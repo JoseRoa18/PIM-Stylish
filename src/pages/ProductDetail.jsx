@@ -360,7 +360,7 @@ export default function ProductDetail() {
       <TabBar tabs={TABS} active={activeTab} onChange={setTab} />
 
       <div className="mt-6">
-        {activeTab === 'overview' && <OverviewTab product={product} edit={editCtx} />}
+        {activeTab === 'overview' && <OverviewTab product={product} edit={editCtx} onProductChanged={refetch} />}
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
         {activeTab === 'content' && <ContentTab product={product} edit={editCtx} />}
         {activeTab === 'pricing' && <PricingTab product={product} edit={editCtx} />}
@@ -400,7 +400,7 @@ function TabBar({ tabs, active, onChange }) {
 
 // ===================== Overview Tab =====================
 
-function OverviewTab({ product, edit }) {
+function OverviewTab({ product, edit, onProductChanged }) {
   return (
     <div className="space-y-6">
       <Section title="Identification">
@@ -416,7 +416,7 @@ function OverviewTab({ product, edit }) {
         </div>
       </Section>
 
-      <VariantsSection product={product} onProductChanged={refetch} />
+      <VariantsSection product={product} onProductChanged={onProductChanged} />
 
       <Section title="Trade & Compliance">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
