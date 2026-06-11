@@ -99,7 +99,8 @@ function buildRowData(product, media) {
   r['Type'] = 'Product';
   r['Product ID'] = product.sku;
   r['Supplier SKU'] = product.sku;
-  r['Product Name'] = product.model_name ?? '';
+  // BB&B wants the long marketing title, not the short model name
+  r['Product Name'] = a.general_title_en ?? product.model_name ?? '';
   r['Description'] = desc;
   // DON'T set "Character Count for Description" — it's a formula cell F8
   r['Hide'] = 'No';
