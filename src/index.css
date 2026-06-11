@@ -30,6 +30,18 @@
   --color-error-container: #fdd9d7;
   --color-on-error-container: #410002;
 
+  /* Success — muted green that sits well with the warm palette */
+  --color-success: #2e6e4e;
+  --color-on-success: #ffffff;
+  --color-success-container: #dcebe0;
+  --color-on-success-container: #1b4332;
+
+  /* Warning — warm amber aligned with the beige tertiary */
+  --color-warning: #9a6200;
+  --color-on-warning: #ffffff;
+  --color-warning-container: #f6e7c8;
+  --color-on-warning-container: #5c3a00;
+
   /* Background and surfaces — neutral grayscale */
   --color-background: #f2f2f2;
   --color-on-background: #0c0c0c;

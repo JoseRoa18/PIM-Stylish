@@ -18,15 +18,15 @@ import {
 import { readWixProduct } from '@/features/syndication/api/wixSync';
 
 const SCORE_BADGE_STYLES = {
-  excellent: 'bg-emerald-100 text-emerald-800',
+  excellent: 'bg-success-container text-on-success-container',
   good: 'bg-tertiary-container/40 text-on-tertiary-container',
-  needs_work: 'bg-amber-100 text-amber-800',
+  needs_work: 'bg-warning-container text-on-warning-container',
   critical: 'bg-error-container text-on-error-container',
 };
 
 const SOURCE_STYLES = {
   wix_cache: { label: 'Wix cache', class: 'bg-tertiary-container/40 text-on-tertiary-container' },
-  pim_fallback: { label: 'PIM (no cache)', class: 'bg-amber-100 text-amber-800' },
+  pim_fallback: { label: 'PIM (no cache)', class: 'bg-warning-container text-on-warning-container' },
   not_linked: { label: 'Not linked', class: 'bg-surface-container text-on-surface-variant' },
   pim: { label: 'PIM', class: 'bg-surface-container text-on-surface-variant' },
 };
@@ -198,7 +198,7 @@ export default function ListingHealth() {
           </div>
 
           {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && cachedCount < linkedCount && (
-            <div className="mb-4 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-body-sm flex items-start gap-2">
+            <div className="mb-4 px-4 py-3 rounded-xl bg-warning-container/50 border border-warning-container text-on-warning-container text-body-sm flex items-start gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-medium">

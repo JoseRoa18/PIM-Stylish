@@ -138,6 +138,48 @@ export async function addDropboxDocument(sku, documentType, dropboxFile) {
   return data;
 }
 
+/**
+ * Add a document by pasting a URL directly (e.g. an existing Dropbox share
+ * link from the master spreadsheet). Replaces nothing — caller handles that.
+ */
+export async function addDocumentByUrl(sku, documentType, url, fileName = null) {
+  const trimmed = url.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new Error('Please paste a valid URL (must start with http:// or https://).');
+  }
+
+  const { data: maxOrderRow } = await supabase
+    .from('product_media')
+    .select('display_order')
+    .eq('sku', sku)
+    .order('display_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const inferredName =
+    fileName?.trim() ||
+    decodeURIComponent(trimmed.split('/').pop()?.split('?')[0] ?? '') ||
+    'document';
+
+  const { data, error } = await supabase
+    .from('product_media')
+    .insert({
+      sku,
+      media_type: 'document',
+      document_type: documentType,
+      storage_path: trimmed,
+      file_name: inferredName,
+      mime_type: inferMimeType(inferredName),
+      is_primary: false,
+      display_order: (maxOrderRow?.display_order ?? -1) + 1,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function setPrimaryMedia(sku, mediaId) {
   const { error: clearError } = await supabase
     .from('product_media')

@@ -12,7 +12,7 @@ const STATUS_LABELS = {
 const STATUS_COLORS = {
   new: 'bg-primary-container',
   in_review: 'bg-tertiary-container',
-  ready_to_sell: 'bg-emerald-200',
+  ready_to_sell: 'bg-success-container',
   archived: 'bg-surface-container',
   unknown: 'bg-surface-container-high',
 };

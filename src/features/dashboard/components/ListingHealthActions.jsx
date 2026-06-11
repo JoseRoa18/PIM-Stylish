@@ -4,14 +4,14 @@ import { categorizeScore } from '../lib/listingHealth';
 
 const SEVERITY_STYLES = {
   critical: { dot: 'bg-error', text: 'text-error', label: 'Critical' },
-  major: { dot: 'bg-amber-500', text: 'text-amber-700', label: 'Major' },
+  major: { dot: 'bg-warning', text: 'text-warning', label: 'Major' },
   minor: { dot: 'bg-on-surface-variant', text: 'text-on-surface-variant', label: 'Minor' },
 };
 
 const SCORE_BADGE_STYLES = {
-  excellent: 'bg-emerald-100 text-emerald-800',
+  excellent: 'bg-success-container text-on-success-container',
   good: 'bg-tertiary-container/40 text-on-tertiary-container',
-  needs_work: 'bg-amber-100 text-amber-800',
+  needs_work: 'bg-warning-container text-on-warning-container',
   critical: 'bg-error-container text-on-error-container',
 };
 
@@ -27,7 +27,7 @@ export default function ListingHealthActions({ stats, products }) {
       <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
         <header className="px-6 py-4 border-b border-outline-variant">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            <AlertTriangle className="w-4 h-4 text-warning" />
             <h3 className="text-title-md text-on-surface">Top Issues</h3>
           </div>
           <p className="text-body-sm text-on-surface-variant mt-0.5">

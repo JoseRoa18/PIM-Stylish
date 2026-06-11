@@ -23,30 +23,30 @@ const CATEGORY_ICONS = {
 
 // Border-only style — keeps the card calm; ring + chip carry the color.
 const CATEGORY_BORDERS = {
-  excellent: 'border-emerald-200',
+  excellent: 'border-success-container',
   good: 'border-tertiary-container',
-  needs_work: 'border-amber-200',
+  needs_work: 'border-warning-container',
   critical: 'border-error/30',
 };
 
 const CATEGORY_HEADER_TINT = {
-  excellent: 'bg-emerald-50/60',
+  excellent: 'bg-success-container/40',
   good: 'bg-tertiary-container/20',
-  needs_work: 'bg-amber-50/60',
+  needs_work: 'bg-warning-container/40',
   critical: 'bg-error-container/40',
 };
 
 const CATEGORY_CHIP_STYLES = {
-  excellent: 'text-emerald-700',
+  excellent: 'text-success',
   good: 'text-on-tertiary-container',
-  needs_work: 'text-amber-700',
+  needs_work: 'text-warning',
   critical: 'text-error',
 };
 
 const SCORE_RING_COLORS = {
-  excellent: 'text-emerald-500',
+  excellent: 'text-success',
   good: 'text-tertiary',
-  needs_work: 'text-amber-500',
+  needs_work: 'text-warning',
   critical: 'text-error',
 };
 
@@ -58,7 +58,7 @@ const SEVERITY_LABEL = {
 
 const SEVERITY_DOT = {
   critical: 'bg-error',
-  major: 'bg-amber-500',
+  major: 'bg-warning',
   minor: 'bg-on-surface-variant',
 };
 
@@ -161,7 +161,7 @@ export default function ProductHealthBadge({ product, media, overrides }) {
                   ))}
                   {passed.map((p) => (
                     <li key={p.key} className="flex items-center gap-2 text-body-sm">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                      <Check className="w-3.5 h-3.5 text-success flex-shrink-0" />
                       <span className="text-on-surface-variant">{p.label}</span>
                     </li>
                   ))}

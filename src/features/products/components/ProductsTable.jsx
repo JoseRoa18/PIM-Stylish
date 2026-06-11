@@ -80,12 +80,12 @@ export default function ProductsTable({
                 </th>
               )}
               <th className="py-3 px-4 w-20"></th>
-              <th className="py-3 px-4 text-left text-label-md uppercase tracking-wider">SKU</th>
-              <th className="py-3 px-4 text-left text-label-md uppercase tracking-wider">Model</th>
-              <th className="py-3 px-4 text-left text-label-md uppercase tracking-wider">Brand</th>
-              <th className="py-3 px-4 text-left text-label-md uppercase tracking-wider">Category</th>
-              <th className="py-3 px-4 text-left text-label-md uppercase tracking-wider">Status</th>
-              <th className="py-3 px-4 text-right text-label-md uppercase tracking-wider">MSRP</th>
+              <th className="py-3 px-4 text-left text-label-md font-medium">SKU</th>
+              <th className="py-3 px-4 text-left text-label-md font-medium">Model</th>
+              <th className="py-3 px-4 text-left text-label-md font-medium">Brand</th>
+              <th className="py-3 px-4 text-left text-label-md font-medium">Category</th>
+              <th className="py-3 px-4 text-left text-label-md font-medium">Status</th>
+              <th className="py-3 px-4 text-right text-label-md font-medium">MSRP</th>
             </tr>
           </thead>
           <tbody>

@@ -10,8 +10,10 @@ import {
   getMediaUrl,
 } from '../api/media';
 import Skeleton from '@/components/ui/Skeleton';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 export default function MediaSection({ sku }) {
+  const confirm = useConfirm();
   const { images, videos, loading, error, reload, mutate } = useProductMedia(sku);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -62,21 +64,24 @@ export default function MediaSection({ sku }) {
       reload();
     } catch (err) {
       console.error('Set primary error:', err);
-      alert(`Failed to set primary: ${err.message}`);
+      setErrorMessage(`Failed to set primary: ${err.message}`);
     }
   };
 
   const handleRemove = async (mediaItem) => {
-    const confirmed = confirm(
-      `Remove "${mediaItem.file_name}" from this product?\n\nThe file stays in Dropbox.`,
-    );
+    const confirmed = await confirm({
+      title: `Remove "${mediaItem.file_name}"?`,
+      message: 'The file stays in Dropbox.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
     if (!confirmed) return;
     try {
       await removeMedia(mediaItem);
       reload();
     } catch (err) {
       console.error('Remove error:', err);
-      alert(`Failed to remove: ${err.message}`);
+      setErrorMessage(`Failed to remove: ${err.message}`);
     }
   };
 
@@ -98,9 +103,12 @@ export default function MediaSection({ sku }) {
 
   const handleBulkRemove = async () => {
     if (selectedIds.size === 0) return;
-    const confirmed = confirm(
-      `Remove ${selectedIds.size} item${selectedIds.size === 1 ? '' : 's'} from this product?\n\nThe files stay in Dropbox.`,
-    );
+    const confirmed = await confirm({
+      title: `Remove ${selectedIds.size} item${selectedIds.size === 1 ? '' : 's'}?`,
+      message: 'The files stay in Dropbox.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
     if (!confirmed) return;
 
     const ids = Array.from(selectedIds);

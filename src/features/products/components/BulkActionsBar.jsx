@@ -14,6 +14,7 @@ import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wix
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
 import { listTemplates } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 const WORKFLOW_OPTIONS = [
   { value: 'new', label: 'New' },
@@ -23,6 +24,7 @@ const WORKFLOW_OPTIONS = [
 ];
 
 export default function BulkActionsBar({ selectedSkus, products, onClear, onChanged }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(null);
   const [result, setResult] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -35,7 +37,12 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
 
   async function handleStatusChange(status) {
     if (!status) return;
-    if (!window.confirm(`Change status to "${status}" for ${count} product${count === 1 ? '' : 's'}?`)) return;
+    const ok = await confirm({
+      title: 'Change workflow status?',
+      message: `Set status to "${status}" for ${count} product${count === 1 ? '' : 's'}.`,
+      confirmLabel: 'Change Status',
+    });
+    if (!ok) return;
     setBusy('status');
     setResult(null);
     try {
@@ -79,7 +86,12 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
       setResult({ type: 'error', message: 'None of the selected products are linked to Wix.' });
       return;
     }
-    if (!window.confirm(`Push ${linkedSkus.length} product${linkedSkus.length === 1 ? '' : 's'} to Wix? This sends the current PIM values to each linked Wix product.`)) return;
+    const ok = await confirm({
+      title: `Push ${linkedSkus.length} product${linkedSkus.length === 1 ? '' : 's'} to Wix?`,
+      message: 'This sends the current PIM values to each linked Wix product, overwriting what is in Wix.',
+      confirmLabel: 'Push to Wix',
+    });
+    if (!ok) return;
     await runBatch(linkedSkus, (sku) => pushProductToWix(sku), 'push');
   }
 
@@ -147,7 +159,7 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
             className={`px-5 py-2 text-body-sm flex items-center gap-2 ${
               result.type === 'error'
                 ? 'bg-error-container text-on-error-container'
-                : 'bg-emerald-50 text-emerald-800'
+                : 'bg-success-container text-on-success-container'
             }`}
           >
             {result.type === 'error' ? (

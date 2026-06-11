@@ -12,23 +12,21 @@ const STATUS_CONFIG = {
     label: 'In Review',
   },
   ready_to_sell: {
-    // Green — universal success indicator (not in brand book but semantically necessary)
-    bg: 'bg-emerald-100',
-    text: 'text-emerald-800',
+    bg: 'bg-success-container',
+    text: 'text-on-success-container',
     label: 'Ready to Sell',
   },
   archived: {
-    // Neutral gray
-    bg: 'bg-gray-200',
-    text: 'text-gray-700',
+    bg: 'bg-surface-container-high',
+    text: 'text-on-surface-variant',
     label: 'Archived',
   },
 };
 
 export default function StatusBadge({ status }) {
   const config = STATUS_CONFIG[status] ?? {
-    bg: 'bg-gray-200',
-    text: 'text-gray-700',
+    bg: 'bg-surface-container-high',
+    text: 'text-on-surface-variant',
     label: status || '—',
   };
 

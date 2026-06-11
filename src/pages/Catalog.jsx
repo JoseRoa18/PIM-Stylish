@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { Plus, Upload } from 'lucide-react';
 import { useProducts } from '@/features/products/hooks/useProducts';
 import {
   useFilteredProducts,
@@ -9,19 +9,30 @@ import {
 import ProductsToolbar from '@/features/products/components/ProductsToolbar';
 import ProductsTable from '@/features/products/components/ProductsTable';
 import BulkActionsBar from '@/features/products/components/BulkActionsBar';
+import CreateProductDialog from '@/features/products/components/CreateProductDialog';
 
 const EMPTY_FILTERS = { brand: [], category: [], series: [], material: [] };
 
 export default function Catalog() {
   const { products, loading, error, reload } = useProducts();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(() => searchParams.get('search') ?? '');
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [selectedSkus, setSelectedSkus] = useState(() => new Set());
+  const [creating, setCreating] = useState(() => searchParams.get('new') === '1');
 
   useEffect(() => {
     const fromUrl = searchParams.get('search') ?? '';
     if (fromUrl !== searchTerm) setSearchTerm(fromUrl);
+    // The sidebar's "Create Product" button lands here with ?new=1.
+    if (searchParams.get('new') === '1') {
+      setCreating(true);
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('new');
+        return next;
+      }, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
@@ -71,15 +82,23 @@ export default function Catalog() {
               : `${totalCount} ${totalCount === 1 ? 'product' : 'products'}`}
           </p>
         </div>
-        <button
-          type="button"
-          disabled
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-container text-on-primary-container text-label-md font-semibold opacity-60 cursor-not-allowed"
-          title="Coming soon"
-        >
-          <Plus className="w-4 h-4" />
-          New Product
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/import"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            Import
+          </Link>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-4 h-4" />
+            New Product
+          </button>
+        </div>
       </header>
 
       {!loading && !error && totalCount > 0 && (
@@ -116,6 +135,8 @@ export default function Catalog() {
           reload();
         }}
       />
+
+      {creating && <CreateProductDialog onClose={() => setCreating(false)} />}
     </div>
   );
 }

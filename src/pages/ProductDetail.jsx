@@ -26,6 +26,7 @@ import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/form
 import { getAttributeGroups } from '@/features/products/config/attributeGroups';
 import StatusBadge from '@/features/products/components/StatusBadge';
 import MediaSection from '@/features/media/components/MediaSection';
+import DocumentsSection from '@/features/media/components/DocumentsSection';
 import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
@@ -64,6 +65,14 @@ const MAX_BULLETS = 12;
 // Helper to read a value from product.attributes JSONB
 function attr(product, key) {
   return product.attributes?.[key] ?? null;
+}
+
+// List attributes are edited as "A; B" text and stored as arrays.
+const LIST_ATTRS = new Set(['installation_type', 'accessories_included', 'durability_tags']);
+
+function joinList(v) {
+  if (Array.isArray(v)) return v.join('; ');
+  return v ?? '';
 }
 
 // ===================== Form helpers =====================
@@ -108,7 +117,7 @@ function buildEditForm(product) {
     _manufacturer: a.manufacturer ?? '',
     _country_of_origin: a.country_of_origin ?? '',
     _hs_code: a.hs_code ?? '',
-    _installation_type: a.installation_type ?? '',
+    _installation_type: joinList(a.installation_type),
     _gauge: a.gauge ?? '',
     _number_of_bowls: a.number_of_bowls ?? '',
     _bowl_configuration: a.bowl_configuration ?? '',
@@ -130,8 +139,8 @@ function buildEditForm(product) {
     _min_internal_cabinet_size_in: a.min_internal_cabinet_size_in ?? '',
     _max_deck_thickness_in: a.max_deck_thickness_in ?? '',
     _bullet_points: a.bullet_points ?? [],
-    _accessories_included: a.accessories_included ?? [],
-    _durability_tags: a.durability_tags ?? [],
+    _accessories_included: joinList(a.accessories_included),
+    _durability_tags: joinList(a.durability_tags),
   };
 }
 
@@ -182,6 +191,14 @@ function buildPatch(form, product) {
       if (attrKey === 'bullet_points') {
         normalized = (value || []).filter((b) => typeof b === 'string' && b.trim() !== '');
         if (normalized.length === 0) normalized = [];
+      }
+
+      // List attributes: "A; B" text → ["A", "B"]
+      if (LIST_ATTRS.has(attrKey)) {
+        const items = typeof value === 'string'
+          ? value.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
+          : Array.isArray(value) ? value : [];
+        normalized = items.length > 0 ? items : null;
       }
 
       if (JSON.stringify(normalized) !== JSON.stringify(original)) {
@@ -320,10 +337,10 @@ export default function ProductDetail() {
               value={form.model_name}
               onChange={(e) => setField('model_name', e.target.value)}
               placeholder="Product name"
-              className="w-full text-display-lg text-on-surface leading-tight mb-2 bg-transparent border-b-2 border-outline-variant focus:border-primary focus:outline-none transition-colors"
+              className="w-full text-display-md text-on-surface leading-tight mb-2 bg-transparent border-b-2 border-outline-variant focus:border-primary focus:outline-none transition-colors"
             />
           ) : (
-            <h1 className="text-display-lg text-on-surface leading-tight mb-2">
+            <h1 className="text-display-md text-on-surface leading-tight mb-2 line-clamp-2">
               {product.model_name || `SKU ${product.sku}`}
             </h1>
           )}
@@ -458,7 +475,7 @@ function SpecsTab({ product, edit }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField label="Material" fieldKey="material" product={product} edit={edit} />
           <EditableField label="Finish" fieldKey="finish" product={product} edit={edit} />
-          <AttrField label="Installation Type" attrKey="installation_type" product={product} edit={edit} />
+          <AttrListField label="Installation Type" attrKey="installation_type" product={product} edit={edit} hint="Separate multiple options with ; (e.g. Undermount; Drop-In)" />
           <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />
           <AttrField label="Craftsmanship" attrKey="craftsmanship" product={product} edit={edit} />
         </div>
@@ -575,7 +592,12 @@ function PricingTab({ product, edit }) {
 // ===================== Media & Marketplaces =====================
 
 function MediaTab({ sku }) {
-  return <MediaSection sku={sku} />;
+  return (
+    <div className="space-y-6">
+      <MediaSection sku={sku} />
+      <DocumentsSection sku={sku} />
+    </div>
+  );
 }
 
 function MarketplacesTab({ product, media, onUpdate }) {
@@ -653,7 +675,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono }) {
       return (
         <div className="flex items-center justify-between">
           <span className="text-body-md text-on-surface">{label}</span>
-          <span className={`text-body-sm font-medium ${val ? 'text-emerald-700' : 'text-on-surface-variant'}`}>{val ? 'Yes' : 'No'}</span>
+          <span className={`text-body-sm font-medium ${val ? 'text-success' : 'text-on-surface-variant'}`}>{val ? 'Yes' : 'No'}</span>
         </div>
       );
     }
@@ -729,16 +751,18 @@ function AttrDimensionsField({ label, attrKey, keys, labels, product, edit }) {
 
 // ===================== AttrListField — for arrays of strings in attributes =====================
 
-function AttrListField({ label, attrKey, product, edit }) {
-  const val = edit.isEditing ? (edit.form['_' + attrKey] ?? []) : (attr(product, attrKey) ?? []);
+function AttrListField({ label, attrKey, product, edit, hint }) {
+  const { isEditing, form, setField } = edit;
 
-  if (!edit.isEditing) {
-    if (!Array.isArray(val) || val.length === 0) return <Field label={label} value={null} />;
+  if (!isEditing) {
+    const raw = attr(product, attrKey);
+    const items = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
+    if (items.length === 0) return <Field label={label} value={null} />;
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
         <div className="flex flex-wrap gap-2">
-          {val.map((item, i) => (
+          {items.map((item, i) => (
             <span key={i} className="px-3 py-1 rounded-full bg-surface-container text-body-sm text-on-surface">{String(item)}</span>
           ))}
         </div>
@@ -746,7 +770,22 @@ function AttrListField({ label, attrKey, product, edit }) {
     );
   }
 
-  return <Field label={label} value={val.join(', ')} />;
+  // Edit as "A; B" text — buildPatch splits it back into an array.
+  const formKey = '_' + attrKey;
+  const value = form[formKey] ?? '';
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-label-md text-on-surface-variant">{label}</span>
+      <input
+        type="text"
+        value={typeof value === 'string' ? value : joinList(value)}
+        onChange={(e) => setField(formKey, e.target.value)}
+        placeholder={`Enter ${label.toLowerCase()}…`}
+        className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
+      />
+      {hint && <span className="text-label-md text-on-surface-variant/70 mt-0.5">{hint}</span>}
+    </div>
+  );
 }
 
 // ===================== BulletPointsEditor — reads from attributes JSONB =====================
@@ -822,7 +861,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
       return (
         <div className="flex items-center justify-between">
           <span className="text-body-md text-on-surface">{label}</span>
-          <span className={`text-body-sm font-medium ${displayValue ? 'text-emerald-700' : 'text-on-surface-variant'}`}>{displayValue ? 'Yes' : 'No'}</span>
+          <span className={`text-body-sm font-medium ${displayValue ? 'text-success' : 'text-on-surface-variant'}`}>{displayValue ? 'Yes' : 'No'}</span>
         </div>
       );
     }
@@ -921,7 +960,7 @@ function EditableDocFlag({ label, fieldKey, product, edit }) {
       <div className="flex items-center justify-between">
         <span className="text-body-md text-on-surface">{label}</span>
         <button type="button" role="switch" aria-checked={!!needsUpdate} onClick={() => setField(fieldKey, !needsUpdate)}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${needsUpdate ? 'bg-amber-500' : 'bg-emerald-500'}`}>
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${needsUpdate ? 'bg-warning' : 'bg-success'}`}>
           <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${needsUpdate ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
       </div>
@@ -930,8 +969,8 @@ function EditableDocFlag({ label, fieldKey, product, edit }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-body-md text-on-surface">{label}</span>
-      <span className={`flex items-center gap-1.5 text-body-sm ${needsUpdate ? 'text-amber-700' : 'text-emerald-700'}`}>
-        <span className={`w-2 h-2 rounded-full ${needsUpdate ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+      <span className={`flex items-center gap-1.5 text-body-sm ${needsUpdate ? 'text-on-warning-container' : 'text-success'}`}>
+        <span className={`w-2 h-2 rounded-full ${needsUpdate ? 'bg-warning' : 'bg-success'}`} />
         {needsUpdate ? 'Needs update' : 'Up to date'}
       </span>
     </div>

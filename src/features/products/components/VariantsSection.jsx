@@ -6,8 +6,11 @@ import { getMediaUrl } from '@/features/media/api/media';
 import { formatCAD } from '@/lib/format';
 import { searchProducts, updateProduct, getProduct } from '../api/products';
 import { supabase } from '@/lib/supabase';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
+import Dialog from '@/components/ui/Dialog';
 
 export default function VariantsSection({ product, onProductChanged }) {
+  const confirm = useConfirm();
   const { variants, loading, reload } = useVariants(product.sku, product.family_number);
   const [managing, setManaging] = useState(false);
 
@@ -86,7 +89,13 @@ export default function VariantsSection({ product, onProductChanged }) {
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {variants.map((v) => (
             <VariantCard key={v.sku} variant={v} current={product} onRemove={async () => {
-              if (!window.confirm(`Remove "${v.model_name || v.sku}" from this variant family?`)) return;
+              const ok = await confirm({
+                title: `Remove "${v.model_name || v.sku}" from this family?`,
+                message: 'The product itself is not deleted — it just leaves the variant group.',
+                confirmLabel: 'Remove',
+                destructive: true,
+              });
+              if (!ok) return;
               await updateProduct(v.sku, { family_number: null });
               reload();
               onProductChanged?.();
@@ -159,10 +168,12 @@ function VariantCard({ variant, current, onRemove }) {
 }
 
 function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
+  const confirm = useConfirm();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
 
   async function runSearch(q) {
     setQuery(q);
@@ -185,57 +196,59 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
 
   async function handleAdd(sku) {
     setBusy(sku);
+    setError(null);
     try {
       await updateProduct(sku, { family_number: product.family_number });
       setResults((prev) => prev.filter((r) => r.sku !== sku));
       onChanged();
     } catch (err) {
-      alert(err.message);
+      setError(err.message);
     } finally {
       setBusy(null);
     }
   }
 
   async function handleRemove(sku) {
-    if (!window.confirm('Remove this product from the variant family?')) return;
+    const ok = await confirm({
+      title: 'Remove from variant family?',
+      message: 'The product itself is not deleted — it just leaves the group.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(sku);
+    setError(null);
     try {
       await updateProduct(sku, { family_number: null });
       onChanged();
     } catch (err) {
-      alert(err.message);
+      setError(err.message);
     } finally {
       setBusy(null);
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <Dialog
+      onClose={onClose}
+      title="Manage Variants"
+      subtitle={`Family ${product.family_number} · add or remove products from this group`}
+      footer={
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-4 py-1.5 rounded-full text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+        >
+          Done
+        </button>
+      }
     >
-      <div
-        className="bg-surface rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="px-6 py-4 border-b border-outline-variant flex items-center justify-between">
-          <div>
-            <h3 className="text-title-lg text-on-surface">Manage Variants</h3>
-            <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Family {product.family_number} · add or remove products from this group
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </header>
-
-        <div className="overflow-y-auto flex-1 px-6 py-4">
-          {/* Current variants */}
+      {error && (
+        <div className="mb-4 px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm">
+          {error}
+        </div>
+      )}
+      {/* Current variants */}
           {variants.length > 0 && (
             <div className="mb-5">
               <h4 className="text-label-md text-on-surface-variant mb-2">Currently in this family</h4>
@@ -320,19 +333,7 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
               </ul>
             )}
           </div>
-        </div>
-
-        <footer className="px-6 py-3 border-t border-outline-variant flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-full text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            Done
-          </button>
-        </footer>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -408,31 +409,21 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <Dialog
+      onClose={onClose}
+      title="Link to variants"
+      subtitle="Group this product with related variants"
+      footer={
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-4 py-1.5 rounded-full text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+        >
+          Cancel
+        </button>
+      }
     >
-      <div
-        className="bg-surface rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="px-6 py-4 border-b border-outline-variant flex items-center justify-between">
-          <div>
-            <h3 className="text-title-lg text-on-surface">Link to variants</h3>
-            <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Group this product with related variants
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </header>
-
-        <div className="border-b border-outline-variant px-6">
+        <div className="border-b border-outline-variant -mx-6 px-6 -mt-5 mb-4">
           <nav className="flex gap-1">
             <button
               type="button"
@@ -459,7 +450,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
           </nav>
         </div>
 
-        <div className="overflow-y-auto flex-1 px-6 py-4">
+        <div>
           {tab === 'existing' ? (
             <>
               <p className="text-body-sm text-on-surface-variant mb-3">
@@ -550,18 +541,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
             <p className="text-body-sm text-error mt-3">{error}</p>
           )}
         </div>
-
-        <footer className="px-6 py-3 border-t border-outline-variant flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-full text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            Cancel
-          </button>
-        </footer>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -599,6 +579,9 @@ function Thumb({ image, alt }) {
 
 function computeDiffs(variant, current) {
   const diffs = [];
+  // Case/whitespace-insensitive so "Stainless steel" vs "Stainless Steel"
+  // doesn't show as a false difference.
+  const norm = (v) => String(v ?? '').trim().toLowerCase();
 
   const fields = [
     { key: 'finish', label: 'Finish' },
@@ -606,7 +589,7 @@ function computeDiffs(variant, current) {
     { key: 'material', label: 'Material' },
   ];
   for (const f of fields) {
-    if (variant[f.key] && variant[f.key] !== current[f.key]) {
+    if (variant[f.key] && norm(variant[f.key]) !== norm(current[f.key])) {
       diffs.push({ label: f.label, value: variant[f.key] });
     }
   }
@@ -620,8 +603,19 @@ function computeDiffs(variant, current) {
     { key: 'bowl_configuration', label: 'Config' },
   ];
   for (const f of attrFields) {
-    if (va[f.key] != null && va[f.key] !== ca[f.key]) {
+    if (va[f.key] != null && norm(va[f.key]) !== norm(ca[f.key])) {
       diffs.push({ label: f.label, value: String(va[f.key]) });
+    }
+  }
+
+  // Booleans that distinguish kit variants (T vs TG, W vs WK)
+  const boolFields = [
+    { key: 'includes_grids', label: 'Grids' },
+    { key: 'low_divider', label: 'Low Divider' },
+  ];
+  for (const f of boolFields) {
+    if (typeof va[f.key] === 'boolean' && va[f.key] !== ca[f.key]) {
+      diffs.push({ label: f.label, value: va[f.key] ? 'Yes' : 'No' });
     }
   }
 

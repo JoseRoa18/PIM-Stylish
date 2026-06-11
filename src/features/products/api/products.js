@@ -42,6 +42,45 @@ export async function listProducts() {
 }
 
 /**
+ * Create a new product. `sku`, `brand`, and `category` are required by the
+ * schema (NOT NULL). Everything else can be filled later via inline editing
+ * on the product detail page.
+ */
+export async function createProduct({ sku, model_name, brand, category, series, family_number, msrp_cad }) {
+  const row = {
+    sku: sku.trim(),
+    brand: brand.trim(),
+    category,
+    workflow_status: 'new',
+    attributes: {},
+  };
+  if (model_name?.trim()) row.model_name = model_name.trim();
+  if (series?.trim()) row.series = series.trim();
+  if (family_number != null && family_number !== '') {
+    const n = Number(family_number);
+    if (!isNaN(n)) row.family_number = n;
+  }
+  if (msrp_cad != null && msrp_cad !== '') {
+    const n = Number(msrp_cad);
+    if (!isNaN(n)) row.msrp_cad = n;
+  }
+
+  const { data, error } = await supabase
+    .from('products')
+    .insert(row)
+    .select('*')
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error(`A product with SKU "${row.sku}" already exists.`);
+    }
+    throw new Error(error.message ?? 'Failed to create product');
+  }
+  return data;
+}
+
+/**
  * Get a single product by SKU with all columns including attributes JSONB.
  */
 export async function getProduct(sku) {

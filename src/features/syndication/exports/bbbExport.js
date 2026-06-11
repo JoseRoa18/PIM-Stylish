@@ -1,6 +1,12 @@
-import JSZip from 'jszip';
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
+
+// JSZip loads on demand — it's only needed when the user actually exports,
+// so it stays out of the page bundles.
+async function loadJSZip() {
+  const mod = await import('jszip');
+  return mod.default;
+}
 
 // ===================== PIM → BB&B field mapping =====================
 
@@ -131,6 +137,25 @@ function buildRowData(product, media) {
   images.forEach((img, i) => {
     if (i < 20) r[`Product Image ${i + 1}`] = getMediaUrl(img.storage_path) ?? '';
   });
+
+  // PDFs → "Product PDF 1-10" with their type. BB&B only accepts PDFs here,
+  // so DXF and other formats are skipped.
+  const DOC_TYPE_TO_BBB = {
+    installation_manual: 'Installation/Assembly Instructions',
+    warranty_file: 'Warranty Information',
+    spec_sheet: 'Technical Specifications',
+    cut_out_template: 'Size Guides',
+  };
+  const pdfs = (media ?? []).filter((m) => {
+    if (m.media_type !== 'document') return false;
+    const name = (m.file_name ?? m.storage_path ?? '').toLowerCase();
+    return m.mime_type === 'application/pdf' || /\.pdf(\?|$)/.test(name);
+  });
+  pdfs.slice(0, 10).forEach((d, i) => {
+    r[`Product PDF ${i + 1}`] = getMediaUrl(d.storage_path) ?? '';
+    const bbbType = DOC_TYPE_TO_BBB[d.document_type];
+    if (bbbType) r[`PDF ${i + 1} Type`] = bbbType;
+  });
   r['Attribute: Assembly Value 1'] = 'Assembled';
   r['Attribute: Basin Depth Value 1'] = basinDepthBucket(ext.depth);
   r['Attribute: Bowl Depth Value 1'] = bowlDepthBucket(ext.depth);
@@ -152,7 +177,16 @@ function buildRowData(product, media) {
   r['Attribute: Shape Value 1'] = 'Rectangle';
   r['Attribute: Sink Drain location Value 1'] = mapDrain(a.drain_hole_location);
   r['Attribute: Sink Gauge Value 1'] = a.gauge ?? '';
-  r['Attribute: Sink Style Value 1'] = mapInstallation(a.installation_type);
+
+  // installation_type is an array (dual-mount sinks have two entries);
+  // BB&B has two Sink Style slots.
+  const installs = Array.isArray(a.installation_type)
+    ? a.installation_type
+    : a.installation_type ? [a.installation_type] : [];
+  const mappedInstalls = installs.map(mapInstallation).filter(Boolean);
+  if (mappedInstalls[0]) r['Attribute: Sink Style Value 1'] = mappedInstalls[0];
+  if (mappedInstalls[1]) r['Attribute: Sink Style Value 2'] = mappedInstalls[1];
+
   r['Attribute: Sink Width Value 1'] = sinkWidthBucket(ext.length);
   return r;
 }
@@ -304,6 +338,7 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
     .download(templateStoragePath);
   if (error) throw new Error(`Failed to download template: ${error.message}`);
 
+  const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
   const sheet = await findDataSheet(zip);
   const baseRow = sheet.headerRow + 1;
@@ -369,6 +404,7 @@ export async function generateBBBFromTemplate(templateStoragePath, product, medi
   if (error) throw new Error(`Failed to download template: ${error.message}`);
 
   // 2. Open as ZIP
+  const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
 
   // 3. Find the correct sheet by scanning ALL sheets for BB&B headers

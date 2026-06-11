@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
-  Grid3x3,
-  History,
-  ChevronDown,
+  Menu,
   LogOut,
   X,
   Loader2,
@@ -16,7 +14,7 @@ import { useProductSearch } from '@/features/search/hooks/useProductSearch';
 import { getMediaUrl } from '@/features/media/api/media';
 import { formatCategory } from '@/lib/format';
 
-export default function Topbar() {
+export default function Topbar({ onMenuClick }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -127,7 +125,17 @@ export default function Topbar() {
   const initial = user?.email?.charAt(0).toUpperCase() ?? '?';
 
   return (
-    <header className="sticky top-0 z-30 h-16 flex justify-between items-center px-6 bg-surface border-b border-outline-variant">
+    <header className="sticky top-0 z-30 h-16 flex justify-between items-center px-4 sm:px-6 bg-surface border-b border-outline-variant gap-2">
+      {/* Mobile menu toggle */}
+      <button
+        type="button"
+        onClick={onMenuClick}
+        className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors lg:hidden flex-shrink-0"
+        aria-label="Open menu"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
       {/* Search */}
       <div ref={wrapperRef} className="flex items-center flex-1 max-w-xl relative">
         <div className="relative w-full group">
@@ -255,30 +263,13 @@ export default function Topbar() {
         )}
       </div>
 
-      {/* Right side: quick actions + user */}
+      {/* Right side: user */}
       <div className="flex items-center gap-2 ml-6">
-        <button
-          className="p-2 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all"
-          aria-label="Apps"
-        >
-          <Grid3x3 className="w-5 h-5" />
-        </button>
-
-        <button
-          className="p-2 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all"
-          aria-label="History"
-        >
-          <History className="w-5 h-5" />
-        </button>
-
-        <div className="h-8 w-px bg-outline-variant mx-2" />
-
-        <div className="flex items-center gap-2 p-1 pr-3 rounded-full hover:bg-surface-container-low transition-colors cursor-pointer">
+        <div className="flex items-center gap-2 p-1 pr-3 rounded-full">
           <div className="w-8 h-8 rounded-full bg-primary text-on-primary font-semibold flex items-center justify-center text-sm">
             {initial}
           </div>
-          <span className="text-label-md text-on-surface">{user?.email}</span>
-          <ChevronDown className="w-4 h-4 text-on-surface-variant" />
+          <span className="text-label-md text-on-surface hidden sm:inline">{user?.email}</span>
         </div>
 
         <button

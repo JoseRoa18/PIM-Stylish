@@ -11,6 +11,7 @@ import {
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { uploadTemplate, deleteTemplate } from '@/features/templates/api/templates';
 import { formatTimeAgo } from '@/lib/format';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 const MARKETPLACE_OPTIONS = [
   'BB&B / Overstock',
@@ -97,16 +98,25 @@ export default function Templates() {
 }
 
 function TemplateCard({ template, onDelete }) {
+  const confirm = useConfirm();
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState(null);
 
   async function handleDelete() {
-    if (!window.confirm(`Delete the "${template.marketplace}" template?`)) return;
+    const ok = await confirm({
+      title: `Delete the "${template.marketplace}" template?`,
+      message: 'Product exports for this marketplace will stop working until a new template is uploaded.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     setDeleting(true);
+    setError(null);
     try {
       await deleteTemplate(template.id, template.storage_path);
       onDelete();
     } catch (err) {
-      alert(err.message);
+      setError(err.message);
     } finally {
       setDeleting(false);
     }
@@ -137,6 +147,7 @@ function TemplateCard({ template, onDelete }) {
       <p className="text-label-md text-on-surface-variant">
         Uploaded {formatTimeAgo(template.uploaded_at)}
       </p>
+      {error && <p className="text-body-sm text-error">{error}</p>}
     </div>
   );
 }

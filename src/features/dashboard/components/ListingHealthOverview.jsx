@@ -9,16 +9,16 @@ const CATEGORY_ICONS = {
 };
 
 const CATEGORY_STYLES = {
-  excellent: 'bg-emerald-100 text-emerald-800',
+  excellent: 'bg-success-container text-on-success-container',
   good: 'bg-tertiary-container/40 text-on-tertiary-container',
-  needs_work: 'bg-amber-100 text-amber-800',
+  needs_work: 'bg-warning-container text-on-warning-container',
   critical: 'bg-error-container text-on-error-container',
 };
 
 const BAR_COLORS = {
-  excellent: 'bg-emerald-500',
+  excellent: 'bg-success',
   good: 'bg-tertiary',
-  needs_work: 'bg-amber-500',
+  needs_work: 'bg-warning',
   critical: 'bg-error',
 };
 
