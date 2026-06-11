@@ -118,6 +118,7 @@ function buildEditForm(product) {
     _country_of_origin: a.country_of_origin ?? '',
     _hs_code: a.hs_code ?? '',
     _installation_type: joinList(a.installation_type),
+    _sink_shape: a.sink_shape ?? '',
     _gauge: a.gauge ?? '',
     _number_of_bowls: a.number_of_bowls ?? '',
     _bowl_configuration: a.bowl_configuration ?? '',
@@ -141,6 +142,15 @@ function buildEditForm(product) {
     _bullet_points: a.bullet_points ?? [],
     _accessories_included: joinList(a.accessories_included),
     _durability_tags: joinList(a.durability_tags),
+    _number_of_pieces: a.number_of_pieces ?? '',
+    _scc_compliant: a.scc_compliant ?? '',
+    _safety_listings: a.safety_listings ?? '',
+    _upc_certified: a.upc_certified ?? '',
+    _vermont_act_193_compliant: a.vermont_act_193_compliant ?? '',
+    _general_title_en: a.general_title_en ?? '',
+    _general_title_fr: a.general_title_fr ?? '',
+    _description_fr: a.description_fr ?? '',
+    _bullet_points_fr: a.bullet_points_fr ?? [],
   };
 }
 
@@ -175,7 +185,8 @@ function buildPatch(form, product) {
       let normalized = value;
       if (typeof value === 'string' && value.trim() === '') normalized = null;
       if (['number_of_bowls', 'sink_radius_mm', 'drain_diameter_in', 'product_weight_lb',
-           'min_external_cabinet_size_in', 'min_internal_cabinet_size_in', 'max_deck_thickness_in'].includes(attrKey)) {
+           'min_external_cabinet_size_in', 'min_internal_cabinet_size_in', 'max_deck_thickness_in',
+           'number_of_pieces'].includes(attrKey)) {
         if (normalized !== null && normalized !== '') {
           normalized = Number(normalized);
           if (isNaN(normalized)) normalized = null;
@@ -187,8 +198,8 @@ function buildPatch(form, product) {
         normalized = cleanDims(value);
       }
 
-      // Handle bullet_points array
-      if (attrKey === 'bullet_points') {
+      // Handle bullet point arrays (EN + FR)
+      if (attrKey === 'bullet_points' || attrKey === 'bullet_points_fr') {
         normalized = (value || []).filter((b) => typeof b === 'string' && b.trim() !== '');
         if (normalized.length === 0) normalized = [];
       }
@@ -441,6 +452,10 @@ function OverviewTab({ product, edit, onProductChanged }) {
           <AttrField label="HS Code" attrKey="hs_code" product={product} edit={edit} mono />
           <AttrField label="Warranty" attrKey="warranty" product={product} edit={edit} />
           <EditableField label="Standards" fieldKey="standards_compliance" product={product} edit={edit} />
+          <AttrField label="Safety Listing(s)" attrKey="safety_listings" product={product} edit={edit} />
+          <AttrField label="SCC Compliant" attrKey="scc_compliant" product={product} edit={edit} />
+          <AttrField label="UPC Certified" attrKey="upc_certified" product={product} edit={edit} />
+          <AttrField label="Vermont Act 193 Compliant" attrKey="vermont_act_193_compliant" product={product} edit={edit} />
         </div>
       </Section>
 
@@ -475,6 +490,7 @@ function SpecsTab({ product, edit }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField label="Material" fieldKey="material" product={product} edit={edit} />
           <EditableField label="Finish" fieldKey="finish" product={product} edit={edit} />
+          <AttrField label="Sink Shape" attrKey="sink_shape" product={product} edit={edit} />
           <AttrListField label="Installation Type" attrKey="installation_type" product={product} edit={edit} hint="Separate multiple options with ; (e.g. Undermount; Drop-In)" />
           <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />
           <AttrField label="Craftsmanship" attrKey="craftsmanship" product={product} edit={edit} />
@@ -524,8 +540,9 @@ function SpecsTab({ product, edit }) {
       </Section>
 
       <Section title="Accessories" defaultOpen={false}>
-        <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} />
+        <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} hint="Separate items with ;" />
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+          <AttrField label="Number of Pieces Included" attrKey="number_of_pieces" type="number" product={product} edit={edit} />
           <AttrField label="Grids Model Code" attrKey="grids_model_code" product={product} edit={edit} />
         </div>
       </Section>
@@ -538,16 +555,28 @@ function SpecsTab({ product, edit }) {
 function ContentTab({ product, edit }) {
   return (
     <div className="space-y-6">
-      <Section title="Description">
+      <Section title="English Content">
         <div className="space-y-4">
+          <AttrField label="General Title (EN)" attrKey="general_title_en" product={product} edit={edit} />
           <EditableField label="Product Description" fieldKey="description" type="richtext" product={product} edit={edit} />
           <EditableField label="QuickBooks Description" fieldKey="quickbooks_description" product={product} edit={edit} />
           <EditableField label="Ribbon" fieldKey="ribbon" product={product} edit={edit} />
         </div>
       </Section>
 
-      <Section title="Bullet Points / Features">
+      <Section title="Bullet Points / Features (EN)">
         <BulletPointsEditor product={product} edit={edit} />
+      </Section>
+
+      <Section title="French Content" defaultOpen={false}>
+        <div className="space-y-4">
+          <AttrField label="General Title (FR)" attrKey="general_title_fr" product={product} edit={edit} />
+          <AttrField label="Description (FR)" attrKey="description_fr" type="textarea" product={product} edit={edit} />
+        </div>
+      </Section>
+
+      <Section title="Bullet Points / Features (FR)" defaultOpen={false}>
+        <BulletPointsEditor product={product} edit={edit} attrKey="bullet_points_fr" />
       </Section>
 
       <Section title="Notes" defaultOpen={false}>
@@ -680,11 +709,35 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono }) {
       );
     }
     if (type === 'number') return <Field label={label} value={val != null ? String(val) : null} mono={mono} />;
+    if (type === 'textarea') {
+      if (!val) return <Field label={label} value={null} />;
+      return (
+        <div className="flex flex-col gap-1">
+          <span className="text-label-md text-on-surface-variant">{label}</span>
+          <p className="text-body-md text-on-surface whitespace-pre-wrap">{val}</p>
+        </div>
+      );
+    }
     return <Field label={label} value={val} mono={mono} />;
   }
 
   const value = form[formKey];
   const inputBase = 'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
+
+  if (type === 'textarea') {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-label-md text-on-surface-variant">{label}</span>
+        <textarea
+          value={value ?? ''}
+          onChange={(e) => setField(formKey, e.target.value)}
+          rows={6}
+          className={inputBase + ' resize-y'}
+          placeholder={`Enter ${label.toLowerCase()}…`}
+        />
+      </div>
+    );
+  }
 
   if (type === 'boolean') {
     return (
@@ -790,9 +843,10 @@ function AttrListField({ label, attrKey, product, edit, hint }) {
 
 // ===================== BulletPointsEditor — reads from attributes JSONB =====================
 
-function BulletPointsEditor({ product, edit }) {
+function BulletPointsEditor({ product, edit, attrKey = 'bullet_points' }) {
   const { isEditing, form, setField } = edit;
-  const bullets = isEditing ? (form._bullet_points ?? []) : (attr(product, 'bullet_points') ?? []);
+  const formKey = '_' + attrKey;
+  const bullets = isEditing ? (form[formKey] ?? []) : (attr(product, attrKey) ?? []);
 
   if (!isEditing) {
     if (bullets.length === 0) return <p className="text-body-md text-on-surface-variant">No bullet points yet.</p>;
@@ -811,14 +865,14 @@ function BulletPointsEditor({ product, edit }) {
   function updateBullet(index, value) {
     const next = [...bullets];
     next[index] = value;
-    setField('_bullet_points', next);
+    setField(formKey, next);
   }
   function addBullet() {
     if (bullets.length >= MAX_BULLETS) return;
-    setField('_bullet_points', [...bullets, '']);
+    setField(formKey, [...bullets, '']);
   }
   function removeBullet(index) {
-    setField('_bullet_points', bullets.filter((_, i) => i !== index));
+    setField(formKey, bullets.filter((_, i) => i !== index));
   }
 
   return (
