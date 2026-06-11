@@ -10,8 +10,10 @@ import ProductsToolbar from '@/features/products/components/ProductsToolbar';
 import ProductsTable from '@/features/products/components/ProductsTable';
 import BulkActionsBar from '@/features/products/components/BulkActionsBar';
 import CreateProductDialog from '@/features/products/components/CreateProductDialog';
+import Pagination from '@/components/ui/Pagination';
 
 const EMPTY_FILTERS = { brand: [], category: [], series: [], material: [] };
+const DEFAULT_PAGE_SIZE = 25;
 
 export default function Catalog() {
   const { products, loading, error, reload } = useProducts();
@@ -20,6 +22,8 @@ export default function Catalog() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [selectedSkus, setSelectedSkus] = useState(() => new Set());
   const [creating, setCreating] = useState(() => searchParams.get('new') === '1');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   useEffect(() => {
     const fromUrl = searchParams.get('search') ?? '';
@@ -41,6 +45,20 @@ export default function Catalog() {
     filters,
   });
 
+  // Back to page 1 whenever the result set changes shape
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filters, pageSize]);
+
+  // Clamp the page if the filtered list shrank below the current offset
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  const pagedProducts = useMemo(
+    () => filteredProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filteredProducts, currentPage, pageSize],
+  );
+
   const options = useMemo(() => getFilterOptions(products), [products]);
 
   const clearAll = () => {
@@ -57,14 +75,20 @@ export default function Catalog() {
     });
   }, []);
 
+  // Header checkbox selects/deselects the visible page; selections persist
+  // across pages (the bulk bar shows the total selected count).
   const toggleSelectAll = useCallback(
     (checked) => {
-      setSelectedSkus(() => {
-        if (!checked) return new Set();
-        return new Set(filteredProducts.map((p) => p.sku));
+      setSelectedSkus((prev) => {
+        const next = new Set(prev);
+        for (const p of pagedProducts) {
+          if (checked) next.add(p.sku);
+          else next.delete(p.sku);
+        }
+        return next;
       });
     },
-    [filteredProducts],
+    [pagedProducts],
   );
 
   const clearSelection = useCallback(() => setSelectedSkus(new Set()), []);
@@ -116,14 +140,25 @@ export default function Catalog() {
       {!loading && !error && totalCount > 0 && filteredProducts.length === 0 ? (
         <EmptyFilterState onClearFilters={clearAll} />
       ) : (
-        <ProductsTable
-          products={filteredProducts}
-          loading={loading}
-          error={error}
-          selectedSkus={selectedSkus}
-          onToggleSelect={toggleSelect}
-          onToggleSelectAll={toggleSelectAll}
-        />
+        <>
+          <ProductsTable
+            products={pagedProducts}
+            loading={loading}
+            error={error}
+            selectedSkus={selectedSkus}
+            onToggleSelect={toggleSelect}
+            onToggleSelectAll={toggleSelectAll}
+          />
+          {!loading && !error && (
+            <Pagination
+              page={currentPage}
+              pageSize={pageSize}
+              total={filteredProducts.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          )}
+        </>
       )}
 
       <BulkActionsBar
