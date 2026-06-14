@@ -8,12 +8,15 @@ import {
   removeMediaBatch,
   reorderMedia,
   getMediaUrl,
+  getThumbnailUrl,
 } from '../api/media';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { useAuth } from '@/features/auth/AuthContext';
 
 export default function MediaSection({ sku }) {
   const confirm = useConfirm();
+  const { canEdit } = useAuth();
   const { images, videos, loading, error, reload, mutate } = useProductMedia(sku);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -202,18 +205,20 @@ export default function MediaSection({ sku }) {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={openDropboxPicker}
-          disabled={busy}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <DropboxIcon className="w-4 h-4" />
-          {busy ? 'Working…' : 'Add from Dropbox'}
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={openDropboxPicker}
+            disabled={busy}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <DropboxIcon className="w-4 h-4" />
+            {busy ? 'Working…' : 'Add from Dropbox'}
+          </button>
+        )}
       </div>
 
-      {selectedIds.size > 0 && (
+      {canEdit && selectedIds.size > 0 && (
         <div className="px-6 py-3 flex items-center justify-between gap-4 flex-wrap bg-primary-container/40 border-b border-outline-variant">
           <span className="text-body-md text-on-surface">
             {selectedIds.size} selected
@@ -263,10 +268,11 @@ export default function MediaSection({ sku }) {
         ) : error ? (
           <p className="text-body-md text-error">Failed to load media: {error.message}</p>
         ) : visualMedia.length === 0 ? (
-          <EmptyState onAddClick={openDropboxPicker} />
+          <EmptyState onAddClick={openDropboxPicker} canEdit={canEdit} />
         ) : (
           <MediaGrid
             media={visualMedia}
+            canEdit={canEdit}
             selectedIds={selectedIds}
             draggingId={draggingId}
             dragOverId={dragOverId}
@@ -286,7 +292,18 @@ export default function MediaSection({ sku }) {
   );
 }
 
-function EmptyState({ onAddClick }) {
+function EmptyState({ onAddClick, canEdit }) {
+  if (!canEdit) {
+    return (
+      <div className="w-full py-12 rounded-xl border-2 border-dashed border-outline-variant text-center">
+        <ImagePlus
+          className="w-12 h-12 mx-auto mb-3 text-on-surface-variant"
+          strokeWidth={1.5}
+        />
+        <p className="text-body-md text-on-surface mb-1">No media linked yet</p>
+      </div>
+    );
+  }
   return (
     <button
       type="button"
@@ -307,6 +324,7 @@ function EmptyState({ onAddClick }) {
 
 function MediaGrid({
   media,
+  canEdit,
   selectedIds,
   draggingId,
   dragOverId,
@@ -326,6 +344,7 @@ function MediaGrid({
         <MediaCard
           key={item.id}
           item={item}
+          canEdit={canEdit}
           selected={selectedIds.has(item.id)}
           isDragging={draggingId === item.id}
           isDragOver={dragOverId === item.id && draggingId !== item.id}
@@ -340,20 +359,23 @@ function MediaGrid({
         />
       ))}
 
-      <button
-        type="button"
-        onClick={onAddClick}
-        className="aspect-square rounded-lg border-2 border-dashed border-outline-variant hover:border-primary hover:bg-surface-container-low transition-colors flex flex-col items-center justify-center text-on-surface-variant hover:text-primary"
-      >
-        <ImagePlus className="w-8 h-8 mb-1" strokeWidth={1.5} />
-        <span className="text-body-sm">Add more</span>
-      </button>
+      {canEdit && (
+        <button
+          type="button"
+          onClick={onAddClick}
+          className="aspect-square rounded-lg border-2 border-dashed border-outline-variant hover:border-primary hover:bg-surface-container-low transition-colors flex flex-col items-center justify-center text-on-surface-variant hover:text-primary"
+        >
+          <ImagePlus className="w-8 h-8 mb-1" strokeWidth={1.5} />
+          <span className="text-body-sm">Add more</span>
+        </button>
+      )}
     </div>
   );
 }
 
 function MediaCard({
   item,
+  canEdit,
   selected,
   isDragging,
   isDragOver,
@@ -369,6 +391,7 @@ function MediaCard({
   const isImage = item.media_type === 'image';
   const isVideo = item.media_type === 'video';
   const url = getMediaUrl(item.storage_path);
+  const thumbUrl = getThumbnailUrl(item.storage_path, 400);
 
   const openInNewTab = () => {
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -384,16 +407,16 @@ function MediaCard({
   return (
     <div
       className={containerClasses}
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDragEnd={onDragEnd}
-      onDrop={onDrop}
+      draggable={canEdit}
+      onDragStart={canEdit ? onDragStart : undefined}
+      onDragOver={canEdit ? onDragOver : undefined}
+      onDragLeave={canEdit ? onDragLeave : undefined}
+      onDragEnd={canEdit ? onDragEnd : undefined}
+      onDrop={canEdit ? onDrop : undefined}
     >
       {isImage ? (
         <img
-          src={url}
+          src={thumbUrl}
           alt={item.alt_text || item.file_name}
           className="w-full h-full object-cover block pointer-events-none"
           loading="lazy"
@@ -419,19 +442,21 @@ function MediaCard({
         </div>
       )}
 
-      {/* Selection checkbox — top-left, always visible */}
-      <label
-        className="absolute top-2 left-2 z-10 cursor-pointer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          className="w-5 h-5 rounded border-2 border-white shadow-md cursor-pointer accent-primary"
-          aria-label={`Select ${item.file_name}`}
-        />
-      </label>
+      {/* Selection checkbox — top-left, always visible (editors only) */}
+      {canEdit && (
+        <label
+          className="absolute top-2 left-2 z-10 cursor-pointer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="w-5 h-5 rounded border-2 border-white shadow-md cursor-pointer accent-primary"
+            aria-label={`Select ${item.file_name}`}
+          />
+        </label>
+      )}
 
       {item.is_primary && (
         <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-primary text-on-primary text-label-md font-semibold inline-flex items-center gap-1 z-10">
@@ -440,34 +465,37 @@ function MediaCard({
         </div>
       )}
 
-      {/* Drag handle indicator — bottom-left, shown on hover */}
-      <div className="absolute bottom-2 left-2 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        <GripVertical className="w-3.5 h-3.5" />
-      </div>
+      {/* Drag handle + hover actions — editors only */}
+      {canEdit && (
+        <>
+          <div className="absolute bottom-2 left-2 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <GripVertical className="w-3.5 h-3.5" />
+          </div>
 
-      {/* Hover action overlay */}
-      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
-        <div className="flex gap-2 pointer-events-auto">
-          {isImage && !item.is_primary && (
-            <button
-              type="button"
-              onClick={onSetPrimary}
-              className="p-2 rounded-full bg-white/90 hover:bg-white text-on-surface transition-colors"
-              title="Set as primary"
-            >
-              <Star className="w-4 h-4" />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onRemove}
-            className="p-2 rounded-full bg-white/90 hover:bg-red-600 hover:text-white text-on-surface transition-colors"
-            title="Remove from product"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
+            <div className="flex gap-2 pointer-events-auto">
+              {isImage && !item.is_primary && (
+                <button
+                  type="button"
+                  onClick={onSetPrimary}
+                  className="p-2 rounded-full bg-white/90 hover:bg-white text-on-surface transition-colors"
+                  title="Set as primary"
+                >
+                  <Star className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onRemove}
+                className="p-2 rounded-full bg-white/90 hover:bg-red-600 hover:text-white text-on-surface transition-colors"
+                title="Remove from product"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

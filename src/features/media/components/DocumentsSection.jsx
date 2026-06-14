@@ -5,6 +5,7 @@ import { addDropboxDocument, addDocumentByUrl, removeMedia, getMediaUrl } from '
 import { formatFileSize } from '@/lib/format';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { useAuth } from '@/features/auth/AuthContext';
 
 const DOCUMENT_TYPES = [
   {
@@ -41,6 +42,7 @@ const DOCUMENT_TYPES = [
 
 export default function DocumentsSection({ sku }) {
   const confirm = useConfirm();
+  const { canEdit } = useAuth();
   const { documents, loading, error, reload } = useProductMedia(sku);
   const [busyType, setBusyType] = useState(null);
   const [urlFormType, setUrlFormType] = useState(null);
@@ -156,6 +158,7 @@ export default function DocumentsSection({ sku }) {
               key={docType.id}
               docType={docType}
               doc={docsByType[docType.id]}
+              canEdit={canEdit}
               busy={busyType === docType.id}
               showUrlForm={urlFormType === docType.id}
               onAdd={() => openPickerForType(docType)}
@@ -173,7 +176,7 @@ export default function DocumentsSection({ sku }) {
   );
 }
 
-function DocumentRow({ docType, doc, busy, showUrlForm, onAdd, onShowUrlForm, onSubmitUrl, onRemove }) {
+function DocumentRow({ docType, doc, canEdit, busy, showUrlForm, onAdd, onShowUrlForm, onSubmitUrl, onRemove }) {
   const [url, setUrl] = useState('');
   const linked = !!doc;
 
@@ -218,59 +221,63 @@ function DocumentRow({ docType, doc, busy, showUrlForm, onAdd, onShowUrlForm, on
 
         <div className="flex items-center gap-1 flex-shrink-0">
           {linked && (
+            <button
+              type="button"
+              onClick={openInNewTab}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container transition-colors"
+              title="Open in new tab"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Open
+            </button>
+          )}
+          {canEdit && (
             <>
+              {linked && (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  className="p-2 rounded-full hover:bg-error-container text-on-surface-variant hover:text-error transition-colors"
+                  title="Remove"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={openInNewTab}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container transition-colors"
-                title="Open in new tab"
+                onClick={onShowUrlForm}
+                disabled={busy}
+                className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-50"
+                title="Paste a URL instead"
               >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Open
+                <LinkIcon className="w-4 h-4" />
               </button>
               <button
                 type="button"
-                onClick={onRemove}
-                className="p-2 rounded-full hover:bg-error-container text-on-surface-variant hover:text-error transition-colors"
-                title="Remove"
+                onClick={onAdd}
+                disabled={busy}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
               >
-                <Trash2 className="w-4 h-4" />
+                {busy ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Adding…
+                  </>
+                ) : linked ? (
+                  'Replace'
+                ) : (
+                  <>
+                    <Plus className="w-3.5 h-3.5" />
+                    Add from Dropbox
+                  </>
+                )}
               </button>
             </>
           )}
-          <button
-            type="button"
-            onClick={onShowUrlForm}
-            disabled={busy}
-            className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-50"
-            title="Paste a URL instead"
-          >
-            <LinkIcon className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onAdd}
-            disabled={busy}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-          >
-            {busy ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Adding…
-              </>
-            ) : linked ? (
-              'Replace'
-            ) : (
-              <>
-                <Plus className="w-3.5 h-3.5" />
-                Add from Dropbox
-              </>
-            )}
-          </button>
         </div>
       </div>
 
-      {showUrlForm && (
+      {canEdit && showUrlForm && (
         <form
           className="flex items-center gap-2 px-3 pb-3"
           onSubmit={(e) => {

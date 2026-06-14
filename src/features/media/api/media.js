@@ -31,13 +31,33 @@ function inferMimeType(filename) {
 }
 
 /**
- * Convert a Dropbox URL to a direct-embed URL.
+ * Convert a Dropbox URL to a direct-embed URL (full resolution).
  */
 export function getMediaUrl(storagePath) {
   if (!storagePath) return null;
   return storagePath
     .replace('?dl=0', '?raw=1')
     .replace('&dl=0', '&raw=1');
+}
+
+const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
+
+/**
+ * Build a lightweight thumbnail URL for an image, resized on the fly by the
+ * weserv.nl image proxy. Dropbox shared links can't be resized themselves, so
+ * without this every grid tile downloads the full-resolution photo (~1 MB).
+ * A 400px webp thumbnail of the same image is ~8 KB.
+ *
+ * Falls back to the full embed URL for non-image paths (e.g. videos) or when
+ * there's no path — so it's always safe to use as an <img src>.
+ */
+export function getThumbnailUrl(storagePath, width = 400) {
+  const embed = getMediaUrl(storagePath);
+  if (!embed) return null;
+  if (!/^https?:\/\//i.test(embed) || !IMAGE_EXT_RE.test(embed)) return embed;
+  const encoded = encodeURIComponent(embed);
+  // we = without enlargement (never upscale a small source past its size)
+  return `https://images.weserv.nl/?url=${encoded}&w=${width}&output=webp&q=80&we`;
 }
 
 export async function listMedia(sku) {

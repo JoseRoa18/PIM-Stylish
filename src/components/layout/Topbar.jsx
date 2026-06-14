@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useProductSearch } from '@/features/search/hooks/useProductSearch';
-import { getMediaUrl } from '@/features/media/api/media';
+import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCategory } from '@/lib/format';
 
 export default function Topbar({ onMenuClick }) {
@@ -290,7 +290,7 @@ function ProductThumb({ product }) {
     return (
       <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-low border border-outline-variant flex-shrink-0">
         <img
-          src={getMediaUrl(product.primary_image.storage_path)}
+          src={getThumbnailUrl(product.primary_image.storage_path, 80)}
           alt=""
           className="w-full h-full object-cover"
           loading="lazy"

@@ -11,11 +11,13 @@ import ProductsTable from '@/features/products/components/ProductsTable';
 import BulkActionsBar from '@/features/products/components/BulkActionsBar';
 import CreateProductDialog from '@/features/products/components/CreateProductDialog';
 import Pagination from '@/components/ui/Pagination';
+import { useAuth } from '@/features/auth/AuthContext';
 
 const EMPTY_FILTERS = { brand: [], category: [], series: [], material: [] };
 const DEFAULT_PAGE_SIZE = 25;
 
 export default function Catalog() {
+  const { canEdit } = useAuth();
   const { products, loading, error, reload } = useProducts();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(() => searchParams.get('search') ?? '');
@@ -106,23 +108,25 @@ export default function Catalog() {
               : `${totalCount} ${totalCount === 1 ? 'product' : 'products'}`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/import"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            Import
-          </Link>
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
-          >
-            <Plus className="w-4 h-4" />
-            New Product
-          </button>
-        </div>
+        {canEdit && (
+          <div className="flex items-center gap-2">
+            <Link
+              to="/import"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors"
+            >
+              <Upload className="w-4 h-4" />
+              Import
+            </Link>
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+            >
+              <Plus className="w-4 h-4" />
+              New Product
+            </button>
+          </div>
+        )}
       </header>
 
       {!loading && !error && totalCount > 0 && (
@@ -171,7 +175,7 @@ export default function Catalog() {
         }}
       />
 
-      {creating && <CreateProductDialog onClose={() => setCreating(false)} />}
+      {canEdit && creating && <CreateProductDialog onClose={() => setCreating(false)} />}
     </div>
   );
 }

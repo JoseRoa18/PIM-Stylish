@@ -5,6 +5,7 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24,6 +25,29 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Load the app profile (role + display name) whenever the user changes.
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId) {
+      setProfile(null);
+      return;
+    }
+
+    let active = true;
+    supabase
+      .from('profiles')
+      .select('id, email, full_name, role')
+      .eq('id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (active) setProfile(data ?? null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.id]);
+
   async function signIn(email, password) {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -38,9 +62,16 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   }
 
+  // Default to 'viewer' until the profile resolves so we never over-grant.
+  const role = profile?.role ?? 'viewer';
+
   const value = {
     session,
     user: session?.user ?? null,
+    profile,
+    role,
+    isAdmin: role === 'admin',
+    canEdit: role === 'admin' || role === 'editor',
     loading,
     signIn,
     signOut,

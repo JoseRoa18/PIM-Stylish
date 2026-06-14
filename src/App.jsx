@@ -1,8 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider } from './features/auth/AuthContext';
 import ProtectedRoute from './features/auth/components/ProtectedRoute';
+import RequireRole from './features/auth/components/RequireRole';
 import { ConfirmProvider } from './components/ui/ConfirmProvider';
 import AppShell from './components/layout/AppShell';
 import Login from './features/auth/pages/Login';
@@ -16,6 +16,7 @@ const Syndication = lazy(() => import('./pages/Syndication'));
 const Templates = lazy(() => import('./pages/Templates'));
 const ListingHealth = lazy(() => import('./pages/ListingHealth'));
 const ImportProducts = lazy(() => import('./pages/ImportProducts'));
+const Users = lazy(() => import('./features/users/pages/Users'));
 
 function PageFallback() {
   return (
@@ -40,27 +41,40 @@ function ProtectedLayout() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ConfirmProvider>
-        <Routes>
-          {/* Public routes */}
-          <Route path="/login" element={<Login />} />
+    <ConfirmProvider>
+      <Routes>
+        {/* Public routes */}
+        <Route path="/login" element={<Login />} />
 
-          {/* Protected routes — wrapped in AppShell (sidebar + topbar) */}
-          <Route element={<ProtectedLayout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/catalog" element={<Catalog />} />
-            <Route path="/catalog/:sku" element={<ProductDetail />} />
-            <Route path="/syndication" element={<Syndication />} />
-            <Route path="/templates" element={<Templates />} />
-            <Route path="/listing-health" element={<ListingHealth />} />
-            <Route path="/import" element={<ImportProducts />} />
-          </Route>
+        {/* Protected routes — wrapped in AppShell (sidebar + topbar) */}
+        <Route element={<ProtectedLayout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/catalog" element={<Catalog />} />
+          <Route path="/catalog/:sku" element={<ProductDetail />} />
+          <Route path="/syndication" element={<Syndication />} />
+          <Route path="/templates" element={<Templates />} />
+          <Route path="/listing-health" element={<ListingHealth />} />
+          <Route
+            path="/import"
+            element={
+              <RequireRole allowed={['admin', 'editor']}>
+                <ImportProducts />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <RequireRole allowed={['admin']}>
+                <Users />
+              </RequireRole>
+            }
+          />
+        </Route>
 
-          {/* Catch-all → redirect to home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </ConfirmProvider>
-    </AuthProvider>
+        {/* Catch-all → redirect to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </ConfirmProvider>
   );
 }

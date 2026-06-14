@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera } from 'lucide-react';
 import { formatCAD, formatCategory } from '@/lib/format';
-import { getMediaUrl } from '@/features/media/api/media';
+import { getThumbnailUrl } from '@/features/media/api/media';
 import Skeleton from '@/components/ui/Skeleton';
 import StatusBadge from './StatusBadge';
 
@@ -168,7 +168,7 @@ function ProductThumbnail({ primaryImage, alt }) {
   return (
     <div className="w-16 aspect-square rounded-md overflow-hidden flex-shrink-0 border border-outline-variant bg-surface-container">
       <img
-        src={getMediaUrl(primaryImage.storage_path)}
+        src={getThumbnailUrl(primaryImage.storage_path, 128)}
         alt={primaryImage.alt_text || alt || ''}
         onError={() => setError(true)}
         loading="lazy"

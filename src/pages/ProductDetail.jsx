@@ -21,7 +21,7 @@ import {
 import { useProduct } from '@/features/products/hooks/useProduct';
 import { useProductMedia } from '@/features/media/hooks/useProductMedia';
 import { updateProduct } from '@/features/products/api/products';
-import { getMediaUrl } from '@/features/media/api/media';
+import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
 import { getAttributeGroups } from '@/features/products/config/attributeGroups';
 import StatusBadge from '@/features/products/components/StatusBadge';
@@ -33,6 +33,7 @@ import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
+import { useAuth } from '@/features/auth/AuthContext';
 
 // ===================== Constants =====================
 
@@ -244,6 +245,7 @@ export default function ProductDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'overview';
 
+  const { canEdit } = useAuth();
   const { product, loading, error, notFound, mergeProduct, refetch } = useProduct(sku);
   const { primary, media } = useProductMedia(sku);
 
@@ -372,12 +374,12 @@ export default function ProductDetail() {
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </>
-          ) : (
+          ) : canEdit ? (
             <button type="button" onClick={startEditing}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
               <Pencil className="w-4 h-4" /> Edit
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -1080,7 +1082,7 @@ function ProductHeroImage({ primary }) {
   if (primary) {
     return (
       <div className="w-full sm:w-60 max-w-[240px] aspect-square rounded-xl overflow-hidden bg-surface-container flex-shrink-0 mx-auto sm:mx-0 border border-outline-variant">
-        <img src={getMediaUrl(primary.storage_path)} alt={primary.alt_text || ''} className="w-full h-full object-cover" />
+        <img src={getThumbnailUrl(primary.storage_path, 480)} alt={primary.alt_text || ''} className="w-full h-full object-cover" />
       </div>
     );
   }

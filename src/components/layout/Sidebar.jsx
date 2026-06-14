@@ -8,9 +8,11 @@ import {
   Activity,
   BarChart3,
   Settings,
+  Users,
   Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { useAuth } from '@/features/auth/AuthContext';
 
 const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -20,11 +22,14 @@ const NAV_ITEMS = [
   { to: '/templates', icon: FileSpreadsheet, label: 'Templates' },
   { to: '/listing-health', icon: Activity, label: 'Listing Health' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+  { to: '/users', icon: Users, label: 'Users', adminOnly: true },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 export default function Sidebar({ open = false, onClose }) {
   const navigate = useNavigate();
+  const { isAdmin, canEdit } = useAuth();
+  const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
   return (
     <>
       {/* Mobile backdrop */}
@@ -58,7 +63,7 @@ export default function Sidebar({ open = false, onClose }) {
 
       {/* Nav items */}
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -79,19 +84,21 @@ export default function Sidebar({ open = false, onClose }) {
         ))}
       </nav>
 
-      {/* Footer: primary CTA */}
-      <div className="p-4">
-        <button
-          onClick={() => {
-            onClose?.();
-            navigate('/catalog?new=1');
-          }}
-          className="w-full bg-primary text-on-primary py-2 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity text-label-md"
-        >
-          <Plus className="w-4 h-4" />
-          Create Product
-        </button>
-      </div>
+      {/* Footer: primary CTA (hidden for read-only viewers) */}
+      {canEdit && (
+        <div className="p-4">
+          <button
+            onClick={() => {
+              onClose?.();
+              navigate('/catalog?new=1');
+            }}
+            className="w-full bg-primary text-on-primary py-2 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity text-label-md"
+          >
+            <Plus className="w-4 h-4" />
+            Create Product
+          </button>
+        </div>
+      )}
       </aside>
     </>
   );

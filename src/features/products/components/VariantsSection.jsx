@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Camera, Layers, Settings, X, Plus, Search, Loader2, Check } from 'lucide-react';
 import { useVariants } from '../hooks/useVariants';
-import { getMediaUrl } from '@/features/media/api/media';
+import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCAD } from '@/lib/format';
 import { searchProducts, updateProduct, getProduct } from '../api/products';
 import { supabase } from '@/lib/supabase';
@@ -568,7 +568,7 @@ function Thumb({ image, alt }) {
   return (
     <div className="w-24 h-24 rounded-lg overflow-hidden bg-surface-container-low border border-outline-variant flex-shrink-0 flex items-center justify-center">
       <img
-        src={getMediaUrl(image.storage_path)}
+        src={getThumbnailUrl(image.storage_path, 192)}
         alt={alt || ''}
         loading="lazy"
         className="w-full h-full object-contain"
