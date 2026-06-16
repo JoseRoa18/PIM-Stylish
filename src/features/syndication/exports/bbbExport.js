@@ -59,6 +59,17 @@ function mapInstallation(t) {
   return t;
 }
 
+function mapShape(s) {
+  if (!s) return 'Rectangle';
+  const l = s.toLowerCase();
+  if (l.includes('rect')) return 'Rectangle';
+  if (l.includes('square')) return 'Square';
+  if (l.includes('round') || l.includes('circ')) return 'Round';
+  if (l.includes('oval')) return 'Oval';
+  // Unknown shape → safe default that matches the BB&B dropdown.
+  return 'Rectangle';
+}
+
 function mapBasins(n) {
   if (n === 1) return 'Single Basin';
   if (n === 2) return 'Double Basin';
@@ -89,6 +100,7 @@ function mapFinish(f) {
 function buildRowData(product, media) {
   const a = product.attributes ?? {};
   const ext = a.external_dimensions_in ?? {};
+  const intl = a.internal_dimensions_in ?? {};
   const ship = a.shipping_dimensions_in ?? {};
   const desc = stripHtml(product.description);
   const images = (media ?? [])
@@ -116,13 +128,15 @@ function buildRowData(product, media) {
   r['UPC'] = a.upc ?? '';
   r['Model/Style#'] = product.sku;
   r['Manufacturer Part #'] = product.sku;
-  r['Manufacturer Name'] = a.manufacturer ?? '';
+  r['Manufacturer Name'] = a.manufacturer ?? 'Stylish International Inc.';
   r['Show Prop 65 Disclaimer'] = 'No';
+  // Width = left-right (length), Depth = front-to-back (width), Height = vertical (depth)
   r['Assembled Width'] = ext.length ?? '';
-  r['Assembled Height'] = ext.width ?? '';
-  r['Assembled Depth'] = ext.depth ?? '';
+  r['Assembled Height'] = ext.depth ?? '';
+  r['Assembled Depth'] = ext.width ?? '';
   r['Assembled Dimensions Unit of Measure'] = 'Inches';
-  r['Product Weight'] = product.shipping_weight_lb ?? a.product_weight_lb ?? '';
+  // Prefer the bare product weight; fall back to shipping weight only if absent.
+  r['Product Weight'] = a.product_weight_lb ?? product.shipping_weight_lb ?? '';
   r['Product Weight Unit of Measure'] = 'Pounds';
   r['Assembly Required?'] = 'No';
   r['Fulfillment Time'] = '1 Business Day';
@@ -133,7 +147,7 @@ function buildRowData(product, media) {
   r['Shipping Box 1 Length'] = ship.length ?? '';
   r['Shipping Box 1 Height'] = ship.height ?? '';
   r['Shipping Box 1 Dimensions Unit of Measure'] = 'Inches';
-  r['Shipping Box 1 Weight'] = product.shipping_weight_lb ? Number(product.shipping_weight_lb) + 1 : '';
+  r['Shipping Box 1 Weight'] = product.shipping_weight_lb ?? '';
   r['Shipping Box 1 Weight Unit of Measure'] = 'Pounds';
   images.forEach((img, i) => {
     if (i < 20) r[`Product Image ${i + 1}`] = getMediaUrl(img.storage_path) ?? '';
@@ -158,8 +172,9 @@ function buildRowData(product, media) {
     if (bbbType) r[`PDF ${i + 1} Type`] = bbbType;
   });
   r['Attribute: Assembly Value 1'] = 'Assembled';
-  r['Attribute: Basin Depth Value 1'] = basinDepthBucket(ext.depth);
-  r['Attribute: Bowl Depth Value 1'] = bowlDepthBucket(ext.depth);
+  // Basin/bowl depth is the internal (usable) depth, not the external dimension.
+  r['Attribute: Basin Depth Value 1'] = basinDepthBucket(intl.depth ?? ext.depth);
+  r['Attribute: Bowl Depth Value 1'] = bowlDepthBucket(intl.depth ?? ext.depth);
   r['Attribute: Commercial Value 1'] = 'Yes';
   if (a.craftsmanship === 'Handmade') r['Attribute: Customization Value 1'] = 'Handmade';
   // "Exact Color" dropdown only allows specific values; map stainless → Silver
@@ -175,7 +190,7 @@ function buildRowData(product, media) {
     r['Attribute: Product Features Value 1'] = 'Rust Resistant';
   }
   r['Attribute: Product Features Value 2'] = 'Sound Dampening';
-  r['Attribute: Shape Value 1'] = 'Rectangle';
+  r['Attribute: Shape Value 1'] = mapShape(a.sink_shape);
   r['Attribute: Sink Drain location Value 1'] = mapDrain(a.drain_hole_location);
   r['Attribute: Sink Gauge Value 1'] = a.gauge ?? '';
 
