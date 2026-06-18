@@ -5,6 +5,7 @@ import { formatCategory } from '@/lib/format';
 export default function FilterDropdown({ label, options, selected, onChange }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const triggerRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
@@ -14,6 +15,11 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
+
+  const close = (returnFocus = false) => {
+    setOpen(false);
+    if (returnFocus) triggerRef.current?.focus();
+  };
 
   const toggle = (value) => {
     if (selected.includes(value)) {
@@ -26,11 +32,23 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
   const count = selected.length;
 
   return (
-    <div ref={ref} className="relative">
+    <div
+      ref={ref}
+      className="relative"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && open) {
+          e.stopPropagation();
+          close(true);
+        }
+      }}
+    >
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(!open)}
-        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-body-sm border transition-colors ${
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-body-sm border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
           count > 0
             ? 'bg-primary-container text-on-primary-container border-primary-container'
             : 'bg-surface-container-lowest text-on-surface border-outline-variant hover:bg-surface-container-low'
@@ -49,21 +67,27 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
       </button>
 
       {open && (
-        <div className="absolute z-20 mt-1 min-w-[220px] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg overflow-hidden">
+        <div
+          role="group"
+          aria-label={`${label} filter options`}
+          className="absolute z-20 mt-1 min-w-[220px] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg overflow-hidden"
+        >
           {options.length === 0 ? (
             <div className="px-3 py-2 text-body-sm text-on-surface-variant">
               No options available
             </div>
           ) : (
-            <ul className="max-h-72 overflow-y-auto py-1">
+            <ul className="max-h-72 overflow-y-auto py-1" data-lenis-prevent>
               {options.map((option) => {
                 const isSelected = selected.includes(option);
                 return (
                   <li key={option}>
                     <button
                       type="button"
+                      role="checkbox"
+                      aria-checked={isSelected}
                       onClick={() => toggle(option)}
-                      className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-surface-container-low transition-colors"
+                      className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-surface-container-low focus:outline-none focus-visible:bg-surface-container-low focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 transition-colors"
                     >
                       <div
                         className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -72,9 +96,7 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
                             : 'border-outline'
                         }`}
                       >
-                        {isSelected && (
-                          <Check className="w-3 h-3" strokeWidth={3} />
-                        )}
+                        {isSelected && <Check className="w-3 h-3" strokeWidth={3} />}
                       </div>
                       <span className="text-body-md text-on-surface">
                         {formatCategory(option)}

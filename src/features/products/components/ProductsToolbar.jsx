@@ -15,6 +15,7 @@ export default function ProductsToolbar({
   onSearchChange,
   filters,
   onFiltersChange,
+  onClearAll,
   options,
   resultCount,
   totalCount,
@@ -30,10 +31,9 @@ export default function ProductsToolbar({
     );
   };
 
-  const clearAll = () => {
-    onSearchChange('');
-    onFiltersChange({ brand: [], category: [], series: [], material: [] });
-  };
+  // Single atomic clear — the parent resets search + all filters in one URL
+  // update (two sequential setSearchParams calls would clobber each other).
+  const clearAll = () => onClearAll();
 
   const activePills = useMemo(() => {
     const pills = [];
