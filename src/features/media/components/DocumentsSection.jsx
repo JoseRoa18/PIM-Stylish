@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { FileText, ExternalLink, Trash2, Plus, Link as LinkIcon, X, Check, Loader2 } from 'lucide-react';
+import { useState, lazy, Suspense } from 'react';
+import { FileText, ExternalLink, Eye, Trash2, Plus, Link as LinkIcon, X, Check, Loader2 } from 'lucide-react';
 import { useProductMedia } from '../hooks/useProductMedia';
 import { addDropboxDocument, addDocumentByUrl, removeMedia, getMediaUrl } from '../api/media';
 import { formatFileSize } from '@/lib/format';
@@ -7,18 +7,37 @@ import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
 
+// Heavy (bundles PDF.js) — loaded only when a user previews a PDF.
+const PdfPreviewModal = lazy(() => import('./PdfPreviewModal'));
+
+const isPdfDoc = (doc) => {
+  if (!doc) return false;
+  if (doc.mime_type === 'application/pdf') return true;
+  return /\.pdf(\?|#|$)/i.test(`${doc.file_name ?? ''} ${doc.storage_path ?? ''}`);
+};
+
+// Language variants for documents that ship in multiple languages
+// (spec sheets, installation manuals). Order matters — English first.
+const LANGUAGES = [
+  { id: 'en', label: 'English' },
+  { id: 'en_fr', label: 'English-French' },
+  { id: 'en_es', label: 'English-Spanish' },
+];
+
 const DOCUMENT_TYPES = [
   {
     id: 'spec_sheet',
     label: 'Spec Sheet',
     extensions: ['.pdf'],
     description: 'Product specification PDF',
+    languages: true,
   },
   {
     id: 'installation_manual',
     label: 'Installation Manual',
     extensions: ['.pdf'],
     description: 'Installation instructions PDF',
+    languages: true,
   },
   {
     id: 'warranty_file',
@@ -40,28 +59,50 @@ const DOCUMENT_TYPES = [
   },
 ];
 
+// A "slot" is a (type, language) pair the UI can hold one document in.
+// Non-language types use language = null. Spec sheets / manuals expand
+// into one slot per language.
+const slotKey = (typeId, language) => (language ? `${typeId}:${language}` : typeId);
+
+const LANG_AWARE = new Set(DOCUMENT_TYPES.filter((t) => t.languages).map((t) => t.id));
+
+// Total number of slots across all types — used for the "X of Y linked" count.
+const TOTAL_SLOTS = DOCUMENT_TYPES.reduce(
+  (sum, t) => sum + (t.languages ? LANGUAGES.length : 1),
+  0,
+);
+
 export default function DocumentsSection({ sku }) {
   const confirm = useConfirm();
   const { canEdit } = useAuth();
   const { documents, loading, error, reload } = useProductMedia(sku);
-  const [busyType, setBusyType] = useState(null);
-  const [urlFormType, setUrlFormType] = useState(null);
+  const [busyKey, setBusyKey] = useState(null);
+  const [urlFormKey, setUrlFormKey] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null);
 
-  // Map docs by document_type
-  const docsByType = {};
+  // Map docs by slot key. Language-aware types key on (type, language);
+  // a legacy spec sheet/manual with no language defaults to the English
+  // slot so existing files keep showing up after the migration.
+  const docsBySlot = {};
   documents.forEach((d) => {
-    if (d.document_type) docsByType[d.document_type] = d;
+    if (!d.document_type) return;
+    if (LANG_AWARE.has(d.document_type)) {
+      docsBySlot[slotKey(d.document_type, d.language || 'en')] = d;
+    } else {
+      docsBySlot[d.document_type] = d;
+    }
   });
 
-  const openPickerForType = (docTypeConfig) => {
+  const openPickerForSlot = (docTypeConfig, language) => {
     if (typeof window === 'undefined' || !window.Dropbox) {
       setErrorMessage('Dropbox Chooser is not loaded.');
       return;
     }
 
+    const key = slotKey(docTypeConfig.id, language);
     setErrorMessage(null);
-    setBusyType(docTypeConfig.id);
+    setBusyKey(key);
 
     window.Dropbox.choose({
       // 'preview' links are permanent; 'direct' links expire after ~4 hours.
@@ -70,38 +111,39 @@ export default function DocumentsSection({ sku }) {
       extensions: docTypeConfig.extensions,
       success: async (files) => {
         try {
-          const existing = docsByType[docTypeConfig.id];
+          const existing = docsBySlot[key];
           if (existing) {
             await removeMedia(existing);
           }
-          await addDropboxDocument(sku, docTypeConfig.id, files[0]);
+          await addDropboxDocument(sku, docTypeConfig.id, files[0], language);
           reload();
         } catch (err) {
           setErrorMessage(err.message);
           console.error('Add document error:', err);
         } finally {
-          setBusyType(null);
+          setBusyKey(null);
         }
       },
-      cancel: () => setBusyType(null),
+      cancel: () => setBusyKey(null),
     });
   };
 
-  const handleAddByUrl = async (docTypeConfig, url) => {
+  const handleAddByUrl = async (docTypeConfig, language, url) => {
+    const key = slotKey(docTypeConfig.id, language);
     setErrorMessage(null);
-    setBusyType(docTypeConfig.id);
+    setBusyKey(key);
     try {
-      const existing = docsByType[docTypeConfig.id];
+      const existing = docsBySlot[key];
       if (existing) {
         await removeMedia(existing);
       }
-      await addDocumentByUrl(sku, docTypeConfig.id, url);
-      setUrlFormType(null);
+      await addDocumentByUrl(sku, docTypeConfig.id, url, null, language);
+      setUrlFormKey(null);
       reload();
     } catch (err) {
       setErrorMessage(err.message);
     } finally {
-      setBusyType(null);
+      setBusyKey(null);
     }
   };
 
@@ -122,13 +164,41 @@ export default function DocumentsSection({ sku }) {
     }
   };
 
+  const linkedCount = Object.keys(docsBySlot).length;
+
+  // Render one slot (type + optional language) as a document row.
+  const renderSlot = (docType, language) => {
+    const key = slotKey(docType.id, language);
+    const langLabel = language ? LANGUAGES.find((l) => l.id === language)?.label : null;
+    return (
+      <DocumentRow
+        key={key}
+        label={langLabel ?? docType.label}
+        description={langLabel ? `${docType.label} — ${langLabel}` : docType.description}
+        doc={docsBySlot[key]}
+        canEdit={canEdit}
+        canPreview={isPdfDoc(docsBySlot[key])}
+        busy={busyKey === key}
+        showUrlForm={urlFormKey === key}
+        onPreview={() => setPreviewDoc(docsBySlot[key])}
+        onAdd={() => openPickerForSlot(docType, language)}
+        onShowUrlForm={() => {
+          setErrorMessage(null);
+          setUrlFormKey(urlFormKey === key ? null : key);
+        }}
+        onSubmitUrl={(url) => handleAddByUrl(docType, language, url)}
+        onRemove={() => handleRemove(docsBySlot[key], langLabel ?? docType.label)}
+      />
+    );
+  };
+
   return (
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       <div className="px-6 py-4 border-b border-outline-variant">
         <div className="flex items-center gap-3">
           <h2 className="text-title-lg text-on-surface">Documents</h2>
           <span className="text-body-sm text-on-surface-variant">
-            {Object.keys(docsByType).length} of {DOCUMENT_TYPES.length} linked
+            {linkedCount} of {TOTAL_SLOTS} linked
           </span>
         </div>
       </div>
@@ -153,30 +223,58 @@ export default function DocumentsSection({ sku }) {
             Failed to load documents: {error.message}
           </p>
         ) : (
-          DOCUMENT_TYPES.map((docType) => (
-            <DocumentRow
-              key={docType.id}
-              docType={docType}
-              doc={docsByType[docType.id]}
-              canEdit={canEdit}
-              busy={busyType === docType.id}
-              showUrlForm={urlFormType === docType.id}
-              onAdd={() => openPickerForType(docType)}
-              onShowUrlForm={() => {
-                setErrorMessage(null);
-                setUrlFormType(urlFormType === docType.id ? null : docType.id);
-              }}
-              onSubmitUrl={(url) => handleAddByUrl(docType, url)}
-              onRemove={() => handleRemove(docsByType[docType.id], docType.label)}
-            />
-          ))
+          DOCUMENT_TYPES.map((docType) =>
+            docType.languages ? (
+              <LanguageGroup
+                key={docType.id}
+                docType={docType}
+                linkedCount={LANGUAGES.filter((l) => docsBySlot[slotKey(docType.id, l.id)]).length}
+              >
+                {LANGUAGES.map((lang) => renderSlot(docType, lang.id))}
+              </LanguageGroup>
+            ) : (
+              renderSlot(docType, null)
+            ),
+          )
         )}
       </div>
+
+      {previewDoc && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" data-lenis-prevent>
+              <Loader2 className="w-8 h-8 animate-spin text-white" />
+            </div>
+          }
+        >
+          <PdfPreviewModal
+            url={getMediaUrl(previewDoc.storage_path)}
+            title={previewDoc.file_name}
+            onClose={() => setPreviewDoc(null)}
+          />
+        </Suspense>
+      )}
     </section>
   );
 }
 
-function DocumentRow({ docType, doc, canEdit, busy, showUrlForm, onAdd, onShowUrlForm, onSubmitUrl, onRemove }) {
+// Groups the per-language rows of a single document type under one heading.
+function LanguageGroup({ docType, linkedCount, children }) {
+  return (
+    <div className="rounded-lg border border-outline-variant bg-surface-container-low overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-outline-variant bg-surface-container">
+        <FileText className="w-4 h-4 text-on-surface-variant" strokeWidth={1.5} />
+        <span className="text-label-md text-on-surface font-semibold">{docType.label}</span>
+        <span className="text-body-sm text-on-surface-variant">
+          {linkedCount} of {LANGUAGES.length} languages
+        </span>
+      </div>
+      <div className="p-2 space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function DocumentRow({ label, description, doc, canEdit, canPreview, busy, showUrlForm, onPreview, onAdd, onShowUrlForm, onSubmitUrl, onRemove }) {
   const [url, setUrl] = useState('');
   const linked = !!doc;
 
@@ -201,7 +299,7 @@ function DocumentRow({ docType, doc, canEdit, busy, showUrlForm, onAdd, onShowUr
 
         <div className="flex-1 min-w-0">
           <div className="text-label-md text-on-surface-variant">
-            {docType.label}
+            {label}
           </div>
           {linked ? (
             <div className="text-body-md text-on-surface truncate">
@@ -214,12 +312,23 @@ function DocumentRow({ docType, doc, canEdit, busy, showUrlForm, onAdd, onShowUr
             </div>
           ) : (
             <div className="text-body-sm text-on-surface-variant italic">
-              {docType.description}
+              {description}
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-1 flex-shrink-0">
+          {linked && canPreview && (
+            <button
+              type="button"
+              onClick={onPreview}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity"
+              title="Preview PDF"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Preview
+            </button>
+          )}
           {linked && (
             <button
               type="button"

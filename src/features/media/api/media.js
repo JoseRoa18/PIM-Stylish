@@ -74,9 +74,11 @@ export async function listMedia(sku) {
 
 /**
  * Add Dropbox files as visual media (images, videos).
- * Used by MediaSection.
+ * `language` tags the batch ('en' | 'en_fr' | 'en_es' | null=Universal) so
+ * language-specific imagery (infographics, callouts) can be distinguished
+ * from language-neutral product photos. Used by MediaSection.
  */
-export async function addDropboxMedia(sku, dropboxFiles) {
+export async function addDropboxMedia(sku, dropboxFiles, language = null) {
   if (!dropboxFiles || dropboxFiles.length === 0) return [];
 
   const { data: existingPrimary } = await supabase
@@ -105,6 +107,7 @@ export async function addDropboxMedia(sku, dropboxFiles) {
     return {
       sku,
       media_type: mediaType,
+      language,
       storage_path: file.link,
       file_name: file.name,
       file_size_bytes: file.bytes ?? null,
@@ -125,9 +128,10 @@ export async function addDropboxMedia(sku, dropboxFiles) {
 
 /**
  * Add a single document from Dropbox, categorized by document_type.
- * Used by DocumentsSection.
+ * `language` ('en' | 'en_fr' | 'en_es' | null) distinguishes language
+ * variants of the same type (e.g. spec sheets). Used by DocumentsSection.
  */
-export async function addDropboxDocument(sku, documentType, dropboxFile) {
+export async function addDropboxDocument(sku, documentType, dropboxFile, language = null) {
   const { data: maxOrderRow } = await supabase
     .from('product_media')
     .select('display_order')
@@ -144,6 +148,7 @@ export async function addDropboxDocument(sku, documentType, dropboxFile) {
       sku,
       media_type: 'document',
       document_type: documentType,
+      language,
       storage_path: dropboxFile.link,
       file_name: dropboxFile.name,
       file_size_bytes: dropboxFile.bytes ?? null,
@@ -162,7 +167,7 @@ export async function addDropboxDocument(sku, documentType, dropboxFile) {
  * Add a document by pasting a URL directly (e.g. an existing Dropbox share
  * link from the master spreadsheet). Replaces nothing — caller handles that.
  */
-export async function addDocumentByUrl(sku, documentType, url, fileName = null) {
+export async function addDocumentByUrl(sku, documentType, url, fileName = null, language = null) {
   const trimmed = url.trim();
   if (!/^https?:\/\//i.test(trimmed)) {
     throw new Error('Please paste a valid URL (must start with http:// or https://).');
@@ -187,6 +192,7 @@ export async function addDocumentByUrl(sku, documentType, url, fileName = null) 
       sku,
       media_type: 'document',
       document_type: documentType,
+      language,
       storage_path: trimmed,
       file_name: inferredName,
       mime_type: inferMimeType(inferredName),
@@ -198,6 +204,18 @@ export async function addDocumentByUrl(sku, documentType, url, fileName = null) 
 
   if (error) throw error;
   return data;
+}
+
+/**
+ * Update the language tag of a single media item
+ * ('en' | 'en_fr' | 'en_es' | null=Universal).
+ */
+export async function setMediaLanguage(mediaId, language) {
+  const { error } = await supabase
+    .from('product_media')
+    .update({ language })
+    .eq('id', mediaId);
+  if (error) throw error;
 }
 
 export async function setPrimaryMedia(sku, mediaId) {

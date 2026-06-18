@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { listMedia } from '../api/media';
 
 export function useProductMedia(sku) {
@@ -6,6 +6,11 @@ export function useProductMedia(sku) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Tracks which sku we've already loaded, so reload()-triggered refetches
+  // (after reorder, set-primary, edits) update silently in the background
+  // instead of flashing the skeleton. The skeleton only shows on the first
+  // load and when navigating to a different product.
+  const loadedSkuRef = useRef(null);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -13,7 +18,7 @@ export function useProductMedia(sku) {
     if (!sku) return;
 
     let mounted = true;
-    setLoading(true);
+    if (loadedSkuRef.current !== sku) setLoading(true);
     setError(null);
 
     listMedia(sku)
@@ -21,6 +26,7 @@ export function useProductMedia(sku) {
         if (mounted) {
           setMedia(data);
           setLoading(false);
+          loadedSkuRef.current = sku;
         }
       })
       .catch((err) => {

@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical } from 'lucide-react';
+import { draggable, dropTargetForElements, monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
+import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
+import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { useProductMedia } from '../hooks/useProductMedia';
 import {
   addDropboxMedia,
   setPrimaryMedia,
+  setMediaLanguage,
   removeMedia,
   removeMediaBatch,
   reorderMedia,
@@ -14,6 +18,30 @@ import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
 
+// Language variants for imagery. `null` = Universal (language-neutral photos);
+// the others tag images that carry text/infographics in a given language.
+const IMAGE_LANGUAGES = [
+  { id: null, label: 'Universal', short: 'ALL' },
+  { id: 'en', label: 'English', short: 'EN' },
+  { id: 'en_fr', label: 'English-French', short: 'FR' },
+  { id: 'en_es', label: 'English-Spanish', short: 'ES' },
+];
+const langMeta = (id) => IMAGE_LANGUAGES.find((l) => l.id === (id ?? null)) ?? IMAGE_LANGUAGES[0];
+const bucketOf = (m) => m.language ?? 'universal';
+
+// Move `startIndex` to sit before/after `indexOfTarget` based on the closest
+// edge — the standard reorder math, inlined so we don't depend on the hitbox
+// reorder util (which Vite/rolldown can't resolve as a subpath).
+function reorderByEdge(list, startIndex, indexOfTarget, edge) {
+  const result = [...list];
+  const [moved] = result.splice(startIndex, 1);
+  let insertIndex = indexOfTarget - (startIndex < indexOfTarget ? 1 : 0);
+  if (edge === 'right') insertIndex += 1;
+  insertIndex = Math.max(0, Math.min(insertIndex, result.length));
+  result.splice(insertIndex, 0, moved);
+  return result;
+}
+
 export default function MediaSection({ sku }) {
   const confirm = useConfirm();
   const { canEdit } = useAuth();
@@ -21,13 +49,70 @@ export default function MediaSection({ sku }) {
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [draggingId, setDraggingId] = useState(null);
-  const [dragOverId, setDragOverId] = useState(null);
+  const [langFilter, setLangFilter] = useState('all');
+  const [addLanguage, setAddLanguage] = useState(''); // '' = Universal
 
   // Visual media only, sorted by display_order
   const visualMedia = [...images, ...videos].sort(
     (a, b) => (a.display_order ?? 0) - (b.display_order ?? 0),
   );
+
+  // Counts per language bucket for the filter chips.
+  const counts = { all: visualMedia.length, universal: 0, en: 0, en_fr: 0, en_es: 0 };
+  for (const m of visualMedia) counts[bucketOf(m)] = (counts[bucketOf(m)] ?? 0) + 1;
+
+  const filteredMedia =
+    langFilter === 'all' ? visualMedia : visualMedia.filter((m) => bucketOf(m) === langFilter);
+
+  // Drag-reorder writes absolute display_order, so it only makes sense on the
+  // full, unfiltered list.
+  const reorderEnabled = langFilter === 'all';
+
+  // The reorder monitor reads the latest list via a ref so it can register
+  // once (not on every render) yet always see fresh media.
+  const mediaRef = useRef(visualMedia);
+  useEffect(() => {
+    mediaRef.current = visualMedia;
+  });
+
+  const persistReorder = async (reordered) => {
+    const orderById = new Map(reordered.map((m, i) => [m.id, i]));
+    mutate((prev) =>
+      prev.map((m) => (orderById.has(m.id) ? { ...m, display_order: orderById.get(m.id) } : m)),
+    );
+    setBusy(true);
+    try {
+      await reorderMedia(reordered.map((m) => m.id));
+      reload();
+    } catch (err) {
+      setErrorMessage(`Reorder failed: ${err.message}`);
+      reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Global drop monitor — computes the new order from the dragged card and the
+  // closest edge of the card it was dropped on.
+  useEffect(() => {
+    if (!reorderEnabled) return undefined;
+    return monitorForElements({
+      canMonitor: ({ source }) => source.data?.type === 'media-card',
+      onDrop: ({ source, location }) => {
+        const target = location.current.dropTargets[0];
+        if (!target) return;
+        const list = mediaRef.current;
+        const startIndex = list.findIndex((m) => m.id === source.data.id);
+        const indexOfTarget = list.findIndex((m) => m.id === target.data.id);
+        if (startIndex < 0 || indexOfTarget < 0) return;
+        const edge = extractClosestEdge(target.data);
+        const reordered = reorderByEdge(list, startIndex, indexOfTarget, edge);
+        if (reordered[startIndex]?.id === list[startIndex]?.id) return; // no change
+        persistReorder(reordered);
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reorderEnabled]);
 
   const openDropboxPicker = () => {
     if (typeof window === 'undefined' || !window.Dropbox) {
@@ -48,7 +133,7 @@ export default function MediaSection({ sku }) {
       success: async (files) => {
         setBusy(true);
         try {
-          await addDropboxMedia(sku, files);
+          await addDropboxMedia(sku, files, addLanguage || null);
           reload();
         } catch (err) {
           setErrorMessage(err.message);
@@ -68,6 +153,17 @@ export default function MediaSection({ sku }) {
     } catch (err) {
       console.error('Set primary error:', err);
       setErrorMessage(`Failed to set primary: ${err.message}`);
+    }
+  };
+
+  const handleSetLanguage = async (mediaId, language) => {
+    // Optimistic update so the badge/filter reflect the change immediately.
+    mutate((prev) => prev.map((m) => (m.id === mediaId ? { ...m, language } : m)));
+    try {
+      await setMediaLanguage(mediaId, language);
+    } catch (err) {
+      setErrorMessage(`Failed to set language: ${err.message}`);
+      reload();
     }
   };
 
@@ -101,8 +197,7 @@ export default function MediaSection({ sku }) {
 
   const clearSelection = () => setSelectedIds(new Set());
 
-  const selectAllVisible = () =>
-    setSelectedIds(new Set(visualMedia.map((m) => m.id)));
+  const selectAllVisible = () => setSelectedIds(new Set(filteredMedia.map((m) => m.id)));
 
   const handleBulkRemove = async () => {
     if (selectedIds.size === 0) return;
@@ -130,68 +225,13 @@ export default function MediaSection({ sku }) {
     }
   };
 
-  // ---------------- Drag & drop ----------------
-
-  const handleDragStart = (id) => (e) => {
-    setDraggingId(id);
-    e.dataTransfer.effectAllowed = 'move';
-    try {
-      e.dataTransfer.setData('text/plain', id);
-    } catch {
-      // Some browsers throw if dataTransfer is read-only — safe to ignore.
-    }
-  };
-
-  const handleDragOver = (id) => (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (dragOverId !== id) setDragOverId(id);
-  };
-
-  const handleDragLeave = (id) => () => {
-    if (dragOverId === id) setDragOverId(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggingId(null);
-    setDragOverId(null);
-  };
-
-  const handleDrop = (targetId) => async (e) => {
-    e.preventDefault();
-    const sourceId = draggingId;
-    setDraggingId(null);
-    setDragOverId(null);
-    if (!sourceId || sourceId === targetId) return;
-
-    const fromIdx = visualMedia.findIndex((m) => m.id === sourceId);
-    const toIdx = visualMedia.findIndex((m) => m.id === targetId);
-    if (fromIdx === -1 || toIdx === -1) return;
-
-    // Build the new visual order, then re-stitch with display_order indexes
-    // and patch the in-memory media list optimistically.
-    const reordered = [...visualMedia];
-    const [moved] = reordered.splice(fromIdx, 1);
-    reordered.splice(toIdx, 0, moved);
-
-    const orderById = new Map(reordered.map((m, i) => [m.id, i]));
-    mutate((prev) =>
-      prev.map((m) =>
-        orderById.has(m.id) ? { ...m, display_order: orderById.get(m.id) } : m,
-      ),
-    );
-
-    setBusy(true);
-    try {
-      await reorderMedia(reordered.map((m) => m.id));
-      reload();
-    } catch (err) {
-      setErrorMessage(`Reorder failed: ${err.message}`);
-      reload();
-    } finally {
-      setBusy(false);
-    }
-  };
+  const FILTER_CHIPS = [
+    { id: 'all', label: 'All' },
+    { id: 'universal', label: 'Universal' },
+    { id: 'en', label: 'English' },
+    { id: 'en_fr', label: 'English-French' },
+    { id: 'en_es', label: 'English-Spanish' },
+  ];
 
   return (
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
@@ -206,30 +246,71 @@ export default function MediaSection({ sku }) {
         </div>
 
         {canEdit && (
-          <button
-            type="button"
-            onClick={openDropboxPicker}
-            disabled={busy}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <DropboxIcon className="w-4 h-4" />
-            {busy ? 'Working…' : 'Add from Dropbox'}
-          </button>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-label-md text-on-surface-variant">
+              Tag new as
+              <select
+                value={addLanguage}
+                onChange={(e) => setAddLanguage(e.target.value)}
+                className="px-2 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              >
+                {IMAGE_LANGUAGES.map((l) => (
+                  <option key={l.id ?? 'universal'} value={l.id ?? ''}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={openDropboxPicker}
+              disabled={busy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <DropboxIcon className="w-4 h-4" />
+              {busy ? 'Working…' : 'Add from Dropbox'}
+            </button>
+          </div>
         )}
       </div>
 
+      {/* Language filter chips */}
+      {!loading && !error && visualMedia.length > 0 && (
+        <div className="px-6 py-3 flex items-center gap-2 flex-wrap border-b border-outline-variant">
+          {FILTER_CHIPS.map((chip) => {
+            const n = counts[chip.id] ?? 0;
+            if (chip.id !== 'all' && n === 0) return null;
+            const active = langFilter === chip.id;
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => setLangFilter(chip.id)}
+                aria-pressed={active}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-body-sm border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                  active
+                    ? 'bg-primary-container text-on-primary-container border-primary-container'
+                    : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant hover:bg-surface-container-low'
+                }`}
+              >
+                {chip.label}
+                <span className="text-label-md font-semibold tabular-nums">{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {canEdit && selectedIds.size > 0 && (
         <div className="px-6 py-3 flex items-center justify-between gap-4 flex-wrap bg-primary-container/40 border-b border-outline-variant">
-          <span className="text-body-md text-on-surface">
-            {selectedIds.size} selected
-          </span>
+          <span className="text-body-md text-on-surface">{selectedIds.size} selected</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={selectAllVisible}
               className="px-3 py-1.5 rounded-full bg-surface-container text-on-surface text-label-md hover:bg-surface-container-high transition-colors"
             >
-              Select all ({visualMedia.length})
+              Select all ({filteredMedia.length})
             </button>
             <button
               type="button"
@@ -269,23 +350,37 @@ export default function MediaSection({ sku }) {
           <p className="text-body-md text-error">Failed to load media: {error.message}</p>
         ) : visualMedia.length === 0 ? (
           <EmptyState onAddClick={openDropboxPicker} canEdit={canEdit} />
+        ) : filteredMedia.length === 0 ? (
+          <p className="text-body-md text-on-surface-variant text-center py-8">
+            No media tagged as {langMeta(langFilter === 'universal' ? null : langFilter).label}.
+          </p>
         ) : (
-          <MediaGrid
-            media={visualMedia}
-            canEdit={canEdit}
-            selectedIds={selectedIds}
-            draggingId={draggingId}
-            dragOverId={dragOverId}
-            onToggleSelect={toggleSelect}
-            onSetPrimary={handleSetPrimary}
-            onRemove={handleRemove}
-            onAddClick={openDropboxPicker}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDragEnd={handleDragEnd}
-            onDrop={handleDrop}
-          />
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {filteredMedia.map((item) => (
+              <MediaCard
+                key={item.id}
+                item={item}
+                canEdit={canEdit}
+                reorderEnabled={reorderEnabled}
+                selected={selectedIds.has(item.id)}
+                onToggleSelect={() => toggleSelect(item.id)}
+                onSetPrimary={() => handleSetPrimary(item.id)}
+                onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
+                onRemove={() => handleRemove(item)}
+              />
+            ))}
+
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openDropboxPicker}
+                className="aspect-square rounded-lg border-2 border-dashed border-outline-variant hover:border-primary hover:bg-surface-container-low transition-colors flex flex-col items-center justify-center text-on-surface-variant hover:text-primary"
+              >
+                <ImagePlus className="w-8 h-8 mb-1" strokeWidth={1.5} />
+                <span className="text-body-sm">Add more</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
     </section>
@@ -296,10 +391,7 @@ function EmptyState({ onAddClick, canEdit }) {
   if (!canEdit) {
     return (
       <div className="w-full py-12 rounded-xl border-2 border-dashed border-outline-variant text-center">
-        <ImagePlus
-          className="w-12 h-12 mx-auto mb-3 text-on-surface-variant"
-          strokeWidth={1.5}
-        />
+        <ImagePlus className="w-12 h-12 mx-auto mb-3 text-on-surface-variant" strokeWidth={1.5} />
         <p className="text-body-md text-on-surface mb-1">No media linked yet</p>
       </div>
     );
@@ -322,76 +414,51 @@ function EmptyState({ onAddClick, canEdit }) {
   );
 }
 
-function MediaGrid({
-  media,
-  canEdit,
-  selectedIds,
-  draggingId,
-  dragOverId,
-  onToggleSelect,
-  onSetPrimary,
-  onRemove,
-  onAddClick,
-  onDragStart,
-  onDragOver,
-  onDragLeave,
-  onDragEnd,
-  onDrop,
-}) {
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-      {media.map((item) => (
-        <MediaCard
-          key={item.id}
-          item={item}
-          canEdit={canEdit}
-          selected={selectedIds.has(item.id)}
-          isDragging={draggingId === item.id}
-          isDragOver={dragOverId === item.id && draggingId !== item.id}
-          onToggleSelect={() => onToggleSelect(item.id)}
-          onSetPrimary={() => onSetPrimary(item.id)}
-          onRemove={() => onRemove(item)}
-          onDragStart={onDragStart(item.id)}
-          onDragOver={onDragOver(item.id)}
-          onDragLeave={onDragLeave(item.id)}
-          onDragEnd={onDragEnd}
-          onDrop={onDrop(item.id)}
-        />
-      ))}
-
-      {canEdit && (
-        <button
-          type="button"
-          onClick={onAddClick}
-          className="aspect-square rounded-lg border-2 border-dashed border-outline-variant hover:border-primary hover:bg-surface-container-low transition-colors flex flex-col items-center justify-center text-on-surface-variant hover:text-primary"
-        >
-          <ImagePlus className="w-8 h-8 mb-1" strokeWidth={1.5} />
-          <span className="text-body-sm">Add more</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
 function MediaCard({
   item,
   canEdit,
+  reorderEnabled,
   selected,
-  isDragging,
-  isDragOver,
   onToggleSelect,
   onSetPrimary,
+  onSetLanguage,
   onRemove,
-  onDragStart,
-  onDragOver,
-  onDragLeave,
-  onDragEnd,
-  onDrop,
 }) {
+  const ref = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const [closestEdge, setClosestEdge] = useState(null);
+  const draggableOn = canEdit && reorderEnabled;
+
   const isImage = item.media_type === 'image';
   const isVideo = item.media_type === 'video';
   const url = getMediaUrl(item.storage_path);
   const thumbUrl = getThumbnailUrl(item.storage_path, 400);
+
+  // Register the card as both a draggable and a drop target (Pragmatic DnD).
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !draggableOn) return undefined;
+    return combine(
+      draggable({
+        element: el,
+        getInitialData: () => ({ type: 'media-card', id: item.id }),
+        onDragStart: () => setDragging(true),
+        onDrop: () => setDragging(false),
+      }),
+      dropTargetForElements({
+        element: el,
+        canDrop: ({ source }) => source.data?.type === 'media-card' && source.data.id !== item.id,
+        getData: ({ input, element }) =>
+          attachClosestEdge(
+            { type: 'media-card', id: item.id },
+            { input, element, allowedEdges: ['left', 'right'] },
+          ),
+        onDrag: ({ self }) => setClosestEdge(extractClosestEdge(self.data)),
+        onDragLeave: () => setClosestEdge(null),
+        onDrop: () => setClosestEdge(null),
+      }),
+    );
+  }, [item.id, draggableOn]);
 
   const openInNewTab = () => {
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -399,21 +466,24 @@ function MediaCard({
 
   const containerClasses = [
     'relative aspect-square rounded-lg overflow-hidden bg-surface-container group transition-all',
-    isDragging ? 'opacity-40 scale-95' : '',
-    isDragOver ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface-container-lowest' : '',
+    draggableOn ? 'cursor-grab active:cursor-grabbing' : '',
+    dragging ? 'opacity-40' : '',
     selected ? 'ring-2 ring-primary' : '',
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <div
-      className={containerClasses}
-      draggable={canEdit}
-      onDragStart={canEdit ? onDragStart : undefined}
-      onDragOver={canEdit ? onDragOver : undefined}
-      onDragLeave={canEdit ? onDragLeave : undefined}
-      onDragEnd={canEdit ? onDragEnd : undefined}
-      onDrop={canEdit ? onDrop : undefined}
-    >
+    <div ref={ref} className={containerClasses}>
+      {/* Drop indicator — bar on the near edge of the target card */}
+      {closestEdge && (
+        <div
+          className={`absolute top-1 bottom-1 w-1.5 rounded-full bg-primary z-20 ${
+            closestEdge === 'left' ? 'left-0' : 'right-0'
+          }`}
+        />
+      )}
+
       {isImage ? (
         <img
           src={thumbUrl}
@@ -432,9 +502,7 @@ function MediaCard({
           }}
           className="w-full h-full flex flex-col items-center justify-center p-3 text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
         >
-          {isVideo ? (
-            <Film className="w-10 h-10 mb-2" strokeWidth={1.5} />
-          ) : null}
+          {isVideo ? <Film className="w-10 h-10 mb-2" strokeWidth={1.5} /> : null}
           <span className="text-body-sm text-center break-words line-clamp-2 px-1">
             {item.file_name}
           </span>
@@ -465,12 +533,38 @@ function MediaCard({
         </div>
       )}
 
-      {/* Drag handle + hover actions — editors only */}
+      {/* Language tag — bottom-right. Editors get a selector; viewers see a
+          short badge only when the image is language-specific. */}
+      {canEdit ? (
+        <select
+          value={item.language ?? ''}
+          onChange={(e) => onSetLanguage(e.target.value || null)}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          draggable={false}
+          aria-label="Image language"
+          className="absolute bottom-2 right-2 z-10 max-w-[88px] text-label-md rounded bg-black/60 text-white border-0 pl-1.5 pr-1 py-0.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          {IMAGE_LANGUAGES.map((l) => (
+            <option key={l.id ?? 'universal'} value={l.id ?? ''} className="text-on-surface bg-surface">
+              {l.label}
+            </option>
+          ))}
+        </select>
+      ) : item.language ? (
+        <span className="absolute bottom-2 right-2 z-10 px-1.5 py-0.5 rounded bg-black/60 text-white text-label-md font-semibold">
+          {langMeta(item.language).short}
+        </span>
+      ) : null}
+
+      {/* Drag handle hint + hover actions — editors only */}
       {canEdit && (
         <>
-          <div className="absolute bottom-2 left-2 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            <GripVertical className="w-3.5 h-3.5" />
-          </div>
+          {reorderEnabled && (
+            <div className="absolute bottom-2 left-2 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              <GripVertical className="w-3.5 h-3.5" />
+            </div>
+          )}
 
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
             <div className="flex gap-2 pointer-events-auto">
