@@ -31,6 +31,7 @@ interface WixProduct {
   visible?: boolean;
   collectionIds?: string[];
   additionalInfoSections?: Array<{ title?: string; description?: string }>;
+  productPageUrl?: { base?: string; path?: string };
   media?: {
     mainMedia?: WixMediaItem;
     items?: WixMediaItem[];
@@ -98,6 +99,23 @@ Deno.serve(async (req) => {
     );
     if (!wixResp.ok) {
       const text = await wixResp.text();
+      // 404 = the product no longer exists in Wix (stale link). Report it as a
+      // clean "not found" state (HTTP 200) so the UI can flag a broken link,
+      // instead of a generic API error that looks transient. Also clear the
+      // cached Wix payload so the dashboard stops scoring against stale data.
+      if (wixResp.status === 404) {
+        const { error: clearErr } = await supabase
+          .from("products")
+          .update({ wix_raw: null })
+          .eq("sku", sku);
+        if (clearErr) {
+          console.error(`[wix-read] cache clear failed (non-fatal):`, clearErr.message);
+        }
+        return new Response(
+          JSON.stringify({ ok: true, sku, wix_product_id: pim.wix_product_id, exists: false }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
       throw new Error(`Wix API ${wixResp.status}: ${text}`);
     }
     const wixData = await wixResp.json();
@@ -118,6 +136,11 @@ Deno.serve(async (req) => {
     }
 
     const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // Public storefront URL for the product (so the UI can link straight to it).
+    const product_url = w.productPageUrl?.base
+      ? `${w.productPageUrl.base}${w.productPageUrl.path ?? ""}`
+      : null;
 
     // Extract media items from Wix and shape them like PIM's product_media rows
     // so the listing-health checkers (countImages, hasPrimaryImage) work uniformly.
@@ -158,6 +181,7 @@ Deno.serve(async (req) => {
             description: s.description ?? "",
           }))
         : [],
+      product_url,
       _wix_media: wixMedia,
     };
 

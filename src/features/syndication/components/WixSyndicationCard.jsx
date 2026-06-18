@@ -18,6 +18,7 @@ import {
   X,
   Search,
   ImageIcon,
+  ExternalLink,
 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
 import { pushProductToWix, readWixProduct } from '../api/wixSync';
@@ -107,7 +108,11 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
   // wixBaseline = the unedited Wix values (for detecting user edits).
   const [wixBaseline, setWixBaseline] = useState(null);
   const [wixMedia, setWixMedia] = useState(null);
+  const [wixUrl, setWixUrl] = useState(null);
   const [wixLoading, setWixLoading] = useState(false);
+  // Live-read outcome: 'missing' = product no longer exists in Wix (broken
+  // link); 'error' = couldn't reach Wix (transient). null = OK / not read yet.
+  const [wixStatus, setWixStatus] = useState(null);
 
   const linked = Boolean(product?.wix_product_id);
 
@@ -115,20 +120,29 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
     if (!linked) return;
     let active = true;
     setWixLoading(true);
+    setWixStatus(null);
     readWixProduct(product.sku)
-      .then((snap) => {
+      .then((res) => {
         if (!active) return;
+        if (!res || res.exists === false) {
+          setWixStatus('missing');
+          return;
+        }
+        const snap = res.snapshot;
         if (snap) {
           const built = buildForm(snap);
           setWixBaseline(built);
           setForm(built);
           if (Array.isArray(snap._wix_media)) setWixMedia(snap._wix_media);
+          if (snap.product_url) setWixUrl(snap.product_url);
         }
       })
-      .catch(() => { /* silent — fall back to PIM values */ })
+      .catch(() => { if (active) setWixStatus('error'); })
       .finally(() => { if (active) setWixLoading(false); });
     return () => { active = false; };
   }, [product.sku, linked]);
+
+  const wixMissing = wixStatus === 'missing';
 
   // "Edited" = user changed something vs what Wix currently has
   const baseline = wixBaseline ?? buildForm(product);
@@ -223,22 +237,43 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
             <p className="text-body-sm text-on-surface-variant mt-0.5">
               Wix Stores · edit the fields below, then push to update.
             </p>
+            {wixUrl && !wixMissing && (
+              <a
+                href={wixUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 mt-2 text-body-sm font-medium text-primary hover:underline"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                View product in store
+              </a>
+            )}
           </div>
         </div>
-        <StatusBadge linked={linked} syncedAt={product?.wix_synced_at} />
+        <StatusBadge linked={linked} missing={wixMissing} syncedAt={product?.wix_synced_at} />
       </header>
 
-      {linked && (
+      {linked && wixMissing ? (
         <div className="px-8 pb-5">
+          <BrokenLinkNotice />
+        </div>
+      ) : linked ? (
+        <div className="px-8 pb-5 space-y-3">
+          {wixStatus === 'error' && (
+            <p className="text-body-sm text-on-surface-variant flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 text-warning flex-shrink-0" />
+              No se pudo leer el estado en Wix — mostrando datos del PIM.
+            </p>
+          )}
           <ProductHealthBadge
             product={product}
             media={wixMedia ?? media}
             overrides={form}
           />
         </div>
-      )}
+      ) : null}
 
-      {linked && (
+      {linked && !wixMissing && (
         <button
           type="button"
           onClick={() => setCardExpanded(!cardExpanded)}
@@ -885,12 +920,23 @@ function SectionsEditor({ value, onChange, disabled }) {
 
 // ============================== Status / notices ==============================
 
-function StatusBadge({ linked, syncedAt }) {
+function StatusBadge({ linked, missing, syncedAt }) {
   if (!linked) {
     return (
       <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container text-body-sm text-on-surface-variant">
         <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant/50" />
         Not linked
+      </span>
+    );
+  }
+  if (missing) {
+    return (
+      <span
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-error-container/50 text-body-sm text-on-error-container"
+        title="El producto ya no existe en Wix — el enlace está roto"
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-error" />
+        Enlace roto
       </span>
     );
   }
@@ -954,6 +1000,30 @@ function WixImagesPreview({ images }) {
             <span className="text-label-md">more</span>
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function BrokenLinkNotice() {
+  return (
+    <div className="rounded-xl border border-error/30 bg-error-container/30 overflow-hidden">
+      <div className="px-4 py-3 flex items-start gap-3">
+        <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <p className="text-body-md font-semibold text-on-surface">
+            Listing Health — no verificable
+          </p>
+          <p className="text-body-sm text-on-surface-variant mt-1">
+            Este producto tiene un ID de Wix guardado, pero ya no existe en la tienda
+            (Wix respondió 404). El enlace está roto, así que no se puede evaluar el
+            estado real del listado. Vuelve a enlazarlo desde{' '}
+            <Link to="/syndication" className="font-semibold underline hover:no-underline">
+              Syndication
+            </Link>{' '}
+            o quita el enlace obsoleto.
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -65,7 +65,12 @@ export async function listWixCollections() {
 
 /**
  * Read-only: fetch the current state of a product from Wix Stores
- * without writing anything to the PIM. Returns a snapshot of mapped fields.
+ * without writing anything to the PIM.
+ *
+ * Returns `{ exists, snapshot }`:
+ *   - exists: false  → the product no longer exists in Wix (stale/broken link)
+ *   - snapshot: the mapped Wix fields, or null when it doesn't exist
+ * Throws only on real failures (network, auth, unexpected API errors).
  */
 export async function readWixProduct(sku) {
   const { data, error } = await supabase.functions.invoke('wix-read-product', {
@@ -90,7 +95,7 @@ export async function readWixProduct(sku) {
     throw new Error(detail);
   }
   if (data?.error) throw new Error(data.error);
-  return data?.snapshot ?? null;
+  return { exists: data?.exists !== false, snapshot: data?.snapshot ?? null };
 }
 
 /**
