@@ -10,6 +10,7 @@ import {
   Package,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 import { useProductSearch } from '@/features/search/hooks/useProductSearch';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCategory } from '@/lib/format';
@@ -265,6 +266,7 @@ export default function Topbar({ onMenuClick }) {
 
       {/* Right side: user */}
       <div className="flex items-center gap-2 ml-6">
+        <ThemeToggle />
         <div className="flex items-center gap-2 p-1 pr-3 rounded-full">
           <div className="w-8 h-8 rounded-full bg-primary text-on-primary font-semibold flex items-center justify-center text-sm">
             {initial}

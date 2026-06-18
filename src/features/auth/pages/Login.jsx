@@ -33,40 +33,40 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Brand header */}
         <div className="mb-8 text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-900 text-white text-2xl font-bold mb-4">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary text-on-primary text-2xl font-bold mb-4">
             S
           </div>
-          <h1 className="text-3xl font-bold text-slate-900">Stylish PIM</h1>
-          <p className="text-slate-500 text-sm mt-1">
+          <h1 className="text-headline-md text-on-surface">Stylish PIM</h1>
+          <p className="text-on-surface-variant text-body-sm mt-1">
             Centralized Product Management
           </p>
         </div>
 
         {/* Login card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-          <h2 className="text-xl font-semibold text-slate-900 mb-1">Sign in</h2>
-          <p className="text-sm text-slate-500 mb-6">
+        <div className="bg-surface rounded-2xl shadow-sm border border-outline-variant p-8">
+          <h2 className="text-title-lg text-on-surface mb-1">Sign in</h2>
+          <p className="text-body-sm text-on-surface-variant mb-6">
             Enter your credentials to continue
           </p>
 
           {error && (
-            <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-rose-700">{error}</p>
+            <div className="mb-4 p-3 rounded-lg bg-error-container border border-error-container flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
+              <p className="text-body-sm text-on-error-container">{error}</p>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label htmlFor="email" className="block text-body-sm font-medium text-on-surface mb-1.5">
                 Email
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
                 <input
                   id="email"
                   type="email"
@@ -75,18 +75,18 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={submitting}
-                  className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-700 focus:border-cyan-700 disabled:bg-slate-50 disabled:text-slate-500"
+                  className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
                   placeholder="you@stylishkb.com"
                 />
               </div>
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label htmlFor="password" className="block text-body-sm font-medium text-on-surface mb-1.5">
                 Password
               </label>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
                 <input
                   id="password"
                   type="password"
@@ -95,7 +95,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={submitting}
-                  className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-700 focus:border-cyan-700 disabled:bg-slate-50 disabled:text-slate-500"
+                  className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
                   placeholder="••••••••"
                 />
               </div>
@@ -104,7 +104,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={submitting || !email || !password}
-              className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+              className="w-full bg-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-on-primary font-semibold text-body-sm py-2.5 rounded-lg transition-opacity flex items-center justify-center gap-2"
             >
               {submitting ? (
                 <>
@@ -119,7 +119,7 @@ export default function Login() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-xs text-slate-500 mt-6">
+        <p className="text-center text-label-md text-on-surface-variant mt-6">
           Stylish International Inc. · Internal product management system
         </p>
       </div>

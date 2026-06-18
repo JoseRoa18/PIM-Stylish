@@ -45,6 +45,7 @@ export function ConfirmProvider({ children }) {
       {request && (
         <Dialog
           onClose={() => settle(false)}
+          ariaLabel={request.title}
           maxWidth="max-w-md"
           footer={
             <>

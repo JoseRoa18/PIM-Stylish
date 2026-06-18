@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
 /**
@@ -12,6 +12,8 @@ import { X } from 'lucide-react';
  *   footer     — optional footer node (right-aligned flex row)
  *   maxWidth   — tailwind max-w class, default 'max-w-2xl'
  *   as         — wrapper element, 'div' (default) or 'form' (pass onSubmit too)
+ *   ariaLabel  — accessible name when the dialog renders its own title in
+ *                `children` instead of using the `title` prop (e.g. Confirm)
  */
 export default function Dialog({
   onClose,
@@ -21,12 +23,18 @@ export default function Dialog({
   maxWidth = 'max-w-2xl',
   as = 'div',
   onSubmit,
+  ariaLabel,
   children,
 }) {
   const panelRef = useRef(null);
+  const titleId = useId();
 
   useEffect(() => {
     const previouslyFocused = document.activeElement;
+
+    // Lock background scroll while the modal is open.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
 
     // Focus the first focusable element inside the panel (or the panel itself)
     const panel = panelRef.current;
@@ -63,6 +71,7 @@ export default function Dialog({
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
     };
   }, [onClose]);
@@ -74,11 +83,14 @@ export default function Dialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
       role="presentation"
+      data-lenis-prevent
     >
       <Panel
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={!title ? ariaLabel : undefined}
         tabIndex={-1}
         onSubmit={onSubmit}
         className={`bg-surface rounded-2xl shadow-xl w-full ${maxWidth} max-h-[85vh] flex flex-col focus:outline-none`}
@@ -87,7 +99,7 @@ export default function Dialog({
         {(title || subtitle) && (
           <header className="px-6 py-4 border-b border-outline-variant flex items-start justify-between gap-4">
             <div className="min-w-0">
-              {title && <h3 className="text-title-lg text-on-surface">{title}</h3>}
+              {title && <h3 id={titleId} className="text-title-lg text-on-surface">{title}</h3>}
               {subtitle && (
                 <p className="text-body-sm text-on-surface-variant mt-0.5">{subtitle}</p>
               )}

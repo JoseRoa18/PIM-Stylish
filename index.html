@@ -11,6 +11,17 @@
   rel="stylesheet"
 />
     <title>Stylish | Product Information Managment</title>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash of the
+      // wrong theme. Defaults to the OS preference when nothing is stored.
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          var dark = t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
     <script
   type="text/javascript"
   src="https://www.dropbox.com/static/api/2/dropins.js"
