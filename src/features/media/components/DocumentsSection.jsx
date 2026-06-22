@@ -66,14 +66,21 @@ const slotKey = (typeId, language) => (language ? `${typeId}:${language}` : type
 
 const LANG_AWARE = new Set(DOCUMENT_TYPES.filter((t) => t.languages).map((t) => t.id));
 
-// Total number of slots across all types — used for the "X of Y linked" count.
-const TOTAL_SLOTS = DOCUMENT_TYPES.reduce(
-  (sum, t) => sum + (t.languages ? LANGUAGES.length : 1),
-  0,
-);
 
-export default function DocumentsSection({ sku }) {
+// Faucets don't have CAD fabrication docs (DXF / cut-out template) — those are
+// for stone fabricators cutting countertops for sinks.
+const FAUCET_HIDDEN_TYPES = new Set(['dxf_file', 'cut_out_template']);
+
+export default function DocumentsSection({ sku, category }) {
   const confirm = useConfirm();
+  const isFaucet = category?.includes('faucet');
+  const visibleTypes = DOCUMENT_TYPES.filter(
+    (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id)),
+  );
+  const totalSlots = visibleTypes.reduce(
+    (sum, t) => sum + (t.languages ? LANGUAGES.length : 1),
+    0,
+  );
   const { canEdit } = useAuth();
   const { documents, loading, error, reload } = useProductMedia(sku);
   const [busyKey, setBusyKey] = useState(null);
@@ -198,7 +205,7 @@ export default function DocumentsSection({ sku }) {
         <div className="flex items-center gap-3">
           <h2 className="text-title-lg text-on-surface">Documents</h2>
           <span className="text-body-sm text-on-surface-variant">
-            {linkedCount} of {TOTAL_SLOTS} linked
+            {linkedCount} of {totalSlots} linked
           </span>
         </div>
       </div>
@@ -223,7 +230,7 @@ export default function DocumentsSection({ sku }) {
             Failed to load documents: {error.message}
           </p>
         ) : (
-          DOCUMENT_TYPES.map((docType) =>
+          visibleTypes.map((docType) =>
             docType.languages ? (
               <LanguageGroup
                 key={docType.id}

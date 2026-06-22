@@ -17,6 +17,9 @@ import {
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
+import Lightbox from 'yet-another-react-lightbox';
+import Zoom from 'yet-another-react-lightbox/plugins/zoom';
+import 'yet-another-react-lightbox/styles.css';
 
 // Language variants for imagery. `null` = Universal (language-neutral photos);
 // the others tag images that carry text/infographics in a given language.
@@ -49,30 +52,40 @@ export default function MediaSection({ sku }) {
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [langFilter, setLangFilter] = useState('all');
+  const [langFilter, setLangFilter] = useState(null); // null = auto (first available bucket)
   const [addLanguage, setAddLanguage] = useState(''); // '' = Universal
+  const [lightboxIndex, setLightboxIndex] = useState(-1);
 
   // Visual media only, sorted by display_order
   const visualMedia = [...images, ...videos].sort(
     (a, b) => (a.display_order ?? 0) - (b.display_order ?? 0),
   );
 
-  // Counts per language bucket for the filter chips.
-  const counts = { all: visualMedia.length, universal: 0, en: 0, en_fr: 0, en_es: 0 };
+  // Counts per language bucket — only buckets that actually have images become
+  // filter chips. We always show ONE language at a time (no "All") so the
+  // EN / EN-FR duplicates of the same shot don't appear side by side.
+  const counts = { universal: 0, en: 0, en_fr: 0, en_es: 0 };
   for (const m of visualMedia) counts[bucketOf(m)] = (counts[bucketOf(m)] ?? 0) + 1;
+  const presentBuckets = ['universal', 'en', 'en_fr', 'en_es'].filter((b) => counts[b] > 0);
+  const activeFilter = presentBuckets.includes(langFilter) ? langFilter : (presentBuckets[0] ?? null);
 
-  const filteredMedia =
-    langFilter === 'all' ? visualMedia : visualMedia.filter((m) => bucketOf(m) === langFilter);
+  const filteredMedia = activeFilter
+    ? visualMedia.filter((m) => bucketOf(m) === activeFilter)
+    : visualMedia;
 
-  // Drag-reorder writes absolute display_order, so it only makes sense on the
-  // full, unfiltered list.
-  const reorderEnabled = langFilter === 'all';
+  // Lightbox slides — full-res images from the visible set, in display order.
+  const imageSlides = filteredMedia.filter((m) => m.media_type === 'image');
+  const slides = imageSlides.map((m) => ({ src: getMediaUrl(m.storage_path) }));
 
-  // The reorder monitor reads the latest list via a ref so it can register
-  // once (not on every render) yet always see fresh media.
+  const reorderEnabled = true;
+
+  // The reorder monitor reads the latest lists via refs so it can register once
+  // yet always see fresh media (full list + the currently visible filtered list).
   const mediaRef = useRef(visualMedia);
+  const filteredRef = useRef(filteredMedia);
   useEffect(() => {
     mediaRef.current = visualMedia;
+    filteredRef.current = filteredMedia;
   });
 
   const persistReorder = async (reordered) => {
@@ -101,14 +114,20 @@ export default function MediaSection({ sku }) {
       onDrop: ({ source, location }) => {
         const target = location.current.dropTargets[0];
         if (!target) return;
-        const list = mediaRef.current;
-        const startIndex = list.findIndex((m) => m.id === source.data.id);
-        const indexOfTarget = list.findIndex((m) => m.id === target.data.id);
+        // Reorder within the currently visible (filtered) set, then splice the
+        // new order back into the full list so display_order stays global and
+        // the other language's images keep their positions.
+        const flist = filteredRef.current;
+        const startIndex = flist.findIndex((m) => m.id === source.data.id);
+        const indexOfTarget = flist.findIndex((m) => m.id === target.data.id);
         if (startIndex < 0 || indexOfTarget < 0) return;
         const edge = extractClosestEdge(target.data);
-        const reordered = reorderByEdge(list, startIndex, indexOfTarget, edge);
-        if (reordered[startIndex]?.id === list[startIndex]?.id) return; // no change
-        persistReorder(reordered);
+        const newFiltered = reorderByEdge(flist, startIndex, indexOfTarget, edge);
+        if (newFiltered[startIndex]?.id === flist[startIndex]?.id) return; // no change
+        const ids = new Set(newFiltered.map((m) => m.id));
+        let fi = 0;
+        const newFull = mediaRef.current.map((m) => (ids.has(m.id) ? newFiltered[fi++] : m));
+        persistReorder(newFull);
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -225,13 +244,13 @@ export default function MediaSection({ sku }) {
     }
   };
 
-  const FILTER_CHIPS = [
-    { id: 'all', label: 'All' },
-    { id: 'universal', label: 'Universal' },
-    { id: 'en', label: 'English' },
-    { id: 'en_fr', label: 'English-French' },
-    { id: 'en_es', label: 'English-Spanish' },
-  ];
+  const BUCKET_LABELS = {
+    universal: 'Universal',
+    en: 'English',
+    en_fr: 'English-French',
+    en_es: 'English-Spanish',
+  };
+  const FILTER_CHIPS = presentBuckets.map((id) => ({ id, label: BUCKET_LABELS[id] }));
 
   return (
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
@@ -278,9 +297,7 @@ export default function MediaSection({ sku }) {
       {!loading && !error && visualMedia.length > 0 && (
         <div className="px-6 py-3 flex items-center gap-2 flex-wrap border-b border-outline-variant">
           {FILTER_CHIPS.map((chip) => {
-            const n = counts[chip.id] ?? 0;
-            if (chip.id !== 'all' && n === 0) return null;
-            const active = langFilter === chip.id;
+            const active = activeFilter === chip.id;
             return (
               <button
                 key={chip.id}
@@ -294,7 +311,7 @@ export default function MediaSection({ sku }) {
                 }`}
               >
                 {chip.label}
-                <span className="text-label-md font-semibold tabular-nums">{n}</span>
+                <span className="text-label-md font-semibold tabular-nums">{counts[chip.id]}</span>
               </button>
             );
           })}
@@ -352,7 +369,7 @@ export default function MediaSection({ sku }) {
           <EmptyState onAddClick={openDropboxPicker} canEdit={canEdit} />
         ) : filteredMedia.length === 0 ? (
           <p className="text-body-md text-on-surface-variant text-center py-8">
-            No media tagged as {langMeta(langFilter === 'universal' ? null : langFilter).label}.
+            No media tagged as {langMeta(activeFilter === 'universal' ? null : activeFilter).label}.
           </p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
@@ -367,6 +384,7 @@ export default function MediaSection({ sku }) {
                 onSetPrimary={() => handleSetPrimary(item.id)}
                 onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
                 onRemove={() => handleRemove(item)}
+                onView={() => setLightboxIndex(imageSlides.findIndex((m) => m.id === item.id))}
               />
             ))}
 
@@ -383,6 +401,33 @@ export default function MediaSection({ sku }) {
           </div>
         )}
       </div>
+
+      {/* Full-screen viewer with smooth zoom (wheel/pinch/double-click) and
+          next/prev (arrows, keyboard, swipe). */}
+      <Lightbox
+        open={lightboxIndex >= 0}
+        close={() => setLightboxIndex(-1)}
+        index={Math.max(0, lightboxIndex)}
+        slides={slides}
+        plugins={[Zoom]}
+        zoom={{
+          maxZoomPixelRatio: 3,
+          zoomInMultiplier: 1.15, // gentle steps (default 2 is jumpy)
+          wheelZoomDistanceFactor: 900, // higher = smoother/slower wheel zoom
+          pinchZoomDistanceFactor: 250,
+          scrollToZoom: true,
+          // Disable double-click/double-tap zoom: with delay 0 the
+          // `timeStamp - lastPointerDown < delay` check never fires.
+          doubleClickDelay: 0,
+          doubleTapDelay: 0,
+        }}
+        carousel={{ finite: false }}
+        animation={{ zoom: 500 }}
+        // Click on the backdrop (outside the image) closes the lightbox.
+        controller={{ closeOnBackdropClick: true }}
+        // Semi-transparent + blurred backdrop so the page shows faintly behind.
+        styles={{ container: { backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)' } }}
+      />
     </section>
   );
 }
@@ -423,6 +468,7 @@ function MediaCard({
   onSetPrimary,
   onSetLanguage,
   onRemove,
+  onView,
 }) {
   const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
@@ -488,7 +534,8 @@ function MediaCard({
         <img
           src={thumbUrl}
           alt={item.alt_text || item.file_name}
-          className="w-full h-full object-cover block pointer-events-none"
+          onClick={onView}
+          className="w-full h-full object-cover block cursor-zoom-in"
           loading="lazy"
           draggable={false}
         />

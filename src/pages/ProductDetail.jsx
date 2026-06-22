@@ -23,7 +23,6 @@ import { useProductMedia } from '@/features/media/hooks/useProductMedia';
 import { updateProduct } from '@/features/products/api/products';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
-import { getAttributeGroups } from '@/features/products/config/attributeGroups';
 import StatusBadge from '@/features/products/components/StatusBadge';
 import MediaSection from '@/features/media/components/MediaSection';
 import DocumentsSection from '@/features/media/components/DocumentsSection';
@@ -187,7 +186,9 @@ function buildPatch(form, product) {
       if (typeof value === 'string' && value.trim() === '') normalized = null;
       if (['number_of_bowls', 'sink_radius_mm', 'drain_diameter_in', 'product_weight_lb',
            'min_external_cabinet_size_in', 'min_internal_cabinet_size_in', 'max_deck_thickness_in',
-           'number_of_pieces'].includes(attrKey)) {
+           'number_of_pieces', 'number_of_installation_holes', 'number_of_handles',
+           'faucet_height_in', 'spout_reach_in', 'spout_height_in',
+           'install_hole_diameter_mm', 'install_hole_diameter_in'].includes(attrKey)) {
         if (normalized !== null && normalized !== '') {
           normalized = Number(normalized);
           if (isNaN(normalized)) normalized = null;
@@ -394,7 +395,7 @@ export default function ProductDetail() {
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
         {activeTab === 'content' && <ContentTab product={product} edit={editCtx} />}
         {activeTab === 'pricing' && <PricingTab product={product} edit={editCtx} />}
-        {activeTab === 'media' && <MediaTab sku={product.sku} />}
+        {activeTab === 'media' && <MediaTab sku={product.sku} category={product.category} />}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
       </div>
     </div>
@@ -485,6 +486,9 @@ function OverviewTab({ product, edit, onProductChanged }) {
 function SpecsTab({ product, edit }) {
   const cat = edit.isEditing ? edit.form.category : product.category;
   const isSink = cat?.includes('sink');
+  // Category-aware: faucet products show faucet sections, sinks show sink ones.
+  // Falls back to a data signal (spout_type) so mis-categorized faucets still work.
+  const isFaucet = Boolean(cat?.includes('faucet')) || attr(product, 'spout_type') != null;
 
   return (
     <div className="space-y-6">
@@ -492,10 +496,12 @@ function SpecsTab({ product, edit }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField label="Material" fieldKey="material" product={product} edit={edit} />
           <EditableField label="Finish" fieldKey="finish" product={product} edit={edit} />
-          <AttrField label="Sink Shape" attrKey="sink_shape" product={product} edit={edit} />
-          <AttrListField label="Installation Type" attrKey="installation_type" product={product} edit={edit} hint="Separate multiple options with ; (e.g. Undermount; Drop-In)" />
-          <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />
           <AttrField label="Craftsmanship" attrKey="craftsmanship" product={product} edit={edit} />
+          {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" product={product} edit={edit} />}
+          {!isFaucet && <AttrListField label="Installation Type" attrKey="installation_type" product={product} edit={edit} hint="Separate multiple options with ; (e.g. Undermount; Drop-In)" />}
+          {!isFaucet && <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />}
+          {isFaucet && <AttrField label="Application" attrKey="application" product={product} edit={edit} />}
+          {isFaucet && <AttrField label="Lead Free" attrKey="lead_free" type="boolean" product={product} edit={edit} />}
         </div>
       </Section>
 
@@ -516,20 +522,101 @@ function SpecsTab({ product, edit }) {
         </Section>
       )}
 
+      {isFaucet && (
+        <>
+          <Section title="Faucet Configuration">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Spout Type" attrKey="spout_type" product={product} edit={edit} />
+              <AttrField label="Swivel Spout" attrKey="swivel_spout" product={product} edit={edit} />
+              <AttrField label="Max Flow Rate" attrKey="max_flow_rate" product={product} edit={edit} />
+              <AttrField label="Installation Holes" attrKey="number_of_installation_holes" type="number" product={product} edit={edit} />
+              <AttrField label="Mounting / Installation Type" attrKey="mounting_type" product={product} edit={edit} />
+              <AttrField label="Connection Size" attrKey="connection_size" product={product} edit={edit} />
+              <AttrField label="Lock Type" attrKey="lock_type" product={product} edit={edit} />
+              <AttrField label="Hot & Cold Dispenser" attrKey="hot_cold_dispenser" type="boolean" product={product} edit={edit} />
+            </div>
+          </Section>
+
+          <Section title="Handles, Spray & Cartridge" defaultOpen={false}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Number of Handles" attrKey="number_of_handles" type="number" product={product} edit={edit} />
+              <AttrField label="Handle(s) Included" attrKey="handles_included" type="boolean" product={product} edit={edit} />
+              <AttrField label="Handle Style" attrKey="handle_style" product={product} edit={edit} />
+              <AttrField label="Cold Start Handle" attrKey="cold_start_handle" type="boolean" product={product} edit={edit} />
+              <AttrField label="Spray Included" attrKey="spray_included" type="boolean" product={product} edit={edit} />
+              <AttrField label="Spray Type" attrKey="spray_type" product={product} edit={edit} />
+              <AttrField label="Spray Activation" attrKey="spray_function_activation" product={product} edit={edit} />
+              <AttrField label="Spray Head Functions" attrKey="spray_head_functions" product={product} edit={edit} />
+              <AttrField label="Pull-Down Hose Model" attrKey="pull_down_hose_model" product={product} edit={edit} />
+              <AttrField label="Cartridge Type" attrKey="cartridge_type" product={product} edit={edit} />
+              <AttrField label="Cartridge Size" attrKey="cartridge_size" product={product} edit={edit} />
+            </div>
+          </Section>
+
+          <Section title="Included Components" defaultOpen={false}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Deck Plate Included" attrKey="deck_plate_included" type="boolean" product={product} edit={edit} />
+              <AttrField label="Compatible Deck Plate #" attrKey="compatible_deck_plate" product={product} edit={edit} />
+              <AttrField label="Supply Line Included" attrKey="supply_line_included" type="boolean" product={product} edit={edit} />
+              <AttrField label="Aerator Included" attrKey="aerator_included" type="boolean" product={product} edit={edit} />
+              <AttrField label="Hose Included" attrKey="hose_included" type="boolean" product={product} edit={edit} />
+            </div>
+          </Section>
+
+          <Section title="Faucet Dimensions" defaultOpen={false}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Faucet Height (in)" attrKey="faucet_height_in" type="number" product={product} edit={edit} />
+              <AttrField label="Spout Reach (in)" attrKey="spout_reach_in" type="number" product={product} edit={edit} />
+              <AttrField label="Spout Height (in)" attrKey="spout_height_in" type="number" product={product} edit={edit} />
+              <AttrField label="Install Hole Ø (mm)" attrKey="install_hole_diameter_mm" type="number" product={product} edit={edit} />
+              <AttrField label="Install Hole Ø (in)" attrKey="install_hole_diameter_in" type="number" product={product} edit={edit} />
+              <AttrField label="Max Deck Thickness (in)" attrKey="max_deck_thickness_in" type="number" product={product} edit={edit} />
+            </div>
+          </Section>
+
+          <Section title="Certifications & Compliance" defaultOpen={false}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="ADA Compliant" attrKey="ada_compliant" product={product} edit={edit} />
+              <AttrField label="cUPC Certified" attrKey="cupc_certified" product={product} edit={edit} />
+              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" product={product} edit={edit} />
+              <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" product={product} edit={edit} />
+              <AttrField label="ASME/CSA B125.1" attrKey="asme_csa_certified" product={product} edit={edit} />
+              <AttrField label="ISTA 1A" attrKey="ista_1a_certified" product={product} edit={edit} />
+              <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" product={product} edit={edit} />
+              <AttrField label="CALGreen" attrKey="calgreen_compliant" product={product} edit={edit} />
+              <AttrField label="Title 20" attrKey="title_20_compliant" product={product} edit={edit} />
+              <AttrField label="Title 24" attrKey="title_24_compliant" product={product} edit={edit} />
+              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" product={product} edit={edit} />
+              <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" product={product} edit={edit} />
+              <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
+              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
+            </div>
+          </Section>
+        </>
+      )}
+
       <Section title="Dimensions & Weight">
         <div className="space-y-5">
-          <AttrDimensionsField label="External Dimensions (in)" attrKey="external_dimensions_in"
-            keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
-          <AttrDimensionsField label="Internal Dimensions (in)" attrKey="internal_dimensions_in"
-            keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
+          {!isFaucet && (
+            <AttrDimensionsField label="External Dimensions (in)" attrKey="external_dimensions_in"
+              keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
+          )}
+          {!isFaucet && (
+            <AttrDimensionsField label="Internal Dimensions (in)" attrKey="internal_dimensions_in"
+              keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
+          )}
           <AttrField label="Product Weight (lb)" attrKey="product_weight_lb" type="number" product={product} edit={edit} />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-            <AttrField label="Min External Cabinet (in)" attrKey="min_external_cabinet_size_in" type="number" product={product} edit={edit} />
-            <AttrField label="Min Internal Cabinet (in)" attrKey="min_internal_cabinet_size_in" type="number" product={product} edit={edit} />
-            <AttrField label="Max Deck Thickness (in)" attrKey="max_deck_thickness_in" type="number" product={product} edit={edit} />
-          </div>
-          <AttrDimensionsField label="Cut-out Dimensions (in)" attrKey="cut_out_dimensions_in"
-            keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
+          {!isFaucet && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Min External Cabinet (in)" attrKey="min_external_cabinet_size_in" type="number" product={product} edit={edit} />
+              <AttrField label="Min Internal Cabinet (in)" attrKey="min_internal_cabinet_size_in" type="number" product={product} edit={edit} />
+              <AttrField label="Max Deck Thickness (in)" attrKey="max_deck_thickness_in" type="number" product={product} edit={edit} />
+            </div>
+          )}
+          {!isFaucet && (
+            <AttrDimensionsField label="Cut-out Dimensions (in)" attrKey="cut_out_dimensions_in"
+              keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
+          )}
         </div>
       </Section>
 
@@ -541,13 +628,15 @@ function SpecsTab({ product, edit }) {
         </div>
       </Section>
 
-      <Section title="Accessories" defaultOpen={false}>
-        <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} hint="Separate items with ;" />
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-          <AttrField label="Number of Pieces Included" attrKey="number_of_pieces" type="number" product={product} edit={edit} />
-          <AttrField label="Grids Model Code" attrKey="grids_model_code" product={product} edit={edit} />
-        </div>
-      </Section>
+      {!isFaucet && (
+        <Section title="Accessories" defaultOpen={false}>
+          <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} hint="Separate items with ;" />
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+            <AttrField label="Number of Pieces Included" attrKey="number_of_pieces" type="number" product={product} edit={edit} />
+            <AttrField label="Grids Model Code" attrKey="grids_model_code" product={product} edit={edit} />
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -622,11 +711,11 @@ function PricingTab({ product, edit }) {
 
 // ===================== Media & Marketplaces =====================
 
-function MediaTab({ sku }) {
+function MediaTab({ sku, category }) {
   return (
     <div className="space-y-6">
       <MediaSection sku={sku} />
-      <DocumentsSection sku={sku} />
+      <DocumentsSection sku={sku} category={category} />
     </div>
   );
 }

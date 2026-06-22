@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 
 export default function ImportProducts() {
@@ -35,13 +35,15 @@ export default function ImportProducts() {
   const newCount = validRows.filter((r) => !existingMap.has(r.sku)).length;
   const updateCount = validRows.length - newCount;
 
-  function downloadTemplate() {
-    const csv = '﻿' + TEMPLATE_HEADERS.map((h) => `"${h}"`).join(',') + '\r\n';
+  function downloadTemplate(category = 'sink') {
+    const headers = category === 'faucet' ? FAUCET_TEMPLATE_HEADERS : TEMPLATE_HEADERS;
+    // RFC-4180: wrap each header in quotes and double any embedded quotes.
+    const csv = '﻿' + headers.map((h) => `"${String(h).replace(/"/g, '""')}"`).join(',') + '\r\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'stylish_pim_import_template.csv';
+    link.download = `stylish_pim_${category}_import_template.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -113,14 +115,25 @@ export default function ImportProducts() {
             Upload a spreadsheet to create or update products in bulk. Images and documents are added separately on each product.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={downloadTemplate}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-        >
-          <Download className="w-4 h-4" />
-          Download blank template
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-body-sm text-on-surface-variant">Blank template:</span>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('sink')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Sink
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('faucet')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Faucet
+          </button>
+        </div>
       </header>
 
       {phase === 'upload' && (
