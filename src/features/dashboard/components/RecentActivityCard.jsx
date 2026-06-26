@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  History, Plus, Send, Pencil, Trash2, Download, ArrowDownToLine, Image as ImageIcon,
+  History, Plus, Send, Pencil, Trash2, Download, ArrowDownToLine, Image as ImageIcon, ArrowRight,
 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
 import { listActivity } from '@/features/activity/api/activityLog';
@@ -28,7 +28,7 @@ export default function RecentActivityCard({ data }) {
 
   useEffect(() => {
     let active = true;
-    listActivity({ pageSize: 8 })
+    listActivity({ pageSize: 5 })
       .then((r) => active && setAudit(r.events))
       .catch(() => active && setAudit([]));
     return () => { active = false; };
@@ -40,10 +40,26 @@ export default function RecentActivityCard({ data }) {
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
-      <header className="px-6 py-4 border-b border-outline-variant flex items-center gap-2">
-        <History className="w-4 h-4 text-on-surface-variant" />
-        <h2 className="text-title-md text-on-surface">Recent Activity</h2>
-      </header>
+      {useAudit ? (
+        <Link
+          to="/activity"
+          className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-2 hover:bg-surface-container-low/40 transition-colors group"
+        >
+          <span className="flex items-center gap-2">
+            <History className="w-4 h-4 text-on-surface-variant" />
+            <span className="text-title-md text-on-surface">Recent Activity</span>
+          </span>
+          <span className="inline-flex items-center gap-1 text-label-md text-primary">
+            View all
+            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </span>
+        </Link>
+      ) : (
+        <header className="px-6 py-4 border-b border-outline-variant flex items-center gap-2">
+          <History className="w-4 h-4 text-on-surface-variant" />
+          <h2 className="text-title-md text-on-surface">Recent Activity</h2>
+        </header>
+      )}
 
       {useAudit ? (
         <ul className="divide-y divide-outline-variant">
@@ -94,7 +110,7 @@ function ProductFeed({ data }) {
   ]
     .filter((e) => e.at)
     .sort((a, b) => new Date(b.at) - new Date(a.at))
-    .slice(0, 8);
+    .slice(0, 5);
 
   if (events.length === 0) {
     return <div className="px-6 py-12 text-center text-body-sm text-on-surface-variant">No recent activity yet.</div>;

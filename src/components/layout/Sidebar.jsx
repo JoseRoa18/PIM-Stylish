@@ -18,14 +18,14 @@ import { useAuth } from '@/features/auth/AuthContext';
 const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/catalog', icon: Package, label: 'Catalog' },
-  { to: '/assets', icon: ImageIcon, label: 'Assets' },
+  { to: '/assets', icon: ImageIcon, label: 'Assets', soon: true },
   { to: '/syndication', icon: Share2, label: 'Syndication' },
   { to: '/templates', icon: FileSpreadsheet, label: 'Templates' },
   { to: '/listing-health', icon: Activity, label: 'Listing Health' },
-  { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics', soon: true },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true },
   { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/settings', icon: Settings, label: 'Settings', soon: true },
 ];
 
 export default function Sidebar({ open = false, onClose }) {
@@ -82,6 +82,11 @@ export default function Sidebar({ open = false, onClose }) {
           >
             <item.icon className="w-5 h-5" />
             <span className="text-label-md">{item.label}</span>
+            {item.soon && (
+              <span className="ml-auto text-label-sm px-1.5 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant">
+                Soon
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

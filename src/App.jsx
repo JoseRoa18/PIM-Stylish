@@ -18,6 +18,7 @@ const ListingHealth = lazy(() => import('./pages/ListingHealth'));
 const ImportProducts = lazy(() => import('./pages/ImportProducts'));
 const Users = lazy(() => import('./features/users/pages/Users'));
 const Activity = lazy(() => import('./pages/Activity'));
+const ComingSoon = lazy(() => import('./pages/ComingSoon'));
 
 function PageFallback() {
   return (
@@ -79,6 +80,11 @@ export default function App() {
               </RequireRole>
             }
           />
+
+          {/* Not built yet — show a friendly "Coming soon" instead of a dead redirect */}
+          <Route path="/assets" element={<ComingSoon />} />
+          <Route path="/analytics" element={<ComingSoon />} />
+          <Route path="/settings" element={<ComingSoon />} />
         </Route>
 
         {/* Catch-all → redirect to home */}
