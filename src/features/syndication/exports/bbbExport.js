@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
+import { logActivity } from '@/features/activity/api/activityLog';
 
 // JSZip loads on demand — it's only needed when the user actually exports,
 // so it stays out of the page bundles.
@@ -408,6 +409,15 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+
+  logActivity({
+    action: 'export',
+    entityType: 'product',
+    entityId: `${productList.length} products`,
+    target: 'bbb',
+    summary: `Exported ${productList.length} product(s) to a BB&B template`,
+    metadata: { count: productList.length, skus: productList.map((p) => p.product?.sku).filter(Boolean) },
+  });
 }
 
 // ===================== Main export (single product) =====================
@@ -456,4 +466,12 @@ export async function generateBBBFromTemplate(templateStoragePath, product, medi
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+
+  logActivity({
+    action: 'export',
+    entityType: 'product',
+    entityId: product.sku,
+    target: 'bbb',
+    summary: `Exported ${product.sku} to a BB&B template`,
+  });
 }

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { setActivityActor } from '@/features/activity/api/activityLog';
 
 const AuthContext = createContext(null);
 
@@ -30,8 +31,13 @@ export function AuthProvider({ children }) {
     const userId = session?.user?.id;
     if (!userId) {
       setProfile(null);
+      setActivityActor(null);
       return;
     }
+
+    // Set a best-effort actor immediately from the session so any early action
+    // is attributed; refine with the display name once the profile resolves.
+    setActivityActor({ id: userId, email: session.user.email, name: null });
 
     let active = true;
     supabase
@@ -40,7 +46,14 @@ export function AuthProvider({ children }) {
       .eq('id', userId)
       .maybeSingle()
       .then(({ data }) => {
-        if (active) setProfile(data ?? null);
+        if (active) {
+          setProfile(data ?? null);
+          setActivityActor({
+            id: userId,
+            email: data?.email ?? session.user.email,
+            name: data?.full_name || null,
+          });
+        }
       });
 
     return () => {

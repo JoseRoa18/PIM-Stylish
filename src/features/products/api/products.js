@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { logActivity } from '@/features/activity/api/activityLog';
 
 /**
  * List all products from the catalog with their primary image (if any).
@@ -81,6 +82,14 @@ export async function createProduct({ sku, model_name, brand, category, series, 
     }
     throw new Error(error.message ?? 'Failed to create product');
   }
+
+  logActivity({
+    action: 'create',
+    entityType: 'product',
+    entityId: data.sku,
+    summary: `Created product ${data.sku}${data.model_name ? ` — ${data.model_name}` : ''}`,
+    metadata: { brand: data.brand, category: data.category },
+  });
   return data;
 }
 
@@ -161,6 +170,15 @@ export async function updateProduct(sku, patch) {
     .maybeSingle();
 
   if (error) throw error;
+
+  const changedKeys = Object.keys(patch ?? {});
+  logActivity({
+    action: 'update',
+    entityType: 'product',
+    entityId: sku,
+    summary: `Edited product ${sku} (${changedKeys.join(', ') || 'no fields'})`,
+    metadata: { fields: changedKeys },
+  });
   return data;
 }
 
@@ -207,5 +225,14 @@ export async function bulkUpdateProducts(skus, patch) {
     .select('*');
 
   if (error) throw error;
+
+  const changedKeys = Object.keys(patch ?? {});
+  logActivity({
+    action: 'update',
+    entityType: 'product',
+    entityId: skus.length === 1 ? skus[0] : `${skus.length} products`,
+    summary: `Bulk-edited ${skus.length} product(s) (${changedKeys.join(', ') || 'no fields'})`,
+    metadata: { count: skus.length, fields: changedKeys, skus },
+  });
   return data ?? [];
 }

@@ -17,6 +17,7 @@ const Templates = lazy(() => import('./pages/Templates'));
 const ListingHealth = lazy(() => import('./pages/ListingHealth'));
 const ImportProducts = lazy(() => import('./pages/ImportProducts'));
 const Users = lazy(() => import('./features/users/pages/Users'));
+const Activity = lazy(() => import('./pages/Activity'));
 
 function PageFallback() {
   return (
@@ -67,6 +68,14 @@ export default function App() {
             element={
               <RequireRole allowed={['admin']}>
                 <Users />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/activity"
+            element={
+              <RequireRole allowed={['admin']}>
+                <Activity />
               </RequireRole>
             }
           />

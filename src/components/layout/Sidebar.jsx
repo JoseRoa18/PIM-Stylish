@@ -9,6 +9,7 @@ import {
   BarChart3,
   Settings,
   Users,
+  History,
   Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { to: '/listing-health', icon: Activity, label: 'Listing Health' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true },
+  { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

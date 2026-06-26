@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { logActivity } from '@/features/activity/api/activityLog';
 
 /**
  * Calls the wix-import-products Edge Function (link-only mode).
@@ -30,6 +31,17 @@ export async function runWixImport({ dryRun = true } = {}) {
     throw new Error(detail);
   }
   if (data?.error) throw new Error(data.error);
+
+  // Only the apply run is a real change to the Wix site; skip dry-run previews.
+  if (!dryRun) {
+    logActivity({
+      action: 'import',
+      entityType: 'product',
+      target: 'wix',
+      summary: `Linked PIM products to Wix (${data?.linked ?? data?.matched ?? '?'} matched)`,
+      metadata: { result: data ?? null },
+    });
+  }
   return data;
 }
 
@@ -128,5 +140,14 @@ export async function pushProductToWix(sku, fields = undefined) {
     throw new Error(detail);
   }
   if (data?.error) throw new Error(data.error);
+
+  logActivity({
+    action: 'push',
+    entityType: 'product',
+    entityId: sku,
+    target: 'wix',
+    summary: `Pushed ${sku} to Wix`,
+    metadata: fields ? { fields: Object.keys(fields) } : { source: 'pim' },
+  });
   return data;
 }
