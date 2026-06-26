@@ -20,11 +20,13 @@ import Dialog from '@/components/ui/Dialog';
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // Dropbox's www→content-host redirect breaks browser CORS, so PDF.js can't
-// fetch the file directly. Route it through our edge proxy, which streams the
-// PDF back with permissive CORS headers.
+// fetch the file directly. Route those through our edge proxy, which streams the
+// PDF back with permissive CORS headers. Supabase-hosted PDFs already send
+// `Access-Control-Allow-Origin: *`, so they load directly — no proxy hop.
 function proxied(url) {
   const base = import.meta.env.VITE_SUPABASE_URL;
   if (!base || !url) return url;
+  if (url.startsWith(base)) return url; // Supabase Storage — CORS-ready
   return `${base}/functions/v1/pdf-proxy?url=${encodeURIComponent(url)}`;
 }
 

@@ -1,18 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical } from 'lucide-react';
+import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2 } from 'lucide-react';
 import { draggable, dropTargetForElements, monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { useProductMedia } from '../hooks/useProductMedia';
 import {
   addDropboxMedia,
+  uploadMediaFiles,
+  addVideoByUrl,
   setPrimaryMedia,
   setMediaLanguage,
+  setMediaAltText,
+  bulkSetMediaLanguage,
   removeMedia,
   removeMediaBatch,
   reorderMedia,
   getMediaUrl,
   getThumbnailUrl,
+  getVideoThumbnail,
+  isSupabaseStored,
 } from '../api/media';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -55,6 +61,12 @@ export default function MediaSection({ sku }) {
   const [langFilter, setLangFilter] = useState(null); // null = auto (first available bucket)
   const [addLanguage, setAddLanguage] = useState(''); // '' = Universal
   const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [linksModal, setLinksModal] = useState(null); // { title, items } | null
+  const [uploadProgress, setUploadProgress] = useState(null); // { done, total } | null
+  const [dragOver, setDragOver] = useState(false);
+  const [videoModalOpen, setVideoModalOpen] = useState(false);
+  const [altEdit, setAltEdit] = useState(null); // media item being edited | null
+  const fileInputRef = useRef(null);
 
   // Visual media only, sorted by display_order
   const visualMedia = [...images, ...videos].sort(
@@ -165,6 +177,124 @@ export default function MediaSection({ sku }) {
     });
   };
 
+  // ---------------- Native Supabase upload ----------------
+
+  const handleFiles = async (fileList) => {
+    const files = Array.from(fileList ?? []).filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0) return;
+    setErrorMessage(null);
+    setUploadProgress({ done: 0, total: files.length });
+    try {
+      await uploadMediaFiles(sku, files, addLanguage || null, (done, total) =>
+        setUploadProgress({ done, total }),
+      );
+      reload();
+    } catch (err) {
+      setErrorMessage(err.message);
+      console.error('Upload error:', err);
+    } finally {
+      setUploadProgress(null);
+    }
+  };
+
+  const onFileInputChange = (e) => {
+    handleFiles(e.target.files);
+    e.target.value = ''; // allow re-selecting the same file
+  };
+
+  // Native file drag-and-drop onto the section. We only react to OS file drags
+  // (types includes 'Files'); element/card drags for reorder are left alone.
+  const isFileDrag = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  const onSectionDragOver = (e) => {
+    if (!canEdit || !isFileDrag(e)) return;
+    e.preventDefault();
+    if (!dragOver) setDragOver(true);
+  };
+  const onSectionDragLeave = (e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return; // still inside
+    setDragOver(false);
+  };
+  const onSectionDrop = (e) => {
+    if (!canEdit || !isFileDrag(e)) return;
+    e.preventDefault();
+    setDragOver(false);
+    handleFiles(e.dataTransfer.files);
+  };
+
+  const handleAddVideo = async (url, language) => {
+    await addVideoByUrl(sku, url, language || null);
+    reload();
+  };
+
+  // ---------------- Alt text + bulk language ----------------
+
+  const handleSaveAlt = async (mediaId, altText) => {
+    mutate((prev) => prev.map((m) => (m.id === mediaId ? { ...m, alt_text: altText } : m)));
+    try {
+      await setMediaAltText(mediaId, altText);
+    } catch (err) {
+      setErrorMessage(`Failed to save alt text: ${err.message}`);
+      reload();
+    }
+  };
+
+  const handleBulkLanguage = async (language) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    mutate((prev) => prev.map((m) => (selectedIds.has(m.id) ? { ...m, language } : m)));
+    try {
+      await bulkSetMediaLanguage(ids, language);
+    } catch (err) {
+      setErrorMessage(`Failed to set language: ${err.message}`);
+      reload();
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    const items = visualMedia.filter((m) => selectedIds.has(m.id) && m.media_type === 'image');
+    if (items.length === 0) return;
+    setBusy(true);
+    setErrorMessage(null);
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      const failures = [];
+      for (const m of items) {
+        try {
+          const res = await fetch(getMediaUrl(m.storage_path));
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          zip.file(m.file_name, await res.blob());
+        } catch {
+          failures.push(m);
+        }
+      }
+      if (failures.length) {
+        zip.file(
+          '_could_not_download.txt',
+          failures.map((m) => `${m.file_name}\t${getMediaUrl(m.storage_path)}`).join('\n'),
+        );
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sku}_images_${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      if (failures.length) {
+        setErrorMessage(
+          `${failures.length} file(s) couldn't be downloaded (likely Dropbox CORS) — their links are in _could_not_download.txt inside the zip.`,
+        );
+      }
+    } catch (err) {
+      setErrorMessage(`Download failed: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleSetPrimary = async (mediaId) => {
     try {
       await setPrimaryMedia(sku, mediaId);
@@ -189,7 +319,9 @@ export default function MediaSection({ sku }) {
   const handleRemove = async (mediaItem) => {
     const confirmed = await confirm({
       title: `Remove "${mediaItem.file_name}"?`,
-      message: 'The file stays in Dropbox.',
+      message: isSupabaseStored(mediaItem.storage_path)
+        ? 'This permanently deletes the file from Supabase storage too. This cannot be undone.'
+        : 'The file stays in Dropbox.',
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -220,21 +352,24 @@ export default function MediaSection({ sku }) {
 
   const handleBulkRemove = async () => {
     if (selectedIds.size === 0) return;
+    const items = visualMedia.filter((m) => selectedIds.has(m.id));
+    const supaCount = items.filter((m) => isSupabaseStored(m.storage_path)).length;
     const confirmed = await confirm({
-      title: `Remove ${selectedIds.size} item${selectedIds.size === 1 ? '' : 's'}?`,
-      message: 'The files stay in Dropbox.',
+      title: `Remove ${items.length} item${items.length === 1 ? '' : 's'}?`,
+      message: supaCount
+        ? `${supaCount} of these are hosted in Supabase and will be permanently deleted from storage. This cannot be undone.`
+        : 'The files stay in Dropbox.',
       confirmLabel: 'Remove',
       destructive: true,
     });
     if (!confirmed) return;
 
-    const ids = Array.from(selectedIds);
     setBusy(true);
     // Optimistic: drop the rows from local state immediately.
     mutate((prev) => prev.filter((m) => !selectedIds.has(m.id)));
     clearSelection();
     try {
-      await removeMediaBatch(ids);
+      await removeMediaBatch(items);
       reload();
     } catch (err) {
       setErrorMessage(`Bulk remove failed: ${err.message}`);
@@ -252,8 +387,52 @@ export default function MediaSection({ sku }) {
   };
   const FILTER_CHIPS = presentBuckets.map((id) => ({ id, label: BUCKET_LABELS[id] }));
 
+  // ---------------- Links ----------------
+  // Map a media row to the shape the links dialog renders.
+  const toLinkItem = (m) => ({
+    id: m.id,
+    file_name: m.file_name,
+    url: getMediaUrl(m.storage_path),
+    thumb: getThumbnailUrl(m.storage_path, 120),
+    language: m.language,
+    is_primary: m.is_primary,
+    media_type: m.media_type,
+  });
+
+  const openAllLinks = () =>
+    setLinksModal({
+      title: `All media · ${sku}`,
+      subtitle: `${visualMedia.length} file${visualMedia.length === 1 ? '' : 's'}`,
+      items: visualMedia.map(toLinkItem),
+    });
+
+  const openSelectedLinks = () => {
+    const items = visualMedia.filter((m) => selectedIds.has(m.id)).map(toLinkItem);
+    setLinksModal({
+      title: `Selected media · ${sku}`,
+      subtitle: `${items.length} file${items.length === 1 ? '' : 's'}`,
+      items,
+    });
+  };
+
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+    <section
+      className="relative rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden"
+      onDragOver={onSectionDragOver}
+      onDragLeave={onSectionDragLeave}
+      onDrop={onSectionDrop}
+    >
+      {/* Drop-to-upload overlay (only for OS file drags) */}
+      {dragOver && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-primary/10 border-2 border-dashed border-primary rounded-xl pointer-events-none">
+          <Upload className="w-10 h-10 text-primary" />
+          <p className="text-title-md text-primary font-semibold">Drop images to upload to Supabase</p>
+          <p className="text-body-sm text-on-surface-variant">
+            Tagged as {langMeta(addLanguage || null).label}
+          </p>
+        </div>
+      )}
+
       <div className="px-6 py-4 flex items-center justify-between border-b border-outline-variant gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <h2 className="text-title-lg text-on-surface">Media</h2>
@@ -262,10 +441,21 @@ export default function MediaSection({ sku }) {
               {visualMedia.length} {visualMedia.length === 1 ? 'item' : 'items'}
             </span>
           )}
+          {!loading && !error && visualMedia.length > 0 && (
+            <button
+              type="button"
+              onClick={openAllLinks}
+              title="View & copy links for all media"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-outline-variant text-label-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors"
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              Links
+            </button>
+          )}
         </div>
 
         {canEdit && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <label className="flex items-center gap-1.5 text-label-md text-on-surface-variant">
               Tag new as
               <select
@@ -280,6 +470,39 @@ export default function MediaSection({ sku }) {
                 ))}
               </select>
             </label>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={onFileInputChange}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy || !!uploadProgress}
+              title="Upload images from your computer to Supabase"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+            >
+              {uploadProgress ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : 'Upload'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setVideoModalOpen(true)}
+              disabled={busy}
+              title="Add a video by URL (YouTube, Vimeo, …)"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+            >
+              <Video className="w-4 h-4" />
+              Video URL
+            </button>
             <button
               type="button"
               onClick={openDropboxPicker}
@@ -337,6 +560,41 @@ export default function MediaSection({ sku }) {
               <X className="w-3.5 h-3.5" />
               Clear
             </button>
+            <select
+              value=""
+              onChange={(e) => {
+                handleBulkLanguage(e.target.value || null);
+                e.target.value = '';
+              }}
+              title="Set language for all selected"
+              className="px-3 py-1.5 rounded-full bg-surface-container text-on-surface text-label-md hover:bg-surface-container-high transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="" disabled>
+                Set language…
+              </option>
+              {IMAGE_LANGUAGES.map((l) => (
+                <option key={l.id ?? 'universal'} value={l.id ?? ''}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleBulkDownload}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-surface-container text-on-surface text-label-md hover:bg-surface-container-high transition-colors disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download
+            </button>
+            <button
+              type="button"
+              onClick={openSelectedLinks}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-surface-container text-on-surface text-label-md hover:bg-surface-container-high transition-colors"
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              Get links ({selectedIds.size})
+            </button>
             <button
               type="button"
               onClick={handleBulkRemove}
@@ -384,6 +642,7 @@ export default function MediaSection({ sku }) {
                 onSetPrimary={() => handleSetPrimary(item.id)}
                 onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
                 onRemove={() => handleRemove(item)}
+                onEditAlt={() => setAltEdit(item)}
                 onView={() => setLightboxIndex(imageSlides.findIndex((m) => m.id === item.id))}
               />
             ))}
@@ -428,6 +687,31 @@ export default function MediaSection({ sku }) {
         // Semi-transparent + blurred backdrop so the page shows faintly behind.
         styles={{ container: { backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)' } }}
       />
+
+      {linksModal && (
+        <LinksDialog
+          title={linksModal.title}
+          subtitle={linksModal.subtitle}
+          items={linksModal.items}
+          onClose={() => setLinksModal(null)}
+        />
+      )}
+
+      {videoModalOpen && (
+        <VideoUrlDialog
+          defaultLanguage={addLanguage}
+          onClose={() => setVideoModalOpen(false)}
+          onAdd={handleAddVideo}
+        />
+      )}
+
+      {altEdit && (
+        <AltTextDialog
+          item={altEdit}
+          onClose={() => setAltEdit(null)}
+          onSave={handleSaveAlt}
+        />
+      )}
     </section>
   );
 }
@@ -468,17 +752,20 @@ function MediaCard({
   onSetPrimary,
   onSetLanguage,
   onRemove,
+  onEditAlt,
   onView,
 }) {
   const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [closestEdge, setClosestEdge] = useState(null);
+  const [copied, setCopied] = useState(false);
   const draggableOn = canEdit && reorderEnabled;
 
   const isImage = item.media_type === 'image';
   const isVideo = item.media_type === 'video';
   const url = getMediaUrl(item.storage_path);
   const thumbUrl = getThumbnailUrl(item.storage_path, 400);
+  const videoThumb = isVideo ? getVideoThumbnail(item.storage_path) : null;
 
   // Register the card as both a draggable and a drop target (Pragmatic DnD).
   useEffect(() => {
@@ -510,6 +797,15 @@ function MediaCard({
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
+  const handleCopyLink = (e) => {
+    e.stopPropagation();
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   const containerClasses = [
     'relative aspect-square rounded-lg overflow-hidden bg-surface-container group transition-all',
     draggableOn ? 'cursor-grab active:cursor-grabbing' : '',
@@ -539,6 +835,30 @@ function MediaCard({
           loading="lazy"
           draggable={false}
         />
+      ) : isVideo && videoThumb ? (
+        <div
+          onClick={openInNewTab}
+          role="link"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') openInNewTab();
+          }}
+          className="relative w-full h-full cursor-pointer"
+          title={item.file_name}
+        >
+          <img
+            src={videoThumb}
+            alt={item.alt_text || item.file_name}
+            className="w-full h-full object-cover block"
+            loading="lazy"
+            draggable={false}
+          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+            <div className="w-11 h-11 rounded-full bg-black/60 flex items-center justify-center">
+              <Film className="w-5 h-5 text-white" />
+            </div>
+          </div>
+        </div>
       ) : (
         <div
           onClick={openInNewTab}
@@ -604,39 +924,409 @@ function MediaCard({
         </span>
       ) : null}
 
-      {/* Drag handle hint + hover actions — editors only */}
-      {canEdit && (
-        <>
-          {reorderEnabled && (
-            <div className="absolute bottom-2 left-2 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              <GripVertical className="w-3.5 h-3.5" />
-            </div>
-          )}
+      {/* Drag handle hint — editors only */}
+      {canEdit && reorderEnabled && (
+        <div className="absolute bottom-2 left-2 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <GripVertical className="w-3.5 h-3.5" />
+        </div>
+      )}
 
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
-            <div className="flex gap-2 pointer-events-auto">
-              {isImage && !item.is_primary && (
-                <button
-                  type="button"
-                  onClick={onSetPrimary}
-                  className="p-2 rounded-full bg-white/90 hover:bg-white text-on-surface transition-colors"
-                  title="Set as primary"
-                >
-                  <Star className="w-4 h-4" />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={onRemove}
-                className="p-2 rounded-full bg-white/90 hover:bg-red-600 hover:text-white text-on-surface transition-colors"
-                title="Remove from product"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+      {/* Hover actions — copy link (everyone), set primary + remove (editors) */}
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
+        <div className="flex gap-2 pointer-events-auto">
+          <button
+            type="button"
+            onClick={handleCopyLink}
+            className={`p-2 rounded-full transition-colors ${
+              copied ? 'bg-primary text-on-primary' : 'bg-white/90 hover:bg-white text-on-surface'
+            }`}
+            title={copied ? 'Link copied!' : 'Copy image link'}
+          >
+            {copied ? <Check className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
+          </button>
+          {canEdit && isImage && (
+            <button
+              type="button"
+              onClick={onEditAlt}
+              className="p-2 rounded-full bg-white/90 hover:bg-white text-on-surface transition-colors"
+              title={item.alt_text ? `Alt text: ${item.alt_text}` : 'Add alt text'}
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
+          {canEdit && isImage && !item.is_primary && (
+            <button
+              type="button"
+              onClick={onSetPrimary}
+              className="p-2 rounded-full bg-white/90 hover:bg-white text-on-surface transition-colors"
+              title="Set as primary"
+            >
+              <Star className="w-4 h-4" />
+            </button>
+          )}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="p-2 rounded-full bg-white/90 hover:bg-red-600 hover:text-white text-on-surface transition-colors"
+              title="Remove from product"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
+  const [url, setUrl] = useState('');
+  const [language, setLanguage] = useState(defaultLanguage ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await onAdd(url, language || null);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add video by URL"
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+        className="w-full max-w-md rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden"
+      >
+        <div className="px-5 py-4 flex items-center justify-between border-b border-outline-variant">
+          <h3 className="text-title-md text-on-surface flex items-center gap-2">
+            <Video className="w-4 h-4 text-primary" />
+            Add video by URL
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-body-sm text-on-surface-variant">
+            Paste a YouTube, Vimeo, or direct video link. Nothing is uploaded — the PIM stores the
+            link only.
+          </p>
+          <input
+            autoFocus
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://youtube.com/watch?v=…"
+            className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+          />
+          <label className="flex items-center gap-2 text-label-md text-on-surface-variant">
+            Language
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="px-2 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              {IMAGE_LANGUAGES.map((l) => (
+                <option key={l.id ?? 'universal'} value={l.id ?? ''}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {error && <p className="text-body-sm text-error">{error}</p>}
+        </div>
+
+        <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-outline-variant bg-surface-container-lowest">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-full text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || !url.trim()}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
+            Add video
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AltTextDialog({ item, onClose, onSave }) {
+  const [value, setValue] = useState(item.alt_text ?? '');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    await onSave(item.id, value.trim());
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Edit alt text"
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+        className="w-full max-w-md rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden"
+      >
+        <div className="px-5 py-4 flex items-center justify-between border-b border-outline-variant">
+          <h3 className="text-title-md text-on-surface flex items-center gap-2">
+            <Pencil className="w-4 h-4 text-primary" />
+            Alt text
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4">
+          <div className="flex gap-3 mb-3">
+            <div className="w-20 h-20 rounded-lg overflow-hidden bg-surface-container flex-shrink-0">
+              <img
+                src={getThumbnailUrl(item.storage_path, 160)}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-body-sm text-on-surface truncate" title={item.file_name}>
+                {item.file_name}
+              </p>
+              <p className="text-label-sm text-on-surface-variant mt-1">
+                Describe the image for accessibility, SEO and marketplace feeds.
+              </p>
             </div>
           </div>
-        </>
-      )}
+          <textarea
+            autoFocus
+            rows={3}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="e.g. Brushed gold pull-down kitchen faucet, side view"
+            className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+          />
+          <p className="text-label-sm text-on-surface-variant mt-1 text-right">{value.length} chars</p>
+        </div>
+
+        <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-outline-variant bg-surface-container-lowest">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-full text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function LinksDialog({ title, subtitle, items, onClose }) {
+  const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+
+  // Close on Escape + lock the background page scroll while the modal is open
+  // (otherwise the wheel scrolls the page behind instead of the modal list).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  const allText = items.map((i) => i.url).join('\n');
+
+  const copy = (text, onDone) => {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(onDone);
+  };
+
+  const copyAll = () =>
+    copy(allText, () => {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+    });
+
+  const copyOne = (item) =>
+    copy(item.url, () => {
+      setCopiedId(item.id);
+      setTimeout(() => setCopiedId((cur) => (cur === item.id ? null : cur)), 1500);
+    });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      data-lenis-prevent
+    >
+      <div
+        className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 py-4 flex items-center justify-between gap-4 border-b border-outline-variant">
+          <div className="min-w-0">
+            <h3 className="text-title-md text-on-surface truncate flex items-center gap-2">
+              <Link2 className="w-4 h-4 text-primary flex-shrink-0" />
+              {title}
+            </h3>
+            {subtitle && <p className="text-body-sm text-on-surface-variant mt-0.5">{subtitle}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors flex-shrink-0"
+            title="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto px-2 py-2" data-lenis-prevent>
+          {items.length === 0 ? (
+            <p className="text-body-md text-on-surface-variant text-center py-10">No media to link.</p>
+          ) : (
+            <ul className="divide-y divide-outline-variant">
+              {items.map((item) => {
+                const isCopied = copiedId === item.id;
+                return (
+                  <li key={item.id} className="flex items-center gap-3 px-3 py-2.5">
+                    {/* Thumbnail / icon */}
+                    <div className="w-12 h-12 rounded-md overflow-hidden bg-surface-container flex items-center justify-center flex-shrink-0">
+                      {item.media_type === 'image' ? (
+                        <img src={item.thumb} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      ) : (
+                        <Film className="w-5 h-5 text-on-surface-variant" />
+                      )}
+                    </div>
+
+                    {/* Name + URL */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-body-sm text-on-surface truncate" title={item.file_name}>
+                          {item.file_name}
+                        </span>
+                        {item.is_primary && (
+                          <Star className="w-3 h-3 text-primary fill-current flex-shrink-0" />
+                        )}
+                        {item.language && (
+                          <span className="px-1 py-0.5 rounded bg-surface-container-high text-on-surface-variant text-label-sm font-semibold flex-shrink-0">
+                            {langMeta(item.language).short}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-label-sm text-on-surface-variant font-mono truncate" title={item.url}>
+                        {item.url}
+                      </p>
+                    </div>
+
+                    {/* Copy one */}
+                    <button
+                      type="button"
+                      onClick={() => copyOne(item)}
+                      className={`p-2 rounded-full transition-colors flex-shrink-0 ${
+                        isCopied
+                          ? 'bg-primary text-on-primary'
+                          : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'
+                      }`}
+                      title={isCopied ? 'Copied!' : 'Copy link'}
+                    >
+                      {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Footer */}
+        {items.length > 0 && (
+          <div className="px-5 py-3 flex items-center justify-between gap-3 border-t border-outline-variant bg-surface-container-lowest">
+            <span className="text-label-md text-on-surface-variant">
+              {items.length} link{items.length === 1 ? '' : 's'}
+            </span>
+            <button
+              type="button"
+              onClick={copyAll}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-label-md font-semibold transition-colors ${
+                copiedAll ? 'bg-primary text-on-primary' : 'bg-primary text-on-primary hover:opacity-90'
+              }`}
+            >
+              {copiedAll ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {copiedAll ? 'Copied all!' : `Copy all (${items.length})`}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

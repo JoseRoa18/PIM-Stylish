@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# K-135G storage_path migration backup (reversible)
+.k135g_storage_path_backup.json
+.k135g_docs_storage_path_backup.json

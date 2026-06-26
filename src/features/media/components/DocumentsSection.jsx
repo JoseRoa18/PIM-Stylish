@@ -1,7 +1,7 @@
-import { useState, lazy, Suspense } from 'react';
-import { FileText, ExternalLink, Eye, Trash2, Plus, Link as LinkIcon, X, Check, Loader2 } from 'lucide-react';
+import { useState, useRef, lazy, Suspense } from 'react';
+import { FileText, ExternalLink, Eye, Trash2, Plus, Link as LinkIcon, Check, Loader2, Upload } from 'lucide-react';
 import { useProductMedia } from '../hooks/useProductMedia';
-import { addDropboxDocument, addDocumentByUrl, removeMedia, getMediaUrl } from '../api/media';
+import { addDropboxDocument, uploadDocumentFile, removeMedia, getMediaUrl, isSupabaseStored } from '../api/media';
 import { formatFileSize } from '@/lib/format';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -84,7 +84,6 @@ export default function DocumentsSection({ sku, category }) {
   const { canEdit } = useAuth();
   const { documents, loading, error, reload } = useProductMedia(sku);
   const [busyKey, setBusyKey] = useState(null);
-  const [urlFormKey, setUrlFormKey] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null);
 
@@ -135,20 +134,19 @@ export default function DocumentsSection({ sku, category }) {
     });
   };
 
-  const handleAddByUrl = async (docTypeConfig, language, url) => {
+  const handleUploadFile = async (docTypeConfig, language, file) => {
+    if (!file) return;
     const key = slotKey(docTypeConfig.id, language);
     setErrorMessage(null);
     setBusyKey(key);
     try {
       const existing = docsBySlot[key];
-      if (existing) {
-        await removeMedia(existing);
-      }
-      await addDocumentByUrl(sku, docTypeConfig.id, url, null, language);
-      setUrlFormKey(null);
+      if (existing) await removeMedia(existing);
+      await uploadDocumentFile(sku, docTypeConfig.id, file, language);
       reload();
     } catch (err) {
       setErrorMessage(err.message);
+      console.error('Upload document error:', err);
     } finally {
       setBusyKey(null);
     }
@@ -157,7 +155,9 @@ export default function DocumentsSection({ sku, category }) {
   const handleRemove = async (doc, label) => {
     const confirmed = await confirm({
       title: `Remove the ${label}?`,
-      message: 'The file stays in Dropbox.',
+      message: isSupabaseStored(doc.storage_path)
+        ? 'This permanently deletes the file from Supabase storage too. This cannot be undone.'
+        : 'The file stays in Dropbox.',
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -186,14 +186,10 @@ export default function DocumentsSection({ sku, category }) {
         canEdit={canEdit}
         canPreview={isPdfDoc(docsBySlot[key])}
         busy={busyKey === key}
-        showUrlForm={urlFormKey === key}
+        accept={docType.extensions.join(',')}
         onPreview={() => setPreviewDoc(docsBySlot[key])}
         onAdd={() => openPickerForSlot(docType, language)}
-        onShowUrlForm={() => {
-          setErrorMessage(null);
-          setUrlFormKey(urlFormKey === key ? null : key);
-        }}
-        onSubmitUrl={(url) => handleAddByUrl(docType, language, url)}
+        onUploadFile={(file) => handleUploadFile(docType, language, file)}
         onRemove={() => handleRemove(docsBySlot[key], langLabel ?? docType.label)}
       />
     );
@@ -281,15 +277,25 @@ function LanguageGroup({ docType, linkedCount, children }) {
   );
 }
 
-function DocumentRow({ label, description, doc, canEdit, canPreview, busy, showUrlForm, onPreview, onAdd, onShowUrlForm, onSubmitUrl, onRemove }) {
-  const [url, setUrl] = useState('');
+function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accept, onPreview, onAdd, onUploadFile, onRemove }) {
+  const fileRef = useRef(null);
+  const [copied, setCopied] = useState(false);
   const linked = !!doc;
 
   const openInNewTab = () => {
-    if (doc) {
-      window.open(getMediaUrl(doc.storage_path), '_blank', 'noopener,noreferrer');
-    }
+    if (doc) window.open(getMediaUrl(doc.storage_path), '_blank', 'noopener,noreferrer');
   };
+
+  const copyLink = () => {
+    if (!doc || !navigator.clipboard) return;
+    navigator.clipboard.writeText(getMediaUrl(doc.storage_path)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  const iconBtn =
+    'p-2 rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-50';
 
   return (
     <div className="rounded-lg border border-outline-variant bg-surface-container-low">
@@ -305,9 +311,7 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, showU
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="text-label-md text-on-surface-variant">
-            {label}
-          </div>
+          <div className="text-label-md text-on-surface-variant">{label}</div>
           {linked ? (
             <div className="text-body-md text-on-surface truncate">
               {doc.file_name}
@@ -318,115 +322,101 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, showU
               ) : null}
             </div>
           ) : (
-            <div className="text-body-sm text-on-surface-variant italic">
-              {description}
-            </div>
+            <div className="text-body-sm text-on-surface-variant italic">{description}</div>
           )}
         </div>
 
         <div className="flex items-center gap-1 flex-shrink-0">
-          {linked && canPreview && (
-            <button
-              type="button"
-              onClick={onPreview}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity"
-              title="Preview PDF"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              Preview
-            </button>
-          )}
-          {linked && (
-            <button
-              type="button"
-              onClick={openInNewTab}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container transition-colors"
-              title="Open in new tab"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Open
-            </button>
-          )}
-          {canEdit && (
+          {/* Shared hidden file input for upload / replace */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept={accept}
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.[0]) onUploadFile(e.target.files[0]);
+              e.target.value = '';
+            }}
+          />
+
+          {linked ? (
             <>
-              {linked && (
+              {canPreview && (
                 <button
                   type="button"
-                  onClick={onRemove}
-                  className="p-2 rounded-full hover:bg-error-container text-on-surface-variant hover:text-error transition-colors"
-                  title="Remove"
+                  onClick={onPreview}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity"
+                  title="Preview PDF"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Eye className="w-3.5 h-3.5" />
+                  Preview
                 </button>
               )}
-              <button
-                type="button"
-                onClick={onShowUrlForm}
-                disabled={busy}
-                className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-50"
-                title="Paste a URL instead"
-              >
-                <LinkIcon className="w-4 h-4" />
+              <button type="button" onClick={openInNewTab} className={iconBtn} title="Open in new tab">
+                <ExternalLink className="w-4 h-4" />
               </button>
               <button
                 type="button"
-                onClick={onAdd}
-                disabled={busy}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                onClick={copyLink}
+                className={copied ? 'p-2 rounded-full bg-primary text-on-primary' : iconBtn}
+                title={copied ? 'Link copied!' : 'Copy link'}
               >
-                {busy ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Adding…
-                  </>
-                ) : linked ? (
-                  'Replace'
-                ) : (
-                  <>
-                    <Plus className="w-3.5 h-3.5" />
-                    Add from Dropbox
-                  </>
-                )}
+                {copied ? <Check className="w-4 h-4" /> : <LinkIcon className="w-4 h-4" />}
               </button>
+              {canEdit && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={busy}
+                    className={iconBtn}
+                    title="Replace — upload from your computer"
+                  >
+                    {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onRemove}
+                    disabled={busy}
+                    className="p-2 rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-colors disabled:opacity-50"
+                    title="Remove"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </>
+          ) : (
+            canEdit && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={busy}
+                  title="Upload from your computer to Supabase"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  {busy ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}
+                  Upload
+                </button>
+                <button
+                  type="button"
+                  onClick={onAdd}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add from Dropbox
+                </button>
+              </>
+            )
           )}
         </div>
       </div>
-
-      {canEdit && showUrlForm && (
-        <form
-          className="flex items-center gap-2 px-3 pb-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (url.trim()) onSubmitUrl(url);
-          }}
-        >
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste a Dropbox or web URL…"
-            autoFocus
-            className="flex-1 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-          />
-          <button
-            type="submit"
-            disabled={busy || !url.trim()}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            <Check className="w-3.5 h-3.5" />
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={onShowUrlForm}
-            className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors"
-            title="Cancel"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </form>
-      )}
     </div>
   );
 }
