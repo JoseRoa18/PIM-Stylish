@@ -61,7 +61,12 @@ export function getThumbnailUrl(storagePath, width = 400) {
   const embed = getMediaUrl(storagePath);
   if (!embed) return null;
   if (isSupabaseStored(embed)) {
-    return `${embed.replace('/object/public/', '/render/image/public/')}?width=${width}&quality=75`;
+    // Supabase needs BOTH dimensions + a resize mode — `width` alone keeps the
+    // original height (e.g. 400×2272, distorted). `cover` yields a square,
+    // undistorted thumbnail that matches the grid's object-cover (square photos
+    // show fully; non-square center-crop, same as the CSS would do anyway).
+    const render = embed.replace('/object/public/', '/render/image/public/');
+    return `${render}?width=${width}&height=${width}&resize=cover&quality=75`;
   }
   if (!/^https?:\/\//i.test(embed) || !IMAGE_EXT_RE.test(embed)) return embed;
   // we = without enlargement (never upscale a small source past its size)
