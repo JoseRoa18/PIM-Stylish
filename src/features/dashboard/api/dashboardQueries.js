@@ -22,30 +22,3 @@ export async function fetchProductStats() {
     pending: pendingResult.count ?? 0,
   };
 }
-
-/**
- * Returns the most recent activity entries with the actor (user) joined.
- */
-export async function fetchRecentActivity({ limit = 5 } = {}) {
-  const { data, error } = await supabase
-    .from('activity_log')
-    .select(`
-      id,
-      verb,
-      target_sku,
-      target_label,
-      context,
-      created_at,
-      actor:users!actor_id (
-        id,
-        full_name,
-        initials
-      )
-    `)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (error) throw error;
-
-  return data ?? [];
-}
