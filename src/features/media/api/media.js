@@ -45,11 +45,14 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
 
 /**
  * Build a lightweight thumbnail URL for an image so grid tiles don't each pull
- * the full-resolution photo (~1 MB). A 400px webp thumbnail is ~8 KB.
+ * the full-resolution photo. A 400px webp thumbnail is ~8 KB.
  *
- *  - Supabase-hosted images → native on-the-fly transform (Pro). The browser
- *    negotiates webp automatically via its Accept header. No external proxy.
- *  - Dropbox links can't resize themselves → proxy through weserv.nl.
+ *  - Supabase-hosted images → native on-the-fly transform. Product images are
+ *    stored at max 2272px (≈5 MP), comfortably under Supabase's ~25 MP
+ *    transformer limit, so the native render endpoint works and the browser
+ *    negotiates webp via its Accept header. No external proxy.
+ *  - Dropbox links (e.g. something added before migration) → weserv.nl proxy,
+ *    which handles any resolution.
  *  - Non-image / non-http paths (videos, etc.) → returned as-is.
  *
  * Always safe to use as an <img src>.
