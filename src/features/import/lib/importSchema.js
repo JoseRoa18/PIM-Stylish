@@ -32,11 +32,14 @@ export const CATEGORY_MAP = {
 export const FIELD_DEFS = [
   // ---------- Identification ----------
   { key: 'sku', label: 'Model Number', aliases: ['modelnumber', 'sku', 'suppliersku'], type: 'text', target: { col: 'sku' }, required: true },
-  { key: 'model_name', label: 'Model Name', aliases: ['modelname'], type: 'text', target: { col: 'model_name' } },
+  // Bathroom-faucet sheets have no "Model Name" column — the QuickBooks
+  // Description doubles as the product name.
+  { key: 'model_name', label: 'Model Name', aliases: ['modelname', 'quickbooksdescription'], type: 'text', target: { col: 'model_name' } },
   // NOTE: "Family #" from spreadsheets is intentionally ignored — variant
   // families are derived automatically from the SKU base model (S-300XG → S-300).
   { key: 'brand', label: 'Brand', aliases: ['brand'], type: 'text', target: { col: 'brand' }, required: true },
   { key: 'category', label: 'Category', aliases: ['category'], type: 'category', target: { col: 'category' }, required: true },
+  { key: 'msrp_cad', label: 'MSRP CAD$', aliases: ['msrpcad', 'msrp', 'msrpcad$'], type: 'number', target: { col: 'msrp_cad' } },
   { key: 'series', label: 'Sinks Series', aliases: ['sinksseries', 'sinkseries', 'series'], type: 'text', target: { col: 'series' } },
   { key: 'product_type', label: 'Product Type', aliases: ['producttype'], type: 'text', target: { col: 'product_type' } },
 
@@ -101,7 +104,7 @@ export const FIELD_DEFS = [
   { key: 'craftsmanship', label: 'Craftsmanship Type', aliases: ['craftsmanshiptype', 'craftsmanship'], type: 'text', target: { attr: 'craftsmanship' } },
   { key: 'durability', label: 'Durability', aliases: ['durability'], type: 'list', target: { attr: 'durability_tags' } },
   { key: 'warranty', label: 'Full or Limited Warranty', aliases: ['fullorlimitedwarranty', 'warranty'], type: 'text', target: { attr: 'warranty' } },
-  { key: 'num_install_holes', label: 'Number of Installation Holes', aliases: ['numberofinstallationholes'], type: 'int', target: { attr: 'number_of_installation_holes' } },
+  { key: 'num_install_holes', label: 'Number of Installation Holes', aliases: ['numberofinstallationholes', 'numberofmountingholes'], type: 'int', target: { attr: 'number_of_installation_holes' } },
   { key: 'spout_type', label: 'Spout Type', aliases: ['spouttype'], type: 'text', target: { attr: 'spout_type' } },
   { key: 'swivel_spout', label: 'Swivel Spout', aliases: ['swivelspout'], type: 'text', target: { attr: 'swivel_spout' } },
   { key: 'max_flow_rate', label: 'Maximum Flow Rate', aliases: ['maximumflowrate'], type: 'text', target: { attr: 'max_flow_rate' } },
@@ -116,24 +119,32 @@ export const FIELD_DEFS = [
   { key: 'cold_start_handle', label: 'Cold start handle?', aliases: ['coldstarthandle'], type: 'bool', target: { attr: 'cold_start_handle' } },
   { key: 'handles_included', label: 'Handle(s) Included', aliases: ['handlesincluded', 'handleincluded'], type: 'bool', target: { attr: 'handles_included' } },
   { key: 'number_of_handles', label: 'Number of Handles', aliases: ['numberofhandles'], type: 'int', target: { attr: 'number_of_handles' } },
-  { key: 'handle_style', label: 'Handle Style', aliases: ['handlestyle'], type: 'text', target: { attr: 'handle_style' } },
+  { key: 'handle_style', label: 'Handle Style', aliases: ['handlestyle', 'handletype'], type: 'text', target: { attr: 'handle_style' } },
   { key: 'deck_plate_included', label: 'Deck Plate Included', aliases: ['deckplateincluded'], type: 'bool', target: { attr: 'deck_plate_included' } },
   { key: 'compatible_deck_plate', label: 'Compatible Deck Plate Part Number', aliases: ['compatibledeckplatepartnumber'], type: 'text', target: { attr: 'compatible_deck_plate' } },
   { key: 'supply_line_included', label: 'Supply Line Included', aliases: ['supplylineincluded'], type: 'bool', target: { attr: 'supply_line_included' } },
   { key: 'aerator_included', label: 'Aerator Included', aliases: ['aeratorincluded'], type: 'bool', target: { attr: 'aerator_included' } },
   { key: 'hose_included', label: 'Hose Included', aliases: ['hoseincluded'], type: 'bool', target: { attr: 'hose_included' } },
-  { key: 'application', label: 'Application', aliases: ['application'], type: 'text', target: { attr: 'application' } },
+  { key: 'application', label: 'Application', aliases: ['application', 'supplierintendedandapproveduse'], type: 'text', target: { attr: 'application' } },
   { key: 'handle_style_lock', label: 'Lock Type', aliases: ['locktype'], type: 'text', target: { attr: 'lock_type' } },
   { key: 'connection_size', label: 'Connection Size', aliases: ['connectionsize'], type: 'text', target: { attr: 'connection_size' } },
   { key: 'mounting_type', label: 'Mounting / Installation Type', aliases: ['mountinginstallationtype'], type: 'text', target: { attr: 'mounting_type' } },
   { key: 'country_of_origin_details', label: 'Country of Origin - Additional Details', aliases: ['countryoforiginadditionaldetails'], type: 'text', target: { attr: 'country_of_origin_details' } },
 
+  // ---------- Bathroom-faucet specific ----------
+  { key: 'laminar_flow', label: 'Laminar Flow', aliases: ['laminarflow'], type: 'text', target: { attr: 'laminar_flow' } },
+  { key: 'drain_overflow', label: 'Drain Overflow', aliases: ['drainoverflow'], type: 'text', target: { attr: 'drain_overflow' } },
+  { key: 'valve_included', label: 'Valve Included', aliases: ['valveincluded'], type: 'bool', target: { attr: 'valve_included' } },
+  { key: 'compatible_drain_assembly', label: 'Compatible Drain Assembly Part Number', aliases: ['compatibledrainassemblypartnumber'], type: 'text', target: { attr: 'compatible_drain_assembly' } },
+  { key: 'handle_material', label: 'Handle Material', aliases: ['handlematerial'], type: 'text', target: { attr: 'handle_material' } },
+  { key: 'faucet_centers', label: 'Faucet Centers', aliases: ['faucetcenters'], type: 'text', target: { attr: 'faucet_centers' } },
+
   // ---------- Faucet dimensions (inches unless noted) ----------
   { key: 'faucet_height', label: 'Faucet Height', aliases: ['faucetheightdecimals', 'faucetheight'], type: 'number', target: { attr: 'faucet_height_in' } },
-  { key: 'spout_reach', label: 'Spout Reach', aliases: ['spoutreachdecimals', 'spoutreach'], type: 'number', target: { attr: 'spout_reach_in' } },
-  { key: 'spout_height', label: 'Spout Height', aliases: ['spoutheightdecimasl', 'spoutheightdecimals', 'spoutheight'], type: 'number', target: { attr: 'spout_height_in' } },
+  { key: 'spout_reach', label: 'Spout Reach', aliases: ['spoutreachdecimals', 'spoutreach', 'spoutreachin'], type: 'number', target: { attr: 'spout_reach_in' } },
+  { key: 'spout_height', label: 'Spout Height', aliases: ['spoutheightdecimasl', 'spoutheightdecimals', 'spoutheight', 'spoutheightin'], type: 'number', target: { attr: 'spout_height_in' } },
   { key: 'install_hole_dia_mm', label: 'Installation Hole Diameter (mm)', aliases: ['installationholediametermm'], type: 'number', target: { attr: 'install_hole_diameter_mm' } },
-  { key: 'install_hole_dia_in', label: 'Installation Hole Diameter (in)', aliases: ['installationholediameter', 'installationholediameterin'], type: 'number', target: { attr: 'install_hole_diameter_in' } },
+  { key: 'install_hole_dia_in', label: 'Installation Hole Diameter (in)', aliases: ['installationholediameter', 'installationholediameterin', 'installationholediameterinch'], type: 'number', target: { attr: 'install_hole_diameter_in' } },
 
   // ---------- Faucet certifications & compliance ----------
   // Kept as text to preserve whatever the sheet holds (Yes/No, N/A, cert #s).
@@ -151,6 +162,13 @@ export const FIELD_DEFS = [
   { key: 'title_24', label: 'Title 24 Compliant', aliases: ['title24compliant'], type: 'text', target: { attr: 'title_24_compliant' } },
   { key: 'energy_efficiency', label: 'Energy Efficiency Regulations Compliant', aliases: ['energyefficiencyregulationscompliant'], type: 'text', target: { attr: 'energy_efficiency_compliant' } },
   { key: 'ab_100', label: 'California AB-100 Compliant', aliases: ['californiaab100compliant'], type: 'text', target: { attr: 'ab_100_compliant' } },
+  // Bathroom-faucet certifications (plumbing/material standards)
+  { key: 'asme_19_2', label: 'ASME A112.19.2/CSA B45.1 Compliant', aliases: ['asmea112192csab451compliant'], type: 'text', target: { attr: 'asme_a112_19_2_compliant' } },
+  { key: 'asme_19_3', label: 'ASME A112.19.3 Compliant', aliases: ['asmea112193compliant'], type: 'text', target: { attr: 'asme_a112_19_3_compliant' } },
+  { key: 'asme_19_1', label: 'ASME A112.19.1/CSA B45.2 - 2018 Compliant', aliases: ['asmea112191csab4522018compliant'], type: 'text', target: { attr: 'asme_a112_19_1_compliant' } },
+  { key: 'sdwa', label: 'SDWA Compliant', aliases: ['sdwacompliant'], type: 'text', target: { attr: 'sdwa_compliant' } },
+  { key: 'reason_for_restriction', label: 'Reason for Restriction', aliases: ['reasonforrestriction'], type: 'text', target: { attr: 'reason_for_restriction' } },
+  { key: 'warranty_length', label: 'Warranty Length', aliases: ['warrantylength'], type: 'text', target: { attr: 'warranty_length' } },
 
   // ---------- Marketing content ----------
   { key: 'general_title_en', label: 'General Title (EN)', aliases: ['generaltitleen'], type: 'text', target: { attr: 'general_title_en' } },
@@ -212,7 +230,7 @@ export const TEMPLATE_HEADERS = [
   ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
 ];
 
-// Blank template headers for kitchen / bath faucets, in the source-sheet order.
+// Blank template headers for KITCHEN faucets, in the source-sheet order.
 // (Family # is omitted — variant families are derived from the SKU.)
 export const FAUCET_TEMPLATE_HEADERS = [
   'Model Number', 'Model Name', 'Brand', 'Category', 'Material', 'Durability',
@@ -235,6 +253,35 @@ export const FAUCET_TEMPLATE_HEADERS = [
   'Maximum Deck Thickness', 'Connection Size', 'Mounting / Installation Type',
   'Full or Limited Warranty', 'UPC', 'Shipping Weight Lbs', 'Shipping Height',
   'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for BATHROOM faucets, in the source-sheet order.
+// (Family # kept for fidelity but ignored on import; the duplicate
+// "Mounting / Installation Type" column is collapsed to one.)
+export const BATH_FAUCET_TEMPLATE_HEADERS = [
+  'Model Number', 'Family #', 'Quickbooks Description', 'MSRP CAD$', 'Brand',
+  'Category', 'Material', 'Durability', 'Craftsmanship Type', 'Maximum Flow Rate',
+  'Laminar Flow', 'Handle(s) Included', 'Number of Handles', 'Deck Plate Included',
+  'Compatible Deck Plate Part Number', 'Drain Overflow', 'Valve Included',
+  'Aerator Included', 'Supply Line Included', 'Supplier Intended and Approved Use',
+  'Country of Origin', 'Compatible Drain Assembly Part Number', 'Handle Material',
+  'Handle Type', 'Finish', 'Spout Height (In)', 'Spout Reach (In)', 'Faucet Height',
+  'Faucet Centers', 'Overall Product Weight', 'Number of Mounting Holes',
+  'Mounting / Installation Type', 'Installation Hole Diameter INCH',
+  'Maximum Deck Thickness', 'Connection Size',
+  'ASME A112.19.2/CSA B45.1 Compliant', 'ASME A112.19.3 Compliant', 'SDWA Compliant',
+  'ASME A112.19.1/CSA B45.2 - 2018 Compliant', 'ASSE 1001 Certified',
+  'Title 20 - California Code of Regulations',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'Canada Product Restriction', 'Reason for Restriction', 'UL 1951 Listed',
+  'ASME A112.18.1/CSA B125.1 - 2018', 'Vermont Act 193 Compliant', 'cUPC Certified',
+  'Title 24 Compliant', 'California AB-100 Compliant', 'Safety Listing(s)',
+  'Warranty Length', 'Full or Limited Warranty', 'UPC', 'Shipping Weight Lbs',
+  'Shipping Height', 'Shipping Width', 'Shipping Length',
   'General Title (EN)', 'Description (EN)',
   ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
   'General Title (FR)', 'Description (FR)',

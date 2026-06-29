@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 
 export default function ImportProducts() {
@@ -35,8 +35,14 @@ export default function ImportProducts() {
   const newCount = validRows.filter((r) => !existingMap.has(r.sku)).length;
   const updateCount = validRows.length - newCount;
 
+  const TEMPLATES = {
+    sink: TEMPLATE_HEADERS,
+    kitchen_faucet: FAUCET_TEMPLATE_HEADERS,
+    bath_faucet: BATH_FAUCET_TEMPLATE_HEADERS,
+  };
+
   function downloadTemplate(category = 'sink') {
-    const headers = category === 'faucet' ? FAUCET_TEMPLATE_HEADERS : TEMPLATE_HEADERS;
+    const headers = TEMPLATES[category] ?? TEMPLATE_HEADERS;
     // RFC-4180: wrap each header in quotes and double any embedded quotes.
     const csv = '﻿' + headers.map((h) => `"${String(h).replace(/"/g, '""')}"`).join(',') + '\r\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -127,11 +133,19 @@ export default function ImportProducts() {
           </button>
           <button
             type="button"
-            onClick={() => downloadTemplate('faucet')}
+            onClick={() => downloadTemplate('kitchen_faucet')}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
           >
             <Download className="w-4 h-4" />
-            Faucet
+            Kitchen Faucet
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('bath_faucet')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Bathroom Faucet
           </button>
         </div>
       </header>
