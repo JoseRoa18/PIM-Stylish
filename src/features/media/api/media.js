@@ -47,31 +47,20 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
  * Build a lightweight thumbnail URL for an image so grid tiles don't each pull
  * the full-resolution photo. A 400px webp thumbnail is ~8 KB.
  *
- *  - Supabase-hosted images → native on-the-fly transform. Product images are
- *    stored at max 2272px (≈5 MP), comfortably under Supabase's ~25 MP
- *    transformer limit, so the native render endpoint works and the browser
- *    negotiates webp via its Accept header. No external proxy.
- *  - Dropbox links (e.g. something added before migration) → weserv.nl proxy,
- *    which handles any resolution.
- *  - Non-image / non-http paths (videos, etc.) → returned as-is.
+ * Resizes via the free weserv.nl image proxy for BOTH Dropbox and Supabase URLs.
+ * We deliberately do NOT use Supabase's native transform: it's a metered Pro
+ * feature (only 100 origin images/month included) and this catalog has ~3,300
+ * images, so browsing blew past the quota (797/100). weserv is free/unlimited.
+ * `fit=cover` + w=h gives a square, undistorted thumbnail matching the grid.
  *
- * Always safe to use as an <img src>.
+ * Non-image / non-http paths (videos, etc.) are returned as-is.
  */
 export function getThumbnailUrl(storagePath, width = 400) {
   const embed = getMediaUrl(storagePath);
   if (!embed) return null;
-  if (isSupabaseStored(embed)) {
-    // Supabase needs BOTH dimensions + a resize mode — `width` alone keeps the
-    // original height (e.g. 400×2272, distorted). `cover` yields a square,
-    // undistorted thumbnail that matches the grid's object-cover (square photos
-    // show fully; non-square center-crop, same as the CSS would do anyway).
-    const render = embed.replace('/object/public/', '/render/image/public/');
-    return `${render}?width=${width}&height=${width}&resize=cover&quality=75`;
-  }
   if (!/^https?:\/\//i.test(embed) || !IMAGE_EXT_RE.test(embed)) return embed;
-  // we = without enlargement (never upscale a small source past its size)
   const encoded = encodeURIComponent(embed);
-  return `https://images.weserv.nl/?url=${encoded}&w=${width}&output=webp&q=80&we`;
+  return `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${width}&fit=cover&output=webp&q=80`;
 }
 
 // Public buckets for files uploaded straight to Supabase. Dropbox stays fully
