@@ -1,4 +1,5 @@
 import WixConnectorCard from '@/features/syndication/components/WixConnectorCard';
+import WayfairConnectorCard from '@/features/syndication/components/WayfairConnectorCard';
 
 export default function Syndication() {
   return (
@@ -11,6 +12,7 @@ export default function Syndication() {
       </header>
 
       <WixConnectorCard />
+      <WayfairConnectorCard />
     </div>
   );
 }
