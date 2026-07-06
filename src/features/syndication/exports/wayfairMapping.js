@@ -58,6 +58,34 @@ const alias = (table, v) => {
   return table[k] ?? v;
 };
 
+// PIM stores "Ceramic Disk Cartridge"; Wayfair's valid value is "Disc".
+const cartridge = (v) => (v && /ceramic dis[ck]/i.test(v) ? 'Ceramic Disc Cartridge' : v || '');
+// Compatible deck-plate part numbers: normalize separators, map the typo'd
+// "Does not Appy" placeholder to the Wayfair-friendly "Does Not Apply".
+const deckPlate = (v) => {
+  if (!v) return '';
+  if (/does\s*not?\s*app/i.test(v)) return 'Does Not Apply';
+  return String(v).replace(/[,:]/g, ';').replace(/\s*;\s*/g, '; ').trim();
+};
+// ADA field stores "No" / "ADA Compliant" (and rarely true/false).
+const adaYesNo = (v) => {
+  if (v == null || v === '') return '';
+  const s = String(v).toLowerCase();
+  if (s.includes('not') || s === 'no' || s === 'false') return 'No';
+  if (s.includes('yes') || s.includes('compliant') || s === 'true') return 'Yes';
+  return 'No';
+};
+// spray_type (Pull Down / Pull Out / Standard / Pot Filler …) → Construction Features.
+const sprayToConstruction = (v) => {
+  if (!v) return '';
+  const s = String(v).toLowerCase();
+  if (s.includes('pull down') || s.includes('pull-down')) return 'Pull Down Spray';
+  if (s.includes('pull out') || s.includes('pull-out')) return 'Pull Out Spray';
+  if (s.includes('side')) return 'Side Spray';
+  if (s.includes('not app') || s.includes('does not')) return 'Does Not Apply';
+  return 'No Construction Features'; // standard faucet, pot filler, etc.
+};
+
 const pieces = (p) => {
   const a = attr(p), out = [];
   if (a.deck_plate_included) out.push('Deck Plate');
@@ -75,10 +103,11 @@ export const WAYFAIR_RULES = {
   'Supplier Part Number': (p) => p.sku,
   Brand: (p) => brandMap(p.brand),
   'Manufacturer Part Number': (p) => p.sku,
-  'Product Name': (p) => p.model_name || p.sku,
+  'Product Name': (p) => attr(p).general_title_en || p.model_name || p.sku,
   'Universal Product Code': (p) => attr(p).upc || '',
-  'Collection Name': (p) => p.series || '',
+  'Collection Name': () => '', // faucets have no collection name
   'Manufacturer Product URL': (p) => (/azuni/i.test(p.brand) ? 'https://azuni.ca' : 'https://stylishkb.com'),
+  Designer: (p) => brandMap(p.brand), // Designer = the brand
   'Amazon Seller SKU': () => '',
   // Pricing
   'Base Cost': () => '', // wholesale — deferred
@@ -108,6 +137,7 @@ export const WAYFAIR_RULES = {
     return (Array.isArray(d) ? d : [d]).filter(Boolean).join('; ');
   },
   'Spout Type': (p) => alias(SPOUT_ALIAS, attr(p).spout_type),
+  'Construction Features': (p) => sprayToConstruction(attr(p).spray_type),
   'Maximum Flow Rate': (p) => num(attr(p).max_flow_rate),
   'Sensor Type': () => 'No Sensor',
   'Supplier Intended and Approved Use': (p) => attr(p).application || 'Residential Use',
@@ -123,9 +153,22 @@ export const WAYFAIR_RULES = {
   'Spout Reach - Front to Back': (p) => num(attr(p).spout_reach_in),
   'Spout/Faucet Height - Top to Bottom': (p) => num(attr(p).faucet_height_in || attr(p).spout_height_in),
   'Faucet Centers': (p) => num(attr(p).faucet_centers),
-  'Number of Mounting Holes': (p) => num(attr(p).number_of_installation_holes),
+  'Number of Installation Holes': (p) => num(attr(p).number_of_installation_holes),
+  'Installation Hole Diameter': (p) => num(attr(p).install_hole_diameter_in),
+  'Number of Handles': (p) => num(attr(p).number_of_handles),
+  'Maximum Deck Thickness': (p) => num(attr(p).max_deck_thickness_in),
+  'Overall Product Weight': (p) => num(attr(p).product_weight_lb || p.shipping_weight_lb),
+  'Cartridge Type': (p) => cartridge(attr(p).cartridge_type),
+  'Craftsmanship Type': (p) => attr(p).craftsmanship || '',
+  'Compatible Deck Plate Part Number': (p) => deckPlate(attr(p).compatible_deck_plate),
   'Mounting / Installation': (p) => alias(MOUNT_ALIAS, attr(p).mounting_type),
+  // Warranty
+  'Product Warranty': () => 'Yes',
+  'Full or Limited Warranty': () => 'Limited',
+  'Warranty Length': (p) => attr(p).warranty_length || '',
   // Compliance
+  'Lead Free': (p) => yesNo(attr(p).lead_free),
+  'ADA Compliant': (p) => adaYesNo(attr(p).ada_compliant),
   'Commercial Warranty': () => 'No',
   'Wayfair Compliance Verified Program (including Baby Safety Alliance fka JPMA) for this product category': () => 'No',
   'Uniform Packaging and Labeling Regulations (UPLR) Compliant': (p) => yesNo(attr(p).uplr_compliant) || 'No',
@@ -135,9 +178,39 @@ export const WAYFAIR_RULES = {
   'ASME A112.18.1/CSA B125.1 - 2018': (p) => yesNoDNA(attr(p).asme_csa_certified),
   'Title 24 Compliant': (p) => yesNoDNA(attr(p).title_24_compliant),
   'Warning Required': () => 'No',
-  'Country Of Manufacturer': (p) => attr(p).country_of_origin || attr(p).country_of_origin_details || '',
+  // Wayfair Canada: ship origin is always Canada; origin-details always N/A.
+  'Country Of Manufacturer': () => 'Canada',
+  'Country of Origin - Additional Details': () => 'Does Not Apply',
 };
 
 // Numbered image / bullet columns are matched by pattern.
 export const IMAGE_COL_RE = /^Image File Name or URL (\d+)$/;
 export const BULLET_COL_RE = /^Feature Bullet (\d+)$/;
+
+// Variant columns. Variant Type / Group Reference ID are single; Grouping and
+// Attribute-Name-On-Site are numbered (1..3). Values come from a per-product
+// `_variant` object attached by the generator (needs whole-family context).
+export const VARIANT_GROUPING_RE = /^Variant Grouping (\d+)$/;
+export const VARIANT_ATTR_NAME_RE = /^Variant Attribute Name On Site (\d+)$/;
+
+// Document columns come in pairs: "Document File Name or URL N" + "Document Type N".
+export const DOC_FILE_RE = /^Document File Name or URL (\d+)$/;
+export const DOC_TYPE_RE = /^Document Type (\d+)$/;
+// PIM product_media.document_type → Wayfair "Document Type" valid value.
+export const DOC_TYPE_MAP = {
+  spec_sheet: 'Specifications',
+  installation_manual: 'Installation & Assembly',
+  warranty_file: 'Warranty Information',
+  owner_manual: 'Owner Manual',
+  cut_out_template: 'Dimensions',
+};
+// Priority when filling the 3 document slots (spec → install → warranty first).
+export const DOC_TYPE_PRIORITY = ['spec_sheet', 'installation_manual', 'warranty_file', 'owner_manual', 'cut_out_template'];
+
+// Candidate second axes (beyond Finish) for families that repeat a finish.
+// name = the Wayfair "Variant Grouping" Select value; get = normalized key.
+export const VARIANT_AXES = [
+  { name: 'Flow Rate', get: (p) => (p.attributes?.max_flow_rate ?? '') + '' },
+  { name: 'Handle Style', get: (p) => (p.attributes?.handle_style ?? p.attributes?.number_of_handles ?? '') + '' },
+  { name: 'Sensor', get: (p) => (p.attributes?.sensor_type ?? '') + '' },
+];

@@ -62,6 +62,14 @@ const CATEGORY_OPTIONS = [
   { value: 'accessory', label: 'Accessory' },
 ];
 
+// Matches Wayfair's "Warranty Length" valid values (used in exports).
+const WARRANTY_LENGTH_OPTIONS = [
+  '30 Days', '60 Days', '90 Days', '6 Months', '18 Months',
+  '1 Year', '2 Years', '3 Years', '4 Years', '5 Years', '6 Years', '7 Years',
+  '8 Years', '10 Years', '12 Years', '15 Years', '20 Years', '25 Years',
+  'Lifetime', 'Warranty length varies by part',
+];
+
 const MAX_BULLETS = 12;
 
 // Helper to read a value from product.attributes JSONB
@@ -81,7 +89,7 @@ function joinList(v) {
 
 function buildEditForm(product) {
   const a = product.attributes ?? {};
-  return {
+  const form = {
     // Direct columns
     model_name: product.model_name ?? '',
     family_number: product.family_number ?? '',
@@ -116,6 +124,7 @@ function buildEditForm(product) {
     // From attributes JSONB
     _upc: a.upc ?? '',
     _warranty: a.warranty ?? '',
+    _warranty_length: a.warranty_length ?? '',
     _manufacturer: a.manufacturer ?? '',
     _country_of_origin: a.country_of_origin ?? '',
     _hs_code: a.hs_code ?? '',
@@ -154,6 +163,19 @@ function buildEditForm(product) {
     _description_fr: a.description_fr ?? '',
     _bullet_points_fr: a.bullet_points_fr ?? [],
   };
+
+  // Seed every remaining SCALAR attribute so its current value shows on edit
+  // (e.g. number_of_handles, spout_type, certifications). Arrays and objects
+  // are skipped — they're handled explicitly above (bullets, dimensions,
+  // LIST_ATTRS) and would corrupt on save if treated as plain text.
+  for (const [k, v] of Object.entries(a)) {
+    const fk = '_' + k;
+    if (fk in form) continue;
+    if (v !== null && typeof v === 'object') continue;
+    form[fk] = v ?? '';
+  }
+
+  return form;
 }
 
 const NUMBER_COLUMNS = new Set([
@@ -456,6 +478,7 @@ function OverviewTab({ product, edit, onProductChanged }) {
           <AttrField label="Country of Origin" attrKey="country_of_origin" product={product} edit={edit} />
           <AttrField label="HS Code" attrKey="hs_code" product={product} edit={edit} mono />
           <AttrField label="Warranty" attrKey="warranty" product={product} edit={edit} />
+          <AttrField label="Warranty Length" attrKey="warranty_length" type="select" options={WARRANTY_LENGTH_OPTIONS} product={product} edit={edit} />
           <EditableField label="Standards" fieldKey="standards_compliance" product={product} edit={edit} />
           <AttrField label="Safety Listing(s)" attrKey="safety_listings" product={product} edit={edit} />
           <AttrField label="SCC Compliant" attrKey="scc_compliant" product={product} edit={edit} />
@@ -743,7 +766,14 @@ function ExportTemplatesCard({ product, media }) {
     setError(null);
     try {
       if (/wayfair/i.test(template.marketplace)) {
-        await generateWayfairFromTemplate(template.storage_path, [product], `Wayfair_${product.sku}`);
+        // Wayfair exports the whole variant family, so name the file by collection.
+        const base = (product.model_name || product.sku).replace(/[^\w-]+/g, '_');
+        const res = await generateWayfairFromTemplate(template.storage_path, [product], `Wayfair_${base}`);
+        if (res.warnings?.length) {
+          setError(
+            `Downloaded ${res.count} variant(s). ⚠ ${res.warnings.length} share a finish — set a 2nd Variant Grouping in Excel before uploading (details in console).`
+          );
+        }
       } else {
         await generateBBBFromTemplate(template.storage_path, product, media);
       }
@@ -792,12 +822,13 @@ function ExportTemplatesCard({ product, media }) {
 
 // ===================== AttrField — reads/writes from attributes JSONB =====================
 
-function AttrField({ label, attrKey, type = 'text', product, edit, mono }) {
+function AttrField({ label, attrKey, type = 'text', product, edit, mono, options }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;
 
   if (!isEditing) {
     const val = attr(product, attrKey);
+    if (type === 'select') return <Field label={label} value={val} />;
     if (type === 'boolean') {
       return (
         <div className="flex items-center justify-between">
@@ -821,6 +852,18 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono }) {
 
   const value = form[formKey];
   const inputBase = 'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
+
+  if (type === 'select' && options) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-label-md text-on-surface-variant">{label}</span>
+        <select value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} className={inputBase}>
+          <option value="">—</option>
+          {options.map((o) => (<option key={o} value={o}>{o}</option>))}
+        </select>
+      </div>
+    );
+  }
 
   if (type === 'textarea') {
     return (
@@ -853,7 +896,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono }) {
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <input type="number" step="any" value={value} onChange={(e) => setField(formKey, e.target.value)} placeholder="0" className={inputBase} />
+        <input type="number" step="any" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} placeholder="0" className={inputBase} />
       </div>
     );
   }
@@ -861,7 +904,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-label-md text-on-surface-variant">{label}</span>
-      <input type="text" value={value} onChange={(e) => setField(formKey, e.target.value)}
+      <input type="text" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)}
         placeholder={`Enter ${label.toLowerCase()}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
     </div>
   );

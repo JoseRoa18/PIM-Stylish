@@ -29,7 +29,6 @@
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.15.1",
     "tailwind-merge": "^3.6.0",
-    "xlsx": "^0.18.5",
     "yet-another-react-lightbox": "^3.32.0"
   },
   "devDependencies": {

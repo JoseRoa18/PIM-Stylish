@@ -184,8 +184,14 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
       }
       if (!productList.length) throw new Error('Could not load product data.');
 
-      await generateWayfairFromTemplate(tmpl.storage_path, productList, `Wayfair_${cat}`);
-      setResult({ type: 'success', message: `Exported ${productList.length} product(s) to the Wayfair template.` });
+      const res = await generateWayfairFromTemplate(tmpl.storage_path, productList, `Wayfair_${cat}`);
+      const base = `Exported ${res.count} product(s) across ${res.families} variant group(s).`;
+      setResult({
+        type: res.warnings?.length ? 'error' : 'success',
+        message: res.warnings?.length
+          ? `${base} ⚠ ${res.warnings.length} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`
+          : base,
+      });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Wayfair export failed' });
     } finally {
