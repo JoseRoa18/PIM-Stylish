@@ -27,6 +27,7 @@ import StatusBadge from '@/features/products/components/StatusBadge';
 import MediaSection from '@/features/media/components/MediaSection';
 import DocumentsSection from '@/features/media/components/DocumentsSection';
 import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
+import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
@@ -725,6 +726,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
     <div className="space-y-6">
       <p className="text-body-md text-on-surface-variant">Manage per-channel fields below, then push the changes to each marketplace.</p>
       <WixSyndicationCard product={product} media={media} onUpdate={onUpdate} />
+      <WayfairProductCard product={product} onUpdate={onUpdate} />
       <ExportTemplatesCard product={product} media={media} />
     </div>
   );

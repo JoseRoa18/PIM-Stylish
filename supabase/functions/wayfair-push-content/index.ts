@@ -1,26 +1,26 @@
-// Stylish PIM → Wayfair content pusher.
+// Stylish PIM → Wayfair syndication (content + media).
 //
-// Pushes a product's marketing copy + feature bullets to Wayfair's catalog via
-// the Product Catalog API (updateMarketSpecificCatalogItemGroups). Descriptions
-// live at the item-GROUP (SKU) level on Wayfair, so this updates the group that
-// the product's Wayfair itemGroupId points to.
+// Pushes a product to Wayfair's catalog via the Product Catalog API:
+//   - content: marketingCopy + featureBullets → updateMarketSpecificCatalogItemGroups
+//              (needs the product's Wayfair itemGroupId; SKU-level/group content)
+//   - media:   product images → updateCatalogItemsMedia (by supplierPartNumber,
+//              no itemGroupId needed)
 //
-// Request body: { sku: string, itemGroupId: string, validateOnly?: boolean=true, market?: "US" }
-//   - validateOnly defaults to TRUE — validates the payload against Wayfair
-//     without changing anything. Set false to actually apply.
+// Request body: {
+//   sku: string,
+//   itemGroupId?: string,        // falls back to products.wayfair_item_group_id
+//   validateOnly?: boolean=true, // safe dry-run; validates without changing
+//   pushContent?: boolean=true,
+//   pushMedia?: boolean=true,
+// }
 //
 // Content mapping (PIM → Wayfair):
-//   marketingCopy  ← products.description (EN) / attributes.description_fr (FR)
-//   featureBullets ← attributes.bullet_points (EN) / bullet_points_fr (FR)
+//   marketingCopy  ← products.description (HTML stripped to plain text)
+//   featureBullets ← attributes.bullet_points
+//   images         ← product_media (public Supabase URLs), primary → lead image
 //
 // Required secrets:
-//   WAYFAIR_CLIENT_ID, WAYFAIR_CLIENT_SECRET  — sandbox app OAuth creds
-//   WAYFAIR_SUPPLIER_ID                        — e.g. 31948
-//   WAYFAIR_ENV                                — "sandbox" (default) | "production"
-//
-// NOTE: productDescription.update / descriptionsByPart require a scope this app
-// lacks (Access Denied); updateMarketSpecificCatalogItemGroups is the permitted
-// path and carries marketingCopy + featureBullets.
+//   WAYFAIR_CLIENT_ID, WAYFAIR_CLIENT_SECRET, WAYFAIR_SUPPLIER_ID, WAYFAIR_ENV
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -30,17 +30,30 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MARKETS: Record<string, { locale: string; country: string; brand: string; lang: "en" | "fr" }> = {
-  // Canada catalog updates are not allowed via the API, so we target the US
-  // market with the English copy by default.
-  US: { locale: "en-US", country: "UNITED_STATES", brand: "WAYFAIR", lang: "en" },
-};
+const MARKET = { locale: "en-US", country: "UNITED_STATES", brand: "WAYFAIR" };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+// Strip HTML tags + decode a few common entities → plain text for Wayfair copy.
+function htmlToText(html: string): string {
+  if (!html) return "";
+  return html
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/\s*p\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function getToken(clientId: string, clientSecret: string): Promise<string> {
@@ -63,12 +76,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { sku, itemGroupId, validateOnly = true, market = "US" } = await req.json();
+    const body = await req.json();
+    const { sku, validateOnly = true, pushContent = true, pushMedia = true } = body;
     if (!sku) return json({ error: "sku is required" }, 400);
-    if (!itemGroupId) return json({ error: "itemGroupId is required (Wayfair group id for this SKU)" }, 400);
-
-    const mkt = MARKETS[market];
-    if (!mkt) return json({ error: `Unsupported market "${market}"` }, 400);
 
     const CLIENT_ID = Deno.env.get("WAYFAIR_CLIENT_ID");
     const CLIENT_SECRET = Deno.env.get("WAYFAIR_CLIENT_SECRET");
@@ -77,74 +87,108 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!CLIENT_ID || !CLIENT_SECRET || !SUPPLIER_ID) {
-      return json({ error: "Missing WAYFAIR_CLIENT_ID / WAYFAIR_CLIENT_SECRET / WAYFAIR_SUPPLIER_ID secrets" }, 500);
+      return json({ error: "Missing WAYFAIR_* secrets" }, 500);
     }
 
-    // 1. Read the product content from the PIM.
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const { data: product, error: pErr } = await supabase
       .from("products")
-      .select("sku, model_name, description, attributes")
+      .select("sku, model_name, description, attributes, wayfair_item_group_id")
       .eq("sku", sku)
       .maybeSingle();
     if (pErr) return json({ error: `PIM read failed: ${pErr.message}` }, 500);
     if (!product) return json({ error: `Product ${sku} not found in PIM` }, 404);
 
-    const attrs = product.attributes ?? {};
-    const marketingCopy = mkt.lang === "fr"
-      ? (attrs.description_fr ?? product.description ?? "")
-      : (product.description ?? "");
-    const featureBullets = (mkt.lang === "fr" ? attrs.bullet_points_fr : attrs.bullet_points) ?? [];
-
-    if (!marketingCopy && featureBullets.length < 3) {
-      return json({ error: "Wayfair needs marketing copy or at least 3 feature bullets; product has neither." }, 400);
-    }
-
-    // 2. Push to Wayfair (validateOnly by default).
+    const itemGroupId = body.itemGroupId || product.wayfair_item_group_id || null;
     const endpoint = ENV === "production"
       ? "https://api.wayfair.io/v1/product-catalog-api/graphql"
       : "https://api.wayfair.io/sandbox/v1/product-catalog-api/graphql";
 
     const token = await getToken(CLIENT_ID, CLIENT_SECRET);
-    const input = {
-      supplierId: SUPPLIER_ID,
-      validateOnly,
-      marketContext: { locale: mkt.locale, country: mkt.country, brand: mkt.brand },
-      catalogItemGroupsToUpdate: [
-        {
-          itemGroupId,
-          itemGroupName: product.model_name ?? sku,
-          marketingCopy,
-          featureBullets,
+    const call = async (query: string, variables: unknown) => {
+      const r = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-SELECTED-SUPPLIER": String(SUPPLIER_ID),
+          "Content-Type": "application/json",
         },
-      ],
+        body: JSON.stringify({ query, variables }),
+      });
+      return r.json();
     };
 
-    const gqlRes = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-SELECTED-SUPPLIER": String(SUPPLIER_ID),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query:
-          "mutation($input: UpdateMarketSpecificCatalogItemGroupsInput!) { updateCatalogEntitiesMutations { updateMarketSpecificCatalogItemGroups(input: $input) { requestId } } }",
-        variables: { input },
-      }),
-    });
-    const gql = await gqlRes.json();
+    const result: Record<string, unknown> = { ok: true, validateOnly, sku };
 
-    if (gql.errors) {
-      return json({ error: gql.errors[0]?.message ?? "Wayfair error", details: gql.errors, validateOnly }, 400);
+    // ---- Content (marketing copy + bullets) ----
+    if (pushContent) {
+      const attrs = product.attributes ?? {};
+      const marketingCopy = htmlToText(product.description ?? "");
+      const featureBullets = attrs.bullet_points ?? [];
+      if (!itemGroupId) {
+        result.content = { skipped: "no itemGroupId (set products.wayfair_item_group_id)" };
+      } else if (!marketingCopy && featureBullets.length < 3) {
+        result.content = { skipped: "no marketing copy and < 3 bullets" };
+      } else {
+        const input = {
+          supplierId: SUPPLIER_ID,
+          validateOnly,
+          marketContext: MARKET,
+          catalogItemGroupsToUpdate: [
+            { itemGroupId, itemGroupName: product.model_name ?? sku, marketingCopy, featureBullets },
+          ],
+        };
+        const gql = await call(
+          "mutation($input: UpdateMarketSpecificCatalogItemGroupsInput!) { updateCatalogEntitiesMutations { updateMarketSpecificCatalogItemGroups(input: $input) { requestId } } }",
+          { input },
+        );
+        result.content = gql.errors
+          ? { error: gql.errors[0]?.message, details: gql.errors }
+          : { requestId: gql.data?.updateCatalogEntitiesMutations?.updateMarketSpecificCatalogItemGroups?.requestId, bullets: featureBullets.length };
+      }
     }
 
-    return json({
-      ok: true,
-      validateOnly,
-      requestId: gql.data?.updateCatalogEntitiesMutations?.updateMarketSpecificCatalogItemGroups?.requestId ?? null,
-      pushed: { marketingCopy: marketingCopy.slice(0, 80), bullets: featureBullets.length },
-    });
+    // ---- Media (images) ----
+    if (pushMedia) {
+      const { data: media } = await supabase
+        .from("product_media")
+        .select("storage_path, is_primary, display_order")
+        .eq("sku", sku)
+        .eq("media_type", "image")
+        .order("display_order", { ascending: true });
+      const images = (media ?? []).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
+      if (images.length === 0) {
+        result.media = { skipped: "no public image URLs" };
+      } else {
+        const input = {
+          supplierId: SUPPLIER_ID,
+          validateOnly,
+          catalogItemsToUpdate: images.map((m) => ({
+            supplierPartNumber: sku,
+            mediaUrl: m.storage_path,
+            mediaType: "IMAGE",
+            leadImageOverride: !!m.is_primary,
+          })),
+        };
+        const gql = await call(
+          "mutation($input: UpdateCatalogItemsMediaInput!) { updateCatalogEntitiesMutations { updateCatalogItemsMedia(input: $input) { requestId } } }",
+          { input },
+        );
+        result.media = gql.errors
+          ? { error: gql.errors[0]?.message, details: gql.errors }
+          : { requestId: gql.data?.updateCatalogEntitiesMutations?.updateCatalogItemsMedia?.requestId, count: images.length };
+      }
+    }
+
+    // Mark synced on a real (non-validate) push that had no hard errors.
+    if (!validateOnly) {
+      const hadError = (result.content as { error?: string })?.error || (result.media as { error?: string })?.error;
+      if (!hadError) {
+        await supabase.from("products").update({ wayfair_synced_at: new Date().toISOString() }).eq("sku", sku);
+      }
+    }
+
+    return json(result);
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
