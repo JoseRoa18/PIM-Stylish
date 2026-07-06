@@ -32,6 +32,7 @@ import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
+import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { useAuth } from '@/features/auth/AuthContext';
 
@@ -741,7 +742,11 @@ function ExportTemplatesCard({ product, media }) {
     setExporting(template.id);
     setError(null);
     try {
-      await generateBBBFromTemplate(template.storage_path, product, media);
+      if (/wayfair/i.test(template.marketplace)) {
+        await generateWayfairFromTemplate(template.storage_path, [product], `Wayfair_${product.sku}`);
+      } else {
+        await generateBBBFromTemplate(template.storage_path, product, media);
+      }
     } catch (err) {
       setError(err.message);
     } finally {

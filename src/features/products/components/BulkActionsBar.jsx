@@ -12,6 +12,7 @@ import {
 import { bulkUpdateProducts, getProduct } from '../api/products';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
+import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { listTemplates } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -151,6 +152,47 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
     }
   }
 
+  async function handleExportWayfair() {
+    setBusy('wayfair');
+    setResult(null);
+    try {
+      const templates = await listTemplates();
+      const wayfairTemplates = templates.filter((t) => /wayfair/i.test(t.marketplace));
+      if (!wayfairTemplates.length) {
+        throw new Error('No Wayfair template found. Upload one in /templates first.');
+      }
+      // Wayfair templates are category-specific — the whole selection must be one category.
+      const cats = new Set(selectedProducts.map((p) => p.category));
+      if (cats.size > 1) {
+        throw new Error('Select products from a single category (all kitchen faucets, or all bathroom faucets).');
+      }
+      const cat = [...cats][0];
+      const match = (t) => {
+        const n = `${t.file_name} ${t.marketplace}`.toLowerCase();
+        if (cat === 'kitchen_faucet') return n.includes('kitchen');
+        if (cat === 'bath_faucet') return n.includes('bath');
+        return false;
+      };
+      const tmpl = wayfairTemplates.find(match) || (wayfairTemplates.length === 1 ? wayfairTemplates[0] : null);
+      if (!tmpl) throw new Error(`No Wayfair template matches "${cat}". Upload the matching category template.`);
+
+      const skus = [...selectedSkus];
+      const productList = [];
+      for (const sku of skus) {
+        const p = await getProduct(sku);
+        if (p) productList.push(p);
+      }
+      if (!productList.length) throw new Error('Could not load product data.');
+
+      await generateWayfairFromTemplate(tmpl.storage_path, productList, `Wayfair_${cat}`);
+      setResult({ type: 'success', message: `Exported ${productList.length} product(s) to the Wayfair template.` });
+    } catch (err) {
+      setResult({ type: 'error', message: err.message ?? 'Wayfair export failed' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="sticky bottom-4 z-30 mx-auto max-w-4xl">
       <div className="rounded-2xl border border-outline-variant bg-surface shadow-lg overflow-hidden">
@@ -223,6 +265,17 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
             >
               <Download className="w-3.5 h-3.5" />
               Export BB&B
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportWayfair}
+              disabled={!!busy}
+              title={`Export ${count} product${count === 1 ? '' : 's'} into the matching Wayfair template`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="w-3.5 h-3.5" />
+              {busy === 'wayfair' ? 'Exporting…' : 'Export Wayfair'}
             </button>
 
             <div className="w-px h-5 bg-outline-variant mx-1" />
