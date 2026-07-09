@@ -109,19 +109,19 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
     setResult(null);
     setProgress({ done: 0, total: count + 1 });
     try {
-      // 1. Find a BB&B template that applies to the selection's category
-      const cats = new Set(selectedProducts.map((p) => p.category));
-      if (cats.size > 1) {
-        throw new Error('Select products from a single category to export.');
-      }
-      const cat = [...cats][0];
+      // 1. Find a BB&B template that applies to EVERY selected category
+      // (one BB&B template can span categories, e.g. kitchen + bathroom sinks).
+      const cats = [...new Set(selectedProducts.map((p) => p.category))];
       const templates = await listTemplates();
       const bbb = templates.find(
         (t) =>
-          /bb&b|bbb|overstock/i.test(t.marketplace) && templateAppliesTo(t, cat)
+          /bb&b|bbb|overstock/i.test(t.marketplace) &&
+          cats.every((c) => templateAppliesTo(t, c))
       );
       if (!bbb) {
-        throw new Error(`No BB&B / Overstock template available for this category. Upload one in /templates first.`);
+        throw new Error(
+          `No single BB&B / Overstock template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload one in /templates or narrow the selection.`
+        );
       }
       setProgress({ done: 1, total: count + 1 });
 
@@ -165,31 +165,40 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
       if (!wayfairTemplates.length) {
         throw new Error('No Wayfair template found. Upload one in /templates first.');
       }
-      // Wayfair templates are category-specific — the whole selection must be one category.
-      const cats = new Set(selectedProducts.map((p) => p.category));
-      if (cats.size > 1) {
-        throw new Error('Select products from a single category (all kitchen faucets, or all bathroom faucets).');
-      }
-      const cat = [...cats][0];
-      const tmpl = wayfairTemplates.find((t) => templateAppliesTo(t, cat));
-      if (!tmpl) throw new Error(`No Wayfair template available for this category. Upload the matching category template.`);
 
+      // Wayfair templates are category-specific — group the selection by
+      // category and generate one file per category's template.
       const skus = [...selectedSkus];
-      const productList = [];
+      const byCategory = new Map();
       for (const sku of skus) {
         const p = await getProduct(sku);
-        if (p) productList.push(p);
+        if (!p) continue;
+        if (!byCategory.has(p.category)) byCategory.set(p.category, []);
+        byCategory.get(p.category).push(p);
       }
-      if (!productList.length) throw new Error('Could not load product data.');
+      if (!byCategory.size) throw new Error('Could not load product data.');
 
-      const res = await generateWayfairFromTemplate(tmpl.storage_path, productList, `Wayfair_${cat}`);
-      const base = `Exported ${res.count} product(s) across ${res.families} variant group(s).`;
-      setResult({
-        type: res.warnings?.length ? 'error' : 'success',
-        message: res.warnings?.length
-          ? `${base} ⚠ ${res.warnings.length} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`
-          : base,
-      });
+      const parts = [];
+      const noTemplate = [];
+      let warnings = 0;
+      for (const [cat, productList] of byCategory) {
+        const tmpl = wayfairTemplates.find((t) => templateAppliesTo(t, cat));
+        if (!tmpl) {
+          noTemplate.push(cat);
+          continue;
+        }
+        const res = await generateWayfairFromTemplate(tmpl.storage_path, productList, `Wayfair_${cat}`);
+        warnings += res.warnings?.length ?? 0;
+        parts.push(`${cat}: ${res.count} product(s) / ${res.families} group(s)`);
+      }
+
+      if (!parts.length) {
+        throw new Error(`No Wayfair template available for: ${noTemplate.join(', ')}. Upload the matching category template(s).`);
+      }
+      let message = `Exported ${parts.length} file(s) — ${parts.join(' · ')}.`;
+      if (noTemplate.length) message += ` ⚠ Skipped (no template): ${noTemplate.join(', ')}.`;
+      if (warnings) message += ` ⚠ ${warnings} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`;
+      setResult({ type: noTemplate.length || warnings ? 'error' : 'success', message });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Wayfair export failed' });
     } finally {
