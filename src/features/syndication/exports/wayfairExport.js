@@ -1,11 +1,13 @@
 import { supabase } from '@/lib/supabase';
 import {
   WAYFAIR_RULES,
+  WAYFAIR_CATEGORY_RULES,
   IMAGE_COL_RE,
   BULLET_COL_RE,
   VARIANT_GROUPING_RE,
   VARIANT_ATTR_NAME_RE,
-  VARIANT_AXES,
+  WAYFAIR_VARIANT_AXES,
+  WAYFAIR_STANDALONE,
   DOC_FILE_RE,
   DOC_TYPE_RE,
   DOC_TYPE_MAP,
@@ -171,8 +173,15 @@ const modelKey = (p) => (p.model_name || '').trim();
 const finishKey = (p) => (p.finish || '').toLowerCase().trim();
 // A real collection's SKUs share a dashed numeric root (K-135G/S/N → "K-135").
 // Bundle SKUs (K130NK147N) have no dash, so they never form a variant family.
+// The model name is part of the key too: sinks reuse roots across collections
+// (S-300TG "Topaz" vs S-300XG — different listings, same numeric root).
 const rootKey = (sku) => (String(sku).match(/^[A-Za-z]+-\d+/) || [null])[0];
-const familyKey = (p) => (rootKey(p.sku) && modelKey(p) ? rootKey(p.sku) : `__sku:${p.sku}`);
+const familyKey = (p) => {
+  // Category-specific standalone SKUs (e.g. bathroom "-2" 2-packs) are always
+  // their own listing, never grouped as a variant of the single unit.
+  if (WAYFAIR_STANDALONE[p.category]?.test(p.sku)) return `__sku:${p.sku}`;
+  return rootKey(p.sku) && modelKey(p) ? `${rootKey(p.sku)}|${modelKey(p)}` : `__sku:${p.sku}`;
+};
 
 // Given the selected products, pull every sibling that shares a model_name so a
 // family is always exported whole, even when only one variant was selected.
@@ -224,12 +233,13 @@ function assignVariants(groups, imgBySku) {
       continue;
     }
 
+    const axes = WAYFAIR_VARIANT_AXES[rows[0].category] ?? WAYFAIR_VARIANT_AXES.default;
     const groupings = ['Finish'];
     const finishUnique = new Set(rows.map(finishKey)).size === rows.length;
     if (!finishUnique) {
       // add the first axis that increases how many rows we can tell apart
       const baseDistinct = new Set(rows.map(finishKey)).size;
-      for (const axis of VARIANT_AXES) {
+      for (const axis of axes) {
         const distinct = new Set(rows.map((p) => finishKey(p) + '|' + axis.get(p))).size;
         if (distinct > baseDistinct) { groupings.push(axis.name); break; }
       }
@@ -237,7 +247,7 @@ function assignVariants(groups, imgBySku) {
 
     // final uniqueness check → warn on rows still colliding
     const axisGetters = groupings.map((n) =>
-      n === 'Finish' ? finishKey : VARIANT_AXES.find((a) => a.name === n).get);
+      n === 'Finish' ? finishKey : axes.find((a) => a.name === n).get);
     const seen = new Map();
     for (const p of rows) {
       const k = axisGetters.map((g) => g(p)).join('|');
@@ -326,7 +336,9 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
       else if (vg) v = groupings[Number(vg[1]) - 1] || '';
       else if (van) v = groupings[Number(van[1]) - 1] || '';
       else {
-        const rule = WAYFAIR_RULES[nm];
+        // Category override first (same display name can mean different things
+        // per template, e.g. Product Type on sinks vs faucets).
+        const rule = WAYFAIR_CATEGORY_RULES[p.category]?.[nm] ?? WAYFAIR_RULES[nm];
         if (!rule) continue;
         try { v = rule(p); } catch { v = ''; }
         if (validMaps[nm]) v = snap(v, validMaps[nm]);

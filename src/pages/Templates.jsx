@@ -22,14 +22,20 @@ import { formatTimeAgo } from '@/lib/format';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 const MARKETPLACE_OPTIONS = [
-  'BB&B / Overstock',
+  'Wayfair CA',
+  'Wayfair US',
   'Amazon CA',
   'Amazon US',
-  'Wayfair',
-  'Home Depot',
-  'Lowe\'s',
-  'Rona',
-  'Best Buy',
+  'BB&B / Overstock CA',
+  'BB&B / Overstock US',
+  'Home Depot CA',
+  'Home Depot US',
+  'Lowe\'s CA',
+  'Lowe\'s US',
+  'Rona (CA)',
+  'Best Buy CA',
+  'Walmart CA',
+  'Walmart US',
 ];
 
 export default function Templates() {

@@ -169,16 +169,18 @@ export default function Catalog() {
     });
   }, []);
 
-  // Header checkbox selects/deselects the visible page; selections persist
-  // across pages (the bulk bar shows the total selected count).
+  // Header checkbox: checking selects the visible page (selections persist
+  // across pages); UNchecking clears the WHOLE selection — otherwise "select
+  // all 137" + uncheck would silently leave the other pages selected.
   const toggleSelectAll = useCallback(
     (checked) => {
+      if (!checked) {
+        setSelectedSkus(new Set());
+        return;
+      }
       setSelectedSkus((prev) => {
         const next = new Set(prev);
-        for (const p of pagedProducts) {
-          if (checked) next.add(p.sku);
-          else next.delete(p.sku);
-        }
+        for (const p of pagedProducts) next.add(p.sku);
         return next;
       });
     },
@@ -186,6 +188,16 @@ export default function Catalog() {
   );
 
   const clearSelection = useCallback(() => setSelectedSkus(new Set()), []);
+
+  // "Select all N" in the bulk bar: selects every product matching the current
+  // search/filters across ALL pages (not just the visible one).
+  const selectAllFiltered = useCallback(() => {
+    setSelectedSkus((prev) => {
+      const next = new Set(prev);
+      for (const p of sortedProducts) next.add(p.sku);
+      return next;
+    });
+  }, [sortedProducts]);
 
   const totalCount = products?.length ?? 0;
 
@@ -273,6 +285,8 @@ export default function Catalog() {
       <BulkActionsBar
         selectedSkus={selectedSkus}
         products={filteredProducts}
+        filteredCount={sortedProducts.length}
+        onSelectAll={selectAllFiltered}
         onClear={clearSelection}
         onChanged={() => {
           clearSelection();

@@ -24,7 +24,7 @@ const WORKFLOW_OPTIONS = [
   { value: 'archived', label: 'Archived' },
 ];
 
-export default function BulkActionsBar({ selectedSkus, products, onClear, onChanged }) {
+export default function BulkActionsBar({ selectedSkus, products, filteredCount = 0, onSelectAll, onClear, onChanged }) {
   const confirm = useConfirm();
   const [busy, setBusy] = useState(null);
   const [result, setResult] = useState(null);
@@ -233,6 +233,16 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
             <span className="text-body-md text-on-surface font-medium">
               {count === 1 ? 'product selected' : 'products selected'}
             </span>
+            {onSelectAll && filteredCount > count && (
+              <button
+                type="button"
+                onClick={onSelectAll}
+                disabled={!!busy}
+                className="text-body-sm text-primary font-semibold hover:underline disabled:opacity-50"
+              >
+                Select all {filteredCount}
+              </button>
+            )}
             {busy && (
               <span className="text-body-sm text-on-surface-variant inline-flex items-center gap-1.5">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />

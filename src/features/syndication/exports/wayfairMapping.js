@@ -49,6 +49,12 @@ const FINISH_ALIAS = {
   'matte black with brushed stainless steel': 'Matte Black; Stainless Steel',
   white: 'Matte White',
   red: 'Does Not Apply',
+  // Sink (composite / nano-coated) colors
+  grey: 'Matte Grey',
+  gray: 'Matte Grey',
+  black: 'Matte Black',
+  'graphite black': 'Gunmetal Black',
+  'nano graphite black dura-tek': 'Gunmetal Black',
 };
 const MOUNT_ALIAS = { 'one hole': 'Single-Hole', 'two holes': 'Centerset' };
 const SPOUT_ALIAS = { foldable: 'Swivel' };
@@ -130,7 +136,10 @@ export const WAYFAIR_RULES = {
   'Product Type': (p) => (attr(p).number_of_handles == 2 ? 'Double Handle Kitchen Facuet' : 'Single Handle Kitchen Faucet'),
   Material: (p) => {
     const m = attr(p).material || p.material;
-    return (Array.isArray(m) ? m : [m]).filter(Boolean).join('; ');
+    return (Array.isArray(m) ? m : [m])
+      .filter(Boolean)
+      .map((x) => (/composite granite|granite composite/i.test(x) ? 'Granite' : x))
+      .join('; ');
   },
   Durability: (p) => {
     const d = attr(p).durability_tags || [];
@@ -159,7 +168,8 @@ export const WAYFAIR_RULES = {
   'Maximum Deck Thickness': (p) => num(attr(p).max_deck_thickness_in),
   'Overall Product Weight': (p) => num(attr(p).product_weight_lb || p.shipping_weight_lb),
   'Cartridge Type': (p) => cartridge(attr(p).cartridge_type),
-  'Craftsmanship Type': (p) => attr(p).craftsmanship || '',
+  // Wayfair uses the British spelling ("Poured / Moulded").
+  'Craftsmanship Type': (p) => (attr(p).craftsmanship || '').replace(/molded/i, 'Moulded'),
   'Compatible Deck Plate Part Number': (p) => deckPlate(attr(p).compatible_deck_plate),
   'Mounting / Installation': (p) => alias(MOUNT_ALIAS, attr(p).mounting_type),
   // Warranty
@@ -207,10 +217,159 @@ export const DOC_TYPE_MAP = {
 // Priority when filling the 3 document slots (spec → install → warranty first).
 export const DOC_TYPE_PRIORITY = ['spec_sheet', 'installation_manual', 'warranty_file', 'owner_manual', 'cut_out_template'];
 
-// Candidate second axes (beyond Finish) for families that repeat a finish.
-// name = the Wayfair "Variant Grouping" Select value; get = normalized key.
-export const VARIANT_AXES = [
-  { name: 'Flow Rate', get: (p) => (p.attributes?.max_flow_rate ?? '') + '' },
-  { name: 'Handle Style', get: (p) => (p.attributes?.handle_style ?? p.attributes?.number_of_handles ?? '') + '' },
-  { name: 'Sensor', get: (p) => (p.attributes?.sensor_type ?? '') + '' },
+// Candidate second axes (beyond Finish) for families that repeat a finish,
+// per category. name = the Wayfair "Variant Grouping" Select value for that
+// template; get = normalized distinguishing key.
+export const WAYFAIR_VARIANT_AXES = {
+  default: [
+    { name: 'Flow Rate', get: (p) => (p.attributes?.max_flow_rate ?? '') + '' },
+    { name: 'Handle Style', get: (p) => (p.attributes?.handle_style ?? p.attributes?.number_of_handles ?? '') + '' },
+    { name: 'Sensor', get: (p) => (p.attributes?.sensor_type ?? '') + '' },
+  ],
+  // Sinks: the same finish repeats between configuration variants of a model —
+  // bare vs kit (S-828WH/WHK), with/without grid (S-300T/TG). The PIM
+  // attributes are often identical between them; the SKU's suffix after the
+  // numeric root IS the configuration code, so it's the distinguishing signal.
+  // The 628 template's "Design" axis covers that split.
+  kitchen_sink: [
+    { name: 'Design', get: (p) => String(p.sku).replace(/^[A-Za-z]+-\d+/, '') },
+  ],
+  // Bathroom sinks (588 axes: Finish / Faucet Mount / Drain Finish): the "D"
+  // suffix = pop-up drain included → Drain Finish axis; drilled vs undrilled
+  // splits by Faucet Mount.
+  bathroom_sink: [
+    { name: 'Drain Finish', get: (p) => (/D$/i.test(p.sku) ? 'With Drain' : 'No Drain') },
+    { name: 'Faucet Mount', get: (p) => `${attr(p).compatible_faucet_type ?? ''}|${attr(p).number_of_faucet_holes ?? 0}` },
+  ],
+};
+
+// SKUs that are their own Wayfair listing, never a variant row, per category.
+// Bathroom "-2" SKUs are 2-packs (no pack-size axis exists on template 588).
+export const WAYFAIR_STANDALONE = {
+  bathroom_sink: /-2$/i,
+};
+
+// ---- Kitchen-sink helpers ----
+const isFarmhouse = (p) => /farm|apron/i.test(p.product_type ?? '');
+// PIM accessory entries are model-coded ("A-04 Colander", "ST-01 Strainer (x2)");
+// map them onto Wayfair's "Pieces Included" nouns by keyword.
+const PIECES_KEYWORDS = [
+  [/colander/i, 'Colander'],
+  [/cutting board/i, 'Cutting Board'],
+  [/strainer/i, 'Basket Strainer'],
+  [/bottom grid|sink grid|grid/i, 'Bottom Grid'],
+  [/drying rack|driying rack/i, 'Does Not Apply'], // no Wayfair option — dropped below
+  [/soap|lotion/i, 'Soap / Lotion Dispenser'],
+  [/cut.?out template/i, 'Cut Out Template'],
+  [/drain assembly|drain kit/i, 'Drain Assembly'],
+  [/faucet hole cover/i, 'Faucet Hole Covers'],
 ];
+const sinkPieces = (p) => {
+  const out = new Set();
+  for (const a of attr(p).accessories_included ?? []) {
+    for (const [re, label] of PIECES_KEYWORDS) {
+      if (re.test(a)) { if (label !== 'Does Not Apply') out.add(label); break; }
+    }
+  }
+  return [...out].join('; ');
+};
+const DRAIN_ALIAS = {
+  'rear center': 'Centre-Back',
+  'rear': 'Back',
+  'center': 'Centre',
+  'centre': 'Centre',
+  'side drain / reversible': 'Reversible',
+  'side drain/reversible': 'Reversible',
+  'center drain / reversible': 'Reversible',
+  'center drain/reversible': 'Reversible',
+  'side drain': 'Reversible',
+};
+// Extract the part code (e.g. "G-05") from an accessory entry matching a keyword.
+const partCode = (p, re) => {
+  const hit = (attr(p).accessories_included ?? []).find((a) => re.test(a));
+  return hit ? (hit.match(/^[A-Z]+-?\w+/) || [''])[0] : '';
+};
+
+// Category-specific rule overrides. The generator resolves a column as
+// WAYFAIR_CATEGORY_RULES[product.category][name] ?? WAYFAIR_RULES[name],
+// so templates that share display names with different semantics (Product
+// Type, Mounting, Pieces Included…) stay correct per category.
+export const WAYFAIR_CATEGORY_RULES = {
+  kitchen_sink: {
+    'Product Type': (p) => (/workstation/i.test(attr(p).general_title_en ?? '') ? 'Kitchen Sink Workstation' : 'Standard Kitchen Sink'),
+    'Mounting / Installation': (p) => {
+      const t = p.product_type ?? '';
+      if (/dual/i.test(t)) return 'Dual Mount';
+      if (/under/i.test(t)) return 'Undermount';
+      if (/drop/i.test(t)) return 'Drop-In';
+      if (isFarmhouse(p)) return 'Farmhouse / Apron';
+      const list = attr(p).installation_type ?? [];
+      return list.length > 1 ? 'Dual Mount' : list[0] ?? '';
+    },
+    'Overall Shape': (p) => attr(p).sink_shape ?? '',
+    'Pieces Included': (p) => sinkPieces(p),
+    'Construction Features': (p) => (isFarmhouse(p) ? 'Apron' : 'No Construction Features'),
+    'Number of Basins': (p) => (attr(p).number_of_bowls != null ? String(attr(p).number_of_bowls) : ''),
+    'Short Height Divider': (p) => (attr(p).low_divider === true ? 'Yes' : attr(p).low_divider === false ? 'No' : ''),
+    'Number of Faucet Holes': (p) => String(attr(p).number_of_faucet_holes ?? attr(p).number_of_installation_holes ?? 0),
+    'Faucet Finish': () => 'Does Not Apply',
+    'Stainless Steel Gauge': (p) => {
+      if (!/stainless/i.test(p.material ?? '')) return 'Does Not Apply';
+      const m = String(attr(p).gauge ?? '').match(/\d+/);
+      return m ? m[0] : '';
+    },
+    'Overall Width from Front to Back': (p) => attr(p).external_dimensions_in?.width ?? '',
+    'Overall Length - End to End': (p) => attr(p).external_dimensions_in?.length ?? '',
+    'Overall Height - Top to Bottom': (p) => attr(p).external_dimensions_in?.depth ?? '',
+    'Minimum Base Cabinet Width - Side to Side': (p) => attr(p).min_external_cabinet_size_in ?? '',
+    'Basin Width - Front to Back': (p) => attr(p).internal_dimensions_in?.width ?? '',
+    'Basin Length - Side to Side': (p) => attr(p).internal_dimensions_in?.length ?? '',
+    'Basin Depth - Top to Bottom': (p) => attr(p).internal_dimensions_in?.depth ?? '',
+    'Drain Diameter': (p) => attr(p).drain_diameter_in ?? '',
+    'Drain Placement': (p) => {
+      const v = attr(p).drain_hole_location ?? '';
+      return DRAIN_ALIAS[String(v).toLowerCase().trim()] ?? v;
+    },
+    'Compatible Sink Grid Part Number': (p) => partCode(p, /grid/i),
+    'Compatible Drain Assembly Part Number': (p) => attr(p).strainer_model ?? '',
+    'ASME A112.19.4 Compliant': () => 'No',
+    'SCC Compliant': (p) => (/yes/i.test(String(attr(p).scc_compliant ?? '')) ? 'Yes' : 'No'),
+  },
+
+  bathroom_sink: {
+    // Porcelain color is not a "finish" for Wayfair's 588 list (its Finish VV
+    // has no White) — metals pass through, anything else is Does Not Apply.
+    Finish: (p) => (/black/i.test(p.finish ?? '') ? 'Matte Black' : 'Does Not Apply'),
+    'Product Type': () => '', // 588's Product Type VV is unrelated taxonomy junk
+    'Compatible Faucet Type': (p) => attr(p).compatible_faucet_type ?? '',
+    'Number of Faucet Holes': (p) => String(attr(p).number_of_faucet_holes ?? 0),
+    'Compatible Pedestal Part Number': (p) => attr(p).compatible_pedestal ?? '',
+    // "D" SKUs include a pop-up drain; the rest ship bare.
+    'Pieces Included': (p) => (/D$/i.test(p.sku) ? 'Drain Assembly' : 'Does Not Apply'),
+    'Drain Finish': () => 'Does Not Apply',
+    'Construction Features': (p) => {
+      const parts = [];
+      if (/yes/i.test(String(attr(p).overflow ?? ''))) parts.push('Overflow Hole');
+      if ((attr(p).number_of_faucet_holes ?? 0) > 0) parts.push('Faucet Holes');
+      return parts.join('; ') || 'No Construction Features';
+    },
+    'Overall Shape': (p) => attr(p).sink_shape ?? '',
+    'Mounting / Installation': (p) => attr(p).mounting_type ?? '',
+    'Dual Mount Installation Type': () => 'Does Not Apply',
+    'Drain Placement': (p) => {
+      const v = attr(p).drain_hole_location ?? '';
+      return DRAIN_ALIAS[String(v).toLowerCase().trim()] ?? v;
+    },
+    'Drain Diameter': (p) => attr(p).drain_diameter_in ?? '',
+    'Overall Width from Front to Back': (p) => attr(p).external_dimensions_in?.width ?? '',
+    'Overall Length - End to End': (p) => attr(p).external_dimensions_in?.length ?? '',
+    'Overall Height - Top to Bottom': (p) => attr(p).external_dimensions_in?.depth ?? '',
+    'Base/Stand Height from Top to Bottom': (p) => attr(p).external_dimensions_in?.depth ?? '',
+    // Vessel sinks have no internal dims in the PIM — the basin IS the sink,
+    // so fall back to the external dimensions.
+    'Basin Width - Front to Back': (p) => attr(p).internal_dimensions_in?.width ?? attr(p).external_dimensions_in?.width ?? '',
+    'Basin Length - Side to Side': (p) => attr(p).internal_dimensions_in?.length ?? attr(p).external_dimensions_in?.length ?? '',
+    'Basin Depth - Top to Bottom': (p) => attr(p).internal_dimensions_in?.depth ?? attr(p).external_dimensions_in?.depth ?? '',
+    'NSF/ANSI 61 Certified': () => 'No',
+  },
+};
