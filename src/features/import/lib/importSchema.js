@@ -17,14 +17,22 @@ export const normalizeHeader = (h) =>
 export const CATEGORY_MAP = {
   'kitchen sink': 'kitchen_sink',
   'kitchen sinks': 'kitchen_sink',
-  'bath sink': 'bath_sink',
-  'bath sinks': 'bath_sink',
-  'bathroom sink': 'bath_sink',
+  'bath sink': 'bathroom_sink',
+  'bath sinks': 'bathroom_sink',
+  'bathroom sink': 'bathroom_sink',
+  'bathroom sinks': 'bathroom_sink',
   'kitchen faucet': 'kitchen_faucet',
   'kitchen faucets': 'kitchen_faucet',
-  'bath faucet': 'bath_faucet',
-  'bath faucets': 'bath_faucet',
-  'bathroom faucet': 'bath_faucet',
+  'bath faucet': 'bathroom_faucet',
+  'bath faucets': 'bathroom_faucet',
+  'bathroom faucet': 'bathroom_faucet',
+  'bathroom faucets': 'bathroom_faucet',
+  'pot filler': 'pot_filler',
+  'pot fillers': 'pot_filler',
+  'bar prep sink': 'bar_prep_sink',
+  'bar/prep sink': 'bar_prep_sink',
+  'bar sink': 'bar_prep_sink',
+  'prep sink': 'bar_prep_sink',
   'accessory': 'accessory',
   'accessories': 'accessory',
 };
@@ -40,6 +48,10 @@ export const FIELD_DEFS = [
   { key: 'brand', label: 'Brand', aliases: ['brand'], type: 'text', target: { col: 'brand' }, required: true },
   { key: 'category', label: 'Category', aliases: ['category'], type: 'category', target: { col: 'category' }, required: true },
   { key: 'msrp_cad', label: 'MSRP CAD$', aliases: ['msrpcad', 'msrp', 'msrpcad$'], type: 'number', target: { col: 'msrp_cad' } },
+  { key: 'dealer_cost_cad', label: 'Dealer Cost CAD$', aliases: ['bmdealercostcad', 'dealercostcad', 'bmdealercost', 'bmdealercostcadinternaldatadonotuse'], type: 'number', target: { col: 'dealer_cost_cad' } },
+  { key: 'launch_lead', label: 'Launch Lead', aliases: ['launchlead'], type: 'date', target: { col: 'launch_lead' } },
+  { key: 'sample_available_date', label: 'When is sample available', aliases: ['whenissampleavailable', 'sampleavailable', 'whensampleavailable', 'sampleavailabledate'], type: 'date', target: { col: 'sample_available_date' } },
+  { key: 'ready_to_sell_date', label: 'When will it be ready to sell?', aliases: ['whenwillitbereadytosell', 'readytosell', 'readytoselldate'], type: 'date', target: { col: 'ready_to_sell_date' } },
   { key: 'series', label: 'Sinks Series', aliases: ['sinksseries', 'sinkseries', 'series'], type: 'text', target: { col: 'series' } },
   { key: 'product_type', label: 'Product Type', aliases: ['producttype'], type: 'text', target: { col: 'product_type' } },
 
@@ -52,7 +64,7 @@ export const FIELD_DEFS = [
   { key: 'low_divider', label: 'Low Divider', aliases: ['lowdivider', 'lowdividershortheightdivider'], type: 'bool', target: { attr: 'low_divider' } },
   { key: 'gauge', label: 'Gauge', aliases: ['gauge'], type: 'text', target: { attr: 'gauge' } },
   { key: 'material', label: 'Material', aliases: ['material'], type: 'text', target: { col: 'material' } },
-  { key: 'finish', label: 'Finish / Color', aliases: ['finishcolor', 'finish'], type: 'text', target: { col: 'finish' } },
+  { key: 'finish', label: 'Finish / Color', aliases: ['finishcolor', 'colorfinish', 'finish'], type: 'text', target: { col: 'finish' } },
   // Dual-mount sinks list two options ("Undermount; Drop-In") → stored as array
   { key: 'installation_type', label: 'Installation Options', aliases: ['installationoptions', 'installationtype'], type: 'list', target: { attr: 'installation_type' } },
   { key: 'sink_radius_mm', label: 'Sink Radius', aliases: ['sinkradius', 'sinkradiusmm'], type: 'number', target: { attr: 'sink_radius_mm' } },
@@ -73,8 +85,8 @@ export const FIELD_DEFS = [
   { key: 'includes_grids', label: 'Include grids?', aliases: ['includegrids', 'includesgrids'], type: 'bool', target: { attr: 'includes_grids' } },
   { key: 'accessories_included', label: 'Accessories included', aliases: ['accessoriesincluded'], type: 'list', target: { attr: 'accessories_included' } },
   { key: 'number_of_pieces', label: 'Number of pieces Included', aliases: ['numberofpiecesincluded'], type: 'int', target: { attr: 'number_of_pieces' } },
-  { key: 'drain_hole_location', label: 'Drain Hole location', aliases: ['drainholelocation', 'drainholelocationplacement'], type: 'text', target: { attr: 'drain_hole_location' } },
-  { key: 'drain_diameter_in', label: 'Drain Diameter', aliases: ['draindiameter'], type: 'number', target: { attr: 'drain_diameter_in' } },
+  { key: 'drain_hole_location', label: 'Drain Hole location', aliases: ['drainholelocation', 'drainholelocationplacement', 'drainplacement'], type: 'text', target: { attr: 'drain_hole_location' } },
+  { key: 'drain_diameter_in', label: 'Drain Diameter', aliases: ['draindiameter', 'drainholediameter'], type: 'number', target: { attr: 'drain_diameter_in' } },
   { key: 'product_weight_lb', label: 'Product Weight lb', aliases: ['productweightlb', 'overallproductweight'], type: 'number', target: { attr: 'product_weight_lb' } },
 
   // ---------- Trade & compliance ----------
@@ -87,7 +99,7 @@ export const FIELD_DEFS = [
   { key: 'upc', label: 'Master UPC', aliases: ['masterupc', 'upc'], type: 'upc', target: { attr: 'upc' } },
 
   // ---------- Shipping ----------
-  { key: 'shipping_weight_lb', label: 'Shipping Weight Lbs', aliases: ['shippingweightlbs', 'shippingweightlb'], type: 'number', target: { col: 'shipping_weight_lb' } },
+  { key: 'shipping_weight_lb', label: 'Shipping Weight Lbs', aliases: ['shippingweightlbs', 'shippingweightlb', 'shippingweight'], type: 'number', target: { col: 'shipping_weight_lb' } },
   { key: 'ship_height', label: 'Shipping Height (in)', aliases: ['shippingheightin', 'shippingheight'], type: 'number', target: { dim: ['shipping_dimensions_in', 'height'] } },
   { key: 'ship_width', label: 'Shipping Width (in)', aliases: ['shippingwidthin', 'shippingwidth'], type: 'number', target: { dim: ['shipping_dimensions_in', 'width'] } },
   { key: 'ship_length', label: 'Shipping Length (in)', aliases: ['shippinglengthin', 'shippinglength'], type: 'number', target: { dim: ['shipping_dimensions_in', 'length'] } },
@@ -170,11 +182,25 @@ export const FIELD_DEFS = [
   { key: 'reason_for_restriction', label: 'Reason for Restriction', aliases: ['reasonforrestriction'], type: 'text', target: { attr: 'reason_for_restriction' } },
   { key: 'warranty_length', label: 'Warranty Length', aliases: ['warrantylength'], type: 'text', target: { attr: 'warranty_length' } },
 
+  // ---------- Bathroom-sink specific ----------
+  { key: 'compatible_faucet_type', label: 'Compatible Faucet Type', aliases: ['compatiblefaucettype'], type: 'text', target: { attr: 'compatible_faucet_type' } },
+  { key: 'faucet_hole_center_spacing', label: 'Faucet Hole Center Spacing', aliases: ['faucetholecenterspacing'], type: 'text', target: { attr: 'faucet_hole_center_spacing' } },
+  { key: 'number_of_faucet_holes', label: 'Number of Faucet Holes', aliases: ['numberoffaucetholes'], type: 'int', target: { attr: 'number_of_faucet_holes' } },
+  { key: 'overflow', label: 'Overflow', aliases: ['overflow'], type: 'text', target: { attr: 'overflow' } },
+  { key: 'pedestal_included', label: 'Pedestal Included', aliases: ['pedestalincluded'], type: 'bool', target: { attr: 'pedestal_included' } },
+  { key: 'compatible_pedestal', label: 'Compatible Pedestal Part Number', aliases: ['compatiblepedestalpartnumber'], type: 'text', target: { attr: 'compatible_pedestal' } },
+  { key: 'console_included', label: 'Console Included', aliases: ['consoleincluded'], type: 'bool', target: { attr: 'console_included' } },
+  { key: 'nsf_ansi_61', label: 'NSF/ANSI 61 Certified', aliases: ['nsfansi61certified'], type: 'text', target: { attr: 'nsf_ansi_61_certified' } },
+  { key: 'nsf_certified', label: 'NSF Certified', aliases: ['nsfcertified'], type: 'text', target: { attr: 'nsf_certified' } },
+  { key: 'csa_b45_5', label: 'CSA B45.5/IAPMO Z124 Compliant', aliases: ['csab455iapmoz124compliantplasticplumbingfixtures', 'csab455iapmoz124compliant'], type: 'text', target: { attr: 'csa_b45_5_iapmo_z124_compliant' } },
+
   // ---------- Marketing content ----------
   { key: 'general_title_en', label: 'General Title (EN)', aliases: ['generaltitleen'], type: 'text', target: { attr: 'general_title_en' } },
   { key: 'description_en', label: 'Description (EN)', aliases: ['descriptionennomorethan1000characters', 'descriptionen'], type: 'description', target: { col: 'description' } },
   { key: 'general_title_fr', label: 'General Title (FR)', aliases: ['generaltitlefr'], type: 'text', target: { attr: 'general_title_fr' } },
   { key: 'description_fr', label: 'Description (FR)', aliases: ['descriptionfr'], type: 'text', target: { attr: 'description_fr' } },
+  { key: 'marketing_copy', label: 'Short Description - Marketing Copy', aliases: ['shortdescriptionmarketingcopy', 'marketingcopy', 'shortdescription'], type: 'text', target: { attr: 'marketing_copy' } },
+  { key: 'product_url', label: 'Product URL', aliases: ['stylishproducturl', 'producturl', 'productpageurl'], type: 'text', target: { attr: 'product_url' } },
 ];
 
 // Bullets are matched by pattern, not by alias list: "Bullet/Feature 3 (EN)"
@@ -206,6 +232,15 @@ export const VALUE_CANONICALS = {
     'side drain/reversible': 'Side Drain / Reversible',
     'center drain/ reversible': 'Center Drain / Reversible',
     'center drain/reversible': 'Center Drain / Reversible',
+  },
+  mounting_type: {
+    'undermount sinks': 'Undermount',
+    'undermount': 'Undermount',
+    'vessel sinks': 'Vessel',
+    'vessel': 'Vessel',
+    'drop-in': 'Drop-In',
+    'drop in': 'Drop-In',
+    'dropin': 'Drop-In',
   },
 };
 
@@ -263,8 +298,8 @@ export const FAUCET_TEMPLATE_HEADERS = [
 // (Family # kept for fidelity but ignored on import; the duplicate
 // "Mounting / Installation Type" column is collapsed to one.)
 export const BATH_FAUCET_TEMPLATE_HEADERS = [
-  'Model Number', 'Family #', 'Quickbooks Description', 'MSRP CAD$', 'Brand',
-  'Category', 'Material', 'Durability', 'Craftsmanship Type', 'Maximum Flow Rate',
+  'Model Number', 'Model Name', 'Family #', 'Quickbooks Description', 'MSRP CAD$',
+  'Brand', 'Category', 'Material', 'Durability', 'Craftsmanship Type', 'Maximum Flow Rate',
   'Laminar Flow', 'Handle(s) Included', 'Number of Handles', 'Deck Plate Included',
   'Compatible Deck Plate Part Number', 'Drain Overflow', 'Valve Included',
   'Aerator Included', 'Supply Line Included', 'Supplier Intended and Approved Use',
@@ -282,6 +317,33 @@ export const BATH_FAUCET_TEMPLATE_HEADERS = [
   'Title 24 Compliant', 'California AB-100 Compliant', 'Safety Listing(s)',
   'Warranty Length', 'Full or Limited Warranty', 'UPC', 'Shipping Weight Lbs',
   'Shipping Height', 'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for BATHROOM sinks, in the source-sheet order.
+// (Media / image / document columns are handled separately and omitted.)
+export const BATH_SINK_TEMPLATE_HEADERS = [
+  'Model Number', 'Model Name', 'Brand', 'Category', 'Color/Finish',
+  'Craftsmanship Type', 'Durability', 'Compatible Faucet Type', 'Country of Origin',
+  'Cut-Out Below Counter Depth', 'Cut-Out Front to Back', 'Cut-Out Left to Right',
+  'Drain Hole Diameter', 'Drain Placement', 'Faucet Hole Center Spacing', 'Material',
+  'Mounting / Installation Type', 'Number of Faucet Holes',
+  'External Sink Size Length (inches)', 'External Sink Size Width (inches)',
+  'External Sink Size Depth (inches)', 'Internal Sink Size Length (inches)',
+  'Internal Sink Size Width (inches)', 'Internal Sink Size Depth (inches)',
+  'Overflow', 'Sink Shape', 'Pedestal Included', 'Compatible Pedestal Part Number',
+  'Console Included', 'Warranty Length', 'MSRP CAD$', 'BM Dealer Cost CAD$',
+  'ASME A112.19.1/CSA B45.2 - 2018 Compliant', 'ASME A112.19.2/CSA B45.1 Compliant',
+  'ASME A112.19.3 Compliant', 'ASSE 1001 Certified',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'Canada Product Restriction', 'Reason for Restriction', 'NSF/ANSI 61 Certified',
+  'UL 1951 Listed', 'UPC Certified', 'Vermont Act 193 Compliant', 'NSF Certified',
+  'cUPC Certified', 'CSA B45.5/IAPMO Z124 Compliant - Plastic Plumbing Fixtures',
+  'California AB-100 Compliant', 'Safety Listing(s)', 'HS CODE', 'UPC',
+  'Shipping Weight', 'Shipping Height', 'Shipping Width', 'Shipping Length',
   'General Title (EN)', 'Description (EN)',
   ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
   'General Title (FR)', 'Description (FR)',

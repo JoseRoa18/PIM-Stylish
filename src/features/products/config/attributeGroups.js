@@ -64,7 +64,7 @@ export const ATTRIBUTE_GROUPS = {
     },
   ],
 
-  // Future: bath_sink, kitchen_faucet, bath_faucet, accessory
+  // Future: bathroom_sink, kitchen_faucet, bathroom_faucet, accessory
 };
 
 export function getAttributeGroups(category) {

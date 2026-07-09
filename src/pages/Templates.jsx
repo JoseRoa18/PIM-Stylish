@@ -7,9 +7,17 @@ import {
   Loader2,
   AlertCircle,
   X,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
-import { uploadTemplate, deleteTemplate } from '@/features/templates/api/templates';
+import {
+  uploadTemplate,
+  deleteTemplate,
+  updateTemplateCategories,
+  TEMPLATE_CATEGORIES,
+  templateCategoryLabel,
+} from '@/features/templates/api/templates';
 import { formatTimeAgo } from '@/lib/format';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
@@ -89,7 +97,7 @@ export default function Templates() {
       {!loading && templates.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {templates.map((t) => (
-            <TemplateCard key={t.id} template={t} onDelete={reload} />
+            <TemplateCard key={t.id} template={t} reload={reload} />
           ))}
         </div>
       )}
@@ -97,10 +105,37 @@ export default function Templates() {
   );
 }
 
-function TemplateCard({ template, onDelete }) {
+function TemplateCard({ template, reload }) {
   const confirm = useConfirm();
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(template.categories ?? []);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  function startEdit() {
+    setDraft(template.categories ?? []);
+    setError(null);
+    setEditing(true);
+  }
+
+  function toggle(value) {
+    setDraft((prev) => (prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateTemplateCategories(template.id, draft);
+      setEditing(false);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleDelete() {
     const ok = await confirm({
@@ -114,7 +149,7 @@ function TemplateCard({ template, onDelete }) {
     setError(null);
     try {
       await deleteTemplate(template.id, template.storage_path);
-      onDelete();
+      reload();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -134,16 +169,87 @@ function TemplateCard({ template, onDelete }) {
             <p className="text-body-sm text-on-surface-variant truncate">{template.file_name}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={deleting}
-          className="p-1.5 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors disabled:opacity-50"
-          title="Delete template"
-        >
-          {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-        </button>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {!editing && (
+            <button
+              type="button"
+              onClick={startEdit}
+              className="p-1.5 rounded-full text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+              title="Edit categories"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting || editing}
+            className="p-1.5 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors disabled:opacity-50"
+            title="Delete template"
+          >
+            {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
+
+      {editing ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-label-md text-on-surface-variant">Available for categories (none = general):</p>
+          <div className="flex flex-wrap gap-2">
+            {TEMPLATE_CATEGORIES.map((c) => {
+              const active = draft.includes(c.value);
+              return (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => toggle(c.value)}
+                  className={`px-3 py-1 rounded-full border text-label-md transition-colors ${
+                    active
+                      ? 'bg-primary text-on-primary border-primary'
+                      : 'border-outline-variant text-on-surface hover:bg-surface-container-low'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 mt-1">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+              className="px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {template.categories?.length ? (
+            template.categories.map((c) => (
+              <span key={c} className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-label-sm">
+                {templateCategoryLabel(c)}
+              </span>
+            ))
+          ) : (
+            <span className="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm">
+              General · all products
+            </span>
+          )}
+        </div>
+      )}
+
       <p className="text-label-md text-on-surface-variant">
         Uploaded {formatTimeAgo(template.uploaded_at)}
       </p>
@@ -155,6 +261,7 @@ function TemplateCard({ template, onDelete }) {
 function UploadCard({ onDone, onCancel }) {
   const [marketplace, setMarketplace] = useState('');
   const [customMarketplace, setCustomMarketplace] = useState('');
+  const [categories, setCategories] = useState([]);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -163,13 +270,17 @@ function UploadCard({ onDone, onCancel }) {
   const effectiveMarketplace = marketplace === '__custom__' ? customMarketplace.trim() : marketplace;
   const canSubmit = effectiveMarketplace && file && !uploading;
 
+  function toggleCategory(value) {
+    setCategories((prev) => (prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]));
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!canSubmit) return;
     setUploading(true);
     setError(null);
     try {
-      await uploadTemplate(effectiveMarketplace, file);
+      await uploadTemplate(effectiveMarketplace, file, categories);
       onDone();
     } catch (err) {
       setError(err.message);
@@ -238,6 +349,37 @@ function UploadCard({ onDone, onCancel }) {
             {file ? file.name : 'Choose .xlsx or .csv file…'}
           </button>
         </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-label-md text-on-surface-variant">
+          Available for categories
+        </label>
+        <p className="text-body-sm text-on-surface-variant -mt-0.5 mb-1">
+          The template only shows on products of the selected categories. Leave all unchecked for a general template (available on every product).
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {TEMPLATE_CATEGORIES.map((c) => {
+            const active = categories.includes(c.value);
+            return (
+              <button
+                key={c.value}
+                type="button"
+                onClick={() => toggleCategory(c.value)}
+                className={`px-3 py-1.5 rounded-full border text-label-md transition-colors ${
+                  active
+                    ? 'bg-primary text-on-primary border-primary'
+                    : 'border-outline-variant text-on-surface hover:bg-surface-container-low'
+                }`}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+        {categories.length === 0 && (
+          <p className="text-label-md text-on-surface-variant mt-1">General — available on all products.</p>
+        )}
       </div>
 
       {error && (

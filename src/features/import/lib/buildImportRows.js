@@ -48,6 +48,19 @@ function coerce(type, raw) {
       const mapped = CATEGORY_MAP[s.toLowerCase()];
       return mapped ?? null;
     }
+    case 'date': {
+      // Already ISO → keep. Excel serial number → convert. Otherwise best-effort
+      // parse; anything unrecognized is dropped (null) rather than risking a bad
+      // insert into a DATE column.
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      if (/^\d+(\.\d+)?$/.test(s)) {
+        const serial = parseFloat(s);
+        const ms = Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000;
+        return new Date(ms).toISOString().slice(0, 10);
+      }
+      const t = Date.parse(s);
+      return isNaN(t) ? null : new Date(t).toISOString().slice(0, 10);
+    }
     case 'description': {
       // Plain text → simple HTML paragraphs (matches how descriptions are stored)
       const escaped = s

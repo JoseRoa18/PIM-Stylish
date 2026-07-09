@@ -13,7 +13,7 @@ import { bulkUpdateProducts, getProduct } from '../api/products';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
-import { listTemplates } from '@/features/templates/api/templates';
+import { listTemplates, templateAppliesTo } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
@@ -109,15 +109,19 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
     setResult(null);
     setProgress({ done: 0, total: count + 1 });
     try {
-      // 1. Find the BB&B template uploaded to /templates
+      // 1. Find a BB&B template that applies to the selection's category
+      const cats = new Set(selectedProducts.map((p) => p.category));
+      if (cats.size > 1) {
+        throw new Error('Select products from a single category to export.');
+      }
+      const cat = [...cats][0];
       const templates = await listTemplates();
-      const bbb = templates.find((t) =>
-        t.marketplace.toLowerCase().includes('bb&b') ||
-        t.marketplace.toLowerCase().includes('bbb') ||
-        t.marketplace.toLowerCase().includes('overstock')
+      const bbb = templates.find(
+        (t) =>
+          /bb&b|bbb|overstock/i.test(t.marketplace) && templateAppliesTo(t, cat)
       );
       if (!bbb) {
-        throw new Error('No BB&B / Overstock template found. Upload one in /templates first.');
+        throw new Error(`No BB&B / Overstock template available for this category. Upload one in /templates first.`);
       }
       setProgress({ done: 1, total: count + 1 });
 
@@ -167,14 +171,8 @@ export default function BulkActionsBar({ selectedSkus, products, onClear, onChan
         throw new Error('Select products from a single category (all kitchen faucets, or all bathroom faucets).');
       }
       const cat = [...cats][0];
-      const match = (t) => {
-        const n = `${t.file_name} ${t.marketplace}`.toLowerCase();
-        if (cat === 'kitchen_faucet') return n.includes('kitchen');
-        if (cat === 'bath_faucet') return n.includes('bath');
-        return false;
-      };
-      const tmpl = wayfairTemplates.find(match) || (wayfairTemplates.length === 1 ? wayfairTemplates[0] : null);
-      if (!tmpl) throw new Error(`No Wayfair template matches "${cat}". Upload the matching category template.`);
+      const tmpl = wayfairTemplates.find((t) => templateAppliesTo(t, cat));
+      if (!tmpl) throw new Error(`No Wayfair template available for this category. Upload the matching category template.`);
 
       const skus = [...selectedSkus];
       const productList = [];

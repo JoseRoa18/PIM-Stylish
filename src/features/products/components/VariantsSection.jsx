@@ -1,18 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Camera, Layers, Settings, X, Plus, Search, Loader2, Check } from 'lucide-react';
+import { Camera, Layers, Settings, X, Plus, Search, Loader2, Check, AlertTriangle } from 'lucide-react';
 import { useVariants } from '../hooks/useVariants';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCAD } from '@/lib/format';
 import { searchProducts, updateProduct, getProduct } from '../api/products';
+import { computeFamilyDrift } from '../lib/variantFields';
 import { supabase } from '@/lib/supabase';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import Dialog from '@/components/ui/Dialog';
 
-export default function VariantsSection({ product, onProductChanged }) {
+export default function VariantsSection({ product, onProductChanged, onUnify }) {
   const confirm = useConfirm();
   const { variants, loading, reload } = useVariants(product.sku, product.family_number);
   const [managing, setManaging] = useState(false);
+  const [drift, setDrift] = useState([]);
+
+  // Detect shared attributes that have drifted apart across the family.
+  // (Empty family → Promise.all([]) resolves to [] → no drift.)
+  useEffect(() => {
+    let active = true;
+    Promise.all(variants.map((v) => getProduct(v.sku))).then((list) => {
+      if (active) setDrift(computeFamilyDrift(product, list.filter(Boolean)));
+    });
+    return () => { active = false; };
+  }, [variants, product]);
 
   if (!product.family_number) {
     return (
@@ -72,6 +84,25 @@ export default function VariantsSection({ product, onProductChanged }) {
           Manage
         </button>
       </header>
+
+      {drift.length > 0 && (
+        <div className="mx-4 mt-4 px-4 py-3 rounded-lg border border-outline-variant bg-surface-container flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <AlertTriangle className="w-4 h-4 text-on-surface-variant flex-shrink-0 mt-0.5" />
+            <p className="text-body-sm text-on-surface min-w-0">
+              <span className="font-medium">{drift.length} shared attribute{drift.length === 1 ? '' : 's'} differ</span>
+              {' '}across this family: <span className="text-on-surface-variant">{drift.slice(0, 4).map((d) => d.label).join(', ')}{drift.length > 4 ? '…' : ''}</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onUnify?.(drift)}
+            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+          >
+            Review &amp; unify
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="px-6 py-8 text-center text-body-sm text-on-surface-variant">

@@ -7,9 +7,11 @@ import Dialog from '@/components/ui/Dialog';
 
 const CATEGORY_OPTIONS = [
   { value: 'kitchen_sink', label: 'Kitchen Sink' },
-  { value: 'bath_sink', label: 'Bath Sink' },
+  { value: 'bathroom_sink', label: 'Bathroom Sink' },
   { value: 'kitchen_faucet', label: 'Kitchen Faucet' },
-  { value: 'bath_faucet', label: 'Bath Faucet' },
+  { value: 'bathroom_faucet', label: 'Bathroom Faucet' },
+  { value: 'pot_filler', label: 'Pot Filler' },
+  { value: 'bar_prep_sink', label: 'Bar/Prep Sink' },
   { value: 'accessory', label: 'Accessory' },
 ];
 

@@ -52,10 +52,8 @@ export default function Sidebar({ open = false, onClose }) {
       >
       {/* Brand */}
       <div className="p-6">
-        <div className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-lg bg-primary text-on-primary font-bold flex items-center justify-center text-lg">
-            S
-          </div>
+        <div className="flex items-center gap-2.5">
+          <img src="/brand/icon.svg" alt="" className="w-11 h-11 flex-shrink-0" />
           <div className="flex flex-col leading-tight">
             <span className="text-title-lg text-primary">Stylish PIM</span>
             <span className="text-label-md text-on-surface-variant">Enterprise Edition</span>

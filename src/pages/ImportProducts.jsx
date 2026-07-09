@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 
 export default function ImportProducts() {
@@ -37,8 +37,9 @@ export default function ImportProducts() {
 
   const TEMPLATES = {
     sink: TEMPLATE_HEADERS,
+    bathroom_sink: BATH_SINK_TEMPLATE_HEADERS,
     kitchen_faucet: FAUCET_TEMPLATE_HEADERS,
-    bath_faucet: BATH_FAUCET_TEMPLATE_HEADERS,
+    bathroom_faucet: BATH_FAUCET_TEMPLATE_HEADERS,
   };
 
   function downloadTemplate(category = 'sink') {
@@ -129,7 +130,15 @@ export default function ImportProducts() {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
           >
             <Download className="w-4 h-4" />
-            Sink
+            Kitchen Sink
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('bathroom_sink')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Bathroom Sink
           </button>
           <button
             type="button"
@@ -141,7 +150,7 @@ export default function ImportProducts() {
           </button>
           <button
             type="button"
-            onClick={() => downloadTemplate('bath_faucet')}
+            onClick={() => downloadTemplate('bathroom_faucet')}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
           >
             <Download className="w-4 h-4" />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -20,7 +20,10 @@ import {
 } from 'lucide-react';
 import { useProduct } from '@/features/products/hooks/useProduct';
 import { useProductMedia } from '@/features/media/hooks/useProductMedia';
-import { updateProduct } from '@/features/products/api/products';
+import { updateProduct, getProduct } from '@/features/products/api/products';
+import { useVariants } from '@/features/products/hooks/useVariants';
+import { VARIANT_DISTINGUISHING, prettifyKey, readField } from '@/features/products/lib/variantFields';
+import Dialog from '@/components/ui/Dialog';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
 import StatusBadge from '@/features/products/components/StatusBadge';
@@ -34,6 +37,7 @@ import VariantsSection from '@/features/products/components/VariantsSection';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
+import { templateAppliesTo } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
 
 // ===================== Constants =====================
@@ -56,9 +60,11 @@ const WORKFLOW_OPTIONS = [
 
 const CATEGORY_OPTIONS = [
   { value: 'kitchen_sink', label: 'Kitchen Sink' },
-  { value: 'bath_sink', label: 'Bath Sink' },
+  { value: 'bathroom_sink', label: 'Bathroom Sink' },
   { value: 'kitchen_faucet', label: 'Kitchen Faucet' },
-  { value: 'bath_faucet', label: 'Bath Faucet' },
+  { value: 'bathroom_faucet', label: 'Bathroom Faucet' },
+  { value: 'pot_filler', label: 'Pot Filler' },
+  { value: 'bar_prep_sink', label: 'Bar/Prep Sink' },
   { value: 'accessory', label: 'Accessory' },
 ];
 
@@ -80,10 +86,27 @@ function attr(product, key) {
 // List attributes are edited as "A; B" text and stored as arrays.
 const LIST_ATTRS = new Set(['installation_type', 'accessories_included', 'durability_tags']);
 
+// Attribute keys that must be coerced to numbers on save.
+const NUMBER_ATTRS = new Set([
+  'number_of_bowls', 'sink_radius_mm', 'drain_diameter_in', 'product_weight_lb',
+  'min_external_cabinet_size_in', 'min_internal_cabinet_size_in', 'max_deck_thickness_in',
+  'number_of_pieces', 'number_of_installation_holes', 'number_of_handles',
+  'faucet_height_in', 'spout_reach_in', 'spout_height_in',
+  'install_hole_diameter_mm', 'install_hole_diameter_in', 'number_of_faucet_holes',
+]);
+
+
 function joinList(v) {
   if (Array.isArray(v)) return v.join('; ');
   return v ?? '';
 }
+
+// A value that means "no value". Used so a field going from absent (null) to an
+// empty default (false / '' / []) is NOT treated as an edit — otherwise editing
+// a faucet would flag sink-only booleans (low_divider, has_grooves…) as changes.
+const isEmptyish = (v) =>
+  v === null || v === undefined || v === '' || v === false || (Array.isArray(v) && v.length === 0);
+const bothEmpty = (a, b) => isEmptyish(a) && isEmptyish(b);
 
 // ===================== Form helpers =====================
 
@@ -208,11 +231,7 @@ function buildPatch(form, product) {
 
       let normalized = value;
       if (typeof value === 'string' && value.trim() === '') normalized = null;
-      if (['number_of_bowls', 'sink_radius_mm', 'drain_diameter_in', 'product_weight_lb',
-           'min_external_cabinet_size_in', 'min_internal_cabinet_size_in', 'max_deck_thickness_in',
-           'number_of_pieces', 'number_of_installation_holes', 'number_of_handles',
-           'faucet_height_in', 'spout_reach_in', 'spout_height_in',
-           'install_hole_diameter_mm', 'install_hole_diameter_in'].includes(attrKey)) {
+      if (NUMBER_ATTRS.has(attrKey)) {
         if (normalized !== null && normalized !== '') {
           normalized = Number(normalized);
           if (isNaN(normalized)) normalized = null;
@@ -238,7 +257,7 @@ function buildPatch(form, product) {
         normalized = items.length > 0 ? items : null;
       }
 
-      if (JSON.stringify(normalized) !== JSON.stringify(original)) {
+      if (JSON.stringify(normalized) !== JSON.stringify(original) && !bothEmpty(normalized, original)) {
         if (normalized === null) delete newAttrs[attrKey];
         else newAttrs[attrKey] = normalized;
         attrsChanged = true;
@@ -254,13 +273,65 @@ function buildPatch(form, product) {
       if (isNaN(normalized)) normalized = null;
     }
     const original = product[key] ?? null;
-    if (normalized !== original) {
+    if (normalized !== original && !bothEmpty(normalized, original)) {
       columnPatch[key] = normalized;
     }
   }
 
   if (attrsChanged) columnPatch.attributes = newAttrs;
   return columnPatch;
+}
+
+// Granular list of what changed (for propagating to variant siblings). Mirrors
+// buildPatch's normalization but keeps each field separate with a label.
+function computeChanges(form, product) {
+  const changes = [];
+  for (const [key, value] of Object.entries(form)) {
+    if (key.startsWith('_')) {
+      const attrKey = key.slice(1);
+      const original = (product.attributes ?? {})[attrKey] ?? null;
+      let normalized = value;
+      if (typeof value === 'string' && value.trim() === '') normalized = null;
+      if (NUMBER_ATTRS.has(attrKey) && normalized !== null && normalized !== '') {
+        normalized = Number(normalized);
+        if (isNaN(normalized)) normalized = null;
+      }
+      if (attrKey.endsWith('_dimensions_in')) normalized = cleanDims(value);
+      if (attrKey === 'bullet_points' || attrKey === 'bullet_points_fr') {
+        normalized = (value || []).filter((b) => typeof b === 'string' && b.trim() !== '');
+      }
+      if (LIST_ATTRS.has(attrKey)) {
+        const items = typeof value === 'string'
+          ? value.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
+          : Array.isArray(value) ? value : [];
+        normalized = items.length ? items : null;
+      }
+      if (JSON.stringify(normalized) !== JSON.stringify(original) && !bothEmpty(normalized, original)) {
+        changes.push({ scope: 'attr', key: attrKey, value: normalized, label: prettifyKey(attrKey) });
+      }
+      continue;
+    }
+    let normalized = value;
+    if (typeof value === 'string' && value.trim() === '') normalized = null;
+    if (NUMBER_COLUMNS.has(key) && normalized !== null) {
+      normalized = Number(normalized);
+      if (isNaN(normalized)) normalized = null;
+    }
+    const original = product[key] ?? null;
+    if (normalized !== original && !bothEmpty(normalized, original)) {
+      changes.push({ scope: 'column', key, value: normalized, label: prettifyKey(key) });
+    }
+  }
+  return changes;
+}
+
+// Human-readable value for the propagation dialog.
+function formatChangeValue(v) {
+  if (v === null || v === '') return '(cleared)';
+  if (Array.isArray(v)) return v.join('; ') || '(empty)';
+  if (typeof v === 'object') return Object.entries(v).filter(([, x]) => x != null && x !== '').map(([k, x]) => `${k}: ${x}`).join(', ') || '(empty)';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v);
 }
 
 // ===================== Main component =====================
@@ -278,6 +349,7 @@ export default function ProductDetail() {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [propagation, setPropagation] = useState(null);
 
   function setTab(key) {
     setSearchParams((prev) => {
@@ -313,10 +385,14 @@ export default function ProductDetail() {
         setIsEditing(false);
         return;
       }
+      const changes = computeChanges(form, product);
+      const hadFamily = product.family_number != null;
       const updated = await updateProduct(product.sku, patch);
       mergeProduct(updated);
       setIsEditing(false);
       setForm({});
+      // Offer to copy the same changes to the other variants in this family.
+      if (hadFamily && changes.length) setPropagation({ changes });
     } catch (err) {
       setSaveError(err.message ?? 'Failed to save changes');
     } finally {
@@ -415,14 +491,185 @@ export default function ProductDetail() {
       <TabBar tabs={TABS} active={activeTab} onChange={setTab} />
 
       <div className="mt-6">
-        {activeTab === 'overview' && <OverviewTab product={product} edit={editCtx} onProductChanged={refetch} />}
+        {activeTab === 'overview' && (
+          <OverviewTab
+            product={product}
+            edit={editCtx}
+            onProductChanged={refetch}
+            onUnify={(driftFields) =>
+              setPropagation({
+                changes: driftFields,
+                title: 'Unify shared attributes?',
+                subtitle: `Family ${product.family_number} · copy this product's values to the variants that differ`,
+              })
+            }
+          />
+        )}
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
         {activeTab === 'content' && <ContentTab product={product} edit={editCtx} />}
         {activeTab === 'pricing' && <PricingTab product={product} edit={editCtx} />}
         {activeTab === 'media' && <MediaTab sku={product.sku} category={product.category} />}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
       </div>
+
+      {propagation && (
+        <PropagateVariantsDialog
+          product={product}
+          changes={propagation.changes}
+          title={propagation.title}
+          subtitle={propagation.subtitle}
+          onClose={(didApply) => { setPropagation(null); if (didApply) refetch(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ===================== Propagate changes to variant siblings =====================
+
+function PropagateVariantsDialog({ product, changes, onClose, title, subtitle }) {
+  const { variants, loading } = useVariants(product.sku, product.family_number);
+  const [selKeys, setSelKeys] = useState(() => new Set(changes.filter((c) => !VARIANT_DISTINGUISHING.has(c.key)).map((c) => c.key)));
+  const [selSkus, setSelSkus] = useState(null); // null until variants load → then all
+  const [full, setFull] = useState({}); // sku → full product row (for current values)
+  const [applying, setApplying] = useState(false);
+  const [result, setResult] = useState(null);
+
+  // Fetch full sibling rows so we can show each one's CURRENT value per field.
+  useEffect(() => {
+    if (!variants.length) return;
+    let active = true;
+    Promise.all(variants.map((v) => getProduct(v.sku))).then((list) => {
+      if (!active) return;
+      const m = {};
+      for (const p of list) if (p) m[p.sku] = p;
+      setFull(m);
+    });
+    return () => { active = false; };
+  }, [variants]);
+
+  const chosenSkus = selSkus ?? new Set(variants.map((v) => v.sku));
+  const toggleKey = (k) => setSelKeys((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleSku = (s) => setSelSkus(() => { const base = new Set(chosenSkus); base.has(s) ? base.delete(s) : base.add(s); return base; });
+
+  const fullLoaded = Object.keys(full).length > 0;
+  const eq = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  // Which chosen siblings currently differ from the new value for a given field.
+  const differingFor = (c) =>
+    variants.filter((v) => chosenSkus.has(v.sku) && full[v.sku] && !eq(readField(full[v.sku], c), c.value));
+
+  async function handleApply() {
+    setApplying(true);
+    setResult(null);
+    try {
+      const fields = changes.filter((c) => selKeys.has(c.key));
+      const targets = variants.filter((v) => chosenSkus.has(v.sku));
+      let ok = 0;
+      for (const v of targets) {
+        const row = full[v.sku] ?? (await getProduct(v.sku));
+        if (!row) continue;
+        const patch = {};
+        const attrs = { ...(row.attributes ?? {}) };
+        let attrsChanged = false;
+        for (const f of fields) {
+          if (f.scope === 'column') patch[f.key] = f.value;
+          else { if (f.value === null) delete attrs[f.key]; else attrs[f.key] = f.value; attrsChanged = true; }
+        }
+        if (attrsChanged) patch.attributes = attrs;
+        if (Object.keys(patch).length) { await updateProduct(v.sku, patch); ok++; }
+      }
+      setResult({ ok, total: targets.length });
+    } catch (err) {
+      setResult({ error: err.message ?? 'Failed to apply' });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const canApply = !applying && selKeys.size > 0 && chosenSkus.size > 0 && variants.length > 0;
+  // Reload the page data only AFTER closing, so refetch() never unmounts this
+  // dialog mid-apply (which would reset it to a broken state).
+  const close = () => onClose(result?.ok > 0);
+
+  return (
+    <Dialog
+      onClose={close}
+      title={title ?? 'Apply changes to variants?'}
+      subtitle={subtitle ?? `Family ${product.family_number} · copy the fields you just edited to the other variants`}
+      footer={
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={close} className="px-4 py-1.5 rounded-full text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
+            {result?.ok != null ? 'Close' : 'Skip'}
+          </button>
+          {result?.ok == null && (
+            <button
+              type="button"
+              onClick={handleApply}
+              disabled={!canApply}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Apply to {chosenSkus.size} variant{chosenSkus.size === 1 ? '' : 's'}
+            </button>
+          )}
+        </div>
+      }
+    >
+      {loading ? (
+        <p className="text-body-sm text-on-surface-variant py-4 text-center">Loading variants…</p>
+      ) : variants.length === 0 ? (
+        <p className="text-body-sm text-on-surface-variant py-2">This product has no other variants in its family.</p>
+      ) : result?.ok != null ? (
+        <p className="text-body-md text-on-surface py-2">
+          ✓ Applied to {result.ok} of {result.total} variant{result.total === 1 ? '' : 's'}.
+        </p>
+      ) : (
+        <div className="space-y-5">
+          <div>
+            <h4 className="text-label-md text-on-surface-variant mb-2">Fields to copy</h4>
+            <p className="text-body-sm text-on-surface-variant mb-2">Finish, color and pricing are unchecked by default since they usually differ per variant.</p>
+            <div className="space-y-1.5">
+              {changes.map((c) => {
+                const diff = fullLoaded ? differingFor(c) : null;
+                return (
+                  <label key={c.key} className="flex items-start gap-2.5 px-3 py-2 rounded-lg border border-outline-variant bg-surface-container-lowest cursor-pointer">
+                    <input type="checkbox" checked={selKeys.has(c.key)} onChange={() => toggleKey(c.key)} className="mt-1 accent-primary" />
+                    <span className="min-w-0 flex-1">
+                      <span className="text-body-md text-on-surface">{c.label}</span>
+                      <span className="block text-body-sm text-on-surface-variant truncate">→ {formatChangeValue(c.value)}</span>
+                      {diff && (
+                        diff.length === 0 ? (
+                          <span className="block text-label-sm text-success">✓ all selected variants already match</span>
+                        ) : (
+                          <span className="block text-label-sm text-on-surface-variant">
+                            Will change: {diff.map((v) => `${v.sku} (${formatChangeValue(readField(full[v.sku], c))})`).join(' · ')}
+                          </span>
+                        )
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <h4 className="text-label-md text-on-surface-variant mb-2">Apply to these variants</h4>
+            <div className="flex flex-wrap gap-2">
+              {variants.map((v) => {
+                const on = chosenSkus.has(v.sku);
+                return (
+                  <button key={v.sku} type="button" onClick={() => toggleSku(v.sku)}
+                    className={`px-3 py-1.5 rounded-full border text-label-md transition-colors ${on ? 'bg-primary text-on-primary border-primary' : 'border-outline-variant text-on-surface hover:bg-surface-container-low'}`}>
+                    {v.model_name ? `${v.model_name} · ` : ''}{v.sku}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {result?.error && <p className="text-body-sm text-error">{result.error}</p>}
+        </div>
+      )}
+    </Dialog>
   );
 }
 
@@ -455,7 +702,7 @@ function TabBar({ tabs, active, onChange }) {
 
 // ===================== Overview Tab =====================
 
-function OverviewTab({ product, edit, onProductChanged }) {
+function OverviewTab({ product, edit, onProductChanged, onUnify }) {
   return (
     <div className="space-y-6">
       <Section title="Identification">
@@ -471,7 +718,7 @@ function OverviewTab({ product, edit, onProductChanged }) {
         </div>
       </Section>
 
-      <VariantsSection product={product} onProductChanged={onProductChanged} />
+      <VariantsSection product={product} onProductChanged={onProductChanged} onUnify={onUnify} />
 
       <Section title="Trade & Compliance">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
@@ -514,6 +761,17 @@ function SpecsTab({ product, edit }) {
   // Category-aware: faucet products show faucet sections, sinks show sink ones.
   // Falls back to a data signal (spout_type) so mis-categorized faucets still work.
   const isFaucet = Boolean(cat?.includes('faucet')) || attr(product, 'spout_type') != null;
+  // Bathroom sinks show pedestal / faucet-hole / overflow fields instead of the
+  // kitchen bowl configuration. Fall back to data signals for mis-categorized rows.
+  const isBathSink = cat === 'bathroom_sink'
+    || attr(product, 'number_of_faucet_holes') != null
+    || attr(product, 'pedestal_included') != null
+    || attr(product, 'overflow') != null;
+  const isKitchenSink = isSink && !isBathSink;
+  const isBathFaucet = cat === 'bathroom_faucet'
+    || attr(product, 'laminar_flow') != null
+    || attr(product, 'valve_included') != null
+    || attr(product, 'compatible_drain_assembly') != null;
 
   return (
     <div className="space-y-6">
@@ -524,13 +782,13 @@ function SpecsTab({ product, edit }) {
           <AttrField label="Craftsmanship" attrKey="craftsmanship" product={product} edit={edit} />
           {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" product={product} edit={edit} />}
           {!isFaucet && <AttrListField label="Installation Type" attrKey="installation_type" product={product} edit={edit} hint="Separate multiple options with ; (e.g. Undermount; Drop-In)" />}
-          {!isFaucet && <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />}
+          {isKitchenSink && <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />}
           {isFaucet && <AttrField label="Application" attrKey="application" product={product} edit={edit} />}
           {isFaucet && <AttrField label="Lead Free" attrKey="lead_free" type="boolean" product={product} edit={edit} />}
         </div>
       </Section>
 
-      {(isSink || attr(product, 'number_of_bowls')) && (
+      {(isKitchenSink || attr(product, 'number_of_bowls')) && (
         <Section title="Bowl Configuration">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
             <AttrField label="Number of Bowls" attrKey="number_of_bowls" type="number" product={product} edit={edit} />
@@ -547,6 +805,42 @@ function SpecsTab({ product, edit }) {
         </Section>
       )}
 
+      {isBathSink && (
+        <>
+          <Section title="Bathroom Sink">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Compatible Faucet Type" attrKey="compatible_faucet_type" product={product} edit={edit} />
+              <AttrField label="Number of Faucet Holes" attrKey="number_of_faucet_holes" type="number" product={product} edit={edit} />
+              <AttrField label="Faucet Hole Center Spacing" attrKey="faucet_hole_center_spacing" product={product} edit={edit} />
+              <AttrField label="Overflow" attrKey="overflow" product={product} edit={edit} />
+              <AttrField label="Drain Location" attrKey="drain_hole_location" product={product} edit={edit} />
+              <AttrField label="Drain Diameter (in)" attrKey="drain_diameter_in" type="number" product={product} edit={edit} />
+              <AttrField label="Pedestal Included" attrKey="pedestal_included" type="boolean" product={product} edit={edit} />
+              <AttrField label="Compatible Pedestal #" attrKey="compatible_pedestal" product={product} edit={edit} />
+              <AttrField label="Console Included" attrKey="console_included" type="boolean" product={product} edit={edit} />
+            </div>
+          </Section>
+
+          <Section title="Certifications & Compliance" defaultOpen={false}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" product={product} edit={edit} />
+              <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" product={product} edit={edit} />
+              <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" product={product} edit={edit} />
+              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" product={product} edit={edit} />
+              <AttrField label="NSF/ANSI 61" attrKey="nsf_ansi_61_certified" product={product} edit={edit} />
+              <AttrField label="NSF Certified" attrKey="nsf_certified" product={product} edit={edit} />
+              <AttrField label="CSA B45.5/IAPMO Z124" attrKey="csa_b45_5_iapmo_z124_compliant" product={product} edit={edit} />
+              <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" product={product} edit={edit} />
+              <AttrField label="cUPC Certified" attrKey="cupc_certified" product={product} edit={edit} />
+              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" product={product} edit={edit} />
+              <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
+              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
+              <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
+            </div>
+          </Section>
+        </>
+      )}
+
       {isFaucet && (
         <>
           <Section title="Faucet Configuration">
@@ -561,6 +855,19 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Hot & Cold Dispenser" attrKey="hot_cold_dispenser" type="boolean" product={product} edit={edit} />
             </div>
           </Section>
+
+          {isBathFaucet && (
+            <Section title="Bathroom Faucet">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+                <AttrField label="Laminar Flow" attrKey="laminar_flow" product={product} edit={edit} />
+                <AttrField label="Valve Included" attrKey="valve_included" type="boolean" product={product} edit={edit} />
+                <AttrField label="Drain Overflow" attrKey="drain_overflow" product={product} edit={edit} />
+                <AttrField label="Compatible Drain Assembly #" attrKey="compatible_drain_assembly" product={product} edit={edit} />
+                <AttrField label="Handle Material" attrKey="handle_material" product={product} edit={edit} />
+                <AttrField label="Faucet Centers" attrKey="faucet_centers" product={product} edit={edit} />
+              </div>
+            </Section>
+          )}
 
           <Section title="Handles, Spray & Cartridge" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
@@ -615,6 +922,11 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" product={product} edit={edit} />
               <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
               <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
+              {isBathFaucet && <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="SDWA Compliant" attrKey="sdwa_compliant" product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />}
             </div>
           </Section>
         </>
@@ -675,6 +987,8 @@ function ContentTab({ product, edit }) {
         <div className="space-y-4">
           <AttrField label="General Title (EN)" attrKey="general_title_en" product={product} edit={edit} />
           <EditableField label="Product Description" fieldKey="description" type="richtext" product={product} edit={edit} />
+          <AttrField label="Short Description / Marketing Copy" attrKey="marketing_copy" type="textarea" product={product} edit={edit} />
+          <AttrField label="Product URL" attrKey="product_url" product={product} edit={edit} mono />
           <EditableField label="QuickBooks Description" fieldKey="quickbooks_description" product={product} edit={edit} />
           <EditableField label="Ribbon" fieldKey="ribbon" product={product} edit={edit} />
         </div>
@@ -758,6 +1072,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
 function ExportTemplatesCard({ product, media }) {
   const { templates, loading } = useTemplates();
+  const available = templates.filter((t) => templateAppliesTo(t, product.category));
   const [exporting, setExporting] = useState(null);
   const [error, setError] = useState(null);
 
@@ -784,7 +1099,7 @@ function ExportTemplatesCard({ product, media }) {
     }
   }
 
-  if (loading || templates.length === 0) return null;
+  if (loading || available.length === 0) return null;
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
@@ -795,7 +1110,7 @@ function ExportTemplatesCard({ product, media }) {
         </p>
       </header>
       <div className="px-8 pb-6 space-y-3">
-        {templates.map((t) => (
+        {available.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -831,9 +1146,9 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     if (type === 'select') return <Field label={label} value={val} />;
     if (type === 'boolean') {
       return (
-        <div className="flex items-center justify-between">
-          <span className="text-body-md text-on-surface">{label}</span>
-          <span className={`text-body-sm font-medium ${val ? 'text-success' : 'text-on-surface-variant'}`}>{val ? 'Yes' : 'No'}</span>
+        <div className="flex flex-col gap-1">
+          <span className="text-label-md text-on-surface-variant">{label}</span>
+          <span className={`text-body-md font-medium ${val ? 'text-success' : 'text-on-surface-variant'}`}>{val ? 'Yes' : 'No'}</span>
         </div>
       );
     }
@@ -1054,9 +1369,9 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     }
     if (type === 'boolean') {
       return (
-        <div className="flex items-center justify-between">
-          <span className="text-body-md text-on-surface">{label}</span>
-          <span className={`text-body-sm font-medium ${displayValue ? 'text-success' : 'text-on-surface-variant'}`}>{displayValue ? 'Yes' : 'No'}</span>
+        <div className="flex flex-col gap-1">
+          <span className="text-label-md text-on-surface-variant">{label}</span>
+          <span className={`text-body-md font-medium ${displayValue ? 'text-success' : 'text-on-surface-variant'}`}>{displayValue ? 'Yes' : 'No'}</span>
         </div>
       );
     }

@@ -37,9 +37,7 @@ export default function Login() {
       <div className="w-full max-w-md">
         {/* Brand header */}
         <div className="mb-8 text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary text-on-primary text-2xl font-bold mb-4">
-            S
-          </div>
+          <img src="/brand/icon.svg" alt="" className="w-16 h-16 mx-auto mb-3" />
           <h1 className="text-headline-md text-on-surface">Stylish PIM</h1>
           <p className="text-on-surface-variant text-body-sm mt-1">
             Centralized Product Management
