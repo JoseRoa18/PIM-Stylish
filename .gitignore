@@ -29,3 +29,6 @@ dist-ssr
 .broken_links_report.json
 .migration_backup.jsonl
 .migration_failures.json
+
+# Supabase CLI scratch
+supabase/.temp/
