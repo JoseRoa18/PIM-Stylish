@@ -30,7 +30,13 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MARKET = { locale: "en-US", country: "UNITED_STATES", brand: "WAYFAIR" };
+// Selectable market contexts. CA is the default (the supplier account is the
+// Canadian entity); CA_FR pushes the PIM's French content to the same market.
+const MARKETS: Record<string, { locale: string; country: string; brand: string }> = {
+  CA: { locale: "en-CA", country: "CANADA", brand: "WAYFAIR" },
+  CA_FR: { locale: "fr-CA", country: "CANADA", brand: "WAYFAIR" },
+  US: { locale: "en-US", country: "UNITED_STATES", brand: "WAYFAIR" },
+};
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -77,17 +83,51 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { sku, validateOnly = true, pushContent = true, pushMedia = true } = body;
-    if (!sku) return json({ error: "sku is required" }, 400);
+    const { sku, validateOnly = true, pushContent = true, pushMedia = true, statusRequestId, supplier = "CAN" } = body;
+    if (!sku && !statusRequestId) return json({ error: "sku or statusRequestId is required" }, 400);
+    // Two separate Wayfair supplier accounts, each with its own catalog and
+    // credentials. Default market follows the supplier's home storefront.
+    const market = body.market ?? (supplier === "USA" ? "US" : "CA");
+    const MARKET = MARKETS[market];
+    if (!MARKET) return json({ error: `unknown market "${market}" (use CA, CA_FR or US)` }, 400);
 
-    const CLIENT_ID = Deno.env.get("WAYFAIR_CLIENT_ID");
-    const CLIENT_SECRET = Deno.env.get("WAYFAIR_CLIENT_SECRET");
-    const SUPPLIER_ID = Deno.env.get("WAYFAIR_SUPPLIER_ID");
+    const CLIENT_ID = supplier === "USA" ? Deno.env.get("WAYFAIR_USA_CLIENT_ID") : Deno.env.get("WAYFAIR_CLIENT_ID");
+    const CLIENT_SECRET = supplier === "USA" ? Deno.env.get("WAYFAIR_USA_CLIENT_SECRET") : Deno.env.get("WAYFAIR_CLIENT_SECRET");
+    const SUPPLIER_ID = supplier === "USA" ? Deno.env.get("WAYFAIR_USA_SUPPLIER_ID") : Deno.env.get("WAYFAIR_SUPPLIER_ID");
     const ENV = Deno.env.get("WAYFAIR_ENV") ?? "sandbox";
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!CLIENT_ID || !CLIENT_SECRET || !SUPPLIER_ID) {
-      return json({ error: "Missing WAYFAIR_* secrets" }, 500);
+      return json({ error: `Missing WAYFAIR_* secrets for supplier ${supplier}` }, 500);
+    }
+
+    // ---- Status lookup mode: report what Wayfair did with a prior request ----
+    if (statusRequestId) {
+      const endpoint = ENV === "production"
+        ? "https://api.wayfair.io/v1/product-catalog-api/graphql"
+        : "https://api.wayfair.io/sandbox/v1/product-catalog-api/graphql";
+      const token = await getToken(CLIENT_ID, CLIENT_SECRET);
+      const r = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-SELECTED-SUPPLIER-ID": String(SUPPLIER_ID),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: `query($input: StatusOfUpdateRequestInput!) {
+            statusOfUpdateRequest(input: $input) {
+              requestId validationOnly status
+              problems { code title detail catalogEntityIdentifier catalogEntityProperty inputValue }
+              successfulUpdates { entityIdentifier catalogEntityProperty }
+            }
+          }`,
+          variables: { input: { requestId: statusRequestId, supplierId: String(SUPPLIER_ID) } },
+        }),
+      });
+      const gql = await r.json();
+      if (gql.errors) return json({ error: gql.errors[0]?.message, details: gql.errors }, 502);
+      return json({ ok: true, env: ENV, ...gql.data.statusOfUpdateRequest });
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -99,7 +139,6 @@ Deno.serve(async (req) => {
     if (pErr) return json({ error: `PIM read failed: ${pErr.message}` }, 500);
     if (!product) return json({ error: `Product ${sku} not found in PIM` }, 404);
 
-    const itemGroupId = body.itemGroupId || product.wayfair_item_group_id || null;
     const endpoint = ENV === "production"
       ? "https://api.wayfair.io/v1/product-catalog-api/graphql"
       : "https://api.wayfair.io/sandbox/v1/product-catalog-api/graphql";
@@ -111,6 +150,7 @@ Deno.serve(async (req) => {
         headers: {
           Authorization: `Bearer ${token}`,
           "X-SELECTED-SUPPLIER": String(SUPPLIER_ID),
+          "X-SELECTED-SUPPLIER-ID": String(SUPPLIER_ID),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ query, variables }),
@@ -118,15 +158,34 @@ Deno.serve(async (req) => {
       return r.json();
     };
 
-    const result: Record<string, unknown> = { ok: true, validateOnly, sku };
+    // The stored wayfair_item_group_id belongs to the CANADIAN supplier's
+    // catalog. For any other supplier (or when nothing is stored) resolve the
+    // listing id live from that supplier's own catalog.
+    let itemGroupId = body.itemGroupId || (supplier === "CAN" ? product.wayfair_item_group_id : null) || null;
+    if (!itemGroupId && pushContent) {
+      const lookup = await call(
+        `query($input: SupplierCatalogItemsInput!) {
+          supplierCatalogItems(input: $input) {
+            ... on SupplierCatalogItems { catalogItems { supplierPartNumber listings { listingId } } }
+          }
+        }`,
+        { input: { filter: { supplierPartNumbers: [sku] }, paginationOptions: { page: 1, pageSize: 30 } } },
+      );
+      itemGroupId = lookup.data?.supplierCatalogItems?.catalogItems?.[0]?.listings?.[0]?.listingId ?? null;
+    }
+
+    const result: Record<string, unknown> = { ok: true, validateOnly, sku, supplier, market, marketContext: MARKET, itemGroupId };
 
     // ---- Content (marketing copy + bullets) ----
     if (pushContent) {
       const attrs = product.attributes ?? {};
-      const marketingCopy = htmlToText(product.description ?? "");
-      const featureBullets = attrs.bullet_points ?? [];
+      // CA_FR pushes the PIM's French content; EN markets push the EN content.
+      const marketingCopy = market === "CA_FR"
+        ? htmlToText(String(attrs.description_fr ?? ""))
+        : htmlToText(product.description ?? "");
+      const featureBullets = (market === "CA_FR" ? attrs.bullet_points_fr : attrs.bullet_points) ?? [];
       if (!itemGroupId) {
-        result.content = { skipped: "no itemGroupId (set products.wayfair_item_group_id)" };
+        result.content = { skipped: `no itemGroupId — ${sku} not found in the ${supplier} supplier's Wayfair catalog` };
       } else if (!marketingCopy && featureBullets.length < 3) {
         result.content = { skipped: "no marketing copy and < 3 bullets" };
       } else {
@@ -134,8 +193,11 @@ Deno.serve(async (req) => {
           supplierId: SUPPLIER_ID,
           validateOnly,
           marketContext: MARKET,
+          // itemGroupName is intentionally NOT sent: Wayfair blocks renames that
+          // strip the collection name from the listing title ("Collection names
+          // cannot be removed or changed directly in the product name").
           catalogItemGroupsToUpdate: [
-            { itemGroupId, itemGroupName: product.model_name ?? sku, marketingCopy, featureBullets },
+            { itemGroupId, marketingCopy, featureBullets },
           ],
         };
         const gql = await call(
