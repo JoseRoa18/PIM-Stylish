@@ -248,6 +248,24 @@ h1, h2, h3, h4, h5, h6 {
    instead of overriding them (which would make them jump). */
 button:not(:disabled):active { scale: 0.98; }
 
+/* Theme switch (View Transitions API): the new theme sweeps over the old one
+   as a circle growing from the toggle button. --theme-x/y/r are set by
+   ThemeToggle before it flips the .dark class; browsers without the API
+   never create these pseudo-elements, and reduced-motion users skip the
+   transition in JS, so this is pure progressive enhancement. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  animation: theme-reveal 450ms var(--ease-in-out-cubic);
+}
+@keyframes theme-reveal {
+  from { clip-path: circle(0px at var(--theme-x, 100%) var(--theme-y, 0%)); }
+  to   { clip-path: circle(var(--theme-r, 150%) at var(--theme-x, 100%) var(--theme-y, 0%)); }
+}
+
 /* Keyboard focus must always be visible. Most controls only style :hover;
    this gives every button/link/select a brand-colored ring when reached by
    keyboard, without affecting mouse clicks (:focus-visible only). Inputs keep
