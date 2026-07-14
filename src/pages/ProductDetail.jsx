@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -1113,30 +1113,58 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
 function ExportTemplatesCard({ product, media }) {
   const { templates, loading } = useTemplates();
-  const available = templates.filter((t) => templateMatchesProduct(t, product));
   const [exporting, setExporting] = useState(null);
   const [error, setError] = useState(null);
 
-  async function handleExport(template) {
-    setExporting(template.id);
+  // One action per marketplace — the file list is an implementation detail.
+  // Menards is a multi-file SET that always downloads as one ZIP, so it
+  // collapses to a single entry (reference-only files excluded, same as the
+  // bulk export). Other marketplaces get one entry per matching template.
+  const entries = useMemo(() => {
+    const byMarket = new Map();
+    for (const t of templates) {
+      if (!templateMatchesProduct(t, product)) continue;
+      if (!byMarket.has(t.marketplace)) byMarket.set(t.marketplace, []);
+      byMarket.get(t.marketplace).push(t);
+    }
+    return [...byMarket.entries()].flatMap(([marketplace, files]) => {
+      if (/menards/i.test(marketplace)) {
+        const set = files.filter((t) => !/recipient|reference\.xls/i.test(t.file_name));
+        if (!set.length) return [];
+        return [{
+          key: marketplace,
+          marketplace,
+          files: set,
+          detail: `Set of ${set.length} files · downloads as one ZIP`,
+        }];
+      }
+      return files.map((t) => ({ key: t.id, marketplace, files: [t], detail: t.file_name }));
+    });
+  }, [templates, product]);
+
+  async function handleExport(entry) {
+    setExporting(entry.key);
     setError(null);
     try {
-      if (/wayfair/i.test(template.marketplace)) {
+      const base = (product.model_name || product.sku).replace(/[^\w-]+/g, '_');
+      if (/menards/i.test(entry.marketplace)) {
+        await generateMenardsFromTemplates(entry.files, [product]);
+      } else if (/wayfair/i.test(entry.marketplace)) {
         // Wayfair exports the whole variant family, so name the file by collection.
-        const base = (product.model_name || product.sku).replace(/[^\w-]+/g, '_');
-        const res = await generateWayfairFromTemplate(template.storage_path, [product], `Wayfair_${base}`);
+        const res = await generateWayfairFromTemplate(entry.files[0].storage_path, [product], `Wayfair_${base}`);
         if (res.warnings?.length) {
           setError(
             `Downloaded ${res.count} variant(s). ⚠ ${res.warnings.length} share a finish — set a 2nd Variant Grouping in Excel before uploading (details in console).`
           );
         }
-      } else if (/amazon/i.test(template.marketplace)) {
-        const base = (product.model_name || product.sku).replace(/[^\w-]+/g, '_');
-        await generateAmazonFromTemplate(template.storage_path, [product], `Amazon_${base}`);
-      } else if (/menards/i.test(template.marketplace)) {
-        await generateMenardsFromTemplates([template], [product]);
+      } else if (/amazon/i.test(entry.marketplace)) {
+        await generateAmazonFromTemplate(entry.files[0].storage_path, [product], `Amazon_${base}`);
+      } else if (/bb&b|bbb|overstock/i.test(entry.marketplace)) {
+        await generateBBBFromTemplate(entry.files[0].storage_path, product, media);
       } else {
-        await generateBBBFromTemplate(template.storage_path, product, media);
+        throw new Error(
+          `${entry.marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B and Menards are supported so far.`
+        );
       }
     } catch (err) {
       setError(err.message);
@@ -1145,7 +1173,7 @@ function ExportTemplatesCard({ product, media }) {
     }
   }
 
-  if (loading || available.length === 0) return null;
+  if (loading || entries.length === 0) return null;
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
@@ -1155,26 +1183,30 @@ function ExportTemplatesCard({ product, media }) {
           Generate pre-filled XLSX files for manual upload to marketplaces.
         </p>
       </header>
-      <div className="px-8 pb-6 space-y-3">
-        {available.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => handleExport(t)}
-            disabled={exporting === t.id}
-            className="w-full flex items-center justify-between px-5 py-4 rounded-xl border border-outline-variant bg-surface hover:bg-surface-container-low transition-colors text-left disabled:opacity-60"
-          >
-            <div>
-              <span className="text-body-md text-on-surface font-medium">{t.marketplace}</span>
-              <p className="text-body-sm text-on-surface-variant mt-0.5">{t.file_name}</p>
-            </div>
-            <span className="text-label-md text-primary font-semibold">
-              {exporting === t.id ? 'Generating…' : 'Export'}
-            </span>
-          </button>
-        ))}
+      <div className="px-8 pb-6">
+        <div className="grid sm:grid-cols-2 gap-2">
+          {entries.map((entry) => (
+            <button
+              key={entry.key}
+              type="button"
+              onClick={() => handleExport(entry)}
+              disabled={exporting === entry.key}
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-outline-variant bg-surface hover:bg-surface-container-low transition-colors text-left disabled:opacity-60"
+            >
+              <div className="min-w-0">
+                <span className="text-body-md text-on-surface font-medium">{entry.marketplace}</span>
+                <p className="text-body-sm text-on-surface-variant mt-0.5 truncate" title={entry.detail}>
+                  {entry.detail}
+                </p>
+              </div>
+              <span className="text-label-md text-primary font-semibold flex-shrink-0">
+                {exporting === entry.key ? 'Generating…' : 'Export'}
+              </span>
+            </button>
+          ))}
+        </div>
         {error && (
-          <p className="text-body-sm text-error mt-2">{error}</p>
+          <p className="text-body-sm text-error mt-3 animate-banner-in">{error}</p>
         )}
       </div>
     </section>
