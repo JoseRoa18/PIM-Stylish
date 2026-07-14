@@ -1,12 +1,11 @@
 import {
+  loadJSZip,
   openTemplate,
   sheetPathByName,
   sheetToGrid,
   buildCell,
   indexToCol,
   injectRows,
-  downloadZip,
-  templateExt,
   fetchImagesBySku,
 } from './templateFiller';
 
@@ -189,8 +188,9 @@ function isDataSheetName(name) {
 }
 
 /**
- * Fill one Menards workbook (content or containers) and download it.
- * Returns per-file stats.
+ * Fill one Menards workbook (content or containers). Returns the filled file
+ * as a blob (kept under its original name — the set ships as one ZIP, the way
+ * Menards delivers it) plus per-file stats.
  */
 async function fillOne(template, products) {
   const { zip, shared } = await openTemplate(template.storage_path);
@@ -237,9 +237,8 @@ async function fillOne(template, products) {
   });
 
   zip.file(dataPath, injectRows(sheetXml, rowsXml, START - 1 + products.length));
-  const base = template.file_name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[^\w-]+/g, '_');
-  await downloadZip(zip, base, templateExt(template.storage_path));
-  return { file: template.file_name, columns: ncols, unmapped: [...unmapped] };
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  return { file: template.file_name, blob, columns: ncols, unmapped: [...unmapped] };
 }
 
 /**
@@ -257,5 +256,21 @@ export async function generateMenardsFromTemplates(templates, products) {
 
   const results = [];
   for (const t of templates) results.push(await fillOne(t, products));
+
+  // Bundle the whole set into one ZIP, mirroring how Menards delivers it.
+  const JSZip = await loadJSZip();
+  const bundle = new JSZip();
+  for (const r of results) bundle.file(r.file, r.blob);
+  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const category = (products[0]?.category ?? 'export').replace(/[^\w-]+/g, '_');
+  const url = URL.createObjectURL(out);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `Menards_${category}_${new Date().toISOString().slice(0, 10)}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
   return { files: results.length, count: products.length, results };
 }
