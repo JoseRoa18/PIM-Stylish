@@ -6,7 +6,10 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
+  // undefined = not fetched yet (role unknown), null = fetched but no row.
+  // The distinction keeps `loading` true until the role is known, so
+  // RequireRole doesn't bounce admins off deep links while the profile loads.
+  const [profile, setProfile] = useState(undefined);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,7 +33,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const userId = session?.user?.id;
     if (!userId) {
-      setProfile(null);
+      // Reset to "unknown", NOT null: this effect also runs before the initial
+      // getSession() resolves, and null here would read as "profile fetched,
+      // no row" → role drops to viewer for one render and RequireRole bounces
+      // admins off deep links.
+      setProfile(undefined);
       setActivityActor(null);
       return;
     }
@@ -39,6 +46,7 @@ export function AuthProvider({ children }) {
     // is attributed; refine with the display name once the profile resolves.
     setActivityActor({ id: userId, email: session.user.email, name: null });
 
+    setProfile(undefined);
     let active = true;
     supabase
       .from('profiles')
@@ -75,17 +83,19 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   }
 
-  // Default to 'viewer' until the profile resolves so we never over-grant.
+  // Default to 'viewer' once the profile has resolved so we never over-grant;
+  // while it's still in flight (undefined) `loading` stays true instead.
   const role = profile?.role ?? 'viewer';
+  const profileLoading = Boolean(session?.user) && profile === undefined;
 
   const value = {
     session,
     user: session?.user ?? null,
-    profile,
+    profile: profile ?? null,
     role,
     isAdmin: role === 'admin',
     canEdit: role === 'admin' || role === 'editor',
-    loading,
+    loading: loading || profileLoading,
     signIn,
     signOut,
   };
