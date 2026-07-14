@@ -125,17 +125,13 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     setResult(null);
     try {
       const cats = [...new Set(selectedProducts.map((p) => p.category))];
-      // Recipient Reference is documentation, not fillable; browser-duplicated
-      // uploads ("... (2).xlsx") collapse to one file each.
-      const seen = new Set();
-      const usable = templates.filter((t) => {
-        if (/recipient|reference\.xls/i.test(t.file_name)) return false;
-        if (!cats.every((c) => templateAppliesTo(t, c))) return false;
-        const key = t.file_name.replace(/ \(\d+\)(?=\.)/, '');
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // Recipient Reference is documentation, not fillable. NOTE: the five
+      // Containers files share a name except the "(n)" suffix but hold
+      // DIFFERENT dimensions — real duplicates are detected inside the
+      // generator by their data sheet name, never by file name.
+      const usable = templates.filter(
+        (t) => !/recipient|reference\.xls/i.test(t.file_name) && cats.every((c) => templateAppliesTo(t, c)),
+      );
       if (!usable.length) {
         throw new Error(`No Menards template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}).`);
       }

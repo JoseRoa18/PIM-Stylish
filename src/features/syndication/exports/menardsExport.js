@@ -198,13 +198,14 @@ async function fillOne(template, products) {
   const sheetNames = [...wbXml.matchAll(/<sheet[^>]*name="([^"]+)"/g)].map((m) => m[1]);
 
   let dataPath = null;
+  let dataSheet = null;
   let grid = null;
   for (const name of sheetNames.filter(isDataSheetName)) {
     const path = await sheetPathByName(zip, name);
     if (!path) continue;
     const g = sheetToGrid(await zip.file(path).async('string'), shared);
     // The data sheet is the one whose row 5 carries display names.
-    if ((g[4] || []).filter(Boolean).length > 0) { dataPath = path; grid = g; break; }
+    if ((g[4] || []).filter(Boolean).length > 0) { dataPath = path; dataSheet = name; grid = g; break; }
   }
   if (!dataPath) throw new Error(`No data sheet found in ${template.file_name}`);
 
@@ -238,7 +239,7 @@ async function fillOne(template, products) {
 
   zip.file(dataPath, injectRows(sheetXml, rowsXml, START - 1 + products.length));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  return { file: template.file_name, blob, columns: ncols, unmapped: [...unmapped] };
+  return { file: template.file_name, blob, dataSheet, columns: ncols, unmapped: [...unmapped] };
 }
 
 /**
@@ -254,8 +255,17 @@ export async function generateMenardsFromTemplates(templates, products) {
   const imgBySku = await fetchImagesBySku(products.map((p) => p.sku));
   for (const p of products) p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
 
+  // True duplicates (re-uploaded files) are detected by their data sheet:
+  // each Containers file carries a distinct dimension sheet, the content file
+  // carries "Attributes". Same sheet twice = same file uploaded twice.
   const results = [];
-  for (const t of templates) results.push(await fillOne(t, products));
+  const seenSheets = new Set();
+  for (const t of templates) {
+    const r = await fillOne(t, products);
+    if (seenSheets.has(r.dataSheet)) continue;
+    seenSheets.add(r.dataSheet);
+    results.push(r);
+  }
 
   // Bundle the whole set into one ZIP, mirroring how Menards delivers it.
   const JSZip = await loadJSZip();
