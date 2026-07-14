@@ -109,7 +109,7 @@ export default function WayfairProductCard({ product, onUpdate }) {
 
         {result &&
           (result.error ? (
-            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container">
+            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span className="break-words">{result.error}</span>
             </div>

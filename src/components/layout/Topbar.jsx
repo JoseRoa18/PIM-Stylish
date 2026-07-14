@@ -187,7 +187,7 @@ export default function Topbar({ onMenuClick }) {
         {showDropdown && (
           <div
             role="listbox"
-            className="absolute left-0 right-0 top-full mt-2 rounded-2xl border border-outline-variant bg-surface shadow-lg overflow-hidden z-40"
+            className="absolute left-0 right-0 top-full mt-2 rounded-2xl border border-outline-variant bg-surface shadow-lg overflow-hidden z-40 animate-menu-in"
           >
             {showLoadingOnly && (
               <div className="px-4 py-6 text-center text-body-sm text-on-surface-variant">

@@ -207,7 +207,7 @@ export default function DocumentsSection({ sku, category }) {
       </div>
 
       {errorMessage && (
-        <div className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant">
+        <div className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant animate-banner-in">
           {errorMessage}
         </div>
       )}
@@ -245,7 +245,7 @@ export default function DocumentsSection({ sku, category }) {
       {previewDoc && (
         <Suspense
           fallback={
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" data-lenis-prevent>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in" data-lenis-prevent>
               <Loader2 className="w-8 h-8 animate-spin text-white" />
             </div>
           }

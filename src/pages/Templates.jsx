@@ -88,7 +88,7 @@ export default function Templates() {
       )}
 
       {error && (
-        <div className="px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm flex items-center gap-2">
+        <div className="px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm flex items-center gap-2 animate-banner-in">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>

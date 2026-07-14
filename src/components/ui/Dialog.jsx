@@ -80,7 +80,7 @@ export default function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-fade-in"
       onClick={onClose}
       role="presentation"
       data-lenis-prevent
@@ -93,7 +93,7 @@ export default function Dialog({
         aria-label={!title ? ariaLabel : undefined}
         tabIndex={-1}
         onSubmit={onSubmit}
-        className={`bg-surface rounded-2xl shadow-xl w-full ${maxWidth} max-h-[85vh] flex flex-col focus:outline-none`}
+        className={`bg-surface rounded-2xl shadow-xl w-full ${maxWidth} max-h-[85vh] flex flex-col focus:outline-none animate-dialog-in`}
         onClick={(e) => e.stopPropagation()}
       >
         {(title || subtitle) && (

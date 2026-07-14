@@ -48,7 +48,7 @@ function BlankTemplateMenu({ onDownload }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full mt-1 right-0 z-20 min-w-[13rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1">
+          <div className="absolute top-full mt-1 right-0 z-20 min-w-[13rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 animate-menu-in">
             {BLANK_TEMPLATES.map((t) => (
               <button
                 key={t.key}
@@ -210,7 +210,7 @@ export default function ImportProducts() {
             Choose file
           </button>
           {parseError && (
-            <div className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-error-container text-on-error-container text-body-sm">
+            <div className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               {parseError}
             </div>

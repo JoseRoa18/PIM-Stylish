@@ -171,7 +171,7 @@ export default function WayfairConnectorCard() {
             </button>
           </div>
           {attrs?.error && (
-            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container">
+            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span className="break-words">{attrs.error}</span>
             </div>
@@ -213,13 +213,13 @@ export default function WayfairConnectorCard() {
             </button>
           </div>
           {pull?.error && (
-            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container">
+            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span className="break-words">{pull.error}</span>
             </div>
           )}
           {pull?.summary && (
-            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-surface-container-high text-on-surface">
+            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-surface-container-high text-on-surface animate-banner-in">
               <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-primary" />
               <span>
                 {pull.summary.applied} IDs imported ({pull.summary.matched} matched)
@@ -236,14 +236,14 @@ export default function WayfairConnectorCard() {
 function WayfairResult({ result }) {
   if (result.error) {
     return (
-      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container">
+      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
         <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
         <span className="break-words">{result.error}</span>
       </div>
     );
   }
   return (
-    <div className="rounded-lg border border-outline-variant divide-y divide-outline-variant text-body-sm">
+    <div className="rounded-lg border border-outline-variant divide-y divide-outline-variant text-body-sm animate-banner-in">
       <ResultRow label="Content (copy + bullets)" part={result.content} okText={(c) => `${c.bullets ?? 0} bullets · ${c.requestId ? 'validated' : 'ok'}`} />
       <ResultRow label="Media (images)" part={result.media} okText={(m) => `${m.count ?? 0} images · ${m.requestId ? 'validated' : 'ok'}`} />
     </div>
@@ -289,7 +289,7 @@ function WayfairStatusCheck({ result }) {
         Check status at Wayfair
       </button>
       {statuses && (
-        <div className="rounded-lg border border-outline-variant divide-y divide-outline-variant text-body-sm">
+        <div className="rounded-lg border border-outline-variant divide-y divide-outline-variant text-body-sm animate-banner-in">
           {statuses.map((s) => (
             <div key={s.label} className="px-3 py-2">
               {s.error ? (

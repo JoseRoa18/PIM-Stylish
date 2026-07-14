@@ -37,7 +37,7 @@ export default function Sidebar({ open = false, onClose }) {
       {/* Mobile backdrop */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden animate-fade-in"
           onClick={onClose}
           aria-hidden
         />

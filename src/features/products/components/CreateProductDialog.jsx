@@ -173,7 +173,7 @@ export default function CreateProductDialog({ onClose }) {
           </label>
 
           {error && (
-            <div className="px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm flex items-center gap-2">
+            <div className="px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm flex items-center gap-2 animate-banner-in">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               {error}
             </div>

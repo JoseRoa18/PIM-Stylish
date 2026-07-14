@@ -265,7 +265,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       <div className="rounded-2xl border border-outline-variant bg-surface shadow-lg">
         {result && (
           <div
-            className={`px-5 py-2 rounded-t-2xl text-body-sm flex items-center gap-2 ${
+            className={`px-5 py-2 rounded-t-2xl text-body-sm flex items-center gap-2 animate-banner-in ${
               result.type === 'error'
                 ? 'bg-error-container text-on-error-container'
                 : 'bg-success-container text-on-success-container'
@@ -390,7 +390,7 @@ function ExportTemplateDropdown({ disabled, busy, onSelect }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full mb-1 right-0 min-w-[12rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 z-40">
+          <div className="absolute bottom-full mb-1 right-0 min-w-[12rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 z-40 animate-menu-in-up">
             {marketplaces === null && (
               <div className="px-4 py-2 text-body-sm text-on-surface-variant inline-flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
@@ -435,7 +435,7 @@ function StatusDropdown({ disabled, onChange }) {
       {open && !disabled && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 bottom-full mb-1 z-20 min-w-[160px] rounded-lg border border-outline-variant bg-surface shadow-lg overflow-hidden">
+          <div className="absolute right-0 bottom-full mb-1 z-20 min-w-[160px] rounded-lg border border-outline-variant bg-surface shadow-lg overflow-hidden animate-menu-in-up">
             {WORKFLOW_OPTIONS.map((o) => (
               <button
                 key={o.value}

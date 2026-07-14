@@ -487,7 +487,7 @@ export default function ProductDetail() {
       </div>
 
       {saveError && (
-        <div className="mb-4 px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm">{saveError}</div>
+        <div className="mb-4 px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">{saveError}</div>
       )}
 
       <TabBar tabs={TABS} active={activeTab} onChange={setTab} />

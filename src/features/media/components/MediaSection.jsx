@@ -609,7 +609,7 @@ export default function MediaSection({ sku }) {
       )}
 
       {errorMessage && (
-        <div className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant">
+        <div className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant animate-banner-in">
           {errorMessage}
         </div>
       )}
@@ -1007,7 +1007,7 @@ function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -1016,7 +1016,7 @@ function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="w-full max-w-md rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden"
+        className="w-full max-w-md rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in"
       >
         <div className="px-5 py-4 flex items-center justify-between border-b border-outline-variant">
           <h3 className="text-title-md text-on-surface flex items-center gap-2">
@@ -1103,7 +1103,7 @@ function AltTextDialog({ item, onClose, onSave }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -1112,7 +1112,7 @@ function AltTextDialog({ item, onClose, onSave }) {
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="w-full max-w-md rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden"
+        className="w-full max-w-md rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in"
       >
         <div className="px-5 py-4 flex items-center justify-between border-b border-outline-variant">
           <h3 className="text-title-md text-on-surface flex items-center gap-2">
@@ -1219,7 +1219,7 @@ function LinksDialog({ title, subtitle, items, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -1227,7 +1227,7 @@ function LinksDialog({ title, subtitle, items, onClose }) {
       data-lenis-prevent
     >
       <div
-        className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden"
+        className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

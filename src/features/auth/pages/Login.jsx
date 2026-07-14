@@ -52,7 +52,7 @@ export default function Login() {
           </p>
 
           {error && (
-            <div className="mb-4 p-3 rounded-lg bg-error-container border border-error-container flex items-start gap-2">
+            <div className="mb-4 p-3 rounded-lg bg-error-container border border-error-container flex items-start gap-2 animate-banner-in">
               <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
               <p className="text-body-sm text-on-error-container">{error}</p>
             </div>

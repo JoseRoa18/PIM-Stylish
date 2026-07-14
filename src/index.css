@@ -226,6 +226,28 @@ h1, h2, h3, h4, h5, h6 {
   --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
+/* Entrance utilities — opacity/transform only (GPU-friendly). Menus grow
+   from their trigger (origin matches drop direction), banners slide up
+   into place, dialogs settle in. All flattened by prefers-reduced-motion. */
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px) scale(0.98); } }
+@keyframes banner-in { from { opacity: 0; transform: translateY(4px); } }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+
+.animate-fade-in { animation: fade-in 150ms linear both; }
+.animate-menu-in { animation: menu-in 180ms var(--ease-out-quint) both; transform-origin: top; }
+.animate-menu-in-up { animation: menu-in-up 180ms var(--ease-out-quint) both; transform-origin: bottom; }
+.animate-banner-in { animation: banner-in 250ms var(--ease-out-cubic) both; }
+.animate-dialog-in { animation: dialog-in 200ms var(--ease-out-quint) both; }
+
+/* Press feedback: a subtle sink on real buttons (rows with role="button"
+   are excluded on purpose — scaling a table row reads as a glitch).
+   Uses the standalone `scale` property, NOT `transform: scale()`, so it
+   composes with Tailwind translate utilities on positioned buttons
+   instead of overriding them (which would make them jump). */
+button:not(:disabled):active { scale: 0.98; }
+
 /* Keyboard focus must always be visible. Most controls only style :hover;
    this gives every button/link/select a brand-colored ring when reached by
    keyboard, without affecting mouse clicks (:focus-visible only). Inputs keep

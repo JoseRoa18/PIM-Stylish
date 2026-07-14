@@ -275,7 +275,7 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
       }
     >
       {error && (
-        <div className="mb-4 px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm">
+        <div className="mb-4 px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm animate-banner-in">
           {error}
         </div>
       )}
