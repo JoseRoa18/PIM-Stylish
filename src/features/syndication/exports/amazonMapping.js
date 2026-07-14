@@ -195,6 +195,8 @@ export const AMAZON_RULES = {
   'Contains Liquid Contents?': () => 'No',
   // Required by Amazon even for inert products; sinks carry no dangerous goods.
   'Dangerous Goods Regulations': () => 'Not Applicable',
+  // Confirmed by the business 2026-07-14: no PFAS in the assortment.
+  'Contains PFAS': () => 'No',
   'Is This Product Subject To Buyer Age Restrictions': () => 'No',
   'Compliance Media Source Location (en_CA, Specification Sheet)': (p) => docUrl(p, 'spec_sheet'),
   'Compliance Media Source Location (en_CA, Installation Manual)': (p) => docUrl(p, 'installation_manual'),
