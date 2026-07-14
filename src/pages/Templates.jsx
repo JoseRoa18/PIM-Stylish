@@ -149,10 +149,11 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-surface-container-low transition-colors rounded-xl"
       >
         <ChevronDown
-          className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+          className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform duration-300 [transition-timing-function:var(--ease-out-quint)] ${open ? '' : '-rotate-90'}`}
         />
         <div className="w-10 h-10 rounded-lg bg-tertiary-container text-on-tertiary-container flex items-center justify-center flex-shrink-0">
           <FileSpreadsheet className="w-5 h-5" />
@@ -162,22 +163,38 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
           <p className="text-body-sm text-on-surface-variant truncate">{summary}</p>
         </div>
       </button>
-      {open && (
-        <div className="px-5 pb-5 pt-4 border-t border-outline-variant space-y-5">
-          {catGroups.map(([label, list]) => (
-            <div key={label}>
-              <p className="text-label-md font-semibold text-on-surface-variant uppercase tracking-wide mb-2">
-                {label} <span className="font-normal normal-case">· {list.length} file{list.length === 1 ? '' : 's'}</span>
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {list.map((t) => (
-                  <TemplateCard key={t.id} template={t} reload={reload} />
-                ))}
+      {/* Smooth expand/collapse without measuring: transition the grid track
+          from 0fr to 1fr and clip the inner row. Enter 300ms ease-out, exit
+          200ms ease-in (exits read faster); content fades slightly behind
+          the height so it never pops. */}
+      <div
+        className={`grid transition-[grid-template-rows] ${
+          open
+            ? 'grid-rows-[1fr] duration-300 [transition-timing-function:var(--ease-out-quint)]'
+            : 'grid-rows-[0fr] duration-200 ease-in'
+        }`}
+      >
+        <div className="overflow-hidden min-h-0">
+          <div
+            className={`px-5 pb-5 pt-4 border-t border-outline-variant space-y-5 transition-opacity ${
+              open ? 'opacity-100 duration-300 delay-75' : 'opacity-0 duration-150'
+            }`}
+          >
+            {catGroups.map(([label, list]) => (
+              <div key={label}>
+                <p className="text-label-md font-semibold text-on-surface-variant uppercase tracking-wide mb-2">
+                  {label} <span className="font-normal normal-case">· {list.length} file{list.length === 1 ? '' : 's'}</span>
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {list.map((t) => (
+                    <TemplateCard key={t.id} template={t} reload={reload} />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

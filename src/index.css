@@ -218,6 +218,14 @@ h1, h2, h3, h4, h5, h6 {
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
+/* Motion easing tokens (see .claude/skills/animate): enters ease-out,
+   exits ease-in and ~25% faster, 200-300ms sweet spot. */
+:root {
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
 /* Keyboard focus must always be visible. Most controls only style :hover;
    this gives every button/link/select a brand-colored ring when reached by
    keyboard, without affecting mouse clicks (:focus-visible only). Inputs keep
