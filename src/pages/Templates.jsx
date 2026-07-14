@@ -9,6 +9,7 @@ import {
   X,
   Pencil,
   Check,
+  ChevronDown,
 } from 'lucide-react';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import {
@@ -112,7 +113,49 @@ export default function Templates() {
       )}
 
       {!loading && templates.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="space-y-3">
+          {[...new Map(templates.map((t) => [t.marketplace, true])).keys()].sort().map((marketplace) => (
+            <MarketplaceGroup
+              key={marketplace}
+              marketplace={marketplace}
+              templates={templates.filter((t) => t.marketplace === marketplace)}
+              reload={reload}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One collapsible card per marketplace; its templates show on expand.
+function MarketplaceGroup({ marketplace, templates, reload }) {
+  const [open, setOpen] = useState(false);
+  const cats = [...new Set(templates.flatMap((t) => t.categories ?? []))];
+
+  return (
+    <div className="rounded-xl border border-outline-variant bg-surface-container-lowest">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-surface-container-low transition-colors rounded-xl"
+      >
+        <ChevronDown
+          className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+        />
+        <div className="w-10 h-10 rounded-lg bg-tertiary-container text-on-tertiary-container flex items-center justify-center flex-shrink-0">
+          <FileSpreadsheet className="w-5 h-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-body-md text-on-surface font-medium">{marketplace}</p>
+          <p className="text-body-sm text-on-surface-variant truncate">
+            {templates.length} template{templates.length === 1 ? '' : 's'}
+            {cats.length > 0 && ` · ${cats.map(templateCategoryLabel).join(', ')}`}
+          </p>
+        </div>
+      </button>
+      {open && (
+        <div className="px-5 pb-5 pt-4 border-t border-outline-variant grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {templates.map((t) => (
             <TemplateCard key={t.id} template={t} reload={reload} />
           ))}
