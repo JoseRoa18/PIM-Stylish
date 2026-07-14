@@ -60,7 +60,7 @@ export default function Templates() {
         <div>
           <h1 className="text-display-lg text-on-surface">Templates</h1>
           <p className="text-body-md text-on-surface-variant mt-1">
-            Upload marketplace templates (XLSX/CSV) to generate pre-filled export files.
+            Upload marketplace templates (XLSX, XLSM or CSV) to generate pre-filled export files.
           </p>
         </div>
         <button
@@ -216,8 +216,8 @@ function TemplateCard({ template, reload }) {
 
   async function handleDelete() {
     const ok = await confirm({
-      title: `Delete the "${template.marketplace}" template?`,
-      message: 'Product exports for this marketplace will stop working until a new template is uploaded.',
+      title: `Delete "${middleTruncate(template.file_name, 40)}"?`,
+      message: `${template.marketplace} exports that rely on this file will stop working until a new template is uploaded.`,
       confirmLabel: 'Delete',
       destructive: true,
     });
@@ -243,12 +243,15 @@ function TemplateCard({ template, reload }) {
             <FileSpreadsheet className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-body-md text-on-surface font-medium truncate">{template.marketplace}</p>
-            {/* Middle-truncate: Syndigo-style names only differ at the end
-                ("…Containers-07022026 (2)"), so keep the tail visible.
-                Full name on hover via title. */}
-            <p className="text-body-sm text-on-surface-variant truncate" title={template.file_name}>
+            {/* The group header already names the marketplace — the card's
+                identity is the FILE. Middle-truncate keeps the distinctive
+                tail of Syndigo-style names ("…Containers-07022026 (2)");
+                full name on hover. */}
+            <p className="text-body-md text-on-surface font-medium truncate" title={template.file_name}>
               {middleTruncate(template.file_name, 46)}
+            </p>
+            <p className="text-body-sm text-on-surface-variant">
+              Uploaded {formatTimeAgo(template.uploaded_at)}
             </p>
           </div>
         </div>
@@ -317,25 +320,10 @@ function TemplateCard({ template, reload }) {
             </button>
           </div>
         </div>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {template.categories?.length ? (
-            template.categories.map((c) => (
-              <span key={c} className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-label-sm">
-                {templateCategoryLabel(c)}
-              </span>
-            ))
-          ) : (
-            <span className="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm">
-              General · all products
-            </span>
-          )}
-        </div>
-      )}
+      ) : null}
+      {/* Category chips only show while editing — in view mode the card sits
+          inside a section that already names its category. */}
 
-      <p className="text-label-md text-on-surface-variant">
-        Uploaded {formatTimeAgo(template.uploaded_at)}
-      </p>
       {error && <p className="text-body-sm text-error">{error}</p>}
     </div>
   );
@@ -345,36 +333,43 @@ function UploadCard({ onDone, onCancel }) {
   const [marketplace, setMarketplace] = useState('');
   const [customMarketplace, setCustomMarketplace] = useState('');
   const [categories, setCategories] = useState([]);
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
 
   const effectiveMarketplace = marketplace === '__custom__' ? customMarketplace.trim() : marketplace;
-  const canSubmit = effectiveMarketplace && file && !uploading;
+  const canSubmit = effectiveMarketplace && files.length > 0 && !uploading;
 
   function toggleCategory(value) {
     setCategories((prev) => (prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]));
   }
 
+  // Multi-file: sets like Menards ship 6+ workbooks for one marketplace and
+  // category — one pass through the form uploads them all.
   async function handleSubmit(e) {
     e.preventDefault();
     if (!canSubmit) return;
     setUploading(true);
     setError(null);
     try {
-      await uploadTemplate(effectiveMarketplace, file, categories);
+      for (let i = 0; i < files.length; i++) {
+        setProgress(i + 1);
+        await uploadTemplate(effectiveMarketplace, files[i], categories);
+      }
       onDone();
     } catch (err) {
       setError(err.message);
     } finally {
       setUploading(false);
+      setProgress(0);
     }
   }
 
   function handleFileChange(e) {
-    const f = e.target.files?.[0];
-    if (f) setFile(f);
+    const list = [...(e.target.files ?? [])];
+    if (list.length) setFiles(list);
   }
 
   return (
@@ -415,11 +410,12 @@ function UploadCard({ onDone, onCancel }) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label className="text-label-md text-on-surface-variant">Template File</label>
+          <label className="text-label-md text-on-surface-variant">Template file(s)</label>
           <input
             ref={fileRef}
             type="file"
             accept=".xlsx,.xlsm,.xls,.csv"
+            multiple
             onChange={handleFileChange}
             className="hidden"
           />
@@ -429,7 +425,11 @@ function UploadCard({ onDone, onCancel }) {
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-outline-variant bg-surface hover:bg-surface-container-low transition-colors text-body-md text-on-surface-variant"
           >
             <Upload className="w-4 h-4" />
-            {file ? file.name : 'Choose .xlsx, .xlsm or .csv file…'}
+            {files.length === 0
+              ? 'Choose .xlsx, .xlsm or .csv files…'
+              : files.length === 1
+                ? files[0].name
+                : `${files.length} files selected`}
           </button>
         </div>
       </div>
@@ -483,7 +483,9 @@ function UploadCard({ onDone, onCancel }) {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-          {uploading ? 'Uploading…' : 'Upload'}
+          {uploading
+            ? files.length > 1 ? `Uploading ${progress}/${files.length}…` : 'Uploading…'
+            : files.length > 1 ? `Upload ${files.length} files` : 'Upload'}
         </button>
       </div>
     </form>
