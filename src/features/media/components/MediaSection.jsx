@@ -938,7 +938,7 @@ function MediaCard({
             type="button"
             onClick={handleCopyLink}
             className={`p-2 rounded-full transition-colors ${
-              copied ? 'bg-primary text-on-primary' : 'bg-white/90 hover:bg-white text-on-surface'
+              copied ? 'bg-primary text-on-primary' : 'bg-white/90 hover:bg-white text-neutral-800'
             }`}
             title={copied ? 'Link copied!' : 'Copy image link'}
           >
@@ -948,7 +948,7 @@ function MediaCard({
             <button
               type="button"
               onClick={onEditAlt}
-              className="p-2 rounded-full bg-white/90 hover:bg-white text-on-surface transition-colors"
+              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
               title={item.alt_text ? `Alt text: ${item.alt_text}` : 'Add alt text'}
             >
               <Pencil className="w-4 h-4" />
@@ -958,7 +958,7 @@ function MediaCard({
             <button
               type="button"
               onClick={onSetPrimary}
-              className="p-2 rounded-full bg-white/90 hover:bg-white text-on-surface transition-colors"
+              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
               title="Set as primary"
             >
               <Star className="w-4 h-4" />
@@ -968,7 +968,7 @@ function MediaCard({
             <button
               type="button"
               onClick={onRemove}
-              className="p-2 rounded-full bg-white/90 hover:bg-red-600 hover:text-white text-on-surface transition-colors"
+              className="p-2 rounded-full bg-white/90 hover:bg-error hover:text-on-error text-neutral-800 transition-colors"
               title="Remove from product"
             >
               <Trash2 className="w-4 h-4" />
