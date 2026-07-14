@@ -36,6 +36,7 @@ import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
+import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct } from '@/features/templates/api/templates';
@@ -1132,6 +1133,8 @@ function ExportTemplatesCard({ product, media }) {
       } else if (/amazon/i.test(template.marketplace)) {
         const base = (product.model_name || product.sku).replace(/[^\w-]+/g, '_');
         await generateAmazonFromTemplate(template.storage_path, [product], `Amazon_${base}`);
+      } else if (/menards/i.test(template.marketplace)) {
+        await generateMenardsFromTemplates([template], [product]);
       } else {
         await generateBBBFromTemplate(template.storage_path, product, media);
       }

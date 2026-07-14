@@ -14,6 +14,7 @@ import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wix
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
+import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -110,10 +111,55 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     const templates = (await listTemplates()).filter((t) => t.marketplace === marketplace);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
     if (/wayfair|amazon/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
+    if (/menards/i.test(marketplace)) return handleExportMenards(templates);
     setResult({
       type: 'error',
-      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon and BB&B are supported so far.`,
+      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B and Menards are supported so far.`,
     });
+  }
+
+  // Menards is a file SET per category (content + one container file per
+  // dimension). Fill every applicable file in one action.
+  async function handleExportMenards(templates) {
+    setBusy('export');
+    setResult(null);
+    try {
+      const cats = [...new Set(selectedProducts.map((p) => p.category))];
+      // Recipient Reference is documentation, not fillable; browser-duplicated
+      // uploads ("... (2).xlsx") collapse to one file each.
+      const seen = new Set();
+      const usable = templates.filter((t) => {
+        if (/recipient|reference\.xls/i.test(t.file_name)) return false;
+        if (!cats.every((c) => templateAppliesTo(t, c))) return false;
+        const key = t.file_name.replace(/ \(\d+\)(?=\.)/, '');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (!usable.length) {
+        throw new Error(`No Menards template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}).`);
+      }
+
+      const skus = [...selectedSkus];
+      const productList = [];
+      for (const sku of skus) {
+        const p = await getProduct(sku);
+        if (p) productList.push(p);
+      }
+      if (!productList.length) throw new Error('Could not load product data.');
+
+      const res = await generateMenardsFromTemplates(usable, productList);
+      const unmappedTotal = new Set(res.results.flatMap((r) => r.unmapped)).size;
+      setResult({
+        type: 'success',
+        message: `Exported ${res.files} Menards file(s) for ${res.count} product(s).` +
+          (unmappedTotal ? ` ${unmappedTotal} column(s) left for manual/account data (vendor terms, master packs…).` : ''),
+      });
+    } catch (err) {
+      setResult({ type: 'error', message: err.message ?? 'Menards export failed' });
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function handleExportBBB(templates) {
