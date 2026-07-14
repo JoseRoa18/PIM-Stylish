@@ -100,7 +100,7 @@ export default function Sidebar({ open = false, onClose }) {
             className="w-full bg-primary text-on-primary py-2 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity text-label-md"
           >
             <Plus className="w-4 h-4" />
-            Create Product
+            New Product
           </button>
         </div>
       )}

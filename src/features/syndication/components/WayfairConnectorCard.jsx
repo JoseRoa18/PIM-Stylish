@@ -91,6 +91,7 @@ export default function WayfairConnectorCard() {
       </div>
 
       <div className="px-6 py-5 space-y-3">
+        <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">Content &amp; images</p>
         <p className="text-body-sm text-on-surface-variant">
           Enter a product SKU, then validate the payload against Wayfair (safe — nothing changes) or
           push it live. Content needs the product's Wayfair item-group id (stored on the product or
@@ -154,9 +155,10 @@ export default function WayfairConnectorCard() {
         {result && !result.error && <WayfairStatusCheck result={result} />}
 
         <div className="pt-3 border-t border-outline-variant space-y-2">
+          <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">Spec attributes</p>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-body-sm text-on-surface-variant">
-              Spec attributes (kitchen sinks only): dimensions, gauge, basins, material, finish, warranty…
+              Dimensions, gauge, basins, material, finish, warranty… (kitchen sinks only for now).
             </p>
             <button
               type="button"
@@ -165,7 +167,7 @@ export default function WayfairConnectorCard() {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
             >
               {attrsBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-              Validate spec attributes
+              Validate
             </button>
           </div>
           {attrs?.error && (
@@ -195,6 +197,7 @@ export default function WayfairConnectorCard() {
         </div>
 
         <div className="pt-3 border-t border-outline-variant space-y-2">
+          <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">Setup</p>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-body-sm text-on-surface-variant">
               Missing item-group ids? Import them from Wayfair's catalog for every SKU (fills empty ones only).

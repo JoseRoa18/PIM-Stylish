@@ -16,6 +16,56 @@ import { buildImportRows } from '@/features/import/lib/buildImportRows';
 import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 
+const BLANK_TEMPLATES = [
+  { key: 'sink', label: 'Kitchen Sink' },
+  { key: 'bathroom_sink', label: 'Bathroom Sink' },
+  { key: 'kitchen_faucet', label: 'Kitchen Faucet' },
+  { key: 'bathroom_faucet', label: 'Bathroom Faucet' },
+  { key: 'cutting_board', label: 'Cutting Board' },
+  { key: 'soap_dispenser', label: 'Soap Dispenser' },
+  { key: 'pop_up_drain', label: 'Pop-Up Drain' },
+  { key: 'basket_strainer', label: 'Basket Strainer' },
+  { key: 'faucet_plate', label: 'Faucet Plate' },
+];
+
+// One button with a category menu — the pill-per-category row outgrew the
+// header once accessories arrived, and this mirrors the catalog's
+// "Export Template" menu (download blank ↔ export filled, same gesture).
+function BlankTemplateMenu({ onDownload }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+      >
+        <Download className="w-4 h-4" />
+        Blank template
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full mt-1 right-0 z-20 min-w-[13rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1">
+            {BLANK_TEMPLATES.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => { setOpen(false); onDownload(t.key); }}
+                className="w-full text-left px-4 py-2 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ImportProducts() {
   const navigate = useNavigate();
   const fileRef = useRef(null);
@@ -127,81 +177,7 @@ export default function ImportProducts() {
             Upload a spreadsheet to create or update products in bulk. Images and documents are added separately on each product.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-body-sm text-on-surface-variant">Blank template:</span>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('sink')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Kitchen Sink
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('bathroom_sink')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Bathroom Sink
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('kitchen_faucet')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Kitchen Faucet
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('bathroom_faucet')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Bathroom Faucet
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('cutting_board')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Cutting Board
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('soap_dispenser')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Soap Dispenser
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('pop_up_drain')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Pop-Up Drain
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('basket_strainer')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Basket Strainer
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('faucet_plate')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Faucet Plate
-          </button>
-        </div>
+        <BlankTemplateMenu onDownload={downloadTemplate} />
       </header>
 
       {phase === 'upload' && (

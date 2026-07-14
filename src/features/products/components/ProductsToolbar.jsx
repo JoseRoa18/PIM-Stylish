@@ -59,7 +59,7 @@ export default function ProductsToolbar({
           type="text"
           value={searchTerm}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search SKU, model, family number, factory code..."
+          placeholder="Filter by SKU, model, family number, factory code…"
           className="w-full pl-11 pr-11 py-2.5 rounded-full bg-surface-container-lowest text-body-md text-on-surface placeholder:text-on-surface-variant border border-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-shadow"
         />
         {searchTerm && (

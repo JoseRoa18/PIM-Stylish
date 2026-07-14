@@ -218,6 +218,18 @@ h1, h2, h3, h4, h5, h6 {
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
+/* Keyboard focus must always be visible. Most controls only style :hover;
+   this gives every button/link/select a brand-colored ring when reached by
+   keyboard, without affecting mouse clicks (:focus-visible only). Inputs keep
+   their own focus ring styles. */
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* Native form controls (checkboxes/radios) should follow the APP theme, not
    the OS preference — otherwise an OS-dark machine renders them as ugly black
    boxes while the app is in light mode. Pairs with `accent-*` for the check color. */

@@ -28,6 +28,10 @@ export default function ProductsTable({
 }) {
   const navigate = useNavigate();
   const selectionEnabled = typeof onToggleSelect === 'function';
+  // A price column that is almost entirely "—" is noise, not information —
+  // show MSRP only when the current list actually carries prices.
+  const showMsrp = (products ?? []).some((p) => p.msrp_cad != null && p.msrp_cad !== '');
+  const columns = showMsrp ? COLUMNS : COLUMNS.filter((c) => c.key !== 'msrp');
 
   if (error) {
     return (
@@ -94,7 +98,7 @@ export default function ProductsTable({
                 </th>
               )}
               <th className="py-3 px-4 w-20"></th>
-              {COLUMNS.map((col) => (
+              {columns.map((col) => (
                 <SortableHeader
                   key={col.key}
                   col={col}
@@ -171,9 +175,11 @@ export default function ProductsTable({
                   <td className="py-3 px-4">
                     <StatusBadge status={product.workflow_status} />
                   </td>
-                  <td className="py-3 px-4 text-body-md font-semibold text-on-surface text-right whitespace-nowrap tabular-nums">
-                    {formatCAD(product.msrp_cad)}
-                  </td>
+                  {showMsrp && (
+                    <td className="py-3 px-4 text-body-md font-semibold text-on-surface text-right whitespace-nowrap tabular-nums">
+                      {formatCAD(product.msrp_cad)}
+                    </td>
+                  )}
                 </tr>
               );
             })}
