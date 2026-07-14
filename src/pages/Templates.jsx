@@ -39,6 +39,16 @@ const MARKETPLACE_OPTIONS = [
   'Menards',
 ];
 
+// "StylishInternatio-Menards-…-KitchenSinks-Containers-07022026 (2).xlsx"
+// → keep the start and the distinctive tail.
+function middleTruncate(name, max) {
+  const s = String(name ?? '');
+  if (s.length <= max) return s;
+  const tail = Math.floor((max - 1) / 2);
+  const head = max - 1 - tail;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
 export default function Templates() {
   const { templates, loading, error, reload } = useTemplates();
   const [showUpload, setShowUpload] = useState(false);
@@ -174,7 +184,12 @@ function TemplateCard({ template, reload }) {
           </div>
           <div className="min-w-0">
             <p className="text-body-md text-on-surface font-medium truncate">{template.marketplace}</p>
-            <p className="text-body-sm text-on-surface-variant truncate">{template.file_name}</p>
+            {/* Middle-truncate: Syndigo-style names only differ at the end
+                ("…Containers-07022026 (2)"), so keep the tail visible.
+                Full name on hover via title. */}
+            <p className="text-body-sm text-on-surface-variant truncate" title={template.file_name}>
+              {middleTruncate(template.file_name, 46)}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
