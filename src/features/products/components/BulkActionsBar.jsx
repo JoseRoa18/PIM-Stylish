@@ -13,7 +13,8 @@ import { bulkUpdateProducts, getProduct } from '../api/products';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
-import { listTemplates, templateAppliesTo } from '@/features/templates/api/templates';
+import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
+import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
@@ -104,7 +105,18 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     await runBatch(linkedSkus, (sku) => readWixProduct(sku), 'refresh');
   }
 
-  async function handleExportBBB() {
+  // One entry point for every marketplace with an uploaded template.
+  async function handleExportMarketplace(marketplace) {
+    const templates = (await listTemplates()).filter((t) => t.marketplace === marketplace);
+    if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
+    if (/wayfair|amazon/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
+    setResult({
+      type: 'error',
+      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon and BB&B are supported so far.`,
+    });
+  }
+
+  async function handleExportBBB(templates) {
     setBusy('export');
     setResult(null);
     setProgress({ done: 0, total: count + 1 });
@@ -112,12 +124,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       // 1. Find a BB&B template that applies to EVERY selected category
       // (one BB&B template can span categories, e.g. kitchen + bathroom sinks).
       const cats = [...new Set(selectedProducts.map((p) => p.category))];
-      const templates = await listTemplates();
-      const bbb = templates.find(
-        (t) =>
-          /bb&b|bbb|overstock/i.test(t.marketplace) &&
-          cats.every((c) => templateAppliesTo(t, c))
-      );
+      const bbb = templates.find((t) => cats.every((c) => templateAppliesTo(t, c)));
       if (!bbb) {
         throw new Error(
           `No single BB&B / Overstock template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload one in /templates or narrow the selection.`
@@ -156,51 +163,55 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     }
   }
 
-  async function handleExportWayfair() {
-    setBusy('wayfair');
+  // Wayfair/Amazon templates are class-specific — resolve each product to its
+  // template (category + accessory kind) and generate one file per template.
+  async function handleExportGrouped(marketplace, mkTemplates) {
+    setBusy('export');
     setResult(null);
     try {
-      const templates = await listTemplates();
-      const wayfairTemplates = templates.filter((t) => /wayfair/i.test(t.marketplace));
-      if (!wayfairTemplates.length) {
-        throw new Error('No Wayfair template found. Upload one in /templates first.');
+      if (!mkTemplates.length) {
+        throw new Error(`No ${marketplace} template found. Upload one in /templates first.`);
       }
+      const generate = /amazon/i.test(marketplace) ? generateAmazonFromTemplate : generateWayfairFromTemplate;
+      const prefix = marketplace.replace(/[^a-z0-9]+/gi, '_');
 
-      // Wayfair templates are category-specific — group the selection by
-      // category and generate one file per category's template.
       const skus = [...selectedSkus];
-      const byCategory = new Map();
+      const byTemplate = new Map(); // template.id → { tmpl, label, products }
+      const noTemplate = [];
       for (const sku of skus) {
         const p = await getProduct(sku);
         if (!p) continue;
-        if (!byCategory.has(p.category)) byCategory.set(p.category, []);
-        byCategory.get(p.category).push(p);
-      }
-      if (!byCategory.size) throw new Error('Could not load product data.');
-
-      const parts = [];
-      const noTemplate = [];
-      let warnings = 0;
-      for (const [cat, productList] of byCategory) {
-        const tmpl = wayfairTemplates.find((t) => templateAppliesTo(t, cat));
+        const tmpl = templateForProduct(mkTemplates, p);
         if (!tmpl) {
-          noTemplate.push(cat);
+          const label = p.category === 'accessory' ? `accessory (${accessoryKind(p) ?? p.sku})` : p.category;
+          if (!noTemplate.includes(label)) noTemplate.push(label);
           continue;
         }
-        const res = await generateWayfairFromTemplate(tmpl.storage_path, productList, `Wayfair_${cat}`);
+        if (!byTemplate.has(tmpl.id)) {
+          const label = p.category === 'accessory' ? `${p.category}/${accessoryKind(p)}` : p.category;
+          byTemplate.set(tmpl.id, { tmpl, label, products: [] });
+        }
+        byTemplate.get(tmpl.id).products.push(p);
+      }
+      if (!byTemplate.size && !noTemplate.length) throw new Error('Could not load product data.');
+
+      const parts = [];
+      let warnings = 0;
+      for (const { tmpl, label, products: productList } of byTemplate.values()) {
+        const res = await generate(tmpl.storage_path, productList, `${prefix}_${label.replace(/[^a-z0-9_]+/gi, '_')}`);
         warnings += res.warnings?.length ?? 0;
-        parts.push(`${cat}: ${res.count} product(s) / ${res.families} group(s)`);
+        parts.push(`${label}: ${res.count} product(s)${res.families != null ? ` / ${res.families} group(s)` : ''}`);
       }
 
       if (!parts.length) {
-        throw new Error(`No Wayfair template available for: ${noTemplate.join(', ')}. Upload the matching category template(s).`);
+        throw new Error(`No ${marketplace} template available for: ${noTemplate.join(', ')}. Upload the matching category template(s).`);
       }
       let message = `Exported ${parts.length} file(s) — ${parts.join(' · ')}.`;
       if (noTemplate.length) message += ` ⚠ Skipped (no template): ${noTemplate.join(', ')}.`;
       if (warnings) message += ` ⚠ ${warnings} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`;
       setResult({ type: noTemplate.length || warnings ? 'error' : 'success', message });
     } catch (err) {
-      setResult({ type: 'error', message: err.message ?? 'Wayfair export failed' });
+      setResult({ type: 'error', message: err.message ?? `${marketplace} export failed` });
     } finally {
       setBusy(null);
     }
@@ -208,10 +219,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
   return (
     <div className="sticky bottom-4 z-30 mx-auto max-w-4xl">
-      <div className="rounded-2xl border border-outline-variant bg-surface shadow-lg overflow-hidden">
+      {/* No overflow-hidden here — the dropdown menus open above the bar. */}
+      <div className="rounded-2xl border border-outline-variant bg-surface shadow-lg">
         {result && (
           <div
-            className={`px-5 py-2 text-body-sm flex items-center gap-2 ${
+            className={`px-5 py-2 rounded-t-2xl text-body-sm flex items-center gap-2 ${
               result.type === 'error'
                 ? 'bg-error-container text-on-error-container'
                 : 'bg-success-container text-on-success-container'
@@ -279,27 +291,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
               Refresh from Wix
             </button>
 
-            <button
-              type="button"
-              onClick={handleExportBBB}
+            <ExportTemplateDropdown
               disabled={!!busy}
-              title={`Export ${count} product${count === 1 ? '' : 's'} into one BB&B template`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export BB&B
-            </button>
-
-            <button
-              type="button"
-              onClick={handleExportWayfair}
-              disabled={!!busy}
-              title={`Export ${count} product${count === 1 ? '' : 's'} into the matching Wayfair template`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download className="w-3.5 h-3.5" />
-              {busy === 'wayfair' ? 'Exporting…' : 'Export Wayfair'}
-            </button>
+              busy={busy === 'export'}
+              onSelect={handleExportMarketplace}
+            />
 
             <div className="w-px h-5 bg-outline-variant mx-1" />
 
@@ -315,6 +311,67 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// One export button; the menu lists every marketplace with an uploaded
+// template (loaded lazily when the menu opens).
+function ExportTemplateDropdown({ disabled, busy, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const [marketplaces, setMarketplaces] = useState(null); // null = not loaded
+
+  async function toggle() {
+    if (open) return setOpen(false);
+    setOpen(true);
+    if (marketplaces === null) {
+      try {
+        const templates = await listTemplates();
+        setMarketplaces([...new Set(templates.map((t) => t.marketplace))]);
+      } catch {
+        setMarketplaces([]);
+      }
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={disabled}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+        {busy ? 'Exporting…' : 'Export Template'}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full mb-1 right-0 min-w-[12rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 z-40">
+            {marketplaces === null && (
+              <div className="px-4 py-2 text-body-sm text-on-surface-variant inline-flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
+              </div>
+            )}
+            {marketplaces?.length === 0 && (
+              <div className="px-4 py-2 text-body-sm text-on-surface-variant">
+                No templates uploaded — add one in /templates.
+              </div>
+            )}
+            {marketplaces?.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => { setOpen(false); onSelect(m); }}
+                className="w-full text-left px-4 py-2 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

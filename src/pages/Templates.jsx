@@ -342,7 +342,7 @@ function UploadCard({ onDone, onCancel }) {
           <input
             ref={fileRef}
             type="file"
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.xlsm,.xls,.csv"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -352,7 +352,7 @@ function UploadCard({ onDone, onCancel }) {
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-outline-variant bg-surface hover:bg-surface-container-low transition-colors text-body-md text-on-surface-variant"
           >
             <Upload className="w-4 h-4" />
-            {file ? file.name : 'Choose .xlsx or .csv file…'}
+            {file ? file.name : 'Choose .xlsx, .xlsm or .csv file…'}
           </button>
         </div>
       </div>

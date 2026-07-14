@@ -21,6 +21,48 @@ export function templateAppliesTo(template, category) {
   return !cats || cats.length === 0 || cats.includes(category);
 }
 
+// Accessories span several marketplace classes (cutting boards, strainers,
+// soap dispensers…), each with its own template file. Derive the product's
+// accessory kind so the right template can be picked by file name.
+export function accessoryKind(product) {
+  const t = `${product.product_type ?? ''} ${product.attributes?.general_title_en ?? ''} ${product.model_name ?? ''}`;
+  if (/cutting board|serving board|over the sink|workstation/i.test(t)) return 'cutting board';
+  if (/strainer/i.test(t)) return 'strainer';
+  if (/colander/i.test(t)) return 'strainer'; // colanders share the strainers class
+  if (/soap|lotion/i.test(t)) return 'soap dispenser';
+  if (/drain/i.test(t)) return 'drain';
+  if (/faucet plate|deck plate/i.test(t)) return 'faucet plate';
+  if (/grid/i.test(t)) return 'grid';
+  return null;
+}
+
+// File-name patterns per accessory kind — tolerant to common typos
+// ("Cuting boards", missing spaces, plurals).
+const KIND_FILE_RE = {
+  'cutting board': /cutt?ing.?boards?/i,
+  strainer: /strainers?|colanders?/i,
+  'soap dispenser': /soap|dispensers?/i,
+  drain: /drains?/i,
+  'faucet plate': /faucet.?plates?|deck.?plates?/i,
+  grid: /grids?/i,
+};
+
+// Category must apply, and for accessories the file name must mention the
+// product's kind (a cutting board never lands in the strainers template).
+export function templateMatchesProduct(template, product) {
+  if (!templateAppliesTo(template, product.category)) return false;
+  if (product.category !== 'accessory') return true;
+  const kind = accessoryKind(product);
+  if (!kind) return false;
+  const re = KIND_FILE_RE[kind] ?? new RegExp(kind.replace(' ', '.?'), 'i');
+  return re.test(template.file_name ?? '');
+}
+
+// Pick the best template for a product. Returns null when nothing fits.
+export function templateForProduct(templates, product) {
+  return templates.find((t) => templateMatchesProduct(t, product)) ?? null;
+}
+
 export async function listTemplates() {
   const { data, error } = await supabase
     .from('marketplace_templates')
@@ -34,10 +76,15 @@ export async function listTemplates() {
 export async function uploadTemplate(marketplace, file, categories = []) {
   const storagePath = `marketplace-templates/${marketplace.toLowerCase().replace(/[^a-z0-9]/g, '_')}/${Date.now()}_${file.name}`;
 
+  const isMacroEnabled = /\.xlsm$/i.test(file.name);
   const { error: uploadErr } = await supabase.storage
     .from('templates')
     .upload(storagePath, file, {
-      contentType: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      contentType:
+        file.type ||
+        (isMacroEnabled
+          ? 'application/vnd.ms-excel.sheet.macroEnabled.12'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
       upsert: false,
     });
 

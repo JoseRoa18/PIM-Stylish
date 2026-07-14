@@ -57,6 +57,23 @@ const FINISH_ALIAS = {
   'nano graphite black dura-tek': 'Gunmetal Black',
 };
 const MOUNT_ALIAS = { 'one hole': 'Single-Hole', 'two holes': 'Centerset' };
+// Accessory "Color" columns want a plain color, not the finish name.
+const COLOR_ALIAS = {
+  'brushed stainless steel': 'Silver',
+  'stainless steel': 'Silver',
+  'brushed gold': 'Gold',
+  'matte black': 'Black',
+  'matte black with gold': 'Black',
+  'graphite black': 'Black',
+  grey: 'Grey',
+  gray: 'Grey',
+  white: 'White',
+  // Bamboo boards
+  'honey-toned brown': 'Brown',
+  'honey toned brown': 'Brown',
+  natural: 'Brown',
+  bamboo: 'Brown',
+};
 const SPOUT_ALIAS = { foldable: 'Swivel' };
 const alias = (table, v) => {
   if (!v) return '';
@@ -118,6 +135,8 @@ export const WAYFAIR_RULES = {
   // Pricing
   'Base Cost': () => '', // wholesale — deferred
   'Manufacturer Suggested Retail Price': (p) => p.msrp_cad || '',
+  'Minimum Advertised Price': () => '', // business-deferred
+  'Everyday B2B Discount Rate': () => '',
   // Marketing
   'Marketing Copy': (p) => stripHtml(p.description),
   // Fulfillment (business defaults)
@@ -126,6 +145,10 @@ export const WAYFAIR_RULES = {
   'Display Set Quantity': () => 1,
   'Product Weight': (p) => num(attr(p).product_weight_lb || p.shipping_weight_lb),
   'Ship Type': () => 'Small Parcel',
+  'Freight Class': () => '', // LTL-only fields; our exports ship small parcel
+  'National Motor Freight Class': () => '',
+  'Flat Pack': () => 'No',
+  'Ship Palletized': () => 'No',
   'Lead Time': () => '24',
   'Replacement Lead Time': () => '24',
   'Carton Weight 1': (p) => num(p.shipping_weight_lb),
@@ -180,6 +203,11 @@ export const WAYFAIR_RULES = {
   'Lead Free': (p) => yesNo(attr(p).lead_free),
   'ADA Compliant': (p) => adaYesNo(attr(p).ada_compliant),
   'Commercial Warranty': () => 'No',
+  'Commercial Warranty Length': (p) => attr(p).commercial_warranty_length || 'Does Not Apply',
+  'ISTA Certified': (p) => yesNo(attr(p).ista_certified) || 'No',
+  'Sustainability & Social Responsibility Certifications (North America Only)': () => '',
+  'Chemical 1': () => '', // Prop 65 — no listed chemicals in our assortment
+  'Toxicity 1': () => '',
   'Wayfair Compliance Verified Program (including Baby Safety Alliance fka JPMA) for this product category': () => 'No',
   'Uniform Packaging and Labeling Regulations (UPLR) Compliant': (p) => yesNo(attr(p).uplr_compliant) || 'No',
   'Canada Product Restriction': (p) => yesNo(attr(p).canada_product_restriction) || 'No',
@@ -295,6 +323,45 @@ const partCode = (p, re) => {
 // so templates that share display names with different semantics (Product
 // Type, Mounting, Pieces Included…) stay correct per category.
 export const WAYFAIR_CATEGORY_RULES = {
+  // Accessories (strainers/colanders 831, soap dispensers, cutting boards…).
+  // Axis translation: Wayfair "Width - Side to Side" is the PIM's length
+  // (end-to-end); "Depth - Front to Back" is the PIM's width.
+  accessory: {
+    'Product Type': (p) => {
+      const t = `${p.product_type ?? ''} ${attr(p).general_title_en ?? ''} ${p.model_name ?? ''}`;
+      if (/strainer/i.test(t)) return 'Basket Strainer';
+      if (/colander/i.test(t)) return 'Colander';
+      if (/soap|lotion/i.test(t)) return 'Soap Dispenser';
+      if (/cutting board|serving board|over the sink|workstation/i.test(t)) return 'Cutting Board';
+      if (/drain/i.test(t)) return 'Pop-Up Drain';
+      if (/grid/i.test(t)) return 'Sink Grid';
+      return p.product_type ?? '';
+    },
+    Color: (p) => alias(COLOR_ALIAS, p.finish),
+    'Color / Finish': (p) => alias(COLOR_ALIAS, p.finish),
+    'Total Number of Pieces Included': (p) => String(attr(p).number_of_pieces ?? 1),
+    'Product Care': (p) => attr(p).product_care ?? '',
+    Handheld: () => 'No',
+    'Adjustability Features': () => 'Does Not Apply',
+    'BPA Free': (p) => yesNo(attr(p).bpa_free) || 'No',
+    'Holiday / Occasion': () => 'Does Not Apply',
+    'Personalization or Monogramming': () => 'No',
+    'Built-In Features': (p) => (attr(p).juice_grooves === true ? 'Juice Groove' : 'Does Not Apply'),
+    'Overall Length - End to End': (p) => num(attr(p).external_dimensions_in?.length),
+    // Axis semantics depend on the template: when it has a Length column
+    // (cutting boards 187), Width means the PIM's width; without one
+    // (strainers 831), Width - Side to Side carries the PIM's length.
+    'Overall Width - Side to Side': (p, headers) =>
+      headers?.has('Overall Length - End to End')
+        ? num(attr(p).external_dimensions_in?.width)
+        : num(attr(p).external_dimensions_in?.length ?? attr(p).external_dimensions_in?.width),
+    // Round items (soap dispensers, strainers) often carry a single footprint
+    // dimension — fall back to it so depth isn't blank.
+    'Overall Depth - Front to Back': (p) => num(attr(p).external_dimensions_in?.width ?? attr(p).external_dimensions_in?.length),
+    'Overall Height - Top to Bottom': (p) => num(attr(p).external_dimensions_in?.height ?? attr(p).external_dimensions_in?.depth),
+    'Overall Thickness': (p) => num(attr(p).external_dimensions_in?.height ?? attr(p).external_dimensions_in?.depth),
+    'Commercial Warranty': (p) => yesNo(attr(p).commercial_warranty) || 'No',
+  },
   kitchen_sink: {
     'Product Type': (p) => (/workstation/i.test(attr(p).general_title_en ?? '') ? 'Kitchen Sink Workstation' : 'Standard Kitchen Sink'),
     'Mounting / Installation': (p) => {

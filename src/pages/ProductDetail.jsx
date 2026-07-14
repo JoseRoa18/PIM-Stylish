@@ -35,9 +35,10 @@ import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
+import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
-import { templateAppliesTo } from '@/features/templates/api/templates';
+import { templateMatchesProduct } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
 
 // ===================== Constants =====================
@@ -1111,7 +1112,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
 function ExportTemplatesCard({ product, media }) {
   const { templates, loading } = useTemplates();
-  const available = templates.filter((t) => templateAppliesTo(t, product.category));
+  const available = templates.filter((t) => templateMatchesProduct(t, product));
   const [exporting, setExporting] = useState(null);
   const [error, setError] = useState(null);
 
@@ -1128,6 +1129,9 @@ function ExportTemplatesCard({ product, media }) {
             `Downloaded ${res.count} variant(s). ⚠ ${res.warnings.length} share a finish — set a 2nd Variant Grouping in Excel before uploading (details in console).`
           );
         }
+      } else if (/amazon/i.test(template.marketplace)) {
+        const base = (product.model_name || product.sku).replace(/[^\w-]+/g, '_');
+        await generateAmazonFromTemplate(template.storage_path, [product], `Amazon_${base}`);
       } else {
         await generateBBBFromTemplate(template.storage_path, product, media);
       }
