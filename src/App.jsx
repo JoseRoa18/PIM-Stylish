@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Catalog = lazy(() => import('./pages/Catalog'));
 const ProductDetail = lazy(() => import('./pages/ProductDetail'));
 const Syndication = lazy(() => import('./pages/Syndication'));
+const SyndicationChannel = lazy(() => import('./pages/SyndicationChannel'));
 const Templates = lazy(() => import('./pages/Templates'));
 const ListingHealth = lazy(() => import('./pages/ListingHealth'));
 const ImportProducts = lazy(() => import('./pages/ImportProducts'));
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/catalog" element={<Catalog />} />
           <Route path="/catalog/:sku" element={<ProductDetail />} />
           <Route path="/syndication" element={<Syndication />} />
+          <Route path="/syndication/:channel" element={<SyndicationChannel />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/listing-health" element={<ListingHealth />} />
           <Route
