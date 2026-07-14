@@ -772,6 +772,7 @@ function SpecsTab({ product, edit }) {
     || attr(product, 'laminar_flow') != null
     || attr(product, 'valve_included') != null
     || attr(product, 'compatible_drain_assembly') != null;
+  const isAccessory = cat === 'accessory';
 
   return (
     <div className="space-y-6">
@@ -834,6 +835,44 @@ function SpecsTab({ product, edit }) {
               <AttrField label="cUPC Certified" attrKey="cupc_certified" product={product} edit={edit} />
               <AttrField label="UPLR Compliant" attrKey="uplr_compliant" product={product} edit={edit} />
               <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
+              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
+              <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
+            </div>
+          </Section>
+        </>
+      )}
+
+      {isAccessory && (
+        <>
+          <Section title="Accessory Details">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Wood Species" attrKey="wood_species" product={product} edit={edit} />
+              <AttrField label="Pattern" attrKey="pattern" product={product} edit={edit} />
+              <AttrField label="Overall Shape" attrKey="overall_shape" product={product} edit={edit} />
+              <AttrField label="Product Care" attrKey="product_care" product={product} edit={edit} />
+              <AttrField label="Antimicrobial" attrKey="antimicrobial" product={product} edit={edit} />
+              <AttrField label="Juice Grooves" attrKey="juice_grooves" type="boolean" product={product} edit={edit} />
+              <AttrField label="BPA Free" attrKey="bpa_free" type="boolean" product={product} edit={edit} />
+              <AttrField label="Flexible" attrKey="flexible_cutting_board" type="boolean" product={product} edit={edit} />
+              <AttrField label="Reversible" attrKey="reversible" type="boolean" product={product} edit={edit} />
+              <AttrField label="Over The Sink" attrKey="over_the_sink" type="boolean" product={product} edit={edit} />
+              <AttrField label="Knife Included" attrKey="knife_included" type="boolean" product={product} edit={edit} />
+              <AttrField label="Handle(s) Included" attrKey="handles_included" type="boolean" product={product} edit={edit} />
+            </div>
+          </Section>
+
+          <Section title="Certifications & Compliance" defaultOpen={false}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="USDA Compliant" attrKey="usda_compliant" product={product} edit={edit} />
+              <AttrField label="TAA Compliant" attrKey="taa_compliant" product={product} edit={edit} />
+              <AttrField label="NSF Certified" attrKey="nsf_certified" product={product} edit={edit} />
+              <AttrField label="ISO 14021 Recycled" attrKey="iso_14021_certified" product={product} edit={edit} />
+              <AttrField label="PEFC Certified" attrKey="pefc_certified" product={product} edit={edit} />
+              <AttrField label="ISTA Certified" attrKey="ista_certified" product={product} edit={edit} />
+              <AttrField label="SFI Certifications" attrKey="sfi_certifications" product={product} edit={edit} />
+              <AttrField label="FSC Certifications" attrKey="fsc_certifications" product={product} edit={edit} />
+              <AttrField label="Safety Reg. #" attrKey="safety_listing_registration_number" product={product} edit={edit} mono />
+              <AttrField label="Commercial Warranty" attrKey="commercial_warranty" product={product} edit={edit} />
               <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
               <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
             </div>

@@ -174,6 +174,12 @@ export function buildImportRows(parsed) {
       filledLabels.add('Bullets (FR)');
     }
 
+    // Bathroom-faucet sheets carry the product name only in the QuickBooks
+    // Description column; use it as the name when Model Name is absent/empty.
+    if (!columns.model_name && columns.quickbooks_description) {
+      columns.model_name = columns.quickbooks_description;
+    }
+
     // Required checks
     const sku = columns.sku ?? null;
     if (!sku) errors.push('Missing Model Number (SKU)');

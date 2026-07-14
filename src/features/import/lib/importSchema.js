@@ -35,14 +35,37 @@ export const CATEGORY_MAP = {
   'prep sink': 'bar_prep_sink',
   'accessory': 'accessory',
   'accessories': 'accessory',
+  'cutting board': 'accessory',
+  'cutting boards': 'accessory',
+  'soap dispenser': 'accessory',
+  'soap dispensers': 'accessory',
+  'pop-up drain': 'accessory',
+  'pop-up drains': 'accessory',
+  'pop up drain': 'accessory',
+  'pop up drains': 'accessory',
+  'drain': 'accessory',
+  'drains': 'accessory',
+  'strainer': 'accessory',
+  'strainers': 'accessory',
+  'basket strainer': 'accessory',
+  'basket strainers': 'accessory',
+  'faucet plate': 'accessory',
+  'faucet plates': 'accessory',
+  'deck plate': 'accessory',
+  'deck plates': 'accessory',
+  'sink grid': 'accessory',
+  'sink grids': 'accessory',
+  'grid': 'accessory',
+  'grids': 'accessory',
 };
 
 export const FIELD_DEFS = [
   // ---------- Identification ----------
   { key: 'sku', label: 'Model Number', aliases: ['modelnumber', 'sku', 'suppliersku'], type: 'text', target: { col: 'sku' }, required: true },
-  // Bathroom-faucet sheets have no "Model Name" column — the QuickBooks
-  // Description doubles as the product name.
-  { key: 'model_name', label: 'Model Name', aliases: ['modelname', 'quickbooksdescription'], type: 'text', target: { col: 'model_name' } },
+  { key: 'model_name', label: 'Model Name', aliases: ['modelname'], type: 'text', target: { col: 'model_name' } },
+  // Bathroom-faucet sheets have no "Model Name" column — buildImportRows falls
+  // back to the QuickBooks Description as the product name when Model Name is empty.
+  { key: 'quickbooks_description', label: 'Quickbooks Description', aliases: ['quickbooksdescription'], type: 'text', target: { col: 'quickbooks_description' } },
   // NOTE: "Family #" from spreadsheets is intentionally ignored — variant
   // families are derived automatically from the SKU base model (S-300XG → S-300).
   { key: 'brand', label: 'Brand', aliases: ['brand'], type: 'text', target: { col: 'brand' }, required: true },
@@ -70,9 +93,10 @@ export const FIELD_DEFS = [
   { key: 'sink_radius_mm', label: 'Sink Radius', aliases: ['sinkradius', 'sinkradiusmm'], type: 'number', target: { attr: 'sink_radius_mm' } },
 
   // ---------- External / internal dimensions ----------
-  { key: 'ext_length', label: 'External Lenght', aliases: ['externallenght', 'externallength', 'externalsinksizelengthinches'], type: 'number', target: { dim: ['external_dimensions_in', 'length'] } },
-  { key: 'ext_width', label: 'External Width', aliases: ['externalwidth', 'externalsinksizewidthinches'], type: 'number', target: { dim: ['external_dimensions_in', 'width'] } },
-  { key: 'ext_depth', label: 'External Depth', aliases: ['externaldepth', 'externalsinksizedepthinches'], type: 'number', target: { dim: ['external_dimensions_in', 'depth'] } },
+  { key: 'ext_length', label: 'External Lenght', aliases: ['externallenght', 'externallength', 'externalsinksizelengthinches', 'overallproductlengthendtoend', 'overalllengthendtoend'], type: 'number', target: { dim: ['external_dimensions_in', 'length'] } },
+  { key: 'ext_width', label: 'External Width', aliases: ['externalwidth', 'externalsinksizewidthinches', 'overallproductwidthsidetoside', 'overallwidthfronttoback', 'overallwidthsidetoside'], type: 'number', target: { dim: ['external_dimensions_in', 'width'] } },
+  { key: 'ext_depth', label: 'External Depth', aliases: ['externaldepth', 'externalsinksizedepthinches', 'overallproductthickness', 'overalldepthfronttoback'], type: 'number', target: { dim: ['external_dimensions_in', 'depth'] } },
+  { key: 'ext_height', label: 'Overall Height - Top to Bottom', aliases: ['overallheighttoptobottom', 'overallproductheighttoptobottom'], type: 'number', target: { dim: ['external_dimensions_in', 'height'] } },
   { key: 'min_ext_cabinet', label: 'External Minimum Cabinet Size', aliases: ['externalminimumcabinetsize', 'minimunexternalcabinetsizeminimumcountertoplength'], type: 'number', target: { attr: 'min_external_cabinet_size_in' } },
   { key: 'int_length', label: 'Internal Lenght', aliases: ['internallenght', 'internallength', 'internalsinksizelengthinches'], type: 'number', target: { dim: ['internal_dimensions_in', 'length'] } },
   { key: 'int_width', label: 'Internal Width', aliases: ['internalwidth', 'internalsinksizewidthinches'], type: 'number', target: { dim: ['internal_dimensions_in', 'width'] } },
@@ -193,6 +217,75 @@ export const FIELD_DEFS = [
   { key: 'nsf_ansi_61', label: 'NSF/ANSI 61 Certified', aliases: ['nsfansi61certified'], type: 'text', target: { attr: 'nsf_ansi_61_certified' } },
   { key: 'nsf_certified', label: 'NSF Certified', aliases: ['nsfcertified'], type: 'text', target: { attr: 'nsf_certified' } },
   { key: 'csa_b45_5', label: 'CSA B45.5/IAPMO Z124 Compliant', aliases: ['csab455iapmoz124compliantplasticplumbingfixtures', 'csab455iapmoz124compliant'], type: 'text', target: { attr: 'csa_b45_5_iapmo_z124_compliant' } },
+
+  // ---------- Accessory (cutting board) specific ----------
+  { key: 'wood_species', label: 'Wood Species', aliases: ['woodspecies'], type: 'text', target: { attr: 'wood_species' } },
+  { key: 'juice_grooves', label: 'Carving Board Juice Grooves', aliases: ['carvingboardjuicegrooves', 'juicegrooves'], type: 'bool', target: { attr: 'juice_grooves' } },
+  { key: 'bpa_free', label: 'BPA Free', aliases: ['bpafree'], type: 'bool', target: { attr: 'bpa_free' } },
+  { key: 'product_care', label: 'Product Care', aliases: ['productcare'], type: 'text', target: { attr: 'product_care' } },
+  { key: 'pattern', label: 'Pattern', aliases: ['pattern'], type: 'text', target: { attr: 'pattern' } },
+  { key: 'flexible_board', label: 'Flexible Cutting Board', aliases: ['flexiblecuttingboard'], type: 'bool', target: { attr: 'flexible_cutting_board' } },
+  { key: 'reversible', label: 'Reversible', aliases: ['reversible'], type: 'bool', target: { attr: 'reversible' } },
+  { key: 'overall_shape', label: 'Overall Shape', aliases: ['overallshape'], type: 'text', target: { attr: 'overall_shape' } },
+  { key: 'over_the_sink', label: 'Over The Sink', aliases: ['overthesink'], type: 'bool', target: { attr: 'over_the_sink' } },
+  { key: 'knife_included', label: 'Knife Included', aliases: ['knifeincluded'], type: 'bool', target: { attr: 'knife_included' } },
+  { key: 'antimicrobial', label: 'Antimicrobial', aliases: ['antimicrobial'], type: 'text', target: { attr: 'antimicrobial' } },
+  { key: 'usda_compliant', label: 'USDA Compliant', aliases: ['usdacompliant'], type: 'text', target: { attr: 'usda_compliant' } },
+  { key: 'taa_compliant', label: 'TAA Compliant', aliases: ['taacompliant'], type: 'text', target: { attr: 'taa_compliant' } },
+  { key: 'iso_14021', label: 'ISO 14021 Recycled Content Standard Certified', aliases: ['iso14021recycledcontentstandardcertified'], type: 'text', target: { attr: 'iso_14021_certified' } },
+  { key: 'pefc_certified', label: 'PEFC Certified', aliases: ['pefccertified'], type: 'text', target: { attr: 'pefc_certified' } },
+  { key: 'safety_listing_reg', label: 'Safety Listing(s) Registration Number', aliases: ['safetylistingsregistrationnumber', 'safetylistingregistrationnumber'], type: 'text', target: { attr: 'safety_listing_registration_number' } },
+  { key: 'ista_certified', label: 'ISTA Certified', aliases: ['istacertified'], type: 'text', target: { attr: 'ista_certified' } },
+  { key: 'sfi_certifications', label: 'SFI Certifications', aliases: ['sficertifications', 'sficertified'], type: 'text', target: { attr: 'sfi_certifications' } },
+  { key: 'fsc_certifications', label: 'FSC Certifications', aliases: ['fsccertifications', 'fsccertified'], type: 'text', target: { attr: 'fsc_certifications' } },
+  { key: 'commercial_warranty', label: 'Commercial Warranty', aliases: ['commercialwarranty'], type: 'text', target: { attr: 'commercial_warranty' } },
+
+  // ---------- Accessory (soap dispenser / grid) specific ----------
+  { key: 'alias', label: 'Alias', aliases: ['alias'], type: 'text', target: { attr: 'alias' } },
+  { key: 'soap_dispenser_features', label: 'Soap Dispenser Features', aliases: ['soapdispenserfeatures'], type: 'list', target: { attr: 'soap_dispenser_features' } },
+  { key: 'grid_hole_placement', label: 'Grid Hole Placement', aliases: ['gridholeplacement'], type: 'text', target: { attr: 'grid_hole_placement' } },
+  { key: 'weight_capacity', label: 'Weight Capacity', aliases: ['weightcapacity'], type: 'text', target: { attr: 'weight_capacity' } },
+  { key: 'installation_required', label: 'Installation Required', aliases: ['installationrequired'], type: 'bool', target: { attr: 'installation_required' } },
+  { key: 'iapmo_certified', label: 'IAPMO Certified', aliases: ['iapmocertified'], type: 'text', target: { attr: 'iapmo_certified' } },
+  { key: 'epa_watersense', label: 'EPA WaterSense Certified', aliases: ['epawatersensecertified'], type: 'text', target: { attr: 'epa_watersense_certified' } },
+  { key: 'hazardous_material', label: 'Hazardous Material / Dangerous Goods', aliases: ['hazardousmaterialdangerousgoods', 'hazardousmaterial'], type: 'text', target: { attr: 'hazardous_material' } },
+
+  // ---------- Accessory (pop-up drain) specific ----------
+  { key: 'drain_shape', label: 'Drain Shape', aliases: ['drainshape'], type: 'text', target: { attr: 'drain_shape' } },
+  { key: 'overflow_included', label: 'Overflow Included', aliases: ['overflowincluded'], type: 'bool', target: { attr: 'overflow_included' } },
+  { key: 'trip_lever_included', label: 'Trip Lever Included', aliases: ['tripleverincluded'], type: 'bool', target: { attr: 'trip_lever_included' } },
+  { key: 'garbage_disposal_compatible', label: 'Compatible with Garbage Disposal', aliases: ['compatiblewithgarbagedisposal'], type: 'bool', target: { attr: 'compatible_with_garbage_disposal' } },
+  { key: 'drain_closure_type', label: 'Drain Closure Type', aliases: ['drainclosuretype'], type: 'text', target: { attr: 'drain_closure_type' } },
+  { key: 'number_of_drain_holes', label: 'Number of Drain Holes', aliases: ['numberofdrainholes'], type: 'int', target: { attr: 'number_of_drain_holes' } },
+  { key: 'compatible_fixture', label: 'Compatible Fixture', aliases: ['compatiblefixture'], type: 'text', target: { attr: 'compatible_fixture' } },
+  { key: 'diameter_in', label: 'Diameter', aliases: ['diameter'], type: 'number', target: { attr: 'diameter_in' } },
+  { key: 'drain_connection_diameter_in', label: 'Drain Connection Diameter', aliases: ['drainconnectiondiameter'], type: 'number', target: { attr: 'drain_connection_diameter_in' } },
+  { key: 'max_compatible_drain_opening', label: 'Maximum Compatible Drain Opening', aliases: ['maximumcompatibledrainopening'], type: 'number', target: { attr: 'max_compatible_drain_opening_in' } },
+  { key: 'assembly_required', label: 'Assembly Required', aliases: ['assemblyrequired'], type: 'bool', target: { attr: 'assembly_required' } },
+  { key: 'commercial_warranty_length', label: 'Commercial Warranty Length', aliases: ['commercialwarrantylength'], type: 'text', target: { attr: 'commercial_warranty_length' } },
+  { key: 'product_warranty', label: 'Product Warranty', aliases: ['productwarranty'], type: 'text', target: { attr: 'product_warranty' } },
+  { key: 'warranty_details', label: 'Warranty Details', aliases: ['warrantydetails'], type: 'text', target: { attr: 'warranty_details' } },
+  { key: 'epd_type_iii', label: 'Type III Product Specific Environmental Product Declaration (EPD)', aliases: ['typeiiiproductspecificenvironmentalproductdeclarationepd'], type: 'text', target: { attr: 'epd_type_iii' } },
+  { key: 'cradle_to_cradle', label: 'Cradle to Cradle Certifications', aliases: ['cradletocradlecertifications'], type: 'text', target: { attr: 'cradle_to_cradle_certifications' } },
+
+  // ---------- Accessory (faucet plate) specific ----------
+  { key: 'asme_18_2', label: 'ASME A112.18.2 Compliant', aliases: ['asmea112182compliant'], type: 'text', target: { attr: 'asme_a112_18_2_compliant' } },
+  { key: 'asse_1016', label: 'ASSE 1016 Certified', aliases: ['asse1016certified'], type: 'text', target: { attr: 'asse_1016_certified' } },
+  { key: 'ab_1953', label: 'California AB 1953 Compliant', aliases: ['californiaab1953compliant'], type: 'text', target: { attr: 'ab_1953_compliant' } },
+  { key: 'wqa_gold_seal', label: 'WQA Gold Seal Certified', aliases: ['wqagoldsealcertified'], type: 'text', target: { attr: 'wqa_gold_seal_certified' } },
+  { key: 'greenguard', label: 'GREENGUARD Certifications', aliases: ['greenguardcertifications', 'greenguardcertified'], type: 'text', target: { attr: 'greenguard_certifications' } },
+
+  // ---------- Retailer listing IDs ----------
+  { key: 'bbb_ca_upc', label: 'BB&B.ca UPC (Alias related)', aliases: ['bbbcaupcaliasrelated', 'bbbcaupc'], type: 'text', target: { attr: 'bbb_ca_upc' } },
+  { key: 'asin', label: 'ASIN', aliases: ['asin'], type: 'text', target: { attr: 'asin' } },
+  { key: 'amazon_fnsku', label: 'Amazon Barcode FNSKU', aliases: ['amazonbarcodefnsku', 'fnsku'], type: 'text', target: { attr: 'amazon_fnsku' } },
+  { key: 'homedepot_ca_sku', label: 'Home Depot.ca SKU', aliases: ['homedepotcasku'], type: 'text', target: { attr: 'homedepot_ca_sku' } },
+  { key: 'bbb_ca_sku', label: 'BB&B.ca SKU', aliases: ['bbbcasku'], type: 'text', target: { attr: 'bbb_ca_sku' } },
+  { key: 'rona_ca_sku', label: 'Rona.ca SKU', aliases: ['ronacasku'], type: 'text', target: { attr: 'rona_ca_sku' } },
+  { key: 'bestbuy_ca_sku', label: 'Best Buy.ca SKU', aliases: ['bestbuycasku'], type: 'text', target: { attr: 'bestbuy_ca_sku' } },
+  { key: 'bbb_com_sku', label: 'BB&B.com SKU', aliases: ['bbbcomsku'], type: 'text', target: { attr: 'bbb_com_sku' } },
+  { key: 'lowes_sku', label: "Lowe's SKU", aliases: ['lowessku'], type: 'text', target: { attr: 'lowes_sku' } },
+  { key: 'wayfair_sku', label: 'Wayfair SKU', aliases: ['wayfairsku'], type: 'text', target: { attr: 'wayfair_sku' } },
 
   // ---------- Marketing content ----------
   { key: 'general_title_en', label: 'General Title (EN)', aliases: ['generaltitleen'], type: 'text', target: { attr: 'general_title_en' } },
@@ -348,6 +441,151 @@ export const BATH_SINK_TEMPLATE_HEADERS = [
   ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
   'General Title (FR)', 'Description (FR)',
   ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for CUTTING BOARDS (accessory), in the source-sheet
+// order. (Media / image / document columns are handled separately and omitted.)
+export const CUTTING_BOARD_TEMPLATE_HEADERS = [
+  'Model Number', 'Model Name', 'Brand', 'Category', 'MSRP CAD$', 'BM Dealer Cost CAD$',
+  'Product Type', 'Material', 'Wood Species', 'Carving Board Juice Grooves',
+  'Handle(s) Included', 'BPA Free', 'Product Care', 'Pattern', 'Flexible Cutting Board',
+  'Reversible', 'Overall Shape', 'Over The Sink', 'Knife Included',
+  'Supplier Intended and Approved Use', 'Country of Origin - Additional Details',
+  'Antimicrobial', 'Color / Finish', 'USDA Compliant', 'TAA Compliant',
+  'Canada Product Restriction', 'Reason for Restriction', 'NSF Certified',
+  'ISO 14021 Recycled Content Standard Certified', 'PEFC Certified',
+  'Safety Listing(s)', 'Safety Listing(s) Registration Number', 'ISTA Certified',
+  'SFI Certifications', 'FSC Certifications',
+  'Overall Product Length - End to End', 'Overall Product Width - Side to Side',
+  'Overall Product Thickness', 'Overall Product Weight',
+  'Commercial Warranty', 'Warranty Length', 'Full or Limited Warranty', 'UPC',
+  'Shipping Weight Lbs', 'Shipping Height', 'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for ACCESSORIES (soap dispensers, grids, …), in the
+// source-sheet order. (Family # kept for fidelity but ignored on import;
+// media / image / document columns are handled separately and omitted.)
+export const ACCESSORY_TEMPLATE_HEADERS = [
+  'Model Number', 'Alias', 'Model Name', 'Family #', 'Brand', 'Category',
+  'MSRP CAD$', 'BM Dealer Cost CAD$', 'Product Type', 'Material',
+  'Soap Dispenser Features', 'Durability', 'Grid Hole Placement', 'Weight Capacity',
+  'Country of Origin - Additional Details', 'Finish',
+  'ASME A112.19.2/CSA B45.1 Compliant', 'ASME A112.19.3 Compliant',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'Canada Product Restriction', 'Reason for Restriction', 'cUPC Certified',
+  'IAPMO Certified', 'UL 1951 Listed', 'UPC Certified', 'ADA Compliant',
+  'ASME A112.18.1/CSA B125.1 - 2018', 'Vermont Act 193 Compliant',
+  'ISO 14021 Recycled Content Standard Certified', 'EPA WaterSense Certified',
+  'Hazardous Material / Dangerous Goods', 'Safety Listing(s)',
+  'Safety Listing(s) Registration Number',
+  'Overall Height - Top to Bottom', 'Overall Length - End to End',
+  'Overall Width - Front to Back', 'Overall Product Weight',
+  'Maximum Deck Thickness', 'Installation Required', 'Installation Type',
+  'Warranty Length', 'Full or Limited Warranty', 'UPC', 'ASIN',
+  'Amazon Barcode FNSKU', 'Home Depot.ca SKU', 'BB&B.ca SKU', 'Rona.ca SKU',
+  'Best Buy.ca SKU', 'BB&B.com SKU', "Lowe's SKU", 'Wayfair SKU',
+  'Shipping Weight Lbs', 'Shipping Height', 'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for BASKET STRAINERS (accessory), in the source-sheet
+// order — the accessories sheet v2: same as soap dispensers but with the
+// Quickbooks Description column instead of Alias. (Family # kept for fidelity
+// but ignored on import; media / document columns are handled separately.)
+export const STRAINER_TEMPLATE_HEADERS = [
+  'Model Number', 'Model Name', 'Family #', 'Quickbooks Description', 'Brand',
+  'Category', 'MSRP CAD$', 'BM Dealer Cost CAD$', 'Product Type', 'Material',
+  'Soap Dispenser Features', 'Durability', 'Grid Hole Placement', 'Weight Capacity',
+  'Country of Origin - Additional Details', 'Finish',
+  'ASME A112.19.2/CSA B45.1 Compliant', 'ASME A112.19.3 Compliant',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'Canada Product Restriction', 'Reason for Restriction', 'cUPC Certified',
+  'IAPMO Certified', 'UL 1951 Listed', 'UPC Certified', 'ADA Compliant',
+  'ASME A112.18.1/CSA B125.1 - 2018', 'Vermont Act 193 Compliant',
+  'ISO 14021 Recycled Content Standard Certified', 'EPA WaterSense Certified',
+  'Hazardous Material / Dangerous Goods', 'Safety Listing(s)',
+  'Safety Listing(s) Registration Number',
+  'Overall Height - Top to Bottom', 'Overall Length - End to End',
+  'Overall Width - Front to Back', 'Overall Product Weight',
+  'Maximum Deck Thickness', 'Installation Required', 'Installation Type',
+  'Warranty Length', 'Full or Limited Warranty', 'UPC', 'ASIN',
+  'Amazon Barcode FNSKU', 'Home Depot.ca SKU', 'BB&B.ca SKU', 'Rona.ca SKU',
+  'Best Buy.ca SKU', 'BB&B.com SKU', "Lowe's SKU", 'Wayfair SKU',
+  'Shipping Weight Lbs', 'Shipping Height', 'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for POP-UP DRAINS (accessory), in the source-sheet
+// order. (Family # kept for fidelity but ignored on import;
+// media / image / document columns are handled separately and omitted.)
+export const DRAIN_TEMPLATE_HEADERS = [
+  'Model Number', 'Model Name', 'Family #', 'Quickbooks Description', 'Brand',
+  'Category', 'Application', 'MSRP CAD$', 'BM Dealer Cost CAD$', 'Product Type',
+  'Material', 'Drain Shape', 'Overflow Included', 'Trip Lever Included',
+  'Lead Free', 'Durability', 'Compatible with Garbage Disposal',
+  'Country of Origin - Additional Details', 'Supplier Intended and Approved Use',
+  'Drain Closure Type', 'Number of Drain Holes', 'Finish', 'Compatible Fixture',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'Canada Product Restriction', 'Reason for Restriction', 'UL 1951 Listed',
+  'IAPMO Certified', 'UPC Certified', 'Vermont Act 193 Compliant', 'cUPC Certified',
+  'ISO 14021 Recycled Content Standard Certified',
+  'Type III Product Specific Environmental Product Declaration (EPD)',
+  'Energy Efficiency Regulations Compliant', 'Safety Listing(s)',
+  'Safety Listing(s) Registration Number', 'Cradle to Cradle Certifications',
+  'Overall Width - Side to Side', 'Overall Height - Top to Bottom', 'Diameter',
+  'Drain Connection Diameter', 'Maximum Compatible Drain Opening',
+  'Overall Product Weight', 'Installation Required', 'Assembly Required',
+  'Commercial Warranty', 'Commercial Warranty Length', 'Product Warranty',
+  'Warranty Length', 'Full or Limited Warranty', 'Warranty Details', 'UPC',
+  'BB&B.ca UPC (Alias related)', 'ASIN', 'Amazon Barcode FNSKU',
+  'Home Depot.ca SKU', 'BB&B.ca SKU', 'Rona.ca SKU', 'Best Buy.ca SKU',
+  'BB&B.com SKU', "Lowe's SKU", 'Wayfair SKU',
+  'Shipping Weight Lbs', 'Shipping Height', 'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for FAUCET PLATES (accessory), in the source-sheet
+// order. This sheet carries only 7 bullet slots per language. (Family # kept
+// for fidelity but ignored on import; media / document columns are handled
+// separately and omitted.)
+export const FAUCET_PLATE_TEMPLATE_HEADERS = [
+  'Model Number', 'Model Name', 'Family #', 'Quickbooks Description', 'Brand',
+  'Category', 'MSRP CAD$', 'BM Dealer Cost CAD$', 'Application', 'Product Type',
+  'Material', 'Lead Free', 'Supplier Intended and Approved Use',
+  'Country of Origin - Additional Details', 'Durability', 'Finish',
+  'ASME A112.18.2 Compliant', 'ASSE 1001 Certified',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'ASSE 1016 Certified', 'Canada Product Restriction', 'Reason for Restriction',
+  'California AB 1953 Compliant', 'cUPC Certified', 'IAPMO Certified',
+  'NSF/ANSI 61 Certified', 'UPC Certified', 'UL 1951 Listed',
+  'WQA Gold Seal Certified', 'ASME A112.18.1/CSA B125.1 - 2018',
+  'Vermont Act 193 Compliant', 'ISO 14021 Recycled Content Standard Certified',
+  'EPA WaterSense Certified', 'Safety Listing(s)', 'GREENGUARD Certifications',
+  'Overall Height - Top to Bottom', 'Overall Width - Side to Side',
+  'Overall Depth - Front to Back', 'Maximum Deck Thickness',
+  'Overall Product Weight', 'Mounting / Installation Type', 'Installation Required',
+  'Commercial Warranty Length', 'Product Warranty', 'Warranty Length',
+  'Full or Limited Warranty', 'Warranty Details', 'UPC', 'ASIN',
+  'Amazon Barcode FNSKU', 'Home Depot.ca SKU', 'BB&B.ca SKU', 'Rona.ca SKU',
+  'Best Buy.ca SKU', 'BB&B.com SKU', "Lowe's SKU", 'Wayfair SKU',
+  'Shipping Weight Lbs', 'Shipping Height', 'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 7 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 7 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
 ];
 
 // Build a lookup: normalized header alias → field def

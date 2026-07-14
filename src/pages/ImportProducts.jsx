@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 
 export default function ImportProducts() {
@@ -40,6 +40,11 @@ export default function ImportProducts() {
     bathroom_sink: BATH_SINK_TEMPLATE_HEADERS,
     kitchen_faucet: FAUCET_TEMPLATE_HEADERS,
     bathroom_faucet: BATH_FAUCET_TEMPLATE_HEADERS,
+    cutting_board: CUTTING_BOARD_TEMPLATE_HEADERS,
+    soap_dispenser: ACCESSORY_TEMPLATE_HEADERS,
+    pop_up_drain: DRAIN_TEMPLATE_HEADERS,
+    basket_strainer: STRAINER_TEMPLATE_HEADERS,
+    faucet_plate: FAUCET_PLATE_TEMPLATE_HEADERS,
   };
 
   function downloadTemplate(category = 'sink') {
@@ -155,6 +160,46 @@ export default function ImportProducts() {
           >
             <Download className="w-4 h-4" />
             Bathroom Faucet
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('cutting_board')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Cutting Board
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('soap_dispenser')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Soap Dispenser
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('pop_up_drain')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Pop-Up Drain
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('basket_strainer')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Basket Strainer
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('faucet_plate')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Faucet Plate
           </button>
         </div>
       </header>
