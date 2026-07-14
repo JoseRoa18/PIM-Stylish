@@ -128,10 +128,21 @@ export default function Templates() {
   );
 }
 
-// One collapsible card per marketplace; its templates show on expand.
+// One collapsible card per marketplace; on expand, its templates are grouped
+// by category (Menards alone ships 7 files for a single category — a flat
+// list would drown once more categories arrive).
 function MarketplaceGroup({ marketplace, templates, reload }) {
   const [open, setOpen] = useState(false);
-  const cats = [...new Set(templates.flatMap((t) => t.categories ?? []))];
+
+  // category key → templates (multi-category templates label with all of them)
+  const byCategory = new Map();
+  for (const t of templates) {
+    const key = (t.categories ?? []).length ? t.categories.map(templateCategoryLabel).join(' + ') : 'General · all products';
+    if (!byCategory.has(key)) byCategory.set(key, []);
+    byCategory.get(key).push(t);
+  }
+  const catGroups = [...byCategory.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const summary = catGroups.map(([label, list]) => `${label} (${list.length})`).join(' · ');
 
   return (
     <div className="rounded-xl border border-outline-variant bg-surface-container-lowest">
@@ -148,16 +159,22 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-body-md text-on-surface font-medium">{marketplace}</p>
-          <p className="text-body-sm text-on-surface-variant truncate">
-            {templates.length} template{templates.length === 1 ? '' : 's'}
-            {cats.length > 0 && ` · ${cats.map(templateCategoryLabel).join(', ')}`}
-          </p>
+          <p className="text-body-sm text-on-surface-variant truncate">{summary}</p>
         </div>
       </button>
       {open && (
-        <div className="px-5 pb-5 pt-4 border-t border-outline-variant grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {templates.map((t) => (
-            <TemplateCard key={t.id} template={t} reload={reload} />
+        <div className="px-5 pb-5 pt-4 border-t border-outline-variant space-y-5">
+          {catGroups.map(([label, list]) => (
+            <div key={label}>
+              <p className="text-label-md font-semibold text-on-surface-variant uppercase tracking-wide mb-2">
+                {label} <span className="font-normal normal-case">· {list.length} file{list.length === 1 ? '' : 's'}</span>
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {list.map((t) => (
+                  <TemplateCard key={t.id} template={t} reload={reload} />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
