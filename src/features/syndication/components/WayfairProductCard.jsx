@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Loader2, CheckCircle2, AlertCircle, ShieldCheck, MinusCircle, Save } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { pushToWayfair, setWayfairItemGroupId } from '../api/wayfairSync';
 import { formatTimeAgo } from '@/lib/format';
 
@@ -93,7 +94,7 @@ export default function WayfairProductCard({ product, onUpdate }) {
             disabled={!!busy}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
           >
-            {busy === 'validate' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+            {busy === 'validate' ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
             Validate
           </button>
           <button

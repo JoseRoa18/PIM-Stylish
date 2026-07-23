@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Loader2, CheckCircle2, AlertCircle, ShieldCheck, MinusCircle, DownloadCloud } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { pushToWayfair, pullWayfairItemGroups, checkWayfairRequestStatus, pushWayfairAttributes } from '../api/wayfairSync';
 
 // Wayfair syndication tester — push a product's content (marketing copy +
@@ -138,7 +139,7 @@ export default function WayfairConnectorCard() {
             disabled={busy || !sku.trim()}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
           >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+            {busy ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
             Validate
           </button>
           <button
@@ -166,7 +167,7 @@ export default function WayfairConnectorCard() {
               disabled={attrsBusy || !sku.trim()}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
             >
-              {attrsBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+              {attrsBusy ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
               Validate
             </button>
           </div>
@@ -208,7 +209,7 @@ export default function WayfairConnectorCard() {
               disabled={pull?.busy}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
             >
-              {pull?.busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
+              {pull?.busy ? <ThinkingOrb state="searching" size={20} className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
               {pull?.busy && pull.total > 0 ? `Importing… ${pull.done}/${pull.total}` : 'Import item-group IDs'}
             </button>
           </div>
@@ -285,7 +286,7 @@ function WayfairStatusCheck({ result }) {
         disabled={busy}
         className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
       >
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+        {busy ? <ThinkingOrb state="searching" size={20} className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
         Check status at Wayfair
       </button>
       {statuses && (
