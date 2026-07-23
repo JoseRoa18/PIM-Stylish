@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 
 const BLANK_TEMPLATES = [
@@ -26,6 +26,7 @@ const BLANK_TEMPLATES = [
   { key: 'soap_dispenser', label: 'Soap Dispenser' },
   { key: 'pop_up_drain', label: 'Pop-Up Drain' },
   { key: 'basket_strainer', label: 'Basket Strainer' },
+  { key: 'colander_drying_rack', label: 'Colanders & Drying Racks' },
   { key: 'faucet_plate', label: 'Faucet Plate' },
 ];
 
@@ -98,6 +99,7 @@ export default function ImportProducts() {
     soap_dispenser: ACCESSORY_TEMPLATE_HEADERS,
     pop_up_drain: DRAIN_TEMPLATE_HEADERS,
     basket_strainer: STRAINER_TEMPLATE_HEADERS,
+    colander_drying_rack: COLANDER_TEMPLATE_HEADERS,
     faucet_plate: FAUCET_PLATE_TEMPLATE_HEADERS,
   };
 

@@ -64,6 +64,13 @@ export const CATEGORY_MAP = {
   'sink grids': 'accessory',
   'grid': 'accessory',
   'grids': 'accessory',
+  'colander': 'colander_drying_rack',
+  'colanders': 'colander_drying_rack',
+  'drying rack': 'colander_drying_rack',
+  'drying racks': 'colander_drying_rack',
+  'colander & drying rack': 'colander_drying_rack',
+  'colanders & drying racks': 'colander_drying_rack',
+  'colanders and drying racks': 'colander_drying_rack',
 };
 
 export const FIELD_DEFS = [
@@ -100,7 +107,7 @@ export const FIELD_DEFS = [
   { key: 'sink_radius_mm', label: 'Sink Radius', aliases: ['sinkradius', 'sinkradiusmm'], type: 'number', target: { attr: 'sink_radius_mm' } },
 
   // ---------- External / internal dimensions ----------
-  { key: 'ext_length', label: 'External Lenght', aliases: ['externallenght', 'externallength', 'externalsinksizelengthinches', 'overallproductlengthendtoend', 'overalllengthendtoend'], type: 'number', target: { dim: ['external_dimensions_in', 'length'] } },
+  { key: 'ext_length', label: 'External Lenght', aliases: ['externallenght', 'externallength', 'externalsinksizelengthinches', 'overallproductlengthendtoend', 'overalllengthendtoend', 'overalllengthtoptobottom'], type: 'number', target: { dim: ['external_dimensions_in', 'length'] } },
   { key: 'ext_width', label: 'External Width', aliases: ['externalwidth', 'externalsinksizewidthinches', 'overallproductwidthsidetoside', 'overallwidthfronttoback', 'overallwidthsidetoside'], type: 'number', target: { dim: ['external_dimensions_in', 'width'] } },
   { key: 'ext_depth', label: 'External Depth', aliases: ['externaldepth', 'externalsinksizedepthinches', 'overallproductthickness', 'overalldepthfronttoback'], type: 'number', target: { dim: ['external_dimensions_in', 'depth'] } },
   { key: 'ext_height', label: 'Overall Height - Top to Bottom', aliases: ['overallheighttoptobottom', 'overallproductheighttoptobottom'], type: 'number', target: { dim: ['external_dimensions_in', 'height'] } },
@@ -115,7 +122,7 @@ export const FIELD_DEFS = [
   { key: 'has_grooves', label: 'Does it have Grooves?', aliases: ['doesithavegrooves'], type: 'bool', target: { attr: 'has_grooves' } },
   { key: 'includes_grids', label: 'Include grids?', aliases: ['includegrids', 'includesgrids'], type: 'bool', target: { attr: 'includes_grids' } },
   { key: 'accessories_included', label: 'Accessories included', aliases: ['accessoriesincluded'], type: 'list', target: { attr: 'accessories_included' } },
-  { key: 'number_of_pieces', label: 'Number of pieces Included', aliases: ['numberofpiecesincluded'], type: 'int', target: { attr: 'number_of_pieces' } },
+  { key: 'number_of_pieces', label: 'Number of pieces Included', aliases: ['numberofpiecesincluded', 'totalnumberofpiecesincluded'], type: 'int', target: { attr: 'number_of_pieces' } },
   { key: 'drain_hole_location', label: 'Drain Hole location', aliases: ['drainholelocation', 'drainholelocationplacement', 'drainplacement'], type: 'text', target: { attr: 'drain_hole_location' } },
   { key: 'drain_diameter_in', label: 'Drain Diameter', aliases: ['draindiameter', 'drainholediameter'], type: 'number', target: { attr: 'drain_diameter_in' } },
   { key: 'product_weight_lb', label: 'Product Weight lb', aliases: ['productweightlb', 'overallproductweight'], type: 'number', target: { attr: 'product_weight_lb' } },
@@ -246,6 +253,12 @@ export const FIELD_DEFS = [
   { key: 'sfi_certifications', label: 'SFI Certifications', aliases: ['sficertifications', 'sficertified'], type: 'text', target: { attr: 'sfi_certifications' } },
   { key: 'fsc_certifications', label: 'FSC Certifications', aliases: ['fsccertifications', 'fsccertified'], type: 'text', target: { attr: 'fsc_certifications' } },
   { key: 'commercial_warranty', label: 'Commercial Warranty', aliases: ['commercialwarranty'], type: 'text', target: { attr: 'commercial_warranty' } },
+
+  // ---------- Colanders & drying racks ----------
+  { key: 'collapsible', label: 'Collapsible', aliases: ['collapsible'], type: 'bool', target: { attr: 'collapsible' } },
+  { key: 'handheld', label: 'Handheld', aliases: ['handheld'], type: 'bool', target: { attr: 'handheld' } },
+  { key: 'color', label: 'Color', aliases: ['color'], type: 'text', target: { attr: 'color' } },
+  { key: 'length_with_handles', label: 'Overall Length Including Handles - End to End', aliases: ['overalllengthincludinghandlesendtoend'], type: 'number', target: { attr: 'length_with_handles_in' } },
 
   // ---------- Accessory (soap dispenser / grid) specific ----------
   { key: 'alias', label: 'Alias', aliases: ['alias'], type: 'text', target: { attr: 'alias' } },
@@ -448,6 +461,31 @@ export const BATH_SINK_TEMPLATE_HEADERS = [
   ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
   'General Title (FR)', 'Description (FR)',
   ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+];
+
+// Blank template headers for COLANDERS & DRYING RACKS, in the source-sheet
+// order. (Media / image / document columns are handled separately and omitted.)
+export const COLANDER_TEMPLATE_HEADERS = [
+  'Model Number', 'Alias', 'Model Name', 'Family #', 'Quickbooks Description',
+  'Brand', 'Category', 'MSRP CAD$', 'BM Dealer Cost CAD$', 'Product Type',
+  'Total Number of Pieces Included', 'Material', 'Collapsible', 'Handheld',
+  'Supplier Intended and Approved Use', 'Country of Origin - Additional Details',
+  'Color', 'Finish', 'USDA Compliant', 'TAA Compliant',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'Canada Product Restriction', 'NSF Certified',
+  'ISO 14021 Recycled Content Standard Certified', 'Safety Listing(s)',
+  'ISTA Certified',
+  'Overall Length - Top to Bottom', 'Overall Width - Side to Side',
+  'Overall Depth - Front to Back', 'Overall Product Weight',
+  'Overall Length Including Handles - End to End',
+  'Commercial Warranty', 'Warranty Length', 'Full or Limited Warranty',
+  'Warranty Details', 'UPC',
+  'Shipping Weight Lbs', 'Shipping Height', 'Shipping Width', 'Shipping Length',
+  'General Title (EN)', 'Description (EN)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (EN)`),
+  'General Title (FR)', 'Description (FR)',
+  ...Array.from({ length: 12 }, (_, i) => `Bullet/Feature ${i + 1} (FR)`),
+  'Short Description - Marketing Copy', 'Stylish product URL',
 ];
 
 // Blank template headers for CUTTING BOARDS (accessory), in the source-sheet
