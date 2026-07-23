@@ -122,7 +122,7 @@ export default function DocumentsSection({ sku, category }) {
     const confirmed = await confirm({
       title: `Remove the ${label}?`,
       message: isSupabaseStored(doc.storage_path)
-        ? 'This permanently deletes the file from Supabase storage too. This cannot be undone.'
+        ? 'This permanently deletes the file. This cannot be undone.'
         : 'The externally hosted file itself is not deleted.',
       confirmLabel: 'Remove',
       destructive: true,

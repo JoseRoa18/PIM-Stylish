@@ -287,7 +287,7 @@ export default function MediaSection({ sku }) {
     const confirmed = await confirm({
       title: `Remove "${mediaItem.file_name}"?`,
       message: isSupabaseStored(mediaItem.storage_path)
-        ? 'This permanently deletes the file from Supabase storage too. This cannot be undone.'
+        ? 'This permanently deletes the file. This cannot be undone.'
         : 'The externally hosted file itself is not deleted.',
       confirmLabel: 'Remove',
       destructive: true,
@@ -324,7 +324,7 @@ export default function MediaSection({ sku }) {
     const confirmed = await confirm({
       title: `Remove ${items.length} item${items.length === 1 ? '' : 's'}?`,
       message: supaCount
-        ? `${supaCount} of these are hosted in Supabase and will be permanently deleted from storage. This cannot be undone.`
+        ? `${supaCount} file${supaCount === 1 ? '' : 's'} will be permanently deleted. This cannot be undone.`
         : 'The externally hosted files themselves are not deleted.',
       confirmLabel: 'Remove',
       destructive: true,
@@ -389,11 +389,13 @@ export default function MediaSection({ sku }) {
       onDragLeave={onSectionDragLeave}
       onDrop={onSectionDrop}
     >
-      {/* Drop-to-upload overlay (only for OS file drags) */}
+      {/* Drop-to-upload overlay (only for OS file drags). Solid backdrop —
+          a translucent one let the empty-state text bleed through and collide
+          with the overlay copy. */}
       {dragOver && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-primary/10 border-2 border-dashed border-primary rounded-xl pointer-events-none">
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-surface/95 backdrop-blur-sm border-2 border-dashed border-primary rounded-xl pointer-events-none">
           <Upload className="w-10 h-10 text-primary" />
-          <p className="text-title-md text-primary font-semibold">Drop images to upload to Supabase</p>
+          <p className="text-title-md text-primary font-semibold">Drop images to upload</p>
           <p className="text-body-sm text-on-surface-variant">
             Tagged as {langMeta(addLanguage || null).label}
           </p>
