@@ -59,6 +59,34 @@ const faucetCollection = (p) => {
   return 'Pull Down';
 };
 
+// Resolve the template's Product Category (full collection path) for any
+// product: derive family + mount terms, then pick the path matching most.
+// Covers the Faucets file (4 collections) and the Sinks file (Bar/Bathroom/
+// Kitchen Sinks × mount, 8 collections).
+const hdCollection = (p, categories) => {
+  if (!categories?.length) return '';
+  const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')} ${attr(p).mounting_type ?? ''}`;
+  const terms = [];
+  if (/sink/i.test(p.category ?? '')) {
+    terms.push(/bath/i.test(p.category) ? 'Bathroom Sinks' : /bar/i.test(t) ? 'Bar Sinks' : 'Kitchen Sinks');
+    if (/vessel/i.test(t)) terms.push('Vessel');
+    else if (/dual/i.test(t)) terms.push('Dual Mount');
+    else if (/farm|apron/i.test(t)) terms.push('Farmhouse');
+    else if (/drop|top.?mount/i.test(t)) terms.push('Drop-in');
+    else terms.push('Undermount');
+  } else {
+    terms.push('Faucets', faucetCollection(p));
+  }
+  let best = categories[0];
+  let bestScore = -1;
+  for (const c of categories) {
+    const lc = c.toLowerCase();
+    const score = terms.reduce((n, w) => n + (lc.includes(w.toLowerCase()) ? 1 : 0), 0);
+    if (score > bestScore) { bestScore = score; best = c; }
+  }
+  return best;
+};
+
 // UPC-12 → GTIN-14 (left-pad with zeros).
 const gtin14 = (p) => {
   const upc = String(attr(p).upc ?? '').replace(/\D/g, '');
@@ -91,8 +119,7 @@ const finishFamily = (finish) => {
 // Keyed by normalized R1 label. Scalars fill EVERY occurrence of a repeated
 // label (HD repeats e.g. "Features" once per collection — only one applies).
 export const HOME_DEPOT_RULES = {
-  'Product Category': (p, ctx) =>
-    ctx.categories.find((c) => c.endsWith(`/${faucetCollection(p)}`)) ?? ctx.categories[0] ?? '',
+  'Product Category': (p, ctx) => hdCollection(p, ctx.categories),
   'Shop SKU': (p) => p.sku,
   'Product Name (120)': (p) => (attr(p).general_title_en || p.model_name || p.sku).slice(0, 120),
   'UPC': (p) => attr(p).upc || '',
@@ -166,7 +193,7 @@ export const HOME_DEPOT_RULES = {
   'Color/Finish': (p) => p.finish || '',
   'Finish Family': (p) => finishFamily(p.finish),
   'Certifications and Listings': (p) =>
-    attr(p).cupc_certified ? 'UPC Certified (Uniform Plumbing Code)' : '',
+    attr(p).cupc_certified || attr(p).upc_certified ? 'UPC Certified (Uniform Plumbing Code)' : '',
   // Faucets ship with their mounting kit (hoses/supply lines confirm it).
   'Included Components': (p) =>
     attr(p).supply_line_included || attr(p).hose_included ? 'All Mounting Hardware' : '',
@@ -178,9 +205,17 @@ export const HOME_DEPOT_RULES = {
     if (/touch/i.test(t)) return 'Touch';
     return 'No Sensor';
   },
-  // "Pull Down Spray Wand"/"Pull Out Spray Wand" are the safe single values
-  // from HD's kitchen Features list (multi-value separators are undocumented).
+  // One safe value from HD's Features closed lists (multi-value separators
+  // are undocumented): wand type for faucets, build trait for sinks.
   'Features': (p) => {
+    if (/sink/i.test(p.category ?? '')) {
+      const acc = list(attr(p).accessories_included).join(' ');
+      if (/workstation/i.test(`${p.product_type ?? ''} ${acc}`)) return 'Workstation';
+      if (num(attr(p).sink_radius_mm) === '0') return 'Zero Radius';
+      if (attr(p).low_divider) return 'Low Divide';
+      if (attr(p).sink_radius_mm != null) return 'Tight Radius';
+      return 'No Additional Features';
+    }
     const c = faucetCollection(p);
     if (c === 'Pull Down') return 'Pull Down Spray Wand';
     if (c === 'Pull Out') return 'Pull Out Spray Wand';
@@ -198,6 +233,54 @@ export const HOME_DEPOT_RULES = {
   'Faucet Hole Fit': (p) => {
     const n = num(attr(p).number_of_installation_holes);
     return n === '1' ? 'Single Hole' : n ? `${n} Hole` : '';
+  },
+
+  // ---- Sinks file (Kitchen / Bathroom / Bar Sinks collections) ----
+  'Kitchen Product Type': (p) => (/^kitchen/i.test(p.category ?? '') ? 'Kitchen Sinks' : ''),
+  'Sink Shape': (p) => attr(p).sink_shape || '',
+  'Mount Type': (p) => {
+    const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')} ${attr(p).mounting_type ?? ''}`;
+    if (/dual/i.test(t)) return 'Drop-In/Undermount';
+    if (/farm|apron/i.test(t)) return 'Farmhouse/Apron-Front';
+    if (/vessel/i.test(t)) return 'Top-mount';
+    if (/drop|top.?mount/i.test(t)) return 'Drop-In';
+    if (/wall/i.test(t)) return 'Wall Mount';
+    return 'Undermount';
+  },
+  'Faucet Included': () => 'Without Faucet',
+  // Undermount/vessel sinks carry no faucet holes unless the PIM says so.
+  'Number of Faucet Holes': (p) => num(attr(p).number_of_faucet_holes) || '0',
+  'Number of Bowls': (p) => num(attr(p).number_of_bowls),
+  'Bowl Split': (p) => attr(p).basin_split || '',
+  'Sink Gauge': (p) => {
+    const g = num(attr(p).gauge);
+    return g ? `${g} Gauge` : '';
+  },
+  'Sink Material': (p) => attr(p).material ?? p.material ?? (num(attr(p).gauge) ? 'Stainless Steel' : ''),
+  'Material': (p) => attr(p).material ?? p.material ?? (num(attr(p).gauge) ? 'Stainless Steel' : ''),
+  // HD sink axes: Length = left-to-right (PIM length), Width = front-to-back
+  // (PIM width), Depth = top-to-bottom (PIM depth/height).
+  'Sink Left to Right Length (in.) (in)': (p) => num(attr(p).external_dimensions_in?.length),
+  'Sink Front to Back Width (in.) (in)': (p) => num(attr(p).external_dimensions_in?.width),
+  'Sink Top to Bottom Depth (in.) (in)': (p) =>
+    num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height),
+  'Bathroom Sink Left to Right Length (In.)': (p) => num(attr(p).external_dimensions_in?.length),
+  'Bathroom Sink Front to Back Width (In.)': (p) => num(attr(p).external_dimensions_in?.width),
+  'Bathroom Sink Top to Bottom Depth (in.)': (p) =>
+    num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height),
+  'Cut-Out Width (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.length),
+  'Cut-Out Depth (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.width),
+  'Minimum Cabinet Size (in.)': (p) => num(attr(p).min_external_cabinet_size_in),
+  'Drain Location': (p) => attr(p).drain_hole_location || '',
+  // Stylish sinks have no overflow (kitchen never does; bathroom models here
+  // don't either) — override via the overflow_location attribute if one ever does.
+  'Overflow location': (p) => (/sink/i.test(p.category ?? '') ? attr(p).overflow_location || 'None' : ''),
+  'Drain Finish': (p) => (/stainless/i.test(p.finish || '') ? 'Stainless' : ''),
+  'Included': (p) => {
+    const acc = list(attr(p).accessories_included).join(' ');
+    if (/strainer/i.test(acc) || attr(p).strainer_model) return 'Strainer Basket';
+    if (/grid|rack/i.test(acc) || attr(p).includes_grids) return 'Drying Rack';
+    return 'Mounting Hardware';
   },
 };
 
