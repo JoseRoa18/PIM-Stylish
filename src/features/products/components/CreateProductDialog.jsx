@@ -12,6 +12,7 @@ const CATEGORY_OPTIONS = [
   { value: 'bathroom_faucet', label: 'Bathroom Faucet' },
   { value: 'pot_filler', label: 'Pot Filler' },
   { value: 'bar_prep_sink', label: 'Bar/Prep Sink' },
+  { value: 'outdoor_sink', label: 'Outdoor Sink & Ice Chest' },
   { value: 'accessory', label: 'Accessory' },
 ];
 

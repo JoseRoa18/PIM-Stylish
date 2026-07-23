@@ -67,6 +67,9 @@ export const ATTRIBUTE_GROUPS = {
   // Future: bathroom_sink, kitchen_faucet, bathroom_faucet, accessory
 };
 
+// Outdoor sinks / ice chests share sink anatomy — same grouping.
+ATTRIBUTE_GROUPS.outdoor_sink = ATTRIBUTE_GROUPS.kitchen_sink;
+
 export function getAttributeGroups(category) {
   return ATTRIBUTE_GROUPS[category] ?? [];
 }
