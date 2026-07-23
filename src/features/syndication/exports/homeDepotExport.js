@@ -76,6 +76,18 @@ const colorFamily = (finish) => {
   return f;
 };
 
+// HD's Finish Family closed list — our finishes map near-verbatim.
+const finishFamily = (finish) => {
+  const f = String(finish || '');
+  if (/matte black/i.test(f)) return 'Matte Black';
+  if (/stainless/i.test(f)) return 'Stainless Steel';
+  if (/brushed gold|satin gold/i.test(f)) return 'Brushed Gold';
+  if (/gunmetal|matte gr[ae]y/i.test(f)) return 'Matte Gray';
+  if (/chrome/i.test(f)) return 'Brushed Chrome';
+  if (/nickel/i.test(f)) return 'Polished Nickel';
+  return f;
+};
+
 // Keyed by normalized R1 label. Scalars fill EVERY occurrence of a repeated
 // label (HD repeats e.g. "Features" once per collection — only one applies).
 export const HOME_DEPOT_RULES = {
@@ -152,14 +164,40 @@ export const HOME_DEPOT_RULES = {
   'Flow rate (gallons per minute)': (p) => num(attr(p).max_flow_rate),
   'Color Family': (p) => colorFamily(p.finish),
   'Color/Finish': (p) => p.finish || '',
-  'Certifications and Listings': (p) => (attr(p).cupc_certified ? 'cUPC Certified' : ''),
-  'Included Components': (p) => list(attr(p).accessories_included).join(', '),
+  'Finish Family': (p) => finishFamily(p.finish),
+  'Certifications and Listings': (p) =>
+    attr(p).cupc_certified ? 'UPC Certified (Uniform Plumbing Code)' : '',
+  // Faucets ship with their mounting kit (hoses/supply lines confirm it).
+  'Included Components': (p) =>
+    attr(p).supply_line_included || attr(p).hose_included ? 'All Mounting Hardware' : '',
   'Number of Faucet Handles': (p) => num(attr(p).number_of_handles) || '1',
   'Mount Location': (p) => (/wall/i.test(attr(p).mounting_type || '') ? 'Wall Mount' : 'Deck Mount'),
-  'Sensor Activation': (p) => (/touch|sensor/i.test(attr(p).spray_type || '') ? 'Yes' : 'No'),
+  'Sensor Activation': (p) => {
+    const t = `${attr(p).spray_function_activation ?? ''} ${attr(p).spray_type ?? ''}`;
+    if (/touchless|sensor|motion/i.test(t)) return 'Touchless';
+    if (/touch/i.test(t)) return 'Touch';
+    return 'No Sensor';
+  },
+  // "Pull Down Spray Wand"/"Pull Out Spray Wand" are the safe single values
+  // from HD's kitchen Features list (multi-value separators are undocumented).
+  'Features': (p) => {
+    const c = faucetCollection(p);
+    if (c === 'Pull Down') return 'Pull Down Spray Wand';
+    if (c === 'Pull Out') return 'Pull Out Spray Wand';
+    return '';
+  },
+  'Spout Swivel Type': (p) => {
+    const sw = String(attr(p).swivel_spout ?? '');
+    if (!sw || /^no/i.test(sw)) return 'Fixed';
+    // Degrees aren't a PIM field — recover them from the bullets when stated.
+    const deg = String(list(attr(p).bullet_points).join(' ')).match(/(\d{2,3})\s*(?:°|degree)/i);
+    return deg ? `${deg[1]} Degree Spout Swivel` : '';
+  },
+  'Faucet Hole Spacing': (p) =>
+    num(attr(p).number_of_installation_holes) === '1' ? 'No Spacing - Single Hole' : '',
   'Faucet Hole Fit': (p) => {
-    const n = num(attr(p).number_of_faucet_holes);
-    return n ? `${n} Hole` : '';
+    const n = num(attr(p).number_of_installation_holes);
+    return n === '1' ? 'Single Hole' : n ? `${n} Hole` : '';
   },
 };
 
