@@ -18,6 +18,7 @@ import { fetchExistingProducts, importProducts } from '@/features/import/api/imp
 
 const BLANK_TEMPLATES = [
   { key: 'sink', label: 'Kitchen Sink' },
+  { key: 'outdoor_sink', label: 'Outdoor Sink & Ice Chest' },
   { key: 'bathroom_sink', label: 'Bathroom Sink' },
   { key: 'kitchen_faucet', label: 'Kitchen Faucet' },
   { key: 'bathroom_faucet', label: 'Bathroom Faucet' },
@@ -87,6 +88,9 @@ export default function ImportProducts() {
 
   const TEMPLATES = {
     sink: TEMPLATE_HEADERS,
+    // Outdoor sinks / ice chests share the kitchen sink columns; the Category
+    // cell ("Outdoor Sink") is what routes rows to the outdoor_sink category.
+    outdoor_sink: TEMPLATE_HEADERS,
     bathroom_sink: BATH_SINK_TEMPLATE_HEADERS,
     kitchen_faucet: FAUCET_TEMPLATE_HEADERS,
     bathroom_faucet: BATH_FAUCET_TEMPLATE_HEADERS,
