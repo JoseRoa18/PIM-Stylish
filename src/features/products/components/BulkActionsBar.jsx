@@ -9,12 +9,15 @@ import {
   AlertCircle,
   Download,
 } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { bulkUpdateProducts, getProduct } from '../api/products';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
+import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
+import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -110,11 +113,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   async function handleExportMarketplace(marketplace) {
     const templates = (await listTemplates()).filter((t) => t.marketplace === marketplace);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
-    if (/wayfair|amazon/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
+    if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
     if (/menards/i.test(marketplace)) return handleExportMenards(templates);
     setResult({
       type: 'error',
-      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B and Menards are supported so far.`,
+      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart and Home Depot are supported so far.`,
     });
   }
 
@@ -214,7 +217,13 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       if (!mkTemplates.length) {
         throw new Error(`No ${marketplace} template found. Upload one in /templates first.`);
       }
-      const generate = /amazon/i.test(marketplace) ? generateAmazonFromTemplate : generateWayfairFromTemplate;
+      const generate = /amazon/i.test(marketplace)
+        ? generateAmazonFromTemplate
+        : /walmart/i.test(marketplace)
+          ? generateWalmartFromTemplate
+          : /home ?depot/i.test(marketplace)
+            ? generateHomeDepotFromTemplate
+            : generateWayfairFromTemplate;
       const prefix = marketplace.replace(/[^a-z0-9]+/gi, '_');
 
       const skus = [...selectedSkus];
@@ -384,7 +393,7 @@ function ExportTemplateDropdown({ disabled, busy, onSelect }) {
         disabled={disabled}
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
       >
-        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+        {busy ? <ThinkingOrb state="composing" size={20} className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
         {busy ? 'Exporting…' : 'Export Template'}
       </button>
       {open && (

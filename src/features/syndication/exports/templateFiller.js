@@ -65,9 +65,18 @@ export async function sheetPathByName(zip, name) {
   return null;
 }
 
-// All worksheet names, in workbook order.
+// All worksheet names, in workbook order. Names are XML-entity decoded so
+// they compare equal to what sheetPathByName (DOM-based) sees — sheet names
+// with "&" (e.g. Walmart's "Home Decor, Kitchen, & Other") arrive encoded.
 export function listSheetNames(workbookXml) {
-  return [...workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"/g)].map((m) => m[1]);
+  return [...workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"/g)].map((m) =>
+    m[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&'),
+  );
 }
 
 // Read a worksheet into a 2D array [rowIdx][colIdx] of text (resolving shared strings).

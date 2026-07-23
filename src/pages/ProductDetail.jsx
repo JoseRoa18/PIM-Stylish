@@ -18,6 +18,7 @@ import {
   Trash2,
   FileText,
 } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { useProduct } from '@/features/products/hooks/useProduct';
 import { useProductMedia } from '@/features/media/hooks/useProductMedia';
 import { updateProduct, getProduct } from '@/features/products/api/products';
@@ -38,6 +39,8 @@ import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExpor
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
+import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
+import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -1159,6 +1162,10 @@ function ExportTemplatesCard({ product, media }) {
         }
       } else if (/amazon/i.test(entry.marketplace)) {
         await generateAmazonFromTemplate(entry.files[0].storage_path, [product], `Amazon_${base}`);
+      } else if (/walmart/i.test(entry.marketplace)) {
+        await generateWalmartFromTemplate(entry.files[0].storage_path, [product], `Walmart_${base}`);
+      } else if (/home ?depot/i.test(entry.marketplace)) {
+        await generateHomeDepotFromTemplate(entry.files[0].storage_path, [product], `HomeDepot_${base}`);
       } else if (/bb&b|bbb|overstock/i.test(entry.marketplace)) {
         await generateBBBFromTemplate(entry.files[0].storage_path, product, media);
       } else {
@@ -1199,7 +1206,8 @@ function ExportTemplatesCard({ product, media }) {
                   {entry.detail}
                 </p>
               </div>
-              <span className="text-label-md text-primary font-semibold flex-shrink-0">
+              <span className="text-label-md text-primary font-semibold flex-shrink-0 inline-flex items-center gap-1.5">
+                {exporting === entry.key && <ThinkingOrb state="composing" size={20} className="w-4 h-4" />}
                 {exporting === entry.key ? 'Generating…' : 'Export'}
               </span>
             </button>

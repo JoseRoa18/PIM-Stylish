@@ -49,13 +49,18 @@ const KIND_FILE_RE = {
 
 // Category must apply, and for accessories the file name must mention the
 // product's kind (a cutting board never lands in the strainers template).
+// Templates whose file name mentions NO kind are spec-wide (e.g. Walmart's
+// "Home Decor, Kitchen & Other" file) and accept every accessory.
 export function templateMatchesProduct(template, product) {
   if (!templateAppliesTo(template, product.category)) return false;
   if (product.category !== 'accessory') return true;
+  const name = template.file_name ?? '';
+  const isKindSpecific = Object.values(KIND_FILE_RE).some((re) => re.test(name));
+  if (!isKindSpecific) return true;
   const kind = accessoryKind(product);
   if (!kind) return false;
   const re = KIND_FILE_RE[kind] ?? new RegExp(kind.replace(' ', '.?'), 'i');
-  return re.test(template.file_name ?? '');
+  return re.test(name);
 }
 
 // Pick the best template for a product. Returns null when nothing fits.
