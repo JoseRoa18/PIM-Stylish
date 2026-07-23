@@ -11,7 +11,7 @@ const ConfirmContext = createContext(null);
  *   const confirm = useConfirm();
  *   const ok = await confirm({
  *     title: 'Remove document?',
- *     message: 'The file stays in Dropbox.',
+ *     message: 'This cannot be undone.',
  *     confirmLabel: 'Remove',
  *     destructive: true,
  *   });

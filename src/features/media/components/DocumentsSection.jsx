@@ -1,7 +1,7 @@
 import { useState, useRef, lazy, Suspense } from 'react';
 import { FileText, ExternalLink, Eye, Trash2, Plus, Link as LinkIcon, Check, Loader2, Upload } from 'lucide-react';
 import { useProductMedia } from '../hooks/useProductMedia';
-import { addDropboxDocument, uploadDocumentFile, removeMedia, getMediaUrl, isSupabaseStored } from '../api/media';
+import { uploadDocumentFile, removeMedia, getMediaUrl, isSupabaseStored } from '../api/media';
 import { formatFileSize } from '@/lib/format';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -100,40 +100,6 @@ export default function DocumentsSection({ sku, category }) {
     }
   });
 
-  const openPickerForSlot = (docTypeConfig, language) => {
-    if (typeof window === 'undefined' || !window.Dropbox) {
-      setErrorMessage('Dropbox Chooser is not loaded.');
-      return;
-    }
-
-    const key = slotKey(docTypeConfig.id, language);
-    setErrorMessage(null);
-    setBusyKey(key);
-
-    window.Dropbox.choose({
-      // 'preview' links are permanent; 'direct' links expire after ~4 hours.
-      linkType: 'preview',
-      multiselect: false,
-      extensions: docTypeConfig.extensions,
-      success: async (files) => {
-        try {
-          const existing = docsBySlot[key];
-          if (existing) {
-            await removeMedia(existing);
-          }
-          await addDropboxDocument(sku, docTypeConfig.id, files[0], language);
-          reload();
-        } catch (err) {
-          setErrorMessage(err.message);
-          console.error('Add document error:', err);
-        } finally {
-          setBusyKey(null);
-        }
-      },
-      cancel: () => setBusyKey(null),
-    });
-  };
-
   const handleUploadFile = async (docTypeConfig, language, file) => {
     if (!file) return;
     const key = slotKey(docTypeConfig.id, language);
@@ -157,7 +123,7 @@ export default function DocumentsSection({ sku, category }) {
       title: `Remove the ${label}?`,
       message: isSupabaseStored(doc.storage_path)
         ? 'This permanently deletes the file from Supabase storage too. This cannot be undone.'
-        : 'The file stays in Dropbox.',
+        : 'The externally hosted file itself is not deleted.',
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -188,7 +154,6 @@ export default function DocumentsSection({ sku, category }) {
         busy={busyKey === key}
         accept={docType.extensions.join(',')}
         onPreview={() => setPreviewDoc(docsBySlot[key])}
-        onAdd={() => openPickerForSlot(docType, language)}
         onUploadFile={(file) => handleUploadFile(docType, language, file)}
         onRemove={() => handleRemove(docsBySlot[key], langLabel ?? docType.label)}
       />
@@ -277,7 +242,7 @@ function LanguageGroup({ docType, linkedCount, children }) {
   );
 }
 
-function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accept, onPreview, onAdd, onUploadFile, onRemove }) {
+function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accept, onPreview, onUploadFile, onRemove }) {
   const fileRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const linked = !!doc;
@@ -393,8 +358,8 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
                   type="button"
                   onClick={() => fileRef.current?.click()}
                   disabled={busy}
-                  title="Upload from your computer to Supabase"
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container transition-colors disabled:opacity-50 whitespace-nowrap"
+                  title="Upload from your computer"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   {busy ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -402,15 +367,6 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
                     <Upload className="w-3.5 h-3.5" />
                   )}
                   Upload
-                </button>
-                <button
-                  type="button"
-                  onClick={onAdd}
-                  disabled={busy}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add from Dropbox
                 </button>
               </>
             )

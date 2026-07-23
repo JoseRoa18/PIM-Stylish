@@ -5,7 +5,6 @@ import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { useProductMedia } from '../hooks/useProductMedia';
 import {
-  addDropboxMedia,
   uploadMediaFiles,
   addVideoByUrl,
   setPrimaryMedia,
@@ -145,38 +144,6 @@ export default function MediaSection({ sku }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reorderEnabled]);
 
-  const openDropboxPicker = () => {
-    if (typeof window === 'undefined' || !window.Dropbox) {
-      setErrorMessage(
-        'Dropbox Chooser is not loaded. Check the script tag in index.html and the VITE_DROPBOX_APP_KEY env var.',
-      );
-      return;
-    }
-
-    setErrorMessage(null);
-
-    window.Dropbox.choose({
-      // 'preview' returns permanent shared links that hot-link via ?raw=1.
-      // 'direct' returns CDN URLs that expire after ~4 hours — do not use.
-      linkType: 'preview',
-      multiselect: true,
-      extensions: ['images', 'video'],
-      success: async (files) => {
-        setBusy(true);
-        try {
-          await addDropboxMedia(sku, files, addLanguage || null);
-          reload();
-        } catch (err) {
-          setErrorMessage(err.message);
-          console.error('Add media error:', err);
-        } finally {
-          setBusy(false);
-        }
-      },
-      cancel: () => {},
-    });
-  };
-
   // ---------------- Native Supabase upload ----------------
 
   const handleFiles = async (fileList) => {
@@ -285,7 +252,7 @@ export default function MediaSection({ sku }) {
       URL.revokeObjectURL(url);
       if (failures.length) {
         setErrorMessage(
-          `${failures.length} file(s) couldn't be downloaded (likely Dropbox CORS) — their links are in _could_not_download.txt inside the zip.`,
+          `${failures.length} file(s) couldn't be downloaded — their links are in _could_not_download.txt inside the zip.`,
         );
       }
     } catch (err) {
@@ -321,7 +288,7 @@ export default function MediaSection({ sku }) {
       title: `Remove "${mediaItem.file_name}"?`,
       message: isSupabaseStored(mediaItem.storage_path)
         ? 'This permanently deletes the file from Supabase storage too. This cannot be undone.'
-        : 'The file stays in Dropbox.',
+        : 'The externally hosted file itself is not deleted.',
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -358,7 +325,7 @@ export default function MediaSection({ sku }) {
       title: `Remove ${items.length} item${items.length === 1 ? '' : 's'}?`,
       message: supaCount
         ? `${supaCount} of these are hosted in Supabase and will be permanently deleted from storage. This cannot be undone.`
-        : 'The files stay in Dropbox.',
+        : 'The externally hosted files themselves are not deleted.',
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -481,20 +448,6 @@ export default function MediaSection({ sku }) {
             />
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={busy || !!uploadProgress}
-              title="Upload images from your computer to Supabase"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
-            >
-              {uploadProgress ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Upload className="w-4 h-4" />
-              )}
-              {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : 'Upload'}
-            </button>
-            <button
-              type="button"
               onClick={() => setVideoModalOpen(true)}
               disabled={busy}
               title="Add a video by URL (YouTube, Vimeo, …)"
@@ -505,12 +458,17 @@ export default function MediaSection({ sku }) {
             </button>
             <button
               type="button"
-              onClick={openDropboxPicker}
-              disabled={busy}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy || !!uploadProgress}
+              title="Upload images from your computer"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <DropboxIcon className="w-4 h-4" />
-              {busy ? 'Working…' : 'Add from Dropbox'}
+              {uploadProgress ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : 'Upload images'}
             </button>
           </div>
         )}
@@ -624,7 +582,7 @@ export default function MediaSection({ sku }) {
         ) : error ? (
           <p className="text-body-md text-error">Failed to load media: {error.message}</p>
         ) : visualMedia.length === 0 ? (
-          <EmptyState onAddClick={openDropboxPicker} canEdit={canEdit} />
+          <EmptyState onAddClick={() => fileInputRef.current?.click()} canEdit={canEdit} />
         ) : filteredMedia.length === 0 ? (
           <p className="text-body-md text-on-surface-variant text-center py-8">
             No media tagged as {langMeta(activeFilter === 'universal' ? null : activeFilter).label}.
@@ -650,7 +608,7 @@ export default function MediaSection({ sku }) {
             {canEdit && (
               <button
                 type="button"
-                onClick={openDropboxPicker}
+                onClick={() => fileInputRef.current?.click()}
                 className="aspect-square rounded-lg border-2 border-dashed border-outline-variant hover:border-primary hover:bg-surface-container-low transition-colors flex flex-col items-center justify-center text-on-surface-variant hover:text-primary"
               >
                 <ImagePlus className="w-8 h-8 mb-1" strokeWidth={1.5} />
@@ -737,7 +695,7 @@ function EmptyState({ onAddClick, canEdit }) {
       />
       <p className="text-body-md text-on-surface mb-1">No media linked yet</p>
       <p className="text-body-sm text-on-surface-variant">
-        Browse Dropbox to add product photos or videos
+        Upload product photos from your computer
       </p>
     </button>
   );
@@ -1331,15 +1289,3 @@ function LinksDialog({ title, subtitle, items, onClose }) {
   );
 }
 
-function DropboxIcon({ className }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path d="M6 2L0 6l6 4 6-4-6-4zM18 2l-6 4 6 4 6-4-6-4zM0 14l6 4 6-4-6-4-6 4zM18 10l-6 4 6 4 6-4-6-4zM6 19l6 4 6-4-6-4-6 4z" />
-    </svg>
-  );
-}

@@ -32,13 +32,11 @@ function inferMimeType(filename) {
 }
 
 /**
- * Convert a Dropbox URL to a direct-embed URL (full resolution).
+ * Media URLs are stored ready-to-embed (Supabase Storage public URLs, or
+ * external video links added by URL).
  */
 export function getMediaUrl(storagePath) {
-  if (!storagePath) return null;
-  return storagePath
-    .replace('?dl=0', '?raw=1')
-    .replace('&dl=0', '&raw=1');
+  return storagePath || null;
 }
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
@@ -47,7 +45,7 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
  * Build a lightweight thumbnail URL for an image so grid tiles don't each pull
  * the full-resolution photo. A 400px webp thumbnail is ~8 KB.
  *
- * Resizes via the free weserv.nl image proxy for BOTH Dropbox and Supabase URLs.
+ * Resizes via the free weserv.nl image proxy.
  * We deliberately do NOT use Supabase's native transform: it's a metered Pro
  * feature (only 100 origin images/month included) and this catalog has ~3,300
  * images, so browsing blew past the quota (797/100). weserv is free/unlimited.
@@ -63,16 +61,15 @@ export function getThumbnailUrl(storagePath, width = 400) {
   return `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${width}&fit=cover&output=webp&q=80`;
 }
 
-// Public buckets for files uploaded straight to Supabase. Dropbox stays fully
-// supported in parallel — a row's storage_path is just a URL either way.
+// Public buckets for files uploaded to Supabase Storage.
 export const MEDIA_BUCKET = 'product-images';
 export const DOCS_BUCKET = 'product-documents';
 const PUBLIC_MARKER = '/storage/v1/object/public/';
 
 /**
- * True when a storage_path points at a file we host in Supabase Storage (vs a
- * Dropbox shared link). Used to decide whether deleting a row should also
- * delete the underlying file — we NEVER delete from Dropbox.
+ * True when a storage_path points at a file we host in Supabase Storage (vs an
+ * external URL, e.g. a video added by link). Used to decide whether deleting a
+ * row should also delete the underlying file — external files are never touched.
  */
 export function isSupabaseStored(storagePath) {
   return typeof storagePath === 'string' && storagePath.includes(PUBLIC_MARKER);
@@ -113,68 +110,6 @@ export async function listMedia(sku) {
   return data ?? [];
 }
 
-/**
- * Add Dropbox files as visual media (images, videos).
- * `language` tags the batch ('en' | 'en_fr' | 'en_es' | null=Universal) so
- * language-specific imagery (infographics, callouts) can be distinguished
- * from language-neutral product photos. Used by MediaSection.
- */
-export async function addDropboxMedia(sku, dropboxFiles, language = null) {
-  if (!dropboxFiles || dropboxFiles.length === 0) return [];
-
-  const { data: existingPrimary } = await supabase
-    .from('product_media')
-    .select('id')
-    .eq('sku', sku)
-    .eq('is_primary', true)
-    .maybeSingle();
-
-  const { data: maxOrderRow } = await supabase
-    .from('product_media')
-    .select('display_order')
-    .eq('sku', sku)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  let nextOrder = (maxOrderRow?.display_order ?? -1) + 1;
-  let primaryAssigned = !!existingPrimary;
-
-  const rows = dropboxFiles.map((file) => {
-    const mediaType = inferMediaType(file.name);
-    const shouldBePrimary = mediaType === 'image' && !primaryAssigned;
-    if (shouldBePrimary) primaryAssigned = true;
-
-    return {
-      sku,
-      media_type: mediaType,
-      language,
-      storage_path: file.link,
-      file_name: file.name,
-      file_size_bytes: file.bytes ?? null,
-      mime_type: inferMimeType(file.name),
-      is_primary: shouldBePrimary,
-      display_order: nextOrder++,
-    };
-  });
-
-  const { data, error } = await supabase
-    .from('product_media')
-    .insert(rows)
-    .select();
-
-  if (error) throw error;
-
-  logActivity({
-    action: 'media',
-    entityType: 'media',
-    entityId: sku,
-    summary: `Added ${rows.length} media file(s) to ${sku}`,
-    metadata: { count: rows.length, language },
-  });
-  return data;
-}
-
 // Build a collision-safe object path: `<sku>/<base>-<rand>.<ext>`. Keeps the
 // original name for display while guaranteeing two different files never clobber.
 function buildObjectPath(sku, fileName) {
@@ -190,8 +125,7 @@ function buildObjectPath(sku, fileName) {
 
 /**
  * Upload image files straight from the user's computer to Supabase Storage and
- * register them as product media. Runs ALONGSIDE the Dropbox flow — this just
- * hosts the bytes in Supabase instead of linking a Dropbox file.
+ * register them as product media.
  *
  * @param {string}   sku
  * @param {File[]}   files     browser File objects (images)
@@ -338,53 +272,8 @@ export async function bulkSetMediaLanguage(ids, language) {
 }
 
 /**
- * Add a single document from Dropbox, categorized by document_type.
- * `language` ('en' | 'en_fr' | 'en_es' | null) distinguishes language
- * variants of the same type (e.g. spec sheets). Used by DocumentsSection.
- */
-export async function addDropboxDocument(sku, documentType, dropboxFile, language = null) {
-  const { data: maxOrderRow } = await supabase
-    .from('product_media')
-    .select('display_order')
-    .eq('sku', sku)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const nextOrder = (maxOrderRow?.display_order ?? -1) + 1;
-
-  const { data, error } = await supabase
-    .from('product_media')
-    .insert({
-      sku,
-      media_type: 'document',
-      document_type: documentType,
-      language,
-      storage_path: dropboxFile.link,
-      file_name: dropboxFile.name,
-      file_size_bytes: dropboxFile.bytes ?? null,
-      mime_type: inferMimeType(dropboxFile.name),
-      is_primary: false,
-      display_order: nextOrder,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-
-  logActivity({
-    action: 'media',
-    entityType: 'media',
-    entityId: sku,
-    summary: `Added ${documentType} document to ${sku}`,
-    metadata: { documentType, language },
-  });
-  return data;
-}
-
-/**
- * Upload a document file (PDF, DXF, …) straight from the user's computer to
- * Supabase Storage and register it. Runs alongside the Dropbox flow.
+ * Upload a document file (PDF, DXF, …) from the user's computer to
+ * Supabase Storage and register it.
  */
 export async function uploadDocumentFile(sku, documentType, file, language = null) {
   if (!file) throw new Error('No file selected.');
@@ -438,8 +327,8 @@ export async function uploadDocumentFile(sku, documentType, file, language = nul
 }
 
 /**
- * Add a document by pasting a URL directly (e.g. an existing Dropbox share
- * link from the master spreadsheet). Replaces nothing — caller handles that.
+ * Add a document by pasting a URL directly (any externally hosted file).
+ * Replaces nothing — caller handles that.
  */
 export async function addDocumentByUrl(sku, documentType, url, fileName = null, language = null) {
   const trimmed = url.trim();
@@ -527,8 +416,8 @@ export async function setPrimaryMedia(sku, mediaId) {
 
 /**
  * Remove a media item. If the file is hosted in Supabase Storage, the file
- * itself is deleted too so we don't pay for orphans. Files in Dropbox are NEVER
- * touched (Dropbox stays the source of truth for those).
+ * itself is deleted too so we don't pay for orphans. Externally hosted files
+ * (e.g. videos linked by URL) are never touched.
  */
 export async function removeMedia(media) {
   const { error } = await supabase
@@ -551,7 +440,7 @@ export async function removeMedia(media) {
 
 /**
  * Best-effort delete of the underlying Storage files for the given paths.
- * Skips Dropbox links. Groups by bucket. Never throws — a storage hiccup must
+ * Skips external URLs. Groups by bucket. Never throws — a storage hiccup must
  * not block the row deletion the user already confirmed.
  */
 async function deleteStorageObjects(storagePaths) {
@@ -573,7 +462,7 @@ async function deleteStorageObjects(storagePaths) {
 
 /**
  * Delete many media rows at once. Supabase-hosted files are deleted from
- * Storage too; Dropbox files are NOT touched. `items` is an array of media
+ * Storage too; external URLs are not touched. `items` is an array of media
  * objects (need at least { id, storage_path }).
  */
 export async function removeMediaBatch(items) {
