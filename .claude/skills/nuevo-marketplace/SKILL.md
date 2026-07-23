@@ -56,7 +56,8 @@ the workbook and destroys data validations and styling. (Reading grids for analy
 | Amazon (CA/US) | full seller flat file, XLSM | A1 settings string declares labelRow=4 / attributeRow=5 / dataRow=7; repeated labels (Bullet Point ×5, Other Image URL ×8) filled by occurrence; Valid Values rows `"Label - [ TYPE ]"`; US labels say `(en_US, ...)` — normalize to `(en_CA, ...)` for rule lookup |
 | Menards (Syndigo) | rows 1–5 = GUIDs/source/locale/requiredness/names, data row 6 | One category = content file + 5 container files that are DISTINCT dimensions despite near-identical filenames `(n)`; dedupe by internal data-sheet name, NEVER by filename; deliver as ONE ZIP with original filenames |
 | BB&B | First Cost sheet, 268 cols | inline strings (no sharedStrings) |
-| Walmart CA | label row + XML-name row | multilocale EN/FR column pairs |
+| Walmart CA | multilocale spec v3.x | data sheet has "Version=…" in A1; labels R4, attribute XML names R5 (the stable key), data R7; _en/_fr pairs (leave _fr blank); repeated XML names fill by occurrence; closed lists on the Hidden_* sheet |
+| Home Depot US | Mirakl | "Data" sheet: labels R1, attribute GUIDs R2, data R3; snap against GUID-keyed ReferenceData columns; requiredness per collection in the "Columns" sheet; Product Category = full collection path string |
 
 ## Gotchas (each of these caused a real bug)
 
@@ -80,6 +81,11 @@ the workbook and destroys data validations and styling. (Reading grids for analy
   PIM; never copy marketplace data back in.
 - Keep heavy deps (JSZip) out of the initial bundle — exporters are reached from
   lazy-loaded routes; import JSZip dynamically (`loadJSZip`).
+- **Sheet names with `&`** arrive XML-entity-encoded from raw regex parsing;
+  `listSheetNames` decodes them (fixed) — compare decoded names only.
+- **Spec-wide accessory templates** (file name mentions no accessory kind, e.g.
+  Walmart's "omniintl-…" file) match EVERY accessory — the kind gate only
+  applies to kind-specific file names.
 
 ## Done checklist
 
