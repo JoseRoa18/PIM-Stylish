@@ -72,6 +72,24 @@ const fmt = (v) => {
   return String(v);
 };
 
+// Descriptions are stored as TipTap HTML; the sheet gets plain text with line
+// breaks. This is also the correct import inverse — the importer converts
+// plain text back into HTML paragraphs (raw HTML would get double-escaped).
+const stripHtml = (h) =>
+  String(h || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+
 function cellValue(product, header) {
   const nh = normalizeHeader(header);
 
@@ -87,10 +105,15 @@ function cellValue(product, header) {
   if (def.type === 'category') return CATEGORY_LABELS[product.category] ?? product.category ?? '';
 
   const t = def.target;
-  if (t.col) return fmt(product[t.col]);
-  if (t.attr) return fmt(product.attributes?.[t.attr]);
-  if (t.dim) return fmt(product.attributes?.[t.dim[0]]?.[t.dim[1]]);
-  return '';
+  const raw = t.col
+    ? product[t.col]
+    : t.attr
+      ? product.attributes?.[t.attr]
+      : t.dim
+        ? product.attributes?.[t.dim[0]]?.[t.dim[1]]
+        : '';
+  if (def.type === 'description') return stripHtml(raw);
+  return fmt(raw);
 }
 
 // RFC-4180 CSV with BOM so Excel opens it as UTF-8.
