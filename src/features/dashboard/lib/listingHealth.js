@@ -64,9 +64,25 @@ const FIELDS = {
   country_of_origin: { label: 'Country of Origin', check: (p) => hasText(attr(p, 'country_of_origin')) },
   hs_code: { label: 'HS Code', check: (p) => hasText(attr(p, 'hs_code')) },
   installation_type: { label: 'Installation Type', check: (p) => hasText(attr(p, 'installation_type')) || hasArray(attr(p, 'installation_type')) },
-  gauge: { label: 'Gauge', check: (p) => hasText(attr(p, 'gauge')) || hasNumber(attr(p, 'gauge')) },
-  number_of_bowls: { label: 'Number of Bowls', check: (p) => hasNumber(attr(p, 'number_of_bowls')) },
-  external_dimensions: { label: 'External Dimensions', check: (p) => hasDims(attr(p, 'external_dimensions_in')) },
+  // Sink-only specs: pass (not applicable) for faucets/accessories — an
+  // accessory shouldn't lose points for having no gauge or bowls.
+  gauge: {
+    label: 'Gauge',
+    check: (p) => !/sink/.test(p.category ?? '') || hasText(attr(p, 'gauge')) || hasNumber(attr(p, 'gauge')),
+  },
+  number_of_bowls: {
+    label: 'Number of Bowls',
+    check: (p) => !/sink/.test(p.category ?? '') || hasNumber(attr(p, 'number_of_bowls')),
+  },
+  // Faucets carry their dimensions as spout/height attributes, not the
+  // external length×width box — accept either shape of dimensional data.
+  external_dimensions: {
+    label: 'External Dimensions',
+    check: (p) =>
+      /faucet|pot_filler/.test(p.category ?? '')
+        ? hasNumber(attr(p, 'faucet_height_in')) || hasNumber(attr(p, 'spout_height_in')) || hasDims(attr(p, 'external_dimensions_in'))
+        : hasDims(attr(p, 'external_dimensions_in')),
+  },
   shipping_dimensions: { label: 'Shipping Dimensions', check: (p) => hasDims(attr(p, 'shipping_dimensions_in')) },
   bullet_points: { label: 'Bullet Points', check: (p) => hasArray(attr(p, 'bullet_points'), 4) },
   primary_image: { label: 'Primary Image', check: (p) => hasPrimaryImage(p._media) },

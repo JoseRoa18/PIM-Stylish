@@ -134,7 +134,9 @@ export function useListingHealth() {
               source:
                 def.dataSource === 'wix_cache'
                   ? e.hasWixCache ? 'wix_cache' : (e.wix_product_id ? 'pim_fallback' : 'not_linked')
-                  : 'pim',
+                  : def.dataSource === 'wayfair'
+                    ? e.raw.wayfair_item_group_id ? 'pim' : 'not_linked'
+                    : 'pim',
               result,
             };
           });

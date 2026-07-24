@@ -41,7 +41,7 @@ const SEVERITY_META = {
 
 // Per-product breakdown of failed checks, grouped by severity — the exact
 // "why is this score what it is" behind each row.
-function IssueBreakdown({ result, sku }) {
+function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'this marketplace' }) {
   if (result.issues.length === 0) {
     return (
       <p className="text-body-sm text-on-surface animate-banner-in">
@@ -55,6 +55,12 @@ function IssueBreakdown({ result, sku }) {
 
   return (
     <div className="animate-banner-in">
+      {notLinked && (
+        <p className="mb-3 px-3 py-2 rounded-lg bg-surface-container-high text-body-sm text-on-surface">
+          Not connected to a {marketplaceLabel} listing yet — the checks below measure
+          how ready this product is to launch there.
+        </p>
+      )}
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         {groups.map(({ sev, items }) => {
           const meta = SEVERITY_META[sev];
@@ -396,7 +402,12 @@ export default function ListingHealth() {
                         {isOpen && (
                           <tr className="bg-surface-container-low/30">
                             <td colSpan={6} className="px-6 pb-4 pt-1">
-                              <IssueBreakdown result={p.result} sku={p.sku} />
+                              <IssueBreakdown
+                                result={p.result}
+                                sku={p.sku}
+                                notLinked={p.source === 'not_linked'}
+                                marketplaceLabel={mktDef.label}
+                              />
                             </td>
                           </tr>
                         )}
