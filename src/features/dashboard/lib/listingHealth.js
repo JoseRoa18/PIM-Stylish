@@ -72,6 +72,27 @@ const FIELDS = {
   primary_image: { label: 'Primary Image', check: (p) => hasPrimaryImage(p._media) },
   multiple_images: { label: '5+ Images', check: (p) => countImages(p._media) >= 5 },
   linked_to_wix: { label: 'Linked to Wix', check: (p) => hasText(p.wix_product_id) },
+  linked_to_wayfair: { label: 'Linked to Wayfair', check: (p) => hasText(p.wayfair_item_group_id) },
+  // Channel titles come from the marketing title, not the short internal
+  // model name ("Topaz") — that's what pushes/exports actually send.
+  marketing_title: {
+    label: 'Marketing Title',
+    check: (p) => hasText(attr(p, 'general_title_en')) && attr(p, 'general_title_en').trim().length >= 10,
+  },
+  // Spec-attribute sync per the latest Wayfair audit snapshot:
+  //   _wayfairAudit === undefined → no audit has run yet (unknown ≠ fail)
+  //   _wayfairAudit === null      → audited run, but this SKU errored / has no listing
+  //   { changed }                 → audited; in sync when changed === 0
+  // The audit only covers Wayfair's Kitchen Sinks class so far.
+  wayfair_specs_synced: {
+    label: 'Spec Attributes in Sync',
+    check: (p) => {
+      if (p.category !== 'kitchen_sink') return true;
+      if (p._wayfairAudit === undefined) return true;
+      if (p._wayfairAudit === null) return false;
+      return p._wayfairAudit.changed === 0;
+    },
+  },
   visible_online: { label: 'Visible Online', check: (p) => p.visible_online === true },
   section_dimensions: { label: 'Dimensions Tab', check: (p) => hasInfoSection(p, /dimension|size|measurement/i) },
   section_documents: { label: 'Documents to Download Tab', check: (p) => hasInfoSection(p, /document|download|spec sheet|manual|installation/i) },
@@ -100,6 +121,31 @@ export const MARKETPLACES = {
       { field: 'section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
       { field: 'section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
       { field: 'section_accessories', category: 'Info Tabs', weight: 6, severity: 'minor' },
+    ],
+  },
+  wayfair: {
+    key: 'wayfair',
+    label: 'Wayfair',
+    subtitle: 'Product Catalog API',
+    dataSource: 'wayfair',
+    connectionType: 'api',
+    requiresLink: true,
+    checks: [
+      { field: 'linked_to_wayfair', category: 'Identity', weight: 14, severity: 'critical' },
+      { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'upc', category: 'Identity', weight: 6, severity: 'major' },
+      { field: 'description', category: 'Content', weight: 10, severity: 'critical' },
+      { field: 'bullet_points', category: 'Content', weight: 8, severity: 'major' },
+      { field: 'warranty', category: 'Content', weight: 4, severity: 'minor' },
+      { field: 'primary_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'multiple_images', category: 'Images', weight: 5, severity: 'minor' },
+      { field: 'external_dimensions', category: 'Specs', weight: 8, severity: 'critical' },
+      { field: 'material', category: 'Specs', weight: 4, severity: 'major' },
+      { field: 'finish', category: 'Specs', weight: 4, severity: 'major' },
+      { field: 'gauge', category: 'Specs', weight: 3, severity: 'minor' },
+      { field: 'number_of_bowls', category: 'Specs', weight: 3, severity: 'minor' },
+      { field: 'shipping_weight', category: 'Shipping', weight: 5, severity: 'major' },
+      { field: 'wayfair_specs_synced', category: 'Channel Sync', weight: 12, severity: 'major' },
     ],
   },
   bbb: {

@@ -184,6 +184,9 @@ export default function ListingHealth() {
               {mktDef.dataSource === 'pim' && (
                 <> · scoring against PIM data needed to fill the template</>
               )}
+              {mktDef.dataSource === 'wayfair' && (
+                <> · PIM readiness + spec-attribute sync from the latest audit</>
+              )}
             </p>
             {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && (
               <button
@@ -219,7 +222,7 @@ export default function ListingHealth() {
             productCount={products.length}
             marketplaceLabel={mktDef.label}
           />
-          <ListingHealthActions stats={stats} products={products} />
+          <ListingHealthActions stats={stats} products={products} marketplaceLabel={mktDef.label} />
 
           <section className="mt-6 rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
             <header className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-4 flex-wrap">

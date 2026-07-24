@@ -15,7 +15,7 @@ const SCORE_BADGE_STYLES = {
   critical: 'bg-error-container text-on-error-container',
 };
 
-export default function ListingHealthActions({ stats, products }) {
+export default function ListingHealthActions({ stats, products, marketplaceLabel = 'marketplace' }) {
   if (!stats) return null;
 
   const ranked = [...products]
@@ -80,7 +80,7 @@ export default function ListingHealthActions({ stats, products }) {
             <h3 className="text-title-md text-on-surface">Needs Attention</h3>
           </div>
           <p className="text-body-sm text-on-surface-variant mt-0.5">
-            Products with the lowest Wix readiness scores
+            Products with the lowest {marketplaceLabel} readiness scores
           </p>
         </header>
         <ul className="divide-y divide-outline-variant">

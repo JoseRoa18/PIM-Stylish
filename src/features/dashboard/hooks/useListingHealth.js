@@ -67,6 +67,24 @@ export function useListingHealth() {
 
         const list = dbProducts ?? [];
 
+        // Latest Wayfair audit snapshot → per-SKU spec-sync map. null map =
+        // no audit has run yet (the sync check treats unknown as pass).
+        let wayfairMap = null;
+        try {
+          const { data: snap } = await supabase
+            .from('channel_health')
+            .select('results')
+            .eq('channel', 'wayfair')
+            .order('run_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (Array.isArray(snap?.results)) {
+            wayfairMap = new Map(snap.results.map((r) => [r.sku, r]));
+          }
+        } catch {
+          // score without sync data rather than failing the page
+        }
+
         // Enrich each product once with parsed Wix data + base fields
         const enriched = list.map((p) => {
           const wixData = extractWixData(p.wix_raw);
@@ -94,6 +112,12 @@ export function useListingHealth() {
             if (def.dataSource === 'wix_cache' && e.wixData) {
               product = { ...e.raw, ...e.wixData };
               media = e.wixData._wix_media;
+            } else if (def.dataSource === 'wayfair') {
+              product = {
+                ...e.raw,
+                _wayfairAudit: wayfairMap ? (wayfairMap.get(e.sku) ?? null) : undefined,
+              };
+              media = e.pimMedia;
             } else {
               product = e.raw;
               media = e.pimMedia;
@@ -116,7 +140,10 @@ export function useListingHealth() {
           });
           const stats = aggregateStats(scores);
           const cachedCount = scores.filter((s) => s.has_wix_cache).length;
-          const linkedCount = scores.filter((s) => s.wix_product_id).length;
+          const linkedCount =
+            def.dataSource === 'wayfair'
+              ? enriched.filter((e) => e.raw.wayfair_item_group_id).length
+              : scores.filter((s) => s.wix_product_id).length;
           perMarketplaceData[mkt] = { products: scores, stats, cachedCount, linkedCount };
         }
 
