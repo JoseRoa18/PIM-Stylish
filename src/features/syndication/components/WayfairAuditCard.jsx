@@ -95,6 +95,32 @@ export default function WayfairAuditCard() {
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     state.busy = false;
     setRun({ ...state, rows: [...state.rows], errors: [...state.errors] });
+
+    // Persist a snapshot (best-effort) so Listing Health can show channel
+    // sync at a glance without re-running the ~1 min live audit.
+    try {
+      const offenders = state.rows
+        .filter((r) => r.changed > 0)
+        .sort((a, b) => b.changed - a.changed)
+        .slice(0, 10)
+        .map((r) => ({
+          sku: r.sku,
+          changed: r.changed,
+          fields: Object.entries(r.diff).filter(([, d]) => d.changed).slice(0, 4).map(([t]) => t),
+        }));
+      await supabase.from('channel_health').insert({
+        channel: 'wayfair',
+        target: `${supplier}/${market}`,
+        total: state.total,
+        in_sync: state.rows.filter((r) => r.changed === 0).length,
+        with_diffs: state.rows.filter((r) => r.changed > 0).length,
+        errors: state.errors.length,
+        partial: state.done < state.total,
+        top_offenders: offenders,
+      });
+    } catch (err) {
+      console.error('channel_health snapshot:', err);
+    }
   }
 
   const rows = run?.rows ?? [];

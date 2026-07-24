@@ -16,6 +16,7 @@ import {
   API_MARKETPLACE_KEYS,
 } from '@/features/dashboard/lib/listingHealth';
 import { readWixProduct } from '@/features/syndication/api/wixSync';
+import ChannelSyncCard from '@/features/dashboard/components/ChannelSyncCard';
 
 const SCORE_BADGE_STYLES = {
   excellent: 'bg-success-container text-on-success-container',
@@ -119,6 +120,8 @@ export default function ListingHealth() {
           Track readiness across each marketplace and identify what needs attention.
         </p>
       </header>
+
+      <ChannelSyncCard />
 
       {/* Marketplace tabs — only API-connected channels */}
       {API_MARKETPLACE_KEYS.length > 1 && (
