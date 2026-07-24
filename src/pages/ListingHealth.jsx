@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Loader2,
   AlertCircle,
   Search,
   ArrowRight,
+  ChevronDown,
   RefreshCw,
 } from 'lucide-react';
 import { useListingHealth } from '@/features/dashboard/hooks/useListingHealth';
@@ -32,6 +33,59 @@ const SOURCE_STYLES = {
   pim: { label: 'PIM', class: 'bg-surface-container text-on-surface-variant' },
 };
 
+const SEVERITY_META = {
+  critical: { label: 'Critical', dot: 'bg-error', text: 'text-error' },
+  major: { label: 'Major', dot: 'bg-warning', text: 'text-warning' },
+  minor: { label: 'Minor', dot: 'bg-on-surface-variant', text: 'text-on-surface-variant' },
+};
+
+// Per-product breakdown of failed checks, grouped by severity — the exact
+// "why is this score what it is" behind each row.
+function IssueBreakdown({ result, sku }) {
+  if (result.issues.length === 0) {
+    return (
+      <p className="text-body-sm text-on-surface animate-banner-in">
+        All {result.passed.length} checks pass — nothing to fix. ✨
+      </p>
+    );
+  }
+  const groups = ['critical', 'major', 'minor']
+    .map((sev) => ({ sev, items: result.issues.filter((i) => i.severity === sev) }))
+    .filter((g) => g.items.length > 0);
+
+  return (
+    <div className="animate-banner-in">
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        {groups.map(({ sev, items }) => {
+          const meta = SEVERITY_META[sev];
+          return (
+            <div key={sev} className="min-w-[14rem]">
+              <p className={`text-label-md font-semibold uppercase tracking-wider ${meta.text} mb-1.5`}>
+                {meta.label} · {items.length}
+              </p>
+              <ul className="space-y-1">
+                {items.map((i) => (
+                  <li key={i.key} className="flex items-center gap-2 text-body-sm text-on-surface">
+                    <span className={`w-1.5 h-1.5 rounded-full ${meta.dot} flex-shrink-0`} />
+                    {i.label}
+                    <span className="text-on-surface-variant">· {i.category}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-body-sm text-on-surface-variant">
+        {result.passed.length} check{result.passed.length === 1 ? '' : 's'} passing ·{' '}
+        <Link to={`/catalog/${sku}?tab=marketplaces`} className="text-primary font-semibold hover:underline">
+          Open product to fix →
+        </Link>
+      </p>
+    </div>
+  );
+}
+
 const SORT_OPTIONS = [
   { key: 'score_asc', label: 'Lowest score first' },
   { key: 'score_desc', label: 'Highest score first' },
@@ -56,6 +110,7 @@ export default function ListingHealth() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState({ done: 0, total: 0 });
   const [page, setPage] = useState(1);
+  const [expandedSku, setExpandedSku] = useState(null);
   const PAGE_SIZE = 25;
 
   const mktDef = MARKETPLACES[marketplace];
@@ -95,9 +150,10 @@ export default function ListingHealth() {
     return list;
   }, [products, search, filter, sort]);
 
-  // Any change of what's listed goes back to page 1.
+  // Any change of what's listed goes back to page 1 and collapses details.
   useEffect(() => {
     setPage(1);
+    setExpandedSku(null);
   }, [marketplace, search, filter, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -291,44 +347,60 @@ export default function ListingHealth() {
                     const cat = categorizeScore(p.result.score);
                     const critCount = p.result.issues.filter((i) => i.severity === 'critical').length;
                     const source = SOURCE_STYLES[p.source] ?? SOURCE_STYLES.pim;
+                    const isOpen = expandedSku === p.sku;
                     return (
-                      <tr key={p.sku} className="hover:bg-surface-container-low/40 transition-colors">
-                        <td className="px-6 py-3">
-                          <Link
-                            to={`/catalog/${p.sku}?tab=marketplaces`}
-                            className="text-body-md text-on-surface hover:text-primary transition-colors"
-                          >
-                            <div className="font-medium truncate max-w-md">{p.model_name || p.sku}</div>
-                            <div className="text-body-sm text-on-surface-variant font-mono mt-0.5">{p.sku}</div>
-                          </Link>
-                        </td>
-                        <td className="px-6 py-3 text-body-md text-on-surface-variant">{p.brand ?? '—'}</td>
-                        <td className="px-6 py-3 text-body-sm">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-label-md ${source.class}`}>
-                            {source.label}
-                          </span>
-                        </td>
-                        <td className="px-6 py-3 text-right">
-                          {critCount > 0 ? (
-                            <span className="text-error font-medium">{critCount}</span>
-                          ) : (
-                            <span className="text-on-surface-variant">—</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-3 text-right">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-label-md font-semibold ${SCORE_BADGE_STYLES[cat]}`}>
-                            {p.result.score}
-                          </span>
-                        </td>
-                        <td className="px-6 py-3 text-right">
-                          <Link
-                            to={`/catalog/${p.sku}?tab=marketplaces`}
-                            className="inline-flex items-center text-on-surface-variant hover:text-primary transition-colors"
-                          >
-                            <ArrowRight className="w-4 h-4" />
-                          </Link>
-                        </td>
-                      </tr>
+                      <Fragment key={p.sku}>
+                        <tr
+                          onClick={() => setExpandedSku(isOpen ? null : p.sku)}
+                          aria-expanded={isOpen}
+                          className={`cursor-pointer transition-colors ${isOpen ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}
+                        >
+                          <td className="px-6 py-3">
+                            <div className="flex items-center gap-2">
+                              <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                              <div>
+                                <div className="text-body-md text-on-surface font-medium truncate max-w-md">{p.model_name || p.sku}</div>
+                                <div className="text-body-sm text-on-surface-variant font-mono mt-0.5">{p.sku}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-3 text-body-md text-on-surface-variant">{p.brand ?? '—'}</td>
+                          <td className="px-6 py-3 text-body-sm">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-label-md ${source.class}`}>
+                              {source.label}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            {critCount > 0 ? (
+                              <span className="text-error font-medium">{critCount}</span>
+                            ) : (
+                              <span className="text-on-surface-variant">—</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-label-md font-semibold ${SCORE_BADGE_STYLES[cat]}`}>
+                              {p.result.score}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            <Link
+                              to={`/catalog/${p.sku}?tab=marketplaces`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Open product"
+                              className="inline-flex items-center text-on-surface-variant hover:text-primary transition-colors"
+                            >
+                              <ArrowRight className="w-4 h-4" />
+                            </Link>
+                          </td>
+                        </tr>
+                        {isOpen && (
+                          <tr className="bg-surface-container-low/30">
+                            <td colSpan={6} className="px-6 pb-4 pt-1">
+                              <IssueBreakdown result={p.result} sku={p.sku} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
