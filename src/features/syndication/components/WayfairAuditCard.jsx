@@ -39,7 +39,7 @@ export default function WayfairAuditCard() {
     }
 
     const skus = products.map((p) => p.sku);
-    const state = { busy: true, done: 0, total: skus.length, rows: [], errors: [] };
+    const state = { busy: true, done: 0, total: skus.length, rows: [], errors: [], startedAt: Date.now() };
     setRun({ ...state });
 
     let cursor = 0;
@@ -69,6 +69,16 @@ export default function WayfairAuditCard() {
   const rows = run?.rows ?? [];
   const withDiffs = rows.filter((r) => r.changed > 0).sort((a, b) => b.changed - a.changed);
   const clean = rows.length - withDiffs.length;
+
+  // ETA from the observed pace (needs a few samples to stabilize). The
+  // component re-renders on every finished SKU, which keeps this fresh.
+  let eta = null;
+  if (run?.busy && run.done >= 3 && run.startedAt) {
+    const remainMs = ((Date.now() - run.startedAt) / run.done) * (run.total - run.done);
+    const mins = Math.floor(remainMs / 60000);
+    const secs = Math.round((remainMs % 60000) / 1000);
+    eta = mins > 0 ? `${mins} min ${String(secs).padStart(2, '0')} s` : `${secs} s`;
+  }
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
@@ -130,9 +140,22 @@ export default function WayfairAuditCard() {
               </span>
             )}
             {run.busy && (
-              <span className="text-on-surface-variant ml-auto">Checking… {run.done}/{run.total}</span>
+              <span className="text-on-surface-variant ml-auto tabular-nums">
+                Checking… {run.done}/{run.total}
+                {eta && <span> · ~{eta} left</span>}
+              </span>
             )}
           </div>
+
+          {/* Progress bar */}
+          {run.busy && (
+            <div className="h-1 bg-surface-container-high" role="progressbar" aria-valuemin={0} aria-valuemax={run.total} aria-valuenow={run.done}>
+              <div
+                className="h-full bg-primary transition-[width] duration-500 [transition-timing-function:var(--ease-out-cubic)]"
+                style={{ width: `${(run.done / Math.max(run.total, 1)) * 100}%` }}
+              />
+            </div>
+          )}
 
           {withDiffs.length > 0 && (
             <ul className="divide-y divide-outline-variant">
