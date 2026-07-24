@@ -2,11 +2,21 @@ import { useParams, Link, Navigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import WixConnectorCard from '@/features/syndication/components/WixConnectorCard';
 import WayfairConnectorCard from '@/features/syndication/components/WayfairConnectorCard';
+import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import { LIVE_CHANNELS } from '@/features/syndication/lib/channels';
+
+function WayfairWorkspace() {
+  return (
+    <div className="space-y-6">
+      <WayfairConnectorCard />
+      <WayfairAuditCard />
+    </div>
+  );
+}
 
 const WORKSPACES = {
   wix: WixConnectorCard,
-  wayfair: WayfairConnectorCard,
+  wayfair: WayfairWorkspace,
 };
 
 // Full-page workspace for one live channel. New connectors plug in with a
