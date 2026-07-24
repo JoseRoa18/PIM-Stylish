@@ -21,10 +21,41 @@ const CONCURRENCY = 3;
 export default function WayfairAuditCard() {
   const [target, setTarget] = useState('CAN_CA');
   const [run, setRun] = useState(null); // { busy, done, total, rows, errors }
+  const [push, setPush] = useState(null); // { busy, done, total, ok, failed }
   const cancelRef = useRef(false);
+
+  // Fix every discrepancy at once: push the PIM's spec attributes for each
+  // SKU the audit flagged. (Against the sandbox this is processed by Wayfair
+  // as validation — production credentials are what make it stick.)
+  async function pushAllDiffs(diffRows) {
+    cancelRef.current = false;
+    const { supplier, market } = TARGETS[target];
+    const targets = diffRows.map((r) => r.sku);
+    const state = { busy: true, done: 0, total: targets.length, ok: 0, failed: [] };
+    setPush({ ...state });
+
+    let cursor = 0;
+    async function worker() {
+      while (cursor < targets.length && !cancelRef.current) {
+        const sku = targets[cursor++];
+        try {
+          await pushWayfairAttributes(sku, { validateOnly: false, supplier, market });
+          state.ok += 1;
+        } catch (err) {
+          state.failed.push({ sku, message: err.message });
+        }
+        state.done += 1;
+        setPush({ ...state, failed: [...state.failed] });
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    state.busy = false;
+    setPush({ ...state, failed: [...state.failed] });
+  }
 
   async function startAudit() {
     cancelRef.current = false;
+    setPush(null);
     const { supplier, market } = TARGETS[target];
 
     // Spec attributes only exist for Wayfair's Kitchen Sinks class so far.
@@ -143,6 +174,34 @@ export default function WayfairAuditCard() {
               <span className="text-on-surface-variant ml-auto tabular-nums">
                 Checking… {run.done}/{run.total}
                 {eta && <span> · ~{eta} left</span>}
+              </span>
+            )}
+            {!run.busy && withDiffs.length > 0 && (
+              <span className="ml-auto inline-flex items-center gap-3">
+                {push && !push.busy && (
+                  <span className="text-body-sm text-on-surface animate-banner-in">
+                    Pushed {push.ok}/{push.total}
+                    {push.failed.length > 0 && <span className="text-error"> · {push.failed.length} failed</span>}
+                  </span>
+                )}
+                {push?.busy ? (
+                  <button
+                    type="button"
+                    onClick={() => { cancelRef.current = true; }}
+                    className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
+                  >
+                    <ThinkingOrb state="working" size={20} className="w-4 h-4" />
+                    Pushing… {push.done}/{push.total}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => pushAllDiffs(withDiffs)}
+                    className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    Push all {withDiffs.length} from PIM
+                  </button>
+                )}
               </span>
             )}
           </div>
