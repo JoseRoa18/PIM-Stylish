@@ -18,6 +18,7 @@ import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazo
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
 import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
+import { generatePimExport, fetchAllProducts } from '@/features/syndication/exports/pimExport';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -109,8 +110,39 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     await runBatch(linkedSkus, (sku) => readWixProduct(sku), 'refresh');
   }
 
+  // Exports products back into the PIM's own category templates (round-trip
+  // CSVs the importer accepts) — selection or the whole catalog.
+  async function handleExportPim(scope) {
+    setBusy('export');
+    setResult(null);
+    try {
+      let productList;
+      if (scope === 'all') {
+        productList = await fetchAllProducts();
+      } else {
+        productList = [];
+        for (const sku of [...selectedSkus]) {
+          const p = await getProduct(sku);
+          if (p) productList.push(p);
+        }
+      }
+      if (!productList.length) throw new Error('No products to export.');
+      const res = await generatePimExport(productList);
+      setResult({
+        type: 'success',
+        message: `Exported ${res.count} product(s) into ${res.files} template file(s): ${res.categories.join(', ')}.`,
+      });
+    } catch (err) {
+      setResult({ type: 'error', message: err.message ?? 'PIM export failed' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // One entry point for every marketplace with an uploaded template.
   async function handleExportMarketplace(marketplace) {
+    if (marketplace === '__pim_selected__') return handleExportPim('selected');
+    if (marketplace === '__pim_all__') return handleExportPim('all');
     const templates = (await listTemplates()).filter((t) => t.marketplace === marketplace);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
     if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
@@ -345,6 +377,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
             <ExportTemplateDropdown
               disabled={!!busy}
               busy={busy === 'export'}
+              count={count}
               onSelect={handleExportMarketplace}
             />
 
@@ -368,7 +401,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
 // One export button; the menu lists every marketplace with an uploaded
 // template (loaded lazily when the menu opens).
-function ExportTemplateDropdown({ disabled, busy, onSelect }) {
+function ExportTemplateDropdown({ disabled, busy, count, onSelect }) {
   const [open, setOpen] = useState(false);
   const [marketplaces, setMarketplaces] = useState(null); // null = not loaded
 
@@ -420,6 +453,25 @@ function ExportTemplateDropdown({ disabled, busy, onSelect }) {
                 {m}
               </button>
             ))}
+            {/* PIM data round-trip: fills the PIM's own category templates */}
+            <div className="my-1 border-t border-outline-variant" />
+            <div className="px-4 pt-1.5 pb-0.5 text-label-md uppercase tracking-wider text-on-surface-variant">
+              PIM data (CSV per category)
+            </div>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onSelect('__pim_selected__'); }}
+              className="w-full text-left px-4 py-2 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+            >
+              Selected products{count ? ` (${count})` : ''}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onSelect('__pim_all__'); }}
+              className="w-full text-left px-4 py-2 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+            >
+              Entire catalog
+            </button>
           </div>
         </>
       )}
