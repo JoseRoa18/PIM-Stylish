@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Loader2,
@@ -55,6 +55,8 @@ export default function ListingHealth() {
   const [filter, setFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState({ done: 0, total: 0 });
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
 
   const mktDef = MARKETPLACES[marketplace];
   const mktData = byMarketplace[marketplace];
@@ -92,6 +94,15 @@ export default function ListingHealth() {
 
     return list;
   }, [products, search, filter, sort]);
+
+  // Any change of what's listed goes back to page 1.
+  useEffect(() => {
+    setPage(1);
+  }, [marketplace, search, filter, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   async function refreshAllFromWix() {
     if (refreshing) return;
@@ -276,7 +287,7 @@ export default function ListingHealth() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
-                  {filtered.map((p) => {
+                  {paged.map((p) => {
                     const cat = categorizeScore(p.result.score);
                     const critCount = p.result.issues.filter((i) => i.severity === 'critical').length;
                     const source = SOURCE_STYLES[p.source] ?? SOURCE_STYLES.pim;
@@ -322,6 +333,35 @@ export default function ListingHealth() {
                   })}
                 </tbody>
               </table>
+            )}
+
+            {filtered.length > PAGE_SIZE && (
+              <div className="px-6 py-3 border-t border-outline-variant flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-body-sm text-on-surface-variant tabular-nums">
+                  Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage === 1}
+                    className="px-3 py-1.5 rounded-lg border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-2 text-body-sm text-on-surface-variant tabular-nums">
+                    {safePage} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage === totalPages}
+                    className="px-3 py-1.5 rounded-lg border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             )}
 
             <footer className="px-6 py-3 border-t border-outline-variant text-label-md text-on-surface-variant">
