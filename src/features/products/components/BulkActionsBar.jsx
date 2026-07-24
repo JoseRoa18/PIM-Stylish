@@ -301,7 +301,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   }
 
   return (
-    <div className="sticky bottom-4 z-30 mx-auto max-w-4xl">
+    <div className="sticky bottom-4 z-30 mx-auto max-w-5xl">
       {/* No overflow-hidden here — the dropdown menus open above the bar. */}
       <div className="rounded-2xl border border-outline-variant bg-surface shadow-lg">
         {result && (
@@ -325,7 +325,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
             <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-primary-container text-on-primary-container text-label-md font-bold">
               {count}
             </span>
-            <span className="text-body-md text-on-surface font-medium">
+            <span className="text-body-md text-on-surface font-medium whitespace-nowrap">
               {count === 1 ? 'product selected' : 'products selected'}
             </span>
             {onSelectAll && filteredCount > count && (
@@ -333,7 +333,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
                 type="button"
                 onClick={onSelectAll}
                 disabled={!!busy}
-                className="text-body-sm text-primary font-semibold hover:underline disabled:opacity-50"
+                className="text-body-sm text-primary font-semibold hover:underline disabled:opacity-50 whitespace-nowrap"
               >
                 Select all {filteredCount}
               </button>
