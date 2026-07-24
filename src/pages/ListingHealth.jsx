@@ -41,7 +41,7 @@ const SEVERITY_META = {
 
 // Per-product breakdown of failed checks, grouped by severity — the exact
 // "why is this score what it is" behind each row.
-function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'this marketplace' }) {
+function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'this marketplace', wayfairAudit }) {
   if (result.issues.length === 0) {
     return (
       <p className="text-body-sm text-on-surface animate-banner-in">
@@ -71,10 +71,18 @@ function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'th
               </p>
               <ul className="space-y-1">
                 {items.map((i) => (
-                  <li key={i.key} className="flex items-center gap-2 text-body-sm text-on-surface">
-                    <span className={`w-1.5 h-1.5 rounded-full ${meta.dot} flex-shrink-0`} />
-                    {i.label}
-                    <span className="text-on-surface-variant">· {i.category}</span>
+                  <li key={i.key} className="text-body-sm text-on-surface">
+                    <span className="flex items-center gap-2">
+                      <span className={`w-1.5 h-1.5 rounded-full ${meta.dot} flex-shrink-0`} />
+                      {i.label}
+                      <span className="text-on-surface-variant">· {i.category}</span>
+                    </span>
+                    {i.key === 'wayfair_specs_synced' && wayfairAudit?.fields?.length > 0 && (
+                      <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant max-w-md">
+                        Differs at Wayfair in:{' '}
+                        <span className="text-on-surface">{wayfairAudit.fields.join(' · ')}</span>
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -407,6 +415,7 @@ export default function ListingHealth() {
                                 sku={p.sku}
                                 notLinked={p.source === 'not_linked'}
                                 marketplaceLabel={mktDef.label}
+                                wayfairAudit={p.wayfair_audit}
                               />
                             </td>
                           </tr>

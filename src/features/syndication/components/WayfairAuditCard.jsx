@@ -117,8 +117,13 @@ export default function WayfairAuditCard() {
         errors: state.errors.length,
         partial: state.done < state.total,
         top_offenders: offenders,
-        // Full per-SKU outcome so Listing Health can score every product.
-        results: state.rows.map((r) => ({ sku: r.sku, changed: r.changed })),
+        // Full per-SKU outcome (incl. which attributes differ) so Listing
+        // Health can score every product and show the exact fields.
+        results: state.rows.map((r) => ({
+          sku: r.sku,
+          changed: r.changed,
+          fields: Object.entries(r.diff).filter(([, d]) => d.changed).map(([t]) => t),
+        })),
       });
     } catch (err) {
       console.error('channel_health snapshot:', err);

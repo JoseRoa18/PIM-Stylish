@@ -137,6 +137,10 @@ export function useListingHealth() {
                   : def.dataSource === 'wayfair'
                     ? e.raw.wayfair_item_group_id ? 'pim' : 'not_linked'
                     : 'pim',
+              // Which spec attributes differ at Wayfair (from the audit),
+              // so the breakdown can name them.
+              wayfair_audit:
+                def.dataSource === 'wayfair' && wayfairMap ? wayfairMap.get(e.sku) ?? null : undefined,
               result,
             };
           });
