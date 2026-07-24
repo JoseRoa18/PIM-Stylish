@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Package } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ChevronDown, Package } from 'lucide-react';
 import { categorizeScore } from '../lib/listingHealth';
 
 const SEVERITY_STYLES = {
@@ -16,11 +17,22 @@ const SCORE_BADGE_STYLES = {
 };
 
 export default function ListingHealthActions({ stats, products, marketplaceLabel = 'marketplace' }) {
+  const [showAllIssues, setShowAllIssues] = useState(false);
   if (!stats) return null;
+
+  // The two cards sit side by side — keep them the same height: both show
+  // rowCount rows (the shorter list decides, capped at 8). Top Issues can
+  // expand to its full list on demand.
+  const MAX_ROWS = 8;
+  const rowCount = stats.topIssues.length > 0
+    ? Math.min(stats.topIssues.length, MAX_ROWS)
+    : MAX_ROWS;
+  const visibleIssues = showAllIssues ? stats.topIssues : stats.topIssues.slice(0, rowCount);
+  const hiddenIssues = stats.topIssues.length - rowCount;
 
   const ranked = [...products]
     .sort((a, b) => a.result.score - b.result.score)
-    .slice(0, 8);
+    .slice(0, rowCount);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -40,7 +52,7 @@ export default function ListingHealthActions({ stats, products, marketplaceLabel
               No issues found — all listings look healthy.
             </li>
           ) : (
-            stats.topIssues.map((issue) => {
+            visibleIssues.map((issue) => {
               const sev = SEVERITY_STYLES[issue.severity];
               return (
                 <li
@@ -71,6 +83,17 @@ export default function ListingHealthActions({ stats, products, marketplaceLabel
             })
           )}
         </ul>
+        {hiddenIssues > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAllIssues((s) => !s)}
+            aria-expanded={showAllIssues}
+            className="w-full px-6 py-2.5 border-t border-outline-variant text-body-sm text-primary font-semibold hover:bg-surface-container-low/50 transition-colors inline-flex items-center justify-center gap-1.5"
+          >
+            {showAllIssues ? 'Show less' : `Show all ${stats.topIssues.length} issues`}
+            <ChevronDown className={`w-4 h-4 transition-transform ${showAllIssues ? 'rotate-180' : ''}`} />
+          </button>
+        )}
       </section>
 
       <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
