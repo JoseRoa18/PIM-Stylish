@@ -31,7 +31,7 @@ export default function WayfairAuditCard() {
     cancelRef.current = false;
     const { supplier, market } = TARGETS[target];
     const targets = diffRows.map((r) => r.sku);
-    const state = { busy: true, done: 0, total: targets.length, ok: 0, failed: [] };
+    const state = { busy: true, done: 0, total: targets.length, ok: 0, failed: [], startedAt: Date.now() };
     setPush({ ...state });
 
     let cursor = 0;
@@ -103,13 +103,15 @@ export default function WayfairAuditCard() {
 
   // ETA from the observed pace (needs a few samples to stabilize). The
   // component re-renders on every finished SKU, which keeps this fresh.
-  let eta = null;
-  if (run?.busy && run.done >= 3 && run.startedAt) {
-    const remainMs = ((Date.now() - run.startedAt) / run.done) * (run.total - run.done);
+  const etaOf = (s) => {
+    if (!s?.busy || s.done < 3 || !s.startedAt) return null;
+    const remainMs = ((Date.now() - s.startedAt) / s.done) * (s.total - s.done);
     const mins = Math.floor(remainMs / 60000);
     const secs = Math.round((remainMs % 60000) / 1000);
-    eta = mins > 0 ? `${mins} min ${String(secs).padStart(2, '0')} s` : `${secs} s`;
-  }
+    return mins > 0 ? `${mins} min ${String(secs).padStart(2, '0')} s` : `${secs} s`;
+  };
+  const eta = etaOf(run);
+  const pushEta = etaOf(push);
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
@@ -191,7 +193,10 @@ export default function WayfairAuditCard() {
                     className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
                   >
                     <ThinkingOrb state="working" size={20} className="w-4 h-4" />
-                    Pushing… {push.done}/{push.total}
+                    <span className="tabular-nums">
+                      Pushing… {push.done}/{push.total}
+                      {pushEta && <span> · ~{pushEta} left</span>}
+                    </span>
                   </button>
                 ) : (
                   <button
