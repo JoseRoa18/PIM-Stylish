@@ -88,6 +88,7 @@ export function useListingHealth() {
         }
         const wayfairMap = await latestSnapshotMap('wayfair');
         const bestbuyMap = await latestSnapshotMap('bestbuy');
+        const walmartMap = await latestSnapshotMap('walmart_us');
 
         // Enrich each product once with parsed Wix data + base fields
         const enriched = list.map((p) => {
@@ -128,6 +129,12 @@ export function useListingHealth() {
                 _bbOffer: bestbuyMap ? (bestbuyMap.get(e.sku) ?? null) : undefined,
               };
               media = e.pimMedia;
+            } else if (def.dataSource === 'walmart_us') {
+              product = {
+                ...e.raw,
+                _wmItem: walmartMap ? (walmartMap.get(e.sku) ?? null) : undefined,
+              };
+              media = e.pimMedia;
             } else {
               product = e.raw;
               media = e.pimMedia;
@@ -148,7 +155,9 @@ export function useListingHealth() {
                     ? e.raw.wayfair_item_group_id ? 'pim' : 'not_linked'
                     : def.dataSource === 'bestbuy'
                       ? (bestbuyMap && bestbuyMap.get(e.sku) ? 'offer' : 'not_linked')
-                      : 'pim',
+                      : def.dataSource === 'walmart_us'
+                        ? (walmartMap && walmartMap.get(e.sku) ? 'offer' : 'not_linked')
+                        : 'pim',
               // Which spec attributes differ at Wayfair (from the audit),
               // so the breakdown can name them.
               wayfair_audit:
@@ -156,6 +165,9 @@ export function useListingHealth() {
               // The live Best Buy offer (price/stock/msrp), for the breakdown.
               bb_offer:
                 def.dataSource === 'bestbuy' && bestbuyMap ? bestbuyMap.get(e.sku) ?? null : undefined,
+              // The live Walmart US item (published/lifecycle/price USD).
+              wm_item:
+                def.dataSource === 'walmart_us' && walmartMap ? walmartMap.get(e.sku) ?? null : undefined,
               result,
             };
           });

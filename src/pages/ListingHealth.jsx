@@ -18,6 +18,7 @@ import {
 } from '@/features/dashboard/lib/listingHealth';
 import { readWixProduct } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers } from '@/features/syndication/api/bestbuySync';
+import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
 import ChannelSyncCard from '@/features/dashboard/components/ChannelSyncCard';
 
 const SCORE_BADGE_STYLES = {
@@ -43,7 +44,7 @@ const SEVERITY_META = {
 
 // Per-product breakdown of failed checks, grouped by severity — the exact
 // "why is this score what it is" behind each row.
-function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'this marketplace', wayfairAudit, bbOffer }) {
+function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'this marketplace', wayfairAudit, bbOffer, wmItem }) {
   if (result.issues.length === 0) {
     return (
       <p className="text-body-sm text-on-surface animate-banner-in">
@@ -94,6 +95,13 @@ function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'th
                     {i.key === 'bb_in_stock' && bbOffer && (
                       <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant">
                         Quantity at Best Buy: <span className="text-on-surface">{bbOffer.quantity ?? 0}</span>
+                      </p>
+                    )}
+                    {(i.key === 'wm_published' || i.key === 'wm_lifecycle_active') && wmItem && (
+                      <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant">
+                        Walmart status: <span className="text-on-surface">{wmItem.published || '—'}</span>
+                        {wmItem.lifecycle ? <span> · {wmItem.lifecycle}</span> : null}
+                        {wmItem.price != null && <span> · ${Number(wmItem.price).toFixed(2)} USD</span>}
                       </p>
                     )}
                   </li>
@@ -187,14 +195,20 @@ export default function ListingHealth() {
   const safePage = Math.min(page, totalPages);
   const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  async function refreshBestBuy() {
+  // Read-only channel pulls: fetch the channel's live state into a snapshot.
+  const CHANNEL_REFRESH = {
+    bestbuy: { run: refreshBestBuyOffers, label: 'Best Buy' },
+    walmart_us: { run: refreshWalmartItems, label: 'Walmart' },
+  };
+
+  async function refreshChannel(key) {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await refreshBestBuyOffers();
+      await CHANNEL_REFRESH[key].run();
       window.location.reload();
     } catch (err) {
-      alert(`Best Buy refresh failed: ${err.message}`);
+      alert(`${CHANNEL_REFRESH[key].label} refresh failed: ${err.message}`);
       setRefreshing(false);
     }
   }
@@ -296,16 +310,19 @@ export default function ListingHealth() {
               {mktDef.dataSource === 'bestbuy' && (
                 <> · offers, stock & prices from the latest read-only pull — nothing is ever written to Best Buy</>
               )}
+              {mktDef.dataSource === 'walmart_us' && (
+                <> · items & publish status from the latest read-only pull — nothing is ever written to Walmart</>
+              )}
             </p>
-            {mktDef.dataSource === 'bestbuy' && (
+            {CHANNEL_REFRESH[mktDef.dataSource] && (
               <button
                 type="button"
-                onClick={refreshBestBuy}
+                onClick={() => refreshChannel(mktDef.dataSource)}
                 disabled={refreshing}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Pulling offers…' : 'Refresh from Best Buy'}
+                {refreshing ? 'Pulling…' : `Refresh from ${CHANNEL_REFRESH[mktDef.dataSource].label}`}
               </button>
             )}
             {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && (
@@ -456,6 +473,7 @@ export default function ListingHealth() {
                                 marketplaceLabel={mktDef.label}
                                 wayfairAudit={p.wayfair_audit}
                                 bbOffer={p.bb_offer}
+                                wmItem={p.wm_item}
                               />
                             </td>
                           </tr>

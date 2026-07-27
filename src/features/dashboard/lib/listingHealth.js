@@ -133,6 +133,21 @@ const FIELDS = {
       return Math.abs(o.price - o.msrp) <= 0.01;
     },
   },
+  // Walmart US item checks — fed by the read-only items snapshot.
+  // Same undefined/null/object semantics as _bbOffer. Prices are USD and the
+  // PIM only holds CAD MSRPs, so price is informational, never scored.
+  listed_on_walmart: {
+    label: 'Listed on Walmart',
+    check: (p) => p._wmItem === undefined || p._wmItem != null,
+  },
+  wm_published: {
+    label: 'Published',
+    check: (p) => !p._wmItem || p._wmItem.published === 'PUBLISHED',
+  },
+  wm_lifecycle_active: {
+    label: 'Lifecycle Active',
+    check: (p) => !p._wmItem || !p._wmItem.lifecycle || p._wmItem.lifecycle === 'ACTIVE',
+  },
   visible_online: { label: 'Visible Online', check: (p) => p.visible_online === true },
   section_dimensions: { label: 'Dimensions Tab', check: (p) => hasInfoSection(p, /dimension|size|measurement/i) },
   section_documents: { label: 'Documents to Download Tab', check: (p) => hasInfoSection(p, /document|download|spec sheet|manual|installation/i) },
@@ -207,6 +222,27 @@ export const MARKETPLACES = {
       { field: 'primary_image', category: 'Images', weight: 10, severity: 'critical' },
       { field: 'multiple_images', category: 'Images', weight: 4, severity: 'minor' },
       { field: 'price', category: 'Pricing', weight: 8, severity: 'critical' },
+      { field: 'external_dimensions', category: 'Specs', weight: 6, severity: 'major' },
+      { field: 'shipping_weight', category: 'Shipping', weight: 4, severity: 'minor' },
+    ],
+  },
+  walmart_us: {
+    key: 'walmart_us',
+    label: 'Walmart US',
+    subtitle: 'Marketplace API (read-only)',
+    dataSource: 'walmart_us',
+    connectionType: 'api',
+    requiresLink: true,
+    checks: [
+      { field: 'listed_on_walmart', category: 'Listing', weight: 15, severity: 'critical' },
+      { field: 'wm_published', category: 'Listing', weight: 12, severity: 'critical' },
+      { field: 'wm_lifecycle_active', category: 'Listing', weight: 6, severity: 'major' },
+      { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'upc', category: 'Identity', weight: 6, severity: 'major' },
+      { field: 'description', category: 'Content', weight: 10, severity: 'critical' },
+      { field: 'bullet_points', category: 'Content', weight: 6, severity: 'major' },
+      { field: 'primary_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'multiple_images', category: 'Images', weight: 4, severity: 'minor' },
       { field: 'external_dimensions', category: 'Specs', weight: 6, severity: 'major' },
       { field: 'shipping_weight', category: 'Shipping', weight: 4, severity: 'minor' },
     ],
