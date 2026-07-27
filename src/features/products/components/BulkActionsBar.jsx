@@ -18,7 +18,7 @@ import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazo
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
 import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
-import { generateLowesFromTemplate } from '@/features/syndication/exports/lowesExport';
+import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
 import { generatePimExport, fetchAllProducts } from '@/features/syndication/exports/pimExport';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
@@ -146,12 +146,39 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     if (marketplace === '__pim_all__') return handleExportPim('all');
     const templates = (await listTemplates()).filter((t) => t.marketplace === marketplace);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
-    if (/wayfair|amazon|walmart|home ?depot|lowe/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
+    if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
+    if (/lowe/i.test(marketplace)) return handleExportLowes(templates);
     if (/menards/i.test(marketplace)) return handleExportMenards(templates);
     setResult({
       type: 'error',
       message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart, Home Depot and Lowe's are supported so far.`,
     });
+  }
+
+  // Lowe's new-item setup is a two-file package (Item Template + SOS Freight
+  // Analysis); one Lowe's template covers every category, so no grouping.
+  async function handleExportLowes(templates) {
+    setBusy('export');
+    setResult(null);
+    try {
+      const skus = [...selectedSkus];
+      const productList = [];
+      for (const sku of skus) {
+        const p = await getProduct(sku);
+        if (p) productList.push(p);
+      }
+      if (!productList.length) throw new Error('Could not load product data.');
+
+      const res = await generateLowesSet(templates, productList);
+      setResult({
+        type: 'success',
+        message: `Exported ${res.files} Lowe's file(s) for ${res.count} product(s) — pricing (USD), lead times and competitive URLs stay blank for the business.`,
+      });
+    } catch (err) {
+      setResult({ type: 'error', message: err.message ?? "Lowe's export failed" });
+    } finally {
+      setBusy(null);
+    }
   }
 
   // Menards is a file SET per category (content + one container file per
@@ -256,9 +283,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           ? generateWalmartFromTemplate
           : /home ?depot/i.test(marketplace)
             ? generateHomeDepotFromTemplate
-            : /lowe/i.test(marketplace)
-              ? generateLowesFromTemplate
-              : generateWayfairFromTemplate;
+            : generateWayfairFromTemplate;
       const prefix = marketplace.replace(/[^a-z0-9]+/gi, '_');
 
       const skus = [...selectedSkus];

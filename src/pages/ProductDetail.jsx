@@ -41,7 +41,7 @@ import { generateMenardsFromTemplates } from '@/features/syndication/exports/men
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
 import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
-import { generateLowesFromTemplate } from '@/features/syndication/exports/lowesExport';
+import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -1144,6 +1144,15 @@ function ExportTemplatesCard({ product, media }) {
           detail: `Set of ${set.length} files · downloads as one ZIP`,
         }];
       }
+      // Lowe's is also a set: Item Template + SOS Freight Analysis, one action.
+      if (/lowe/i.test(marketplace)) {
+        return [{
+          key: marketplace,
+          marketplace,
+          files,
+          detail: files.length > 1 ? `Set of ${files.length} files · Item Setup + Freight Analysis` : files[0].file_name,
+        }];
+      }
       return files.map((t) => ({ key: t.id, marketplace, files: [t], detail: t.file_name }));
     });
   }, [templates, product]);
@@ -1170,7 +1179,7 @@ function ExportTemplatesCard({ product, media }) {
       } else if (/home ?depot/i.test(entry.marketplace)) {
         await generateHomeDepotFromTemplate(entry.files[0].storage_path, [product], `HomeDepot_${base}`);
       } else if (/lowe/i.test(entry.marketplace)) {
-        await generateLowesFromTemplate(entry.files[0].storage_path, [product], `Lowes_${base}`);
+        await generateLowesSet(entry.files, [product], `Lowes_${base}`);
       } else if (/bb&b|bbb|overstock/i.test(entry.marketplace)) {
         await generateBBBFromTemplate(entry.files[0].storage_path, product, media);
       } else {
