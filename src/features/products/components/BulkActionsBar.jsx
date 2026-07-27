@@ -18,6 +18,7 @@ import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazo
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
 import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
+import { generateLowesFromTemplate } from '@/features/syndication/exports/lowesExport';
 import { generatePimExport, fetchAllProducts } from '@/features/syndication/exports/pimExport';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
@@ -145,11 +146,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     if (marketplace === '__pim_all__') return handleExportPim('all');
     const templates = (await listTemplates()).filter((t) => t.marketplace === marketplace);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
-    if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
+    if (/wayfair|amazon|walmart|home ?depot|lowe/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
     if (/menards/i.test(marketplace)) return handleExportMenards(templates);
     setResult({
       type: 'error',
-      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart and Home Depot are supported so far.`,
+      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart, Home Depot and Lowe's are supported so far.`,
     });
   }
 
@@ -255,7 +256,9 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           ? generateWalmartFromTemplate
           : /home ?depot/i.test(marketplace)
             ? generateHomeDepotFromTemplate
-            : generateWayfairFromTemplate;
+            : /lowe/i.test(marketplace)
+              ? generateLowesFromTemplate
+              : generateWayfairFromTemplate;
       const prefix = marketplace.replace(/[^a-z0-9]+/gi, '_');
 
       const skus = [...selectedSkus];

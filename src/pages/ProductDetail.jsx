@@ -41,6 +41,7 @@ import { generateMenardsFromTemplates } from '@/features/syndication/exports/men
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
 import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
+import { generateLowesFromTemplate } from '@/features/syndication/exports/lowesExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -1168,6 +1169,8 @@ function ExportTemplatesCard({ product, media }) {
         await generateWalmartFromTemplate(entry.files[0].storage_path, [product], `Walmart_${base}`);
       } else if (/home ?depot/i.test(entry.marketplace)) {
         await generateHomeDepotFromTemplate(entry.files[0].storage_path, [product], `HomeDepot_${base}`);
+      } else if (/lowe/i.test(entry.marketplace)) {
+        await generateLowesFromTemplate(entry.files[0].storage_path, [product], `Lowes_${base}`);
       } else if (/bb&b|bbb|overstock/i.test(entry.marketplace)) {
         await generateBBBFromTemplate(entry.files[0].storage_path, product, media);
       } else {
