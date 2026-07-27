@@ -35,7 +35,65 @@ export const LIVE_CHANNELS = [
       return { value: `${count ?? 0}/${totals.products}`, label: 'item groups linked' };
     },
   },
+  {
+    id: 'bestbuy',
+    name: 'Best Buy Canada',
+    tagline: 'Mirakl marketplace — offers, stock & prices (read-only)',
+    letter: 'B',
+    avatarClass: 'bg-[#0046BE]/10 text-[#0046BE] dark:bg-[#0046BE]/30 dark:text-[#9DC2FF]',
+    env: 'Read-only',
+    envClass: 'bg-surface-container text-on-surface-variant',
+    stat: async () => {
+      const snap = await latestSnapshot('bestbuy');
+      return snap
+        ? { value: `${snap.in_sync}/${snap.total}`, label: 'offers active' }
+        : { value: '—', label: 'no pull yet' };
+    },
+  },
+  {
+    id: 'walmart_us',
+    name: 'Walmart US',
+    tagline: 'Marketplace items & publish status (read-only)',
+    letter: 'W',
+    avatarClass: 'bg-[#0071CE]/10 text-[#0071CE] dark:bg-[#0071CE]/30 dark:text-[#8FC4F4]',
+    env: 'Read-only',
+    envClass: 'bg-surface-container text-on-surface-variant',
+    stat: async () => {
+      const snap = await latestSnapshot('walmart_us');
+      return snap
+        ? { value: `${snap.in_sync}/${snap.total}`, label: 'items published' }
+        : { value: '—', label: 'no pull yet' };
+    },
+  },
+  {
+    id: 'walmart_ca',
+    name: 'Walmart Canada',
+    tagline: 'Presence via daily inventory feed (read-only)',
+    letter: 'W',
+    avatarClass: 'bg-[#0071CE]/10 text-[#0071CE] dark:bg-[#0071CE]/30 dark:text-[#8FC4F4]',
+    env: 'Read-only',
+    envClass: 'bg-surface-container text-on-surface-variant',
+    stat: async () => {
+      const snap = await latestSnapshot('walmart_ca');
+      return snap
+        ? { value: `${snap.total}`, label: 'SKUs in feed' }
+        : { value: '—', label: 'no pull yet' };
+    },
+  },
 ];
+
+// Latest channel_health snapshot for a channel (written by the read-only
+// pulls); the directory reads it instead of hitting the live APIs.
+export async function latestSnapshot(channel) {
+  const { data } = await supabase
+    .from('channel_health')
+    .select('*')
+    .eq('channel', channel)
+    .order('run_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ?? null;
+}
 
 // Channels served by filled template files rather than a live API. They live
 // on the Templates page; the directory lists them so Syndication shows the

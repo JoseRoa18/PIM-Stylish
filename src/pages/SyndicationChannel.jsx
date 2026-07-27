@@ -3,6 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import WixConnectorCard from '@/features/syndication/components/WixConnectorCard';
 import WayfairConnectorCard from '@/features/syndication/components/WayfairConnectorCard';
 import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
+import ReadOnlyChannelCard from '@/features/syndication/components/ReadOnlyChannelCard';
 import { LIVE_CHANNELS } from '@/features/syndication/lib/channels';
 
 function WayfairWorkspace() {
@@ -17,6 +18,9 @@ function WayfairWorkspace() {
 const WORKSPACES = {
   wix: WixConnectorCard,
   wayfair: WayfairWorkspace,
+  bestbuy: () => <ReadOnlyChannelCard channel="bestbuy" />,
+  walmart_us: () => <ReadOnlyChannelCard channel="walmart_us" />,
+  walmart_ca: () => <ReadOnlyChannelCard channel="walmart_ca" />,
 };
 
 // Full-page workspace for one live channel. New connectors plug in with a

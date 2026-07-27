@@ -138,7 +138,12 @@ const FILTER_OPTIONS = [
 
 export default function ListingHealth() {
   const { byMarketplace, loading, error } = useListingHealth();
-  const [marketplace, setMarketplace] = useState(API_MARKETPLACE_KEYS[0]);
+  // ?tab=<marketplace key> deep-links straight into a channel's tab
+  // (used by the Syndication channel workspaces).
+  const initialTab = new URLSearchParams(window.location.search).get('tab');
+  const [marketplace, setMarketplace] = useState(
+    API_MARKETPLACE_KEYS.includes(initialTab) ? initialTab : API_MARKETPLACE_KEYS[0],
+  );
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('score_asc');
   const [filter, setFilter] = useState('all');
