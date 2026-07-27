@@ -51,7 +51,7 @@ export default function Syndication() {
               className="flex items-center gap-4 rounded-2xl border border-outline-variant bg-surface-container-lowest px-6 py-5 hover:bg-surface-container-low transition-colors group"
             >
               <div className={`w-11 h-11 rounded-lg flex items-center justify-center font-bold text-title-lg flex-shrink-0 ${c.avatarClass}`}>
-                {c.letter}
+                {c.logo ? <img src={c.logo} alt="" className="w-6 h-6" /> : c.letter}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">

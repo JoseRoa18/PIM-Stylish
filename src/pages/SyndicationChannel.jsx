@@ -43,7 +43,7 @@ export default function SyndicationChannel() {
 
       <header className="flex items-center gap-4">
         <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-headline-sm ${meta.avatarClass}`}>
-          {meta.letter}
+          {meta.logo ? <img src={meta.logo} alt="" className="w-7 h-7" /> : meta.letter}
         </div>
         <div>
           <div className="flex items-center gap-2">

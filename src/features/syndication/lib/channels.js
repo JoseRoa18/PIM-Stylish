@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+﻿import { supabase } from '@/lib/supabase';
 
 // Channel registry — the single place a new connector is declared.
 // `stat` returns the one number that tells the channel's health at a glance.
@@ -8,7 +8,8 @@ export const LIVE_CHANNELS = [
     name: 'Wix',
     tagline: 'Website catalog — import & push product data',
     letter: 'W',
-    avatarClass: 'bg-inverse-surface text-on-inverse-surface',
+    logo: '/brand/channels/wix.svg',
+    avatarClass: 'bg-[#0C6EFC]/10 dark:bg-[#0C6EFC]/25 text-[#0C6EFC]',
     env: 'Production',
     envClass: 'bg-success-container text-on-success-container',
     stat: async (totals) => {
@@ -40,6 +41,7 @@ export const LIVE_CHANNELS = [
     name: 'Best Buy Canada',
     tagline: 'Mirakl marketplace — offers, stock & prices (read-only)',
     letter: 'B',
+    logo: '/brand/channels/bestbuy.svg',
     avatarClass: 'bg-[#0046BE]/10 text-[#0046BE] dark:bg-[#0046BE]/30 dark:text-[#9DC2FF]',
     env: 'Read-only',
     envClass: 'bg-surface-container text-on-surface-variant',
@@ -55,7 +57,8 @@ export const LIVE_CHANNELS = [
     name: 'Walmart US',
     tagline: 'Marketplace items & publish status (read-only)',
     letter: 'W',
-    avatarClass: 'bg-[#0071CE]/10 text-[#0071CE] dark:bg-[#0071CE]/30 dark:text-[#8FC4F4]',
+    logo: '/brand/channels/walmart.svg',
+    avatarClass: 'bg-[#0071CE]',
     env: 'Read-only',
     envClass: 'bg-surface-container text-on-surface-variant',
     stat: async () => {
@@ -70,7 +73,8 @@ export const LIVE_CHANNELS = [
     name: 'Walmart Canada',
     tagline: 'Presence via daily inventory feed (read-only)',
     letter: 'W',
-    avatarClass: 'bg-[#0071CE]/10 text-[#0071CE] dark:bg-[#0071CE]/30 dark:text-[#8FC4F4]',
+    logo: '/brand/channels/walmart.svg',
+    avatarClass: 'bg-[#0071CE]',
     env: 'Read-only',
     envClass: 'bg-surface-container text-on-surface-variant',
     stat: async () => {
@@ -111,3 +115,4 @@ export async function loadTotals() {
   const { count } = await supabase.from('products').select('sku', { count: 'exact', head: true });
   return { products: count ?? 0 };
 }
+
