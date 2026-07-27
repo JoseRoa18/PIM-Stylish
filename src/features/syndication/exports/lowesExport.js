@@ -69,6 +69,7 @@ const productCategory = (p) => {
   switch (p.category) {
     case 'kitchen_sink': return 'Kitchen Sinks';
     case 'bathroom_sink': return 'Bathroom Sinks';
+    case 'laundry_sink': return 'Utility Sinks';
     case 'bar_prep_sink': return 'Bar & Prep Sinks';
     // No outdoor-sink category at Lowe's; drop-in outdoor/ice-chest sinks list as bar sinks.
     case 'outdoor_sink': return 'Bar & Prep Sinks';
@@ -241,7 +242,8 @@ const freightAssortment = (p) => {
   switch (p.category) {
     case 'kitchen_sink':
     case 'bar_prep_sink':
-    case 'outdoor_sink': return 'SOS SINKS';
+    case 'outdoor_sink':
+    case 'laundry_sink': return 'SOS SINKS';
     case 'bathroom_sink':
       if (/vessel/i.test(t)) return 'SOS VESSEL SINKS';
       if (/pedestal/i.test(t)) return 'SOS PEDESTAL SINKS';

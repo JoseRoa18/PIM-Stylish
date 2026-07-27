@@ -66,7 +66,7 @@ const department = (p) => {
   if (/faucet|pot_filler/.test(p.category ?? '')) {
     return { dept: '29 Bath', breakdown: 'Faucets_____29_Bath_l2_1' };
   }
-  if (p.category === 'bathroom_sink') {
+  if (p.category === 'bathroom_sink' || p.category === 'laundry_sink') {
     return { dept: '29 Bath', breakdown: 'Bath Fixtures_____29_Bath_l2_3' };
   }
   return { dept: '29 Kitchen', breakdown: 'Kitchen Sinks_____29_Kitchen_l2_4' };
@@ -107,6 +107,8 @@ const categoryChain = (p) => {
     }
     case 'bathroom_faucet':
       return ['Bath_____l1_bath', 'Bathroom_Faucets_and_Shower_Heads_____l2_bath_faucets', 'Bathroom_Sink_Faucets_____1010154'];
+    case 'laundry_sink':
+      return ['Bath_____l1_bath', 'Laundry_Sinks_and_Faucets_____category_laundryroombath', 'Laundry_Sinks_and_Tubs_____category_laundrysinksb'];
     case 'colander_drying_rack':
       return ['Kitchen_____l1_kitchen', 'Kitchen_and_Sink_Accessories_____l2_kitchen_sinkaccessories', 'Colanders_____l3_cuttingboards_colanders'];
     case 'accessory': {

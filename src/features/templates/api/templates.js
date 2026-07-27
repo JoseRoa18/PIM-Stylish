@@ -8,6 +8,7 @@ export const TEMPLATE_CATEGORIES = [
   { value: 'bathroom_faucet', label: 'Bathroom Faucet' },
   { value: 'pot_filler', label: 'Pot Filler' },
   { value: 'bar_prep_sink', label: 'Bar/Prep Sink' },
+  { value: 'laundry_sink', label: 'Laundry Sink' },
   { value: 'outdoor_sink', label: 'Outdoor Sink & Ice Chest' },
   { value: 'colander_drying_rack', label: 'Colanders & Drying Racks' },
   { value: 'accessory', label: 'Accessory' },
