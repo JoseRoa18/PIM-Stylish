@@ -198,7 +198,8 @@ export default function ListingHealth() {
   // Read-only channel pulls: fetch the channel's live state into a snapshot.
   const CHANNEL_REFRESH = {
     bestbuy: { run: refreshBestBuyOffers, label: 'Best Buy' },
-    walmart_us: { run: refreshWalmartItems, label: 'Walmart' },
+    walmart_us: { run: () => refreshWalmartItems('us'), label: 'Walmart' },
+    walmart_ca: { run: () => refreshWalmartItems('ca'), label: 'Walmart CA' },
   };
 
   async function refreshChannel(key) {
@@ -312,6 +313,9 @@ export default function ListingHealth() {
               )}
               {mktDef.dataSource === 'walmart_us' && (
                 <> · items & publish status from the latest read-only pull — nothing is ever written to Walmart</>
+              )}
+              {mktDef.dataSource === 'walmart_ca' && (
+                <> · presence from the latest inventory feed (Walmart CA exposes no item API) — read-only</>
               )}
             </p>
             {CHANNEL_REFRESH[mktDef.dataSource] && (

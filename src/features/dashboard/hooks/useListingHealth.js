@@ -88,7 +88,10 @@ export function useListingHealth() {
         }
         const wayfairMap = await latestSnapshotMap('wayfair');
         const bestbuyMap = await latestSnapshotMap('bestbuy');
-        const walmartMap = await latestSnapshotMap('walmart_us');
+        const walmartMaps = {
+          walmart_us: await latestSnapshotMap('walmart_us'),
+          walmart_ca: await latestSnapshotMap('walmart_ca'),
+        };
 
         // Enrich each product once with parsed Wix data + base fields
         const enriched = list.map((p) => {
@@ -129,10 +132,11 @@ export function useListingHealth() {
                 _bbOffer: bestbuyMap ? (bestbuyMap.get(e.sku) ?? null) : undefined,
               };
               media = e.pimMedia;
-            } else if (def.dataSource === 'walmart_us') {
+            } else if (def.dataSource in walmartMaps) {
+              const wm = walmartMaps[def.dataSource];
               product = {
                 ...e.raw,
-                _wmItem: walmartMap ? (walmartMap.get(e.sku) ?? null) : undefined,
+                _wmItem: wm ? (wm.get(e.sku) ?? null) : undefined,
               };
               media = e.pimMedia;
             } else {
@@ -155,8 +159,8 @@ export function useListingHealth() {
                     ? e.raw.wayfair_item_group_id ? 'pim' : 'not_linked'
                     : def.dataSource === 'bestbuy'
                       ? (bestbuyMap && bestbuyMap.get(e.sku) ? 'offer' : 'not_linked')
-                      : def.dataSource === 'walmart_us'
-                        ? (walmartMap && walmartMap.get(e.sku) ? 'offer' : 'not_linked')
+                      : def.dataSource in walmartMaps
+                        ? (walmartMaps[def.dataSource]?.get(e.sku) ? 'offer' : 'not_linked')
                         : 'pim',
               // Which spec attributes differ at Wayfair (from the audit),
               // so the breakdown can name them.
@@ -165,9 +169,12 @@ export function useListingHealth() {
               // The live Best Buy offer (price/stock/msrp), for the breakdown.
               bb_offer:
                 def.dataSource === 'bestbuy' && bestbuyMap ? bestbuyMap.get(e.sku) ?? null : undefined,
-              // The live Walmart US item (published/lifecycle/price USD).
+              // The live Walmart item (US: published/lifecycle/price USD;
+              // CA: feed presence).
               wm_item:
-                def.dataSource === 'walmart_us' && walmartMap ? walmartMap.get(e.sku) ?? null : undefined,
+                def.dataSource in walmartMaps && walmartMaps[def.dataSource]
+                  ? walmartMaps[def.dataSource].get(e.sku) ?? null
+                  : undefined,
               result,
             };
           });

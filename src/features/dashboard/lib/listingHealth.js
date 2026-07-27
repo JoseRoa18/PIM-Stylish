@@ -247,6 +247,28 @@ export const MARKETPLACES = {
       { field: 'shipping_weight', category: 'Shipping', weight: 4, severity: 'minor' },
     ],
   },
+  walmart_ca: {
+    key: 'walmart_ca',
+    label: 'Walmart CA',
+    subtitle: 'Presence via inventory feed (read-only)',
+    dataSource: 'walmart_ca',
+    connectionType: 'api',
+    requiresLink: true,
+    // Walmart's item APIs don't serve the CA catalog — presence comes from
+    // the daily MP_INVENTORY feed, so only listed/readiness can be scored.
+    checks: [
+      { field: 'listed_on_walmart', category: 'Listing', weight: 18, severity: 'critical' },
+      { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'upc', category: 'Identity', weight: 6, severity: 'major' },
+      { field: 'description', category: 'Content', weight: 10, severity: 'critical' },
+      { field: 'bullet_points', category: 'Content', weight: 6, severity: 'major' },
+      { field: 'primary_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'multiple_images', category: 'Images', weight: 4, severity: 'minor' },
+      { field: 'price', category: 'Pricing', weight: 8, severity: 'critical' },
+      { field: 'external_dimensions', category: 'Specs', weight: 6, severity: 'major' },
+      { field: 'shipping_weight', category: 'Shipping', weight: 4, severity: 'minor' },
+    ],
+  },
   bbb: {
     key: 'bbb',
     label: 'BB&B / Overstock',

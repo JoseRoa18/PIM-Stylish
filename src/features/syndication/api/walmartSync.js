@@ -27,27 +27,32 @@ async function invokeWalmart(body = {}) {
 }
 
 /**
- * Pull the seller's Walmart US items and persist a channel_health snapshot
+ * Pull the seller's Walmart items and persist a channel_health snapshot
  * (read-only against Walmart; the snapshot lives in our own DB).
- * NOTE: Walmart US prices are USD — the PIM only has CAD MSRPs, so price
- * is stored for display but never scored against msrp_cad.
+ *
+ * market 'us': full item list (published/lifecycle/price USD — price is
+ * stored for display but never scored against msrp_cad).
+ * market 'ca': Walmart's item APIs don't serve the CA catalog; presence
+ * comes from the latest MP_INVENTORY feed detail (SKU + ingestion status).
  */
-export async function refreshWalmartItems() {
-  const { total, items } = await invokeWalmart();
+export async function refreshWalmartItems(market = 'us') {
+  const { total, items } = await invokeWalmart(market === 'ca' ? { market: 'ca' } : {});
 
-  const published = items.filter((i) => i.published === 'PUBLISHED').length;
-  const unpublished = items.filter((i) => i.published !== 'PUBLISHED').length;
+  const isCa = market === 'ca';
+  const okCount = isCa
+    ? items.filter((i) => i.feedStatus === 'SUCCESS').length
+    : items.filter((i) => i.published === 'PUBLISHED').length;
 
   await supabase.from('channel_health').insert({
-    channel: 'walmart_us',
+    channel: isCa ? 'walmart_ca' : 'walmart_us',
     target: 'marketplace.walmartapis.com',
     total,
-    in_sync: published,
-    with_diffs: unpublished,
+    in_sync: okCount,
+    with_diffs: total - okCount,
     errors: 0,
     partial: false,
     results: items,
   });
 
-  return { total, published, unpublished };
+  return { total, okCount };
 }
