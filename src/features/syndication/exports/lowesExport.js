@@ -1,4 +1,5 @@
 import {
+  loadJSZip,
   openTemplate,
   sheetPathByName,
   sheetToGrid,
@@ -189,7 +190,7 @@ function mergeRows(sheetXml, cellsByRow) {
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
  */
-export async function generateLowesFromTemplate(templateStoragePath, products, fileName = 'Lowes_Export') {
+async function fillItemTemplate(templateStoragePath, products) {
   if (!products?.length) throw new Error('No products to export.');
 
   const { zip, shared } = await openTemplate(templateStoragePath);
@@ -231,8 +232,12 @@ export async function generateLowesFromTemplate(templateStoragePath, products, f
   });
 
   zip.file(tplPath, mergeRows(sheetXml, cellsByRow));
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  return zip;
+}
 
+export async function generateLowesFromTemplate(templateStoragePath, products, fileName = 'Lowes_Export') {
+  const zip = await fillItemTemplate(templateStoragePath, products);
+  await downloadZip(zip, fileName, templateExt(templateStoragePath));
   return { count: products.length };
 }
 
@@ -292,7 +297,7 @@ const freightAssortment = (p) => {
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
  */
-export async function generateLowesFreightFromTemplate(templateStoragePath, products, fileName = 'Lowes_Freight_Analysis') {
+async function fillFreightTemplate(templateStoragePath, products) {
   if (!products?.length) throw new Error('No products to export.');
 
   const { zip, shared } = await openTemplate(templateStoragePath);
@@ -349,14 +354,19 @@ export async function generateLowesFreightFromTemplate(templateStoragePath, prod
   });
 
   zip.file(tplPath, mergeRows(sheetXml, cellsByRow));
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  return zip;
+}
 
+export async function generateLowesFreightFromTemplate(templateStoragePath, products, fileName = 'Lowes_Freight_Analysis') {
+  const zip = await fillFreightTemplate(templateStoragePath, products);
+  await downloadZip(zip, fileName, templateExt(templateStoragePath));
   return { count: products.length };
 }
 
 /**
  * Lowe's new-item setup is a two-file package: the Item Template (.xlsm) and
- * the SOS Freight Analysis (.xlsx). Fill and download every uploaded file.
+ * the SOS Freight Analysis (.xlsx). Fill every uploaded file and download the
+ * whole set as ONE ZIP, each file kept under its original Lowe's name.
  *
  * @param {Object[]} templates  Lowe's template rows ({ file_name, storage_path })
  * @param {Object[]} products
@@ -368,8 +378,25 @@ export async function generateLowesSet(templates, products, baseName = 'Lowes') 
   if (!itemTpl && !freightTpl) {
     throw new Error("No Lowe's template matched — upload the Item Template and/or the SOS Freight Analysis file.");
   }
-  let files = 0;
-  if (itemTpl) { await generateLowesFromTemplate(itemTpl.storage_path, products, `${baseName}_Item_Setup`); files++; }
-  if (freightTpl) { await generateLowesFreightFromTemplate(freightTpl.storage_path, products, `${baseName}_Freight_Analysis`); files++; }
-  return { count: products.length, files };
+
+  const parts = [];
+  if (itemTpl) parts.push({ name: itemTpl.file_name, zip: await fillItemTemplate(itemTpl.storage_path, products) });
+  if (freightTpl) parts.push({ name: freightTpl.file_name, zip: await fillFreightTemplate(freightTpl.storage_path, products) });
+
+  const JSZip = await loadJSZip();
+  const bundle = new JSZip();
+  for (const part of parts) {
+    bundle.file(part.name, await part.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }));
+  }
+  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const url = URL.createObjectURL(out);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${baseName}_${new Date().toISOString().slice(0, 10)}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  return { count: products.length, files: parts.length };
 }

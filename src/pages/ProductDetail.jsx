@@ -1150,7 +1150,7 @@ function ExportTemplatesCard({ product, media }) {
           key: marketplace,
           marketplace,
           files,
-          detail: files.length > 1 ? `Set of ${files.length} files · Item Setup + Freight Analysis` : files[0].file_name,
+          detail: files.length > 1 ? `Set of ${files.length} files · downloads as one ZIP` : files[0].file_name,
         }];
       }
       return files.map((t) => ({ key: t.id, marketplace, files: [t], detail: t.file_name }));
