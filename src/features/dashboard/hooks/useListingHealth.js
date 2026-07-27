@@ -67,23 +67,27 @@ export function useListingHealth() {
 
         const list = dbProducts ?? [];
 
-        // Latest Wayfair audit snapshot → per-SKU spec-sync map. null map =
-        // no audit has run yet (the sync check treats unknown as pass).
-        let wayfairMap = null;
-        try {
-          const { data: snap } = await supabase
-            .from('channel_health')
-            .select('results')
-            .eq('channel', 'wayfair')
-            .order('run_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (Array.isArray(snap?.results)) {
-            wayfairMap = new Map(snap.results.map((r) => [r.sku, r]));
+        // Latest channel snapshots → per-SKU maps. null map = no snapshot yet
+        // (the channel checks treat unknown as pass).
+        async function latestSnapshotMap(channel) {
+          try {
+            const { data: snap } = await supabase
+              .from('channel_health')
+              .select('results')
+              .eq('channel', channel)
+              .order('run_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (Array.isArray(snap?.results)) {
+              return new Map(snap.results.map((r) => [r.sku, r]));
+            }
+          } catch {
+            // score without sync data rather than failing the page
           }
-        } catch {
-          // score without sync data rather than failing the page
+          return null;
         }
+        const wayfairMap = await latestSnapshotMap('wayfair');
+        const bestbuyMap = await latestSnapshotMap('bestbuy');
 
         // Enrich each product once with parsed Wix data + base fields
         const enriched = list.map((p) => {
@@ -118,6 +122,12 @@ export function useListingHealth() {
                 _wayfairAudit: wayfairMap ? (wayfairMap.get(e.sku) ?? null) : undefined,
               };
               media = e.pimMedia;
+            } else if (def.dataSource === 'bestbuy') {
+              product = {
+                ...e.raw,
+                _bbOffer: bestbuyMap ? (bestbuyMap.get(e.sku) ?? null) : undefined,
+              };
+              media = e.pimMedia;
             } else {
               product = e.raw;
               media = e.pimMedia;
@@ -136,11 +146,16 @@ export function useListingHealth() {
                   ? e.hasWixCache ? 'wix_cache' : (e.wix_product_id ? 'pim_fallback' : 'not_linked')
                   : def.dataSource === 'wayfair'
                     ? e.raw.wayfair_item_group_id ? 'pim' : 'not_linked'
-                    : 'pim',
+                    : def.dataSource === 'bestbuy'
+                      ? (bestbuyMap && bestbuyMap.get(e.sku) ? 'offer' : 'not_linked')
+                      : 'pim',
               // Which spec attributes differ at Wayfair (from the audit),
               // so the breakdown can name them.
               wayfair_audit:
                 def.dataSource === 'wayfair' && wayfairMap ? wayfairMap.get(e.sku) ?? null : undefined,
+              // The live Best Buy offer (price/stock/msrp), for the breakdown.
+              bb_offer:
+                def.dataSource === 'bestbuy' && bestbuyMap ? bestbuyMap.get(e.sku) ?? null : undefined,
               result,
             };
           });

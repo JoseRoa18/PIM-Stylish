@@ -109,6 +109,30 @@ const FIELDS = {
       return p._wayfairAudit.changed === 0;
     },
   },
+  // Best Buy offer checks — fed by the read-only offers snapshot.
+  //   _bbOffer === undefined → no snapshot yet (unknown ≠ fail)
+  //   _bbOffer === null      → snapshot exists, product has no offer
+  //   { price, quantity, active, msrp } → live offer data
+  listed_on_bestbuy: {
+    label: 'Listed on Best Buy',
+    check: (p) => p._bbOffer === undefined || p._bbOffer != null,
+  },
+  bb_offer_active: {
+    label: 'Offer Active',
+    check: (p) => !p._bbOffer || p._bbOffer.active === true,
+  },
+  bb_in_stock: {
+    label: 'In Stock',
+    check: (p) => !p._bbOffer || (p._bbOffer.quantity ?? 0) > 0,
+  },
+  bb_price_matches: {
+    label: 'Price Matches PIM MSRP',
+    check: (p) => {
+      const o = p._bbOffer;
+      if (!o || o.price == null || o.msrp == null) return true;
+      return Math.abs(o.price - o.msrp) <= 0.01;
+    },
+  },
   visible_online: { label: 'Visible Online', check: (p) => p.visible_online === true },
   section_dimensions: { label: 'Dimensions Tab', check: (p) => hasInfoSection(p, /dimension|size|measurement/i) },
   section_documents: { label: 'Documents to Download Tab', check: (p) => hasInfoSection(p, /document|download|spec sheet|manual|installation/i) },
@@ -162,6 +186,29 @@ export const MARKETPLACES = {
       { field: 'number_of_bowls', category: 'Specs', weight: 3, severity: 'minor' },
       { field: 'shipping_weight', category: 'Shipping', weight: 5, severity: 'major' },
       { field: 'wayfair_specs_synced', category: 'Channel Sync', weight: 12, severity: 'major' },
+    ],
+  },
+  bestbuy: {
+    key: 'bestbuy',
+    label: 'Best Buy Canada',
+    subtitle: 'Mirakl marketplace (read-only)',
+    dataSource: 'bestbuy',
+    connectionType: 'api',
+    requiresLink: true,
+    checks: [
+      { field: 'listed_on_bestbuy', category: 'Offer', weight: 15, severity: 'critical' },
+      { field: 'bb_offer_active', category: 'Offer', weight: 8, severity: 'critical' },
+      { field: 'bb_in_stock', category: 'Offer', weight: 8, severity: 'major' },
+      { field: 'bb_price_matches', category: 'Offer', weight: 10, severity: 'major' },
+      { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'upc', category: 'Identity', weight: 6, severity: 'major' },
+      { field: 'description', category: 'Content', weight: 10, severity: 'critical' },
+      { field: 'bullet_points', category: 'Content', weight: 6, severity: 'major' },
+      { field: 'primary_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'multiple_images', category: 'Images', weight: 4, severity: 'minor' },
+      { field: 'price', category: 'Pricing', weight: 8, severity: 'critical' },
+      { field: 'external_dimensions', category: 'Specs', weight: 6, severity: 'major' },
+      { field: 'shipping_weight', category: 'Shipping', weight: 4, severity: 'minor' },
     ],
   },
   bbb: {

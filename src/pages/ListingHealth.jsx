@@ -17,6 +17,7 @@ import {
   API_MARKETPLACE_KEYS,
 } from '@/features/dashboard/lib/listingHealth';
 import { readWixProduct } from '@/features/syndication/api/wixSync';
+import { refreshBestBuyOffers } from '@/features/syndication/api/bestbuySync';
 import ChannelSyncCard from '@/features/dashboard/components/ChannelSyncCard';
 
 const SCORE_BADGE_STYLES = {
@@ -31,6 +32,7 @@ const SOURCE_STYLES = {
   pim_fallback: { label: 'PIM (no cache)', class: 'bg-warning-container text-on-warning-container' },
   not_linked: { label: 'Not linked', class: 'bg-surface-container text-on-surface-variant' },
   pim: { label: 'PIM', class: 'bg-surface-container text-on-surface-variant' },
+  offer: { label: 'Live offer', class: 'bg-success-container text-on-success-container' },
 };
 
 const SEVERITY_META = {
@@ -41,7 +43,7 @@ const SEVERITY_META = {
 
 // Per-product breakdown of failed checks, grouped by severity — the exact
 // "why is this score what it is" behind each row.
-function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'this marketplace', wayfairAudit }) {
+function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'this marketplace', wayfairAudit, bbOffer }) {
   if (result.issues.length === 0) {
     return (
       <p className="text-body-sm text-on-surface animate-banner-in">
@@ -81,6 +83,17 @@ function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'th
                       <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant max-w-md">
                         Differs at Wayfair in:{' '}
                         <span className="text-on-surface">{wayfairAudit.fields.join(' · ')}</span>
+                      </p>
+                    )}
+                    {i.key === 'bb_price_matches' && bbOffer?.price != null && bbOffer?.msrp != null && (
+                      <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant">
+                        Best Buy <span className="text-on-surface">${Number(bbOffer.price).toFixed(2)}</span>{' '}
+                        vs PIM MSRP <span className="text-on-surface">${Number(bbOffer.msrp).toFixed(2)}</span>
+                      </p>
+                    )}
+                    {i.key === 'bb_in_stock' && bbOffer && (
+                      <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant">
+                        Quantity at Best Buy: <span className="text-on-surface">{bbOffer.quantity ?? 0}</span>
                       </p>
                     )}
                   </li>
@@ -173,6 +186,18 @@ export default function ListingHealth() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  async function refreshBestBuy() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refreshBestBuyOffers();
+      window.location.reload();
+    } catch (err) {
+      alert(`Best Buy refresh failed: ${err.message}`);
+      setRefreshing(false);
+    }
+  }
 
   async function refreshAllFromWix() {
     if (refreshing) return;
@@ -268,7 +293,21 @@ export default function ListingHealth() {
               {mktDef.dataSource === 'wayfair' && (
                 <> · PIM readiness + spec-attribute sync from the latest audit</>
               )}
+              {mktDef.dataSource === 'bestbuy' && (
+                <> · offers, stock & prices from the latest read-only pull — nothing is ever written to Best Buy</>
+              )}
             </p>
+            {mktDef.dataSource === 'bestbuy' && (
+              <button
+                type="button"
+                onClick={refreshBestBuy}
+                disabled={refreshing}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Pulling offers…' : 'Refresh from Best Buy'}
+              </button>
+            )}
             {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && (
               <button
                 type="button"
@@ -416,6 +455,7 @@ export default function ListingHealth() {
                                 notLinked={p.source === 'not_linked'}
                                 marketplaceLabel={mktDef.label}
                                 wayfairAudit={p.wayfair_audit}
+                                bbOffer={p.bb_offer}
                               />
                             </td>
                           </tr>
