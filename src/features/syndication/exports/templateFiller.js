@@ -146,6 +146,39 @@ export async function openTemplate(templateStoragePath) {
   return { zip, shared };
 }
 
+// Merge new cells into an existing <row> element: cells we write replace the
+// originals at the same ref, everything else (styles, defaults, formulas) is
+// kept, and the result stays in column order as OOXML requires. Keys of
+// newCellsByCol are 1-based column indexes (same as colToIndex).
+export function mergeRowXml(rowXml, newCellsByCol) {
+  const open = rowXml.match(/^<row ([^>]*?)\/?>/);
+  const attrs = open[1].replace(/\/\s*$/, '').trim();
+  const cells = new Map();
+  for (const m of rowXml.matchAll(/<c r="([A-Z]+)\d+"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)) {
+    cells.set(colToIndex(m[1]), m[0]);
+  }
+  for (const [ci, xml] of newCellsByCol) cells.set(ci, xml);
+  const body = [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('');
+  return `<row ${attrs}>${body}</row>`;
+}
+
+// Walk a sheet's XML once, splicing merged rows in ascending order. For
+// templates that ship with every data row already present (Lowe's, Home Depot
+// Canada) — injecting rows there would duplicate row numbers.
+export function mergeRows(sheetXml, cellsByRow) {
+  let out = '';
+  let cursor = 0;
+  for (const rn of [...cellsByRow.keys()].sort((a, b) => a - b)) {
+    const start = sheetXml.indexOf(`<row r="${rn}"`, cursor);
+    if (start === -1) continue;
+    const tagClose = sheetXml.indexOf('>', start);
+    const end = sheetXml[tagClose - 1] === '/' ? tagClose + 1 : sheetXml.indexOf('</row>', tagClose) + '</row>'.length;
+    out += sheetXml.slice(cursor, start) + mergeRowXml(sheetXml.slice(start, end), cellsByRow.get(rn));
+    cursor = end;
+  }
+  return out + sheetXml.slice(cursor);
+}
+
 // Inject prebuilt <row> XML before </sheetData> and bump the sheet dimension.
 export function injectRows(sheetXml, rowsXml, lastRowNum) {
   let newXml = sheetXml.replace('</sheetData>', `${rowsXml}</sheetData>`);

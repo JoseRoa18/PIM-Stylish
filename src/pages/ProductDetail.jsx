@@ -42,6 +42,7 @@ import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayf
 import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
 import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
 import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
+import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/homeDepotCaExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -1176,6 +1177,8 @@ function ExportTemplatesCard({ product, media }) {
         await generateAmazonFromTemplate(entry.files[0].storage_path, [product], `Amazon_${base}`);
       } else if (/walmart/i.test(entry.marketplace)) {
         await generateWalmartFromTemplate(entry.files[0].storage_path, [product], `Walmart_${base}`);
+      } else if (/home ?depot.*(\bca\b|canada)/i.test(entry.marketplace)) {
+        await generateHomeDepotCaFromTemplate(entry.files[0].storage_path, [product], `HomeDepotCA_${base}`);
       } else if (/home ?depot/i.test(entry.marketplace)) {
         await generateHomeDepotFromTemplate(entry.files[0].storage_path, [product], `HomeDepot_${base}`);
       } else if (/lowe/i.test(entry.marketplace)) {

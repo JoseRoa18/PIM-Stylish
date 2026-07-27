@@ -19,6 +19,7 @@ import { generateMenardsFromTemplates } from '@/features/syndication/exports/men
 import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
 import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
 import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
+import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/homeDepotCaExport';
 import { generatePimExport, fetchAllProducts } from '@/features/syndication/exports/pimExport';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
@@ -281,9 +282,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         ? generateAmazonFromTemplate
         : /walmart/i.test(marketplace)
           ? generateWalmartFromTemplate
-          : /home ?depot/i.test(marketplace)
-            ? generateHomeDepotFromTemplate
-            : generateWayfairFromTemplate;
+          : /home ?depot.*(\bca\b|canada)/i.test(marketplace)
+            ? generateHomeDepotCaFromTemplate
+            : /home ?depot/i.test(marketplace)
+              ? generateHomeDepotFromTemplate
+              : generateWayfairFromTemplate;
       const prefix = marketplace.replace(/[^a-z0-9]+/gi, '_');
 
       const skus = [...selectedSkus];

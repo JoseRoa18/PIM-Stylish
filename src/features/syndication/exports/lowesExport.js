@@ -8,6 +8,7 @@ import {
   indexToCol,
   downloadZip,
   templateExt,
+  mergeRows,
 } from './templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
 
@@ -152,36 +153,6 @@ export const LOWES_RULES = {
   supplierBullet2: (p) => list(attr(p).bullet_points)[1] ?? '',
   supplierBullet3: (p) => list(attr(p).bullet_points)[2] ?? '',
 };
-
-// Merge new cells into an existing <row> element: cells we write replace the
-// originals at the same ref, everything else (styles, defaults) is kept, and
-// the result stays in column order as OOXML requires.
-function mergeRowXml(rowXml, newCellsByCol) {
-  const open = rowXml.match(/^<row ([^>]*?)\/?>/);
-  const attrs = open[1].replace(/\/\s*$/, '').trim();
-  const cells = new Map();
-  for (const m of rowXml.matchAll(/<c r="([A-Z]+)\d+"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)) {
-    cells.set(colToIndex(m[1]), m[0]);
-  }
-  for (const [ci, xml] of newCellsByCol) cells.set(ci, xml);
-  const body = [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('');
-  return `<row ${attrs}>${body}</row>`;
-}
-
-// Walk the sheet XML once, splicing merged rows in ascending order.
-function mergeRows(sheetXml, cellsByRow) {
-  let out = '';
-  let cursor = 0;
-  for (const rn of [...cellsByRow.keys()].sort((a, b) => a - b)) {
-    const start = sheetXml.indexOf(`<row r="${rn}"`, cursor);
-    if (start === -1) continue;
-    const tagClose = sheetXml.indexOf('>', start);
-    const end = sheetXml[tagClose - 1] === '/' ? tagClose + 1 : sheetXml.indexOf('</row>', tagClose) + '</row>'.length;
-    out += sheetXml.slice(cursor, start) + mergeRowXml(sheetXml.slice(start, end), cellsByRow.get(rn));
-    cursor = end;
-  }
-  return out + sheetXml.slice(cursor);
-}
 
 /**
  * Fill a Lowe's US item setup template (in place) and download it.
