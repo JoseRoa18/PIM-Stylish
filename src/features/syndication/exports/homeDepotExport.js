@@ -119,14 +119,28 @@ const colorFamily = (finish) => {
   return f;
 };
 
-// HD's Finish Family closed list — our finishes map near-verbatim.
-const finishFamily = (finish) => {
-  const f = String(finish || '');
+// HD's Finish Family is a DIFFERENT closed list per file: the faucets one has
+// finish names (Matte Black, Brushed Gold…), the sinks one has treatments
+// (Matte, Gloss, Stainless Steel…) — every value below is verified against
+// the respective ReferenceData tab.
+const finishFamily = (p) => {
+  const f = String(p.finish || '');
+  if (/sink/.test(p.category ?? '')) {
+    const m = String(attr(p).material ?? p.material ?? '');
+    if (/stainless/i.test(f) || /stainless/i.test(m)) return 'Stainless Steel';
+    if (/porcelain|fireclay|ceramic/i.test(m)) return 'High Gloss';
+    if (/granite|composite|quartz/i.test(m)) return 'Matte';
+    if (/gloss/i.test(f)) return 'High Gloss';
+    if (/matte/i.test(f)) return 'Matte';
+    return '';
+  }
   if (/matte black/i.test(f)) return 'Matte Black';
   if (/stainless/i.test(f)) return 'Stainless Steel';
   if (/brushed gold|satin gold/i.test(f)) return 'Brushed Gold';
   if (/gunmetal|matte gr[ae]y/i.test(f)) return 'Matte Gray';
+  if (/polished chrome/i.test(f)) return 'Polished Chrome';
   if (/chrome/i.test(f)) return 'Brushed Chrome';
+  if (/brushed nickel/i.test(f)) return 'Brushed Nickel';
   if (/nickel/i.test(f)) return 'Polished Nickel';
   return f;
 };
@@ -193,7 +207,8 @@ export const HOME_DEPOT_RULES = {
   'Does your product contain plastic or resin?': sinkNo,
   'Proposition 65 warning required?': () => 'No',
   'Is your product a textile, or does it contain a textile article, as described in California AB1817 (the Safer Clothing and Textiles Act)?': () => 'No',
-  'Does this product contain electronic equipment (does it contain a circuit board, computer chip, copper wiring, or other electrical components)?': () => 'No',
+  // This one's list is Y/N, unlike its sibling questions.
+  'Does this product contain electronic equipment (does it contain a circuit board, computer chip, copper wiring, or other electrical components)?': () => 'N',
   'Is this item governed by the Textile and Wool Labeling Act as administered by the Federal Trade Commission?': () => 'No',
 
   // Documents
@@ -203,7 +218,10 @@ export const HOME_DEPOT_RULES = {
   'Specification': (p) => docUrl(p, 'spec_sheet'),
 
   // Faucet attributes
-  'Faucet Type': (p) => faucetCollection(p),
+  'Faucet Type': (p) => {
+    const c = faucetCollection(p);
+    return c === 'Beverage Faucets' ? 'Beverage Faucet' : c; // list option is singular
+  },
   'Commercial / Residential': () => 'Residential',
   'Manufacturer Warranty': (p) => {
     const parts = [attr(p).warranty_length, attr(p).warranty].filter(Boolean);
@@ -213,13 +231,17 @@ export const HOME_DEPOT_RULES = {
   'Flow rate (gallons per minute)': (p) => num(attr(p).max_flow_rate),
   'Color Family': (p) => colorFamily(p.finish),
   'Color/Finish': (p) => p.finish || '',
-  'Finish Family': (p) => finishFamily(p.finish),
+  'Finish Family': finishFamily,
+  // Never blank on a list column — "No Certifications or Listings" is an option.
   'Certifications and Listings': (p) =>
-    attr(p).cupc_certified || attr(p).upc_certified ? 'UPC Certified (Uniform Plumbing Code)' : '',
+    attr(p).cupc_certified || attr(p).upc_certified
+      ? 'UPC Certified (Uniform Plumbing Code)'
+      : 'No Certifications or Listings',
   // Faucets ship with their mounting kit (hoses/supply lines confirm it).
   'Included Components': (p) =>
     attr(p).supply_line_included || attr(p).hose_included ? 'All Mounting Hardware' : '',
-  'Number of Faucet Handles': (p) => num(attr(p).number_of_handles) || '1',
+  // The list is textual ("1 Handle"), not numeric.
+  'Number of Faucet Handles': (p) => `${num(attr(p).number_of_handles) || '1'} Handle`,
   'Mount Location': (p) => (/wall/i.test(attr(p).mounting_type || '') ? 'Wall Mount' : 'Deck Mount'),
   'Sensor Activation': (p) => {
     const t = `${attr(p).spray_function_activation ?? ''} ${attr(p).spray_type ?? ''}`;
@@ -227,21 +249,28 @@ export const HOME_DEPOT_RULES = {
     if (/touch/i.test(t)) return 'Touch';
     return 'No Sensor';
   },
-  // One safe value from HD's Features closed lists (multi-value separators
-  // are undocumented): wand type for faucets, build trait for sinks.
+  // "Features" repeats once per collection with a DIFFERENT list each time
+  // (the kitchen-sinks one has Workstation/Zero Radius/Low Divide, the
+  // bathroom one has Rust/Scratch Resistant…). The rule returns ordered
+  // CANDIDATES; each column takes the first one its own list accepts.
   'Features': (p) => {
     if (/sink/i.test(p.category ?? '')) {
       const acc = list(attr(p).accessories_included).join(' ');
-      if (/workstation/i.test(`${p.product_type ?? ''} ${acc}`)) return 'Workstation';
-      if (num(attr(p).sink_radius_mm) === '0') return 'Zero Radius';
-      if (attr(p).low_divider) return 'Low Divide';
-      if (attr(p).sink_radius_mm != null) return 'Tight Radius';
-      return 'No Additional Features';
+      const m = `${attr(p).material ?? p.material ?? ''}`;
+      const cands = [];
+      if (/workstation/i.test(`${p.product_type ?? ''} ${acc}`)) cands.push('Workstation');
+      if (num(attr(p).sink_radius_mm) === '0') cands.push('Zero Radius');
+      if (attr(p).low_divider) cands.push('Low Divide');
+      if (attr(p).sink_radius_mm != null) cands.push('Tight Radius');
+      if (/stainless/i.test(m)) cands.push('Rust Resistant');
+      if (/granite|composite|quartz|porcelain|fireclay/i.test(m)) cands.push('Scratch Resistant');
+      cands.push('No Additional Features');
+      return cands;
     }
     const c = faucetCollection(p);
-    if (c === 'Pull Down') return 'Pull Down Spray Wand';
-    if (c === 'Pull Out') return 'Pull Out Spray Wand';
-    return '';
+    if (c === 'Pull Down') return ['Pull Down Spray Wand', 'Gooseneck', 'No Additional Features'];
+    if (c === 'Pull Out') return ['Pull Out Spray Wand', 'Pull out sprayer', 'No Additional Features'];
+    return ['No Additional Features'];
   },
   'Spout Swivel Type': (p) => {
     const sw = String(attr(p).swivel_spout ?? '');
@@ -258,28 +287,57 @@ export const HOME_DEPOT_RULES = {
   },
 
   // ---- Sinks file (Kitchen / Bathroom / Bar Sinks collections) ----
-  'Kitchen Product Type': (p) => (/^kitchen/i.test(p.category ?? '') ? 'Kitchen Sinks' : ''),
+  // List values verified against ReferenceData ("Kitchen Sink" is singular).
+  'Kitchen Product Type': (p) => (/^kitchen/i.test(p.category ?? '') ? 'Kitchen Sink' : ''),
   'Sink Shape': (p) => attr(p).sink_shape || '',
   'Mount Type': (p) => {
     const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')} ${attr(p).mounting_type ?? ''}`;
     if (/dual/i.test(t)) return 'Drop-In/Undermount';
     if (/farm|apron/i.test(t)) return 'Farmhouse/Apron-Front';
-    if (/vessel/i.test(t)) return 'Top-mount';
+    if (/vessel/i.test(t)) return 'Drop-In/Topmount';
     if (/drop|top.?mount/i.test(t)) return 'Drop-In';
     if (/wall/i.test(t)) return 'Wall Mount';
     return 'Undermount';
   },
   'Faucet Included': () => 'Without Faucet',
   // Undermount/vessel sinks carry no faucet holes unless the PIM says so.
-  'Number of Faucet Holes': (p) => num(attr(p).number_of_faucet_holes) || '0',
-  'Number of Bowls': (p) => num(attr(p).number_of_bowls),
-  'Bowl Split': (p) => attr(p).basin_split || '',
+  // One occurrence's list spells zero as "0", the other as "None".
+  'Number of Faucet Holes': (p) => {
+    const n = num(attr(p).number_of_faucet_holes);
+    return n && n !== '0' ? [n] : ['0', 'None'];
+  },
+  // HD's list is textual ("50/50 Double Bowl", not "2").
+  'Number of Bowls': (p) => {
+    const n = Number(num(attr(p).number_of_bowls));
+    if (!n) return '';
+    if (n === 1) return 'Single Bowl';
+    if (n >= 3) return 'Triple Bowl';
+    const split = String(attr(p).basin_split ?? '').match(/\d{2}\/\d{2}/)?.[0];
+    return split ? `${split} Double Bowl` : 'Double Bowl';
+  },
+  'Bowl Split': (p) => {
+    const n = Number(num(attr(p).number_of_bowls));
+    if (n === 1) return 'No Split';
+    return String(attr(p).basin_split ?? '').match(/\d{2}\/\d{2}/)?.[0] ?? '';
+  },
+  // Non-steel sinks (granite composite, porcelain) have no gauge — the list
+  // has an explicit option for that instead of leaving the cell blank.
   'Sink Gauge': (p) => {
     const g = num(attr(p).gauge);
-    return g ? `${g} Gauge` : '';
+    return g ? `${g} Gauge` : 'No Gauge Applicable';
   },
-  'Sink Material': (p) => attr(p).material ?? p.material ?? (num(attr(p).gauge) ? 'Stainless Steel' : ''),
-  'Material': (p) => attr(p).material ?? p.material ?? (num(attr(p).gauge) ? 'Stainless Steel' : ''),
+  // "Sink Material" list says "Granite Composite"; the generic "Material"
+  // list only has "Composite". PIM stores "Composite Granite".
+  'Sink Material': (p) => {
+    const m = String(attr(p).material ?? p.material ?? '');
+    if (/granite|composite/i.test(m)) return 'Granite Composite';
+    return m || (num(attr(p).gauge) ? 'Stainless Steel' : '');
+  },
+  'Material': (p) => {
+    const m = String(attr(p).material ?? p.material ?? '');
+    if (/sink/.test(p.category ?? '') && /granite|composite/i.test(m)) return 'Composite';
+    return m || (num(attr(p).gauge) ? 'Stainless Steel' : '');
+  },
   // HD sink axes: Length = left-to-right (PIM length), Width = front-to-back
   // (PIM width), Depth = top-to-bottom (PIM depth/height).
   'Sink Left to Right Length (in.) (in)': (p) => num(attr(p).external_dimensions_in?.length),
@@ -292,17 +350,40 @@ export const HOME_DEPOT_RULES = {
     num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height),
   'Cut-Out Width (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.length),
   'Cut-Out Depth (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.width),
-  'Minimum Cabinet Size (in.)': (p) => num(attr(p).min_external_cabinet_size_in),
-  'Drain Location': (p) => attr(p).drain_hole_location || '',
+  // The list only has whole inches — a 29.25" minimum means the next size up.
+  'Minimum Cabinet Size (in.)': (p, ctx, options) => {
+    const v = Number(num(attr(p).min_external_cabinet_size_in));
+    if (!v) return '';
+    const need = Math.ceil(v);
+    const ladder = (options ?? []).map(Number).filter((x) => !Number.isNaN(x)).sort((a, b) => a - b);
+    const hit = ladder.find((x) => x >= need);
+    return String(hit ?? need);
+  },
+  // PIM wording → HD's closed list (no "Rear Center" / "Side Drain" options).
+  'Drain Location': (p) => {
+    const d = String(attr(p).drain_hole_location ?? '');
+    if (!d) return '';
+    if (/side|reversible/i.test(d)) return 'Reversible';
+    if (/rear|back/i.test(d)) return 'Rear';
+    if (/center/i.test(d)) return 'Center';
+    if (/front/i.test(d)) return 'Front';
+    if (/left/i.test(d)) return 'Left';
+    if (/right/i.test(d)) return 'Right';
+    return d;
+  },
   // Stylish sinks have no overflow (kitchen never does; bathroom models here
   // don't either) — override via the overflow_location attribute if one ever does.
   'Overflow location': (p) => (/sink/i.test(p.category ?? '') ? attr(p).overflow_location || 'None' : ''),
   'Drain Finish': (p) => (/stainless/i.test(p.finish || '') ? 'Stainless' : ''),
+  // Repeated per collection with different lists — ordered candidates.
   'Included': (p) => {
     const acc = list(attr(p).accessories_included).join(' ');
-    if (/strainer/i.test(acc) || attr(p).strainer_model) return 'Strainer Basket';
-    if (/grid|rack/i.test(acc) || attr(p).includes_grids) return 'Drying Rack';
-    return 'Mounting Hardware';
+    const cands = [];
+    if (/strainer/i.test(acc) || attr(p).strainer_model) cands.push('Strainer Basket', 'Strainer');
+    if (/grid/i.test(acc) || attr(p).includes_grids) cands.push('Bottom Grids');
+    if (/rack/i.test(acc)) cands.push('Drying Rack');
+    cands.push('Mounting Hardware');
+    return cands;
   },
 };
 
@@ -315,6 +396,24 @@ for (let i = 1; i <= 22; i++) {
 const snapTo = (value, options) => {
   if (!options?.length || value === '' || value == null) return value;
   return options.find((o) => norm(o) === norm(value)) ?? value;
+};
+
+const isOption = (value, options) => options.some((o) => norm(o) === norm(value));
+
+// Resolve a rule result against ONE column's ReferenceData list. Rules may
+// return an array of candidates (ordered by preference) because repeated
+// labels carry a different list per collection — each occurrence takes the
+// first candidate its own list accepts. A scalar that isn't in the column's
+// list is dropped (that occurrence belongs to another collection).
+const resolveForColumn = (v, options) => {
+  const candidates = Array.isArray(v) ? v.filter((c) => c !== '' && c != null) : [v];
+  if (!candidates.length) return null;
+  if (!options?.length) return candidates[0];
+  for (const c of candidates) {
+    const snapped = snapTo(c, options);
+    if (isOption(snapped, options)) return snapped;
+  }
+  return null;
 };
 
 /**
@@ -388,10 +487,15 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
       if (!label) continue;
       const rule = HOME_DEPOT_RULES[String(label).trim()];
       if (!rule) continue;
+      const opts = validByGuid[String(guids[ci] ?? '')];
       let v;
-      try { v = rule(p, ctx); } catch { v = ''; }
+      // Rules get the column's ReferenceData options as a 3rd arg for
+      // numeric-ladder fields (e.g. Minimum Cabinet Size rounds UP to the
+      // next available option).
+      try { v = rule(p, ctx, opts); } catch { v = ''; }
       if (v === '' || v == null) continue;
-      v = snapTo(v, validByGuid[String(guids[ci] ?? '')]);
+      v = resolveForColumn(v, opts);
+      if (v === null || v === '') continue;
       cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
     }
     rowsXml += `<row r="${rowNum}" spans="1:${labels.length}">${cells}</row>`;
