@@ -75,22 +75,21 @@ export default function MediaSection({ sku }) {
     (a, b) => (a.display_order ?? 0) - (b.display_order ?? 0),
   );
 
-  // Counts per language bucket — only buckets that actually have images become
-  // filter chips. We always show ONE language at a time (no "All") so the
-  // EN / EN-FR duplicates of the same shot don't appear side by side.
+  // Counts per language bucket — IMAGES only: videos are language-neutral and
+  // always visible, so they neither create chips nor react to the filter.
+  const allImages = visualMedia.filter((m) => m.media_type === 'image');
   const counts = { universal: 0, en: 0, fr: 0, en_fr: 0, en_es: 0 };
-  for (const m of visualMedia) counts[bucketOf(m)] = (counts[bucketOf(m)] ?? 0) + 1;
+  for (const m of allImages) counts[bucketOf(m)] = (counts[bucketOf(m)] ?? 0) + 1;
   const presentBuckets = ['universal', 'en', 'fr', 'en_fr', 'en_es'].filter((b) => counts[b] > 0);
   const activeFilter = presentBuckets.includes(langFilter) ? langFilter : (presentBuckets[0] ?? null);
 
-  const filteredMedia = activeFilter
-    ? visualMedia.filter((m) => bucketOf(m) === activeFilter)
-    : visualMedia;
-
   // Videos render in their OWN block under the image grid — they never mix
   // into the photo lineup (only images participate in drag-reorder).
-  const filteredImages = filteredMedia.filter((m) => m.media_type === 'image');
-  const filteredVideos = filteredMedia.filter((m) => m.media_type === 'video');
+  const filteredImages = activeFilter
+    ? allImages.filter((m) => bucketOf(m) === activeFilter)
+    : allImages;
+  const filteredVideos = visualMedia.filter((m) => m.media_type === 'video');
+  const filteredMedia = [...filteredImages, ...filteredVideos];
 
   // Default video thumbnail: the product's SECOND image (normally the live
   // shot). A per-video custom pick (thumbnail_path) wins over it.
@@ -205,8 +204,8 @@ export default function MediaSection({ sku }) {
     handleFiles(e.dataTransfer.files);
   };
 
-  const handleAddVideo = async (url, language) => {
-    await addVideoByUrl(sku, url, language || null);
+  const handleAddVideo = async (url) => {
+    await addVideoByUrl(sku, url);
     reload();
   };
 
@@ -233,9 +232,13 @@ export default function MediaSection({ sku }) {
   };
 
   const handleBulkLanguage = async (language) => {
-    const ids = Array.from(selectedIds);
+    // Videos stay language-neutral — the bulk tag only touches images.
+    const ids = visualMedia
+      .filter((m) => selectedIds.has(m.id) && m.media_type === 'image')
+      .map((m) => m.id);
     if (ids.length === 0) return;
-    mutate((prev) => prev.map((m) => (selectedIds.has(m.id) ? { ...m, language } : m)));
+    const idSet = new Set(ids);
+    mutate((prev) => prev.map((m) => (idSet.has(m.id) ? { ...m, language } : m)));
     try {
       await bulkSetMediaLanguage(ids, language);
     } catch (err) {
@@ -721,7 +724,6 @@ export default function MediaSection({ sku }) {
 
       {videoModalOpen && (
         <VideoUrlDialog
-          defaultLanguage={addLanguage}
           onClose={() => setVideoModalOpen(false)}
           onAdd={handleAddVideo}
         />
@@ -967,9 +969,10 @@ function MediaCard({
         </div>
       )}
 
-      {/* Language tag — bottom-right. Editors get a selector; viewers see a
-          short badge only when the image is language-specific. */}
-      {canEdit ? (
+      {/* Language tag — bottom-right, IMAGES only (videos are language-
+          neutral). Editors get a selector; viewers see a short badge only
+          when the image is language-specific. */}
+      {canEdit && isImage ? (
         <select
           value={item.language ?? ''}
           onChange={(e) => onSetLanguage(e.target.value || null)}
@@ -985,7 +988,7 @@ function MediaCard({
             </option>
           ))}
         </select>
-      ) : item.language ? (
+      ) : isImage && item.language ? (
         <span className="absolute bottom-2 right-2 z-10 px-1.5 py-0.5 rounded bg-black/60 text-white text-label-md font-semibold">
           {langMeta(item.language).short}
         </span>
@@ -1057,9 +1060,8 @@ function MediaCard({
   );
 }
 
-function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
+function VideoUrlDialog({ onClose, onAdd }) {
   const [url, setUrl] = useState('');
-  const [language, setLanguage] = useState(defaultLanguage ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -1074,7 +1076,7 @@ function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
     setError(null);
     setBusy(true);
     try {
-      await onAdd(url, language || null);
+      await onAdd(url);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -1122,20 +1124,6 @@ function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
             placeholder="https://youtube.com/watch?v=…"
             className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
           />
-          <label className="flex items-center gap-2 text-label-md text-on-surface-variant">
-            Language
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="px-2 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              {IMAGE_LANGUAGES.map((l) => (
-                <option key={l.id ?? 'universal'} value={l.id ?? ''}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </label>
           {error && <p className="text-body-sm text-error">{error}</p>}
         </div>
 

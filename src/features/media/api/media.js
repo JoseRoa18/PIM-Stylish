@@ -175,7 +175,8 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     rows.push({
       sku,
       media_type: isVideo ? 'video' : 'image',
-      language,
+      // Videos are language-neutral by design — only images carry a tag.
+      language: isVideo ? null : language,
       storage_path: pub.publicUrl,
       file_name: file.name,
       file_size_bytes: file.size ?? null,
@@ -205,9 +206,9 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
 /**
  * Register a video by URL (YouTube, Vimeo, or any direct link). Stores the URL
  * as the storage_path with media_type='video' — no bytes are hosted, matching
- * the "videos by link" strategy.
+ * the "videos by link" strategy. Videos are always language-neutral.
  */
-export async function addVideoByUrl(sku, url, language = null) {
+export async function addVideoByUrl(sku, url) {
   const trimmed = (url ?? '').trim();
   if (!/^https?:\/\//i.test(trimmed)) {
     throw new Error('Please paste a valid URL (must start with http:// or https://).');
@@ -233,7 +234,7 @@ export async function addVideoByUrl(sku, url, language = null) {
     .insert({
       sku,
       media_type: 'video',
-      language,
+      language: null,
       storage_path: trimmed,
       file_name: fileName,
       mime_type: 'text/uri-list',
