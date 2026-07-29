@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
       .eq("sku", sku)
       .maybeSingle();
     if (loadErr) {
-      throw new Error(`Supabase select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
+      throw new Error(`Database select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
     }
     if (!pim) {
       return new Response(
@@ -193,7 +193,7 @@ Deno.serve(async (req) => {
       .select("*")
       .maybeSingle();
     if (updateErr) {
-      throw new Error(`Supabase update failed: ${updateErr.message ?? JSON.stringify(updateErr)}`);
+      throw new Error(`Database update failed: ${updateErr.message ?? JSON.stringify(updateErr)}`);
     }
 
     console.log(`[wix-pull] OK sku=${sku}`);

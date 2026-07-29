@@ -209,8 +209,8 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     action: 'media',
     entityType: 'media',
     entityId: sku,
-    target: 'supabase',
-    summary: `Uploaded ${rows.length} media file(s) to ${sku} (Supabase)${videoCount ? ` — ${videoCount} video(s)` : ''}`,
+    target: 'pim',
+    summary: `Uploaded ${rows.length} media file(s) to ${sku}${videoCount ? ` — ${videoCount} video(s)` : ''}`,
     metadata: { count: rows.length, videos: videoCount, language },
   });
   return data;
@@ -349,8 +349,8 @@ export async function uploadDocumentFile(sku, documentType, file, language = nul
     action: 'media',
     entityType: 'media',
     entityId: sku,
-    target: 'supabase',
-    summary: `Uploaded ${documentType} document to ${sku} (Supabase)`,
+    target: 'pim',
+    summary: `Uploaded ${documentType} document to ${sku}`,
     metadata: { documentType, language },
   });
   return data;

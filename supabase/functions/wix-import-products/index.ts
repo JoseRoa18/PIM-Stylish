@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
       .from("products")
       .select("sku, wix_product_id");
     if (loadErr) {
-      throw new Error(`Supabase select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
+      throw new Error(`Database select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
     }
     console.log(`[wix-link] loaded ${existing?.length ?? 0} PIM rows`);
 

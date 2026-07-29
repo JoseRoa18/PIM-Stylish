@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
       .maybeSingle<PimRow>();
 
     if (loadErr) {
-      throw new Error(`Supabase select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
+      throw new Error(`Database select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
     }
     if (!pimRow) {
       return new Response(

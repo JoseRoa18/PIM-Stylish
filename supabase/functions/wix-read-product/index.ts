@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
       .eq("sku", sku)
       .maybeSingle();
 
-    if (loadErr) throw new Error(`Supabase select failed: ${loadErr.message}`);
+    if (loadErr) throw new Error(`Database select failed: ${loadErr.message}`);
     if (!pim) {
       return new Response(
         JSON.stringify({ error: `Product not found: ${sku}` }),
