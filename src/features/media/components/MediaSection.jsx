@@ -18,6 +18,7 @@ import {
   getMediaUrl,
   getThumbnailUrl,
   getVideoThumbnail,
+  getVideoEmbed,
   isSupabaseStored,
 } from '../api/media';
 import Skeleton from '@/components/ui/Skeleton';
@@ -69,6 +70,7 @@ export default function MediaSection({ sku }) {
   const [videoModalOpen, setVideoModalOpen] = useState(false);
   const [altEdit, setAltEdit] = useState(null); // media item being edited | null
   const [thumbEdit, setThumbEdit] = useState(null); // video whose thumbnail is being picked | null
+  const [playing, setPlaying] = useState(null); // video item playing in the in-app player | null
   const fileInputRef = useRef(null);
 
   // Visual media only, sorted by display_order
@@ -708,7 +710,7 @@ export default function MediaSection({ sku }) {
                       onRemove={() => handleRemove(item)}
                       onEditAlt={() => setAltEdit(item)}
                       onSetThumbnail={() => setThumbEdit(item)}
-                      onView={() => {}}
+                      onView={() => setPlaying(item)}
                     />
                   ))}
                 </div>
@@ -778,6 +780,10 @@ export default function MediaSection({ sku }) {
           onClose={() => setThumbEdit(null)}
           onSave={handleSetPoster}
         />
+      )}
+
+      {playing && (
+        <VideoPlayerDialog item={playing} onClose={() => setPlaying(null)} />
       )}
     </section>
   );
@@ -910,15 +916,16 @@ function MediaCard({
           draggable={false}
         />
       ) : isVideo && videoThumb ? (
+        // Videos play IN-APP (onView opens the player dialog), never a new tab.
         <div
-          onClick={openInNewTab}
-          role="link"
+          onClick={onView}
+          role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') openInNewTab();
+            if (e.key === 'Enter' || e.key === ' ') onView();
           }}
           className="relative w-full h-full cursor-pointer"
-          title={item.file_name}
+          title={`Play ${item.file_name}`}
         >
           <img
             src={videoThumb}
@@ -936,14 +943,14 @@ function MediaCard({
       ) : isVideo && isSupabaseStored(item.storage_path) ? (
         // Uploaded video file: first frame as the tile, play badge on top.
         <div
-          onClick={openInNewTab}
-          role="link"
+          onClick={onView}
+          role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') openInNewTab();
+            if (e.key === 'Enter' || e.key === ' ') onView();
           }}
           className="relative w-full h-full cursor-pointer"
-          title={item.file_name}
+          title={`Play ${item.file_name}`}
         >
           <video
             // The #t=1 media fragment makes the browser seek to second 1 and
@@ -963,11 +970,11 @@ function MediaCard({
         </div>
       ) : (
         <div
-          onClick={openInNewTab}
-          role="link"
+          onClick={isVideo ? onView : openInNewTab}
+          role={isVideo ? 'button' : 'link'}
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') openInNewTab();
+            if (e.key === 'Enter' || e.key === ' ') (isVideo ? onView : openInNewTab)();
           }}
           className="w-full h-full flex flex-col items-center justify-center p-3 text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
         >
@@ -975,7 +982,7 @@ function MediaCard({
           <span className="text-body-sm text-center break-words line-clamp-2 px-1">
             {item.file_name}
           </span>
-          <ExternalLink className="w-3 h-3 mt-1 opacity-50" />
+          {!isVideo && <ExternalLink className="w-3 h-3 mt-1 opacity-50" />}
         </div>
       )}
 
@@ -1064,6 +1071,16 @@ function MediaCard({
               title={item.thumbnail_path ? 'Change thumbnail' : 'Set thumbnail (default: 2nd product image)'}
             >
               <ImageIcon className="w-4 h-4" />
+            </button>
+          )}
+          {isVideo && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); openInNewTab(); }}
+              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
+              title="Open in new tab"
+            >
+              <ExternalLink className="w-4 h-4" />
             </button>
           )}
           {canEdit && isImage && !item.is_primary && (
@@ -1287,6 +1304,72 @@ function AltTextDialog({ item, onClose, onSave }) {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// In-app video player: native <video> for uploaded/direct files, embedded
+// iframe for YouTube/Vimeo links — nothing leaves the app.
+function VideoPlayerDialog({ item, onClose }) {
+  const embed = getVideoEmbed(getMediaUrl(item.storage_path));
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Playing ${item.file_name}`}
+    >
+      <div
+        className="w-full max-w-4xl animate-dialog-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-2 px-1">
+          <p className="text-body-md text-white/90 truncate" title={item.file_name}>
+            <Film className="w-4 h-4 inline mr-2 align-[-2px]" />
+            {item.file_name}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+            title="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="aspect-video w-full rounded-xl overflow-hidden bg-black shadow-2xl">
+          {embed?.kind === 'file' ? (
+            <video
+              src={embed.src}
+              controls
+              autoPlay
+              playsInline
+              className="w-full h-full"
+            />
+          ) : (
+            <iframe
+              src={embed?.src}
+              title={item.file_name}
+              className="w-full h-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

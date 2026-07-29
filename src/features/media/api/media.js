@@ -88,6 +88,20 @@ export function getVideoThumbnail(url) {
   return null;
 }
 
+/**
+ * How to play a video URL inside the app:
+ *   { kind: 'youtube' | 'vimeo', src } → embed iframe
+ *   { kind: 'file', src }              → native <video> (uploaded/direct files)
+ */
+export function getVideoEmbed(url) {
+  if (!url) return null;
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/);
+  if (yt) return { kind: 'youtube', src: `https://www.youtube-nocookie.com/embed/${yt[1]}?autoplay=1` };
+  const vimeo = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  if (vimeo) return { kind: 'vimeo', src: `https://player.vimeo.com/video/${vimeo[1]}?autoplay=1` };
+  return { kind: 'file', src: url };
+}
+
 export async function listMedia(sku) {
   const { data, error } = await supabase
     .from('product_media')
