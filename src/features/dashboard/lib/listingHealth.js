@@ -95,17 +95,19 @@ const FIELDS = {
     label: 'Marketing Title',
     check: (p) => hasText(attr(p, 'general_title_en')) && attr(p, 'general_title_en').trim().length >= 10,
   },
-  // Spec-attribute sync per the latest Wayfair audit snapshot:
+  // Spec-attribute sync per the latest Wayfair audit snapshot (the audit
+  // covers the whole catalog — every category against its own Wayfair class):
   //   _wayfairAudit === undefined → no audit has run yet (unknown ≠ fail)
-  //   _wayfairAudit === null      → audited run, but this SKU errored / has no listing
+  //   _wayfairAudit === null      → audited run, but this SKU wasn't audited:
+  //                                 fail only if it claims a Wayfair link —
+  //                                 unlinked products are already flagged by
+  //                                 "Linked to Wayfair", no double penalty.
   //   { changed }                 → audited; in sync when changed === 0
-  // The audit only covers Wayfair's Kitchen Sinks class so far.
   wayfair_specs_synced: {
     label: 'Spec Attributes in Sync',
     check: (p) => {
-      if (p.category !== 'kitchen_sink') return true;
       if (p._wayfairAudit === undefined) return true;
-      if (p._wayfairAudit === null) return false;
+      if (p._wayfairAudit === null) return !hasText(p.wayfair_item_group_id);
       return p._wayfairAudit.changed === 0;
     },
   },
