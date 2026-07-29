@@ -147,7 +147,9 @@ export default function MediaSection({ sku }) {
   // ---------------- Native Supabase upload ----------------
 
   const handleFiles = async (fileList) => {
-    const files = Array.from(fileList ?? []).filter((f) => f.type.startsWith('image/'));
+    const files = Array.from(fileList ?? []).filter(
+      (f) => f.type.startsWith('image/') || f.type.startsWith('video/'),
+    );
     if (files.length === 0) return;
     setErrorMessage(null);
     setUploadProgress({ done: 0, total: files.length });
@@ -395,7 +397,7 @@ export default function MediaSection({ sku }) {
       {dragOver && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-surface/95 backdrop-blur-sm border-2 border-dashed border-primary rounded-xl pointer-events-none">
           <Upload className="w-10 h-10 text-primary" />
-          <p className="text-title-md text-primary font-semibold">Drop images to upload</p>
+          <p className="text-title-md text-primary font-semibold">Drop images or videos to upload</p>
           <p className="text-body-sm text-on-surface-variant">
             Tagged as {langMeta(addLanguage || null).label}
           </p>
@@ -443,7 +445,7 @@ export default function MediaSection({ sku }) {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/mp4,video/webm,video/quicktime"
               multiple
               hidden
               onChange={onFileInputChange}
@@ -462,7 +464,7 @@ export default function MediaSection({ sku }) {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={busy || !!uploadProgress}
-              title="Upload images from your computer"
+              title="Upload images or videos from your computer"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {uploadProgress ? (
@@ -470,7 +472,7 @@ export default function MediaSection({ sku }) {
               ) : (
                 <Upload className="w-4 h-4" />
               )}
-              {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : 'Upload images'}
+              {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : 'Upload media'}
             </button>
           </div>
         )}
@@ -812,6 +814,31 @@ function MediaCard({
             className="w-full h-full object-cover block"
             loading="lazy"
             draggable={false}
+          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+            <div className="w-11 h-11 rounded-full bg-black/60 flex items-center justify-center">
+              <Film className="w-5 h-5 text-white" />
+            </div>
+          </div>
+        </div>
+      ) : isVideo && isSupabaseStored(item.storage_path) ? (
+        // Uploaded video file: first frame as the tile, play badge on top.
+        <div
+          onClick={openInNewTab}
+          role="link"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') openInNewTab();
+          }}
+          className="relative w-full h-full cursor-pointer"
+          title={item.file_name}
+        >
+          <video
+            src={url}
+            preload="metadata"
+            muted
+            playsInline
+            className="w-full h-full object-cover block pointer-events-none"
           />
           <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
             <div className="w-11 h-11 rounded-full bg-black/60 flex items-center justify-center">

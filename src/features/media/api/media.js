@@ -1,16 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 
-/**
- * Infer media type from filename extension.
- */
-function inferMediaType(filename) {
-  const ext = filename.toLowerCase().split('.').pop();
-  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext)) return 'image';
-  if (['mp4', 'mov', 'webm', 'avi', 'mkv'].includes(ext)) return 'video';
-  return 'document';
-}
-
 function inferMimeType(filename) {
   const ext = filename.toLowerCase().split('.').pop();
   const map = {
@@ -123,18 +113,30 @@ function buildObjectPath(sku, fileName) {
   return `${sku}/${base}-${rand}.${ext}`;
 }
 
+// Storage rejects oversized uploads anyway, but failing early gives a clear
+// message instead of a generic 413 after minutes of uploading.
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+
 /**
- * Upload image files straight from the user's computer to Supabase Storage and
- * register them as product media.
+ * Upload image AND video files straight from the user's computer to Supabase
+ * Storage and register them as product media. Videos are never primary.
  *
  * @param {string}   sku
- * @param {File[]}   files     browser File objects (images)
+ * @param {File[]}   files     browser File objects (images / videos)
  * @param {string?}  language  'en' | 'en_fr' | 'en_es' | null=Universal
  * @param {function} onProgress optional (doneCount, total) callback
  */
 export async function uploadMediaFiles(sku, files, language = null, onProgress) {
-  const list = Array.from(files ?? []).filter((f) => f.type.startsWith('image/'));
+  const list = Array.from(files ?? []).filter(
+    (f) => f.type.startsWith('image/') || f.type.startsWith('video/'),
+  );
   if (list.length === 0) return [];
+  const oversized = list.find((f) => f.type.startsWith('video/') && f.size > MAX_VIDEO_BYTES);
+  if (oversized) {
+    throw new Error(
+      `"${oversized.name}" is ${Math.round(oversized.size / 1024 / 1024)} MB — videos over 200 MB should be hosted externally (add them with "Video URL").`,
+    );
+  }
 
   const { data: existingPrimary } = await supabase
     .from('product_media')
@@ -166,12 +168,13 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     if (upErr) throw new Error(`Upload failed for ${file.name}: ${upErr.message}`);
 
     const { data: pub } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
-    const shouldBePrimary = !primaryAssigned;
+    const isVideo = file.type.startsWith('video/');
+    const shouldBePrimary = !isVideo && !primaryAssigned;
     if (shouldBePrimary) primaryAssigned = true;
 
     rows.push({
       sku,
-      media_type: 'image',
+      media_type: isVideo ? 'video' : 'image',
       language,
       storage_path: pub.publicUrl,
       file_name: file.name,
@@ -187,13 +190,14 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
   const { data, error } = await supabase.from('product_media').insert(rows).select();
   if (error) throw error;
 
+  const videoCount = rows.filter((r) => r.media_type === 'video').length;
   logActivity({
     action: 'media',
     entityType: 'media',
     entityId: sku,
     target: 'supabase',
-    summary: `Uploaded ${rows.length} image(s) to ${sku} (Supabase)`,
-    metadata: { count: rows.length, language },
+    summary: `Uploaded ${rows.length} media file(s) to ${sku} (Supabase)${videoCount ? ` — ${videoCount} video(s)` : ''}`,
+    metadata: { count: rows.length, videos: videoCount, language },
   });
   return data;
 }
@@ -441,9 +445,10 @@ export async function removeMedia(media) {
 /**
  * Best-effort delete of the underlying Storage files for the given paths.
  * Skips external URLs. Groups by bucket. Never throws — a storage hiccup must
- * not block the row deletion the user already confirmed.
+ * not block the row deletion the user already confirmed. Also used by product
+ * deletion to clean up everything a product hosted.
  */
-async function deleteStorageObjects(storagePaths) {
+export async function deleteStorageObjects(storagePaths) {
   const byBucket = new Map();
   for (const p of storagePaths ?? []) {
     const obj = parseStorageObject(p);

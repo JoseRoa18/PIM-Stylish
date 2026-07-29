@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   ChevronDown,
@@ -21,7 +21,8 @@ import {
 import { ThinkingOrb } from 'thinking-orbs';
 import { useProduct } from '@/features/products/hooks/useProduct';
 import { useProductMedia } from '@/features/media/hooks/useProductMedia';
-import { updateProduct, getProduct } from '@/features/products/api/products';
+import { updateProduct, getProduct, deleteProducts } from '@/features/products/api/products';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useVariants } from '@/features/products/hooks/useVariants';
 import { VARIANT_DISTINGUISHING, prettifyKey, readField } from '@/features/products/lib/variantFields';
 import Dialog from '@/components/ui/Dialog';
@@ -352,10 +353,13 @@ export default function ProductDetail() {
   const activeTab = searchParams.get('tab') || 'overview';
 
   const { canEdit } = useAuth();
+  const confirm = useConfirm();
+  const navigate = useNavigate();
   const { product, loading, error, notFound, mergeProduct, refetch } = useProduct(sku);
   const { primary, media } = useProductMedia(sku);
 
   const [isEditing, setIsEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -407,6 +411,24 @@ export default function ProductDetail() {
       setSaveError(err.message ?? 'Failed to save changes');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    const ok = await confirm({
+      title: `Delete ${product.sku}?`,
+      message: `"${product.model_name || product.sku}" will be permanently deleted from the PIM, including all its images, videos and documents. Marketplace listings are not touched. This cannot be undone.`,
+      confirmLabel: 'Delete product',
+      destructive: true,
+    });
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await deleteProducts([product.sku]);
+      navigate('/catalog', { replace: true });
+    } catch (err) {
+      setSaveError(err.message ?? 'Delete failed');
+      setDeleting(false);
     }
   }
 
@@ -486,10 +508,18 @@ export default function ProductDetail() {
               </button>
             </>
           ) : canEdit ? (
-            <button type="button" onClick={startEditing}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
-              <Pencil className="w-4 h-4" /> Edit
-            </button>
+            <>
+              <button type="button" onClick={handleDelete} disabled={deleting}
+                title="Permanently delete this product"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-error hover:bg-error-container hover:text-on-error-container hover:border-error-container transition-colors disabled:opacity-60">
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Delete
+              </button>
+              <button type="button" onClick={startEditing}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
+                <Pencil className="w-4 h-4" /> Edit
+              </button>
+            </>
           ) : null}
         </div>
       </div>

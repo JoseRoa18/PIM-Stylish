@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { deleteStorageObjects } from '@/features/media/api/media';
 
 /**
  * List all products from the catalog with their primary image (if any).
@@ -235,4 +236,38 @@ export async function bulkUpdateProducts(skus, patch) {
     metadata: { count: skus.length, fields: changedKeys, skus },
   });
   return data ?? [];
+}
+
+/**
+ * Permanently delete products from the PIM. product_media rows cascade with
+ * the FK; their Supabase-hosted files (images, documents, videos) are removed
+ * from Storage afterwards, best-effort. Channel listings (Wix, Wayfair, …)
+ * are NOT touched — this only removes the PIM's copy.
+ */
+export async function deleteProducts(skus) {
+  if (!skus?.length) return { count: 0 };
+
+  // Collect the storage paths BEFORE deleting — the rows cascade away.
+  const mediaPaths = [];
+  for (let i = 0; i < skus.length; i += 40) {
+    const { data } = await supabase
+      .from('product_media')
+      .select('storage_path')
+      .in('sku', skus.slice(i, i + 40));
+    for (const m of data ?? []) mediaPaths.push(m.storage_path);
+  }
+
+  const { error } = await supabase.from('products').delete().in('sku', skus);
+  if (error) throw error;
+
+  await deleteStorageObjects(mediaPaths);
+
+  logActivity({
+    action: 'delete',
+    entityType: 'product',
+    entityId: skus.length === 1 ? skus[0] : `${skus.length} products`,
+    summary: `Deleted ${skus.length} product(s): ${skus.slice(0, 10).join(', ')}${skus.length > 10 ? '…' : ''}`,
+    metadata: { count: skus.length, skus, mediaFiles: mediaPaths.length },
+  });
+  return { count: skus.length };
 }

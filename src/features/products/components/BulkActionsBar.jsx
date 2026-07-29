@@ -8,9 +8,10 @@ import {
   Check,
   AlertCircle,
   Download,
+  Trash2,
 } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
-import { bulkUpdateProducts, getProduct } from '../api/products';
+import { bulkUpdateProducts, getProduct, deleteProducts } from '../api/products';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
@@ -60,6 +61,30 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       onChanged?.();
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Update failed' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Permanent removal — spells out exactly which SKUs go before asking.
+  async function handleDelete() {
+    const skus = [...selectedSkus];
+    const preview = skus.slice(0, 8).join(', ') + (skus.length > 8 ? ` … +${skus.length - 8} more` : '');
+    const ok = await confirm({
+      title: `Delete ${count} product${count === 1 ? '' : 's'}?`,
+      message: `${preview} will be permanently deleted from the PIM, including all their images, videos and documents. Marketplace listings are not touched. This cannot be undone.`,
+      confirmLabel: `Delete ${count}`,
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy('delete');
+    setResult(null);
+    try {
+      await deleteProducts(skus);
+      onChanged?.();
+      onClear?.();
+    } catch (err) {
+      setResult({ type: 'error', message: err.message ?? 'Delete failed' });
     } finally {
       setBusy(null);
     }
@@ -413,6 +438,17 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
             />
 
             <div className="w-px h-5 bg-outline-variant mx-1" />
+
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={!!busy}
+              title="Permanently delete the selected products"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-error hover:bg-error-container hover:text-on-error-container transition-colors disabled:opacity-50"
+            >
+              {busy === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              Delete
+            </button>
 
             <button
               type="button"
