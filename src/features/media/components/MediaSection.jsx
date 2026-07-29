@@ -84,8 +84,13 @@ export default function MediaSection({ sku }) {
     ? visualMedia.filter((m) => bucketOf(m) === activeFilter)
     : visualMedia;
 
+  // Videos render in their OWN block under the image grid — they never mix
+  // into the photo lineup (only images participate in drag-reorder).
+  const filteredImages = filteredMedia.filter((m) => m.media_type === 'image');
+  const filteredVideos = filteredMedia.filter((m) => m.media_type === 'video');
+
   // Lightbox slides — full-res images from the visible set, in display order.
-  const imageSlides = filteredMedia.filter((m) => m.media_type === 'image');
+  const imageSlides = filteredImages;
   const slides = imageSlides.map((m) => ({ src: getMediaUrl(m.storage_path) }));
 
   const reorderEnabled = true;
@@ -93,10 +98,12 @@ export default function MediaSection({ sku }) {
   // The reorder monitor reads the latest lists via refs so it can register once
   // yet always see fresh media (full list + the currently visible filtered list).
   const mediaRef = useRef(visualMedia);
-  const filteredRef = useRef(filteredMedia);
+  const filteredRef = useRef(filteredImages);
   useEffect(() => {
     mediaRef.current = visualMedia;
-    filteredRef.current = filteredMedia;
+    // Reorder math runs over the visible IMAGE list only — videos live in
+    // their own block and aren't draggable.
+    filteredRef.current = filteredImages;
   });
 
   const persistReorder = async (reordered) => {
@@ -592,34 +599,66 @@ export default function MediaSection({ sku }) {
             No media tagged as {langMeta(activeFilter === 'universal' ? null : activeFilter).label}.
           </p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {filteredMedia.map((item) => (
-              <MediaCard
-                key={item.id}
-                item={item}
-                canEdit={canEdit}
-                reorderEnabled={reorderEnabled}
-                selected={selectedIds.has(item.id)}
-                onToggleSelect={() => toggleSelect(item.id)}
-                onSetPrimary={() => handleSetPrimary(item.id)}
-                onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
-                onRemove={() => handleRemove(item)}
-                onEditAlt={() => setAltEdit(item)}
-                onView={() => setLightboxIndex(imageSlides.findIndex((m) => m.id === item.id))}
-              />
-            ))}
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {filteredImages.map((item) => (
+                <MediaCard
+                  key={item.id}
+                  item={item}
+                  canEdit={canEdit}
+                  reorderEnabled={reorderEnabled}
+                  selected={selectedIds.has(item.id)}
+                  onToggleSelect={() => toggleSelect(item.id)}
+                  onSetPrimary={() => handleSetPrimary(item.id)}
+                  onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
+                  onRemove={() => handleRemove(item)}
+                  onEditAlt={() => setAltEdit(item)}
+                  onView={() => setLightboxIndex(imageSlides.findIndex((m) => m.id === item.id))}
+                />
+              ))}
 
-            {canEdit && (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="aspect-square rounded-lg border-2 border-dashed border-outline-variant hover:border-primary hover:bg-surface-container-low transition-colors flex flex-col items-center justify-center text-on-surface-variant hover:text-primary"
-              >
-                <ImagePlus className="w-8 h-8 mb-1" strokeWidth={1.5} />
-                <span className="text-body-sm">Add more</span>
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="aspect-square rounded-lg border-2 border-dashed border-outline-variant hover:border-primary hover:bg-surface-container-low transition-colors flex flex-col items-center justify-center text-on-surface-variant hover:text-primary"
+                >
+                  <ImagePlus className="w-8 h-8 mb-1" strokeWidth={1.5} />
+                  <span className="text-body-sm">Add more</span>
+                </button>
+              )}
+            </div>
+
+            {/* Videos — their own block under the photo grid, never mixed in. */}
+            {filteredVideos.length > 0 && (
+              <div className="mt-6 pt-5 border-t border-outline-variant">
+                <h3 className="text-title-md text-on-surface mb-3 flex items-center gap-2">
+                  <Film className="w-4 h-4 text-on-surface-variant" />
+                  Videos
+                  <span className="text-body-sm text-on-surface-variant font-normal">
+                    {filteredVideos.length}
+                  </span>
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {filteredVideos.map((item) => (
+                    <MediaCard
+                      key={item.id}
+                      item={item}
+                      canEdit={canEdit}
+                      reorderEnabled={false}
+                      selected={selectedIds.has(item.id)}
+                      onToggleSelect={() => toggleSelect(item.id)}
+                      onSetPrimary={() => handleSetPrimary(item.id)}
+                      onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
+                      onRemove={() => handleRemove(item)}
+                      onEditAlt={() => setAltEdit(item)}
+                      onView={() => {}}
+                    />
+                  ))}
+                </div>
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
 
