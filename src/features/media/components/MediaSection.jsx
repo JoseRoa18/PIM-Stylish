@@ -60,6 +60,7 @@ export default function MediaSection({ sku }) {
   const [errorMessage, setErrorMessage] = useState(null);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [langFilter, setLangFilter] = useState(null); // null = auto (first available bucket)
+  const [videoLangFilter, setVideoLangFilter] = useState(null); // videos filter — independent of images
   const [addLanguage, setAddLanguage] = useState(''); // '' = Universal
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [linksModal, setLinksModal] = useState(null); // { title, items } | null
@@ -75,20 +76,33 @@ export default function MediaSection({ sku }) {
     (a, b) => (a.display_order ?? 0) - (b.display_order ?? 0),
   );
 
-  // Counts per language bucket — IMAGES only: videos are language-neutral and
-  // always visible, so they neither create chips nor react to the filter.
+  // Images and videos filter independently: each block has its own language
+  // chips and its own active bucket — filtering photos never hides videos
+  // and vice versa.
   const allImages = visualMedia.filter((m) => m.media_type === 'image');
+  const allVideos = visualMedia.filter((m) => m.media_type === 'video');
+  const BUCKET_ORDER = ['universal', 'en', 'fr', 'en_fr', 'en_es'];
+
   const counts = { universal: 0, en: 0, fr: 0, en_fr: 0, en_es: 0 };
   for (const m of allImages) counts[bucketOf(m)] = (counts[bucketOf(m)] ?? 0) + 1;
-  const presentBuckets = ['universal', 'en', 'fr', 'en_fr', 'en_es'].filter((b) => counts[b] > 0);
+  const presentBuckets = BUCKET_ORDER.filter((b) => counts[b] > 0);
   const activeFilter = presentBuckets.includes(langFilter) ? langFilter : (presentBuckets[0] ?? null);
+
+  const videoCounts = { universal: 0, en: 0, fr: 0, en_fr: 0, en_es: 0 };
+  for (const m of allVideos) videoCounts[bucketOf(m)] = (videoCounts[bucketOf(m)] ?? 0) + 1;
+  const presentVideoBuckets = BUCKET_ORDER.filter((b) => videoCounts[b] > 0);
+  const activeVideoFilter = presentVideoBuckets.includes(videoLangFilter)
+    ? videoLangFilter
+    : (presentVideoBuckets[0] ?? null);
 
   // Videos render in their OWN block under the image grid — they never mix
   // into the photo lineup (only images participate in drag-reorder).
   const filteredImages = activeFilter
     ? allImages.filter((m) => bucketOf(m) === activeFilter)
     : allImages;
-  const filteredVideos = visualMedia.filter((m) => m.media_type === 'video');
+  const filteredVideos = activeVideoFilter
+    ? allVideos.filter((m) => bucketOf(m) === activeVideoFilter)
+    : allVideos;
   const filteredMedia = [...filteredImages, ...filteredVideos];
 
   // Default video thumbnail: the product's SECOND image (normally the live
@@ -204,8 +218,8 @@ export default function MediaSection({ sku }) {
     handleFiles(e.dataTransfer.files);
   };
 
-  const handleAddVideo = async (url) => {
-    await addVideoByUrl(sku, url);
+  const handleAddVideo = async (url, language) => {
+    await addVideoByUrl(sku, url, language || null);
     reload();
   };
 
@@ -232,13 +246,9 @@ export default function MediaSection({ sku }) {
   };
 
   const handleBulkLanguage = async (language) => {
-    // Videos stay language-neutral — the bulk tag only touches images.
-    const ids = visualMedia
-      .filter((m) => selectedIds.has(m.id) && m.media_type === 'image')
-      .map((m) => m.id);
+    const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
-    const idSet = new Set(ids);
-    mutate((prev) => prev.map((m) => (idSet.has(m.id) ? { ...m, language } : m)));
+    mutate((prev) => prev.map((m) => (selectedIds.has(m.id) ? { ...m, language } : m)));
     try {
       await bulkSetMediaLanguage(ids, language);
     } catch (err) {
@@ -651,16 +661,38 @@ export default function MediaSection({ sku }) {
               )}
             </div>
 
-            {/* Videos — their own block under the photo grid, never mixed in. */}
-            {filteredVideos.length > 0 && (
+            {/* Videos — their own block under the photo grid, never mixed in,
+                with an independent language filter. */}
+            {allVideos.length > 0 && (
               <div className="mt-6 pt-5 border-t border-outline-variant">
-                <h3 className="text-title-md text-on-surface mb-3 flex items-center gap-2">
-                  <Film className="w-4 h-4 text-on-surface-variant" />
-                  Videos
-                  <span className="text-body-sm text-on-surface-variant font-normal">
-                    {filteredVideos.length}
-                  </span>
-                </h3>
+                <div className="mb-3 flex items-center gap-3 flex-wrap">
+                  <h3 className="text-title-md text-on-surface flex items-center gap-2">
+                    <Film className="w-4 h-4 text-on-surface-variant" />
+                    Videos
+                    <span className="text-body-sm text-on-surface-variant font-normal">
+                      {filteredVideos.length}
+                    </span>
+                  </h3>
+                  {presentVideoBuckets.length > 1 && presentVideoBuckets.map((b) => {
+                    const active = activeVideoFilter === b;
+                    return (
+                      <button
+                        key={b}
+                        type="button"
+                        onClick={() => setVideoLangFilter(b)}
+                        aria-pressed={active}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-body-sm border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                          active
+                            ? 'bg-primary-container text-on-primary-container border-primary-container'
+                            : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant hover:bg-surface-container-low'
+                        }`}
+                      >
+                        {BUCKET_LABELS[b]}
+                        <span className="text-label-md font-semibold tabular-nums">{videoCounts[b]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {filteredVideos.map((item) => (
                     <MediaCard
@@ -724,6 +756,7 @@ export default function MediaSection({ sku }) {
 
       {videoModalOpen && (
         <VideoUrlDialog
+          defaultLanguage={addLanguage}
           onClose={() => setVideoModalOpen(false)}
           onAdd={handleAddVideo}
         />
@@ -969,10 +1002,9 @@ function MediaCard({
         </div>
       )}
 
-      {/* Language tag — bottom-right, IMAGES only (videos are language-
-          neutral). Editors get a selector; viewers see a short badge only
-          when the image is language-specific. */}
-      {canEdit && isImage ? (
+      {/* Language tag — bottom-right. Editors get a selector; viewers see a
+          short badge only when the item is language-specific. */}
+      {canEdit ? (
         <select
           value={item.language ?? ''}
           onChange={(e) => onSetLanguage(e.target.value || null)}
@@ -988,7 +1020,7 @@ function MediaCard({
             </option>
           ))}
         </select>
-      ) : isImage && item.language ? (
+      ) : item.language ? (
         <span className="absolute bottom-2 right-2 z-10 px-1.5 py-0.5 rounded bg-black/60 text-white text-label-md font-semibold">
           {langMeta(item.language).short}
         </span>
@@ -1060,8 +1092,9 @@ function MediaCard({
   );
 }
 
-function VideoUrlDialog({ onClose, onAdd }) {
+function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
   const [url, setUrl] = useState('');
+  const [language, setLanguage] = useState(defaultLanguage ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -1076,7 +1109,7 @@ function VideoUrlDialog({ onClose, onAdd }) {
     setError(null);
     setBusy(true);
     try {
-      await onAdd(url);
+      await onAdd(url, language || null);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -1124,6 +1157,20 @@ function VideoUrlDialog({ onClose, onAdd }) {
             placeholder="https://youtube.com/watch?v=…"
             className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
           />
+          <label className="flex items-center gap-2 text-label-md text-on-surface-variant">
+            Language
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="px-2 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              {IMAGE_LANGUAGES.map((l) => (
+                <option key={l.id ?? 'universal'} value={l.id ?? ''}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {error && <p className="text-body-sm text-error">{error}</p>}
         </div>
 
