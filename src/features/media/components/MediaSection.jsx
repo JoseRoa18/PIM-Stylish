@@ -873,7 +873,10 @@ function MediaCard({
           title={item.file_name}
         >
           <video
-            src={url}
+            // The #t=1 media fragment makes the browser seek to second 1 and
+            // paint that frame as the tile — plain metadata preload can stay
+            // black until a seek happens.
+            src={`${url}#t=1`}
             preload="metadata"
             muted
             playsInline
