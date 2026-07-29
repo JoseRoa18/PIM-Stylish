@@ -55,7 +55,7 @@ function reorderByEdge(list, startIndex, indexOfTarget, edge) {
 
 export default function MediaSection({ sku }) {
   const confirm = useConfirm();
-  const { canEdit } = useAuth();
+  const { canEditMedia: canEdit } = useAuth();
   const { images, videos, loading, error, reload, mutate } = useProductMedia(sku);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);

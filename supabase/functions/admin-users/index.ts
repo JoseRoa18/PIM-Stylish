@@ -19,7 +19,7 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ROLES = ["admin", "editor", "viewer"] as const;
+const ROLES = ["admin", "editor", "viewer", "designer"] as const;
 type Role = (typeof ROLES)[number];
 
 function json(body: unknown, status = 200) {

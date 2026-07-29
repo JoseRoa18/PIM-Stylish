@@ -5,6 +5,7 @@
 export const ROLE_OPTIONS = [
   { value: 'admin', label: 'Admin', description: 'Manages users + full access' },
   { value: 'editor', label: 'Editor', description: 'Edit products, no user management' },
+  { value: 'designer', label: 'Designer', description: 'Edit images, videos & documents only' },
   { value: 'viewer', label: 'Viewer', description: 'Read-only' },
 ];
 
@@ -16,5 +17,6 @@ export const ROLE_LABELS = Object.fromEntries(
 export const ROLE_BADGE = {
   admin: 'bg-primary-container text-on-primary-container',
   editor: 'bg-secondary-container text-on-secondary-container',
+  designer: 'bg-tertiary-container text-on-tertiary-container',
   viewer: 'bg-surface-container-high text-on-surface-variant',
 };

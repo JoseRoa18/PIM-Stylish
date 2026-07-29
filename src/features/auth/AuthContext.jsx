@@ -95,6 +95,8 @@ export function AuthProvider({ children }) {
     role,
     isAdmin: role === 'admin',
     canEdit: role === 'admin' || role === 'editor',
+    // Designers can manage media (images/videos/documents) but nothing else.
+    canEditMedia: role === 'admin' || role === 'editor' || role === 'designer',
     loading: loading || profileLoading,
     signIn,
     signOut,

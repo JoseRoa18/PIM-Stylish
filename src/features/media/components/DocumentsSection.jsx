@@ -1,5 +1,5 @@
 import { useState, useRef, lazy, Suspense } from 'react';
-import { FileText, ExternalLink, Eye, Trash2, Plus, Link as LinkIcon, Check, Loader2, Upload } from 'lucide-react';
+import { FileText, ExternalLink, Eye, Trash2, Link as LinkIcon, Check, Loader2, Upload } from 'lucide-react';
 import { useProductMedia } from '../hooks/useProductMedia';
 import { uploadDocumentFile, removeMedia, getMediaUrl, isSupabaseStored } from '../api/media';
 import { formatFileSize } from '@/lib/format';
@@ -82,7 +82,7 @@ export default function DocumentsSection({ sku, category }) {
     (sum, t) => sum + (t.languages ? LANGUAGES.length : 1),
     0,
   );
-  const { canEdit } = useAuth();
+  const { canEditMedia: canEdit } = useAuth();
   const { documents, loading, error, reload } = useProductMedia(sku);
   const [busyKey, setBusyKey] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
