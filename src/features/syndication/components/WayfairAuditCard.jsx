@@ -6,10 +6,13 @@ import { supabase } from '@/lib/supabase';
 import { pushWayfairAttributes } from '../api/wayfairSync';
 
 // Catalog-wide spec-attributes audit: runs the per-SKU attribute diff
-// (dryRun — reads Wayfair, changes nothing) across every kitchen sink and
+// (dryRun — reads Wayfair, changes nothing) across the WHOLE catalog and
 // aggregates the discrepancies, so nobody has to check product by product.
-// The PIM is the source of truth: differences are fixed by pushing FROM the
-// product page, never by copying Wayfair values in.
+// The edge function resolves each item's Wayfair class at runtime, so every
+// category audits the attributes its class carries; SKUs with no Wayfair
+// listing simply land in the "not audited" list. The PIM is the source of
+// truth: differences are fixed by pushing FROM the PIM, never by copying
+// Wayfair values in.
 
 const TARGETS = {
   CAN_CA: { supplier: 'CAN', market: 'CA', label: 'Canada — English (CAN_Stylish)' },
@@ -58,11 +61,12 @@ export default function WayfairAuditCard() {
     setPush(null);
     const { supplier, market } = TARGETS[target];
 
-    // Spec attributes only exist for Wayfair's Kitchen Sinks class so far.
+    // Whole catalog — the edge function handles every Wayfair class; items
+    // Wayfair doesn't know land in the errors list, not in the results.
     const { data: products, error } = await supabase
       .from('products')
       .select('sku')
-      .eq('category', 'kitchen_sink')
+      .order('category')
       .order('sku');
     if (error) {
       setRun({ busy: false, error: error.message, rows: [], errors: [] });
@@ -152,9 +156,10 @@ export default function WayfairAuditCard() {
         <div>
           <h3 className="text-title-lg text-on-surface">Spec attributes audit</h3>
           <p className="text-body-sm text-on-surface-variant mt-1 max-w-lg">
-            Compares every kitchen sink's spec attributes against Wayfair and lists the
-            differences — read-only, nothing changes. Fix diffs by pushing from each
-            product's page (the PIM is the source of truth).
+            Compares every product's spec attributes against Wayfair — all categories,
+            each audited on its own Wayfair class — and lists the differences.
+            Read-only, nothing changes. Fix diffs by pushing from the PIM
+            (the PIM is the source of truth).
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -184,7 +189,7 @@ export default function WayfairAuditCard() {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
             >
               <ScanSearch className="w-4 h-4" />
-              Audit all kitchen sinks
+              Audit all products
             </button>
           )}
         </div>
@@ -265,7 +270,7 @@ export default function WayfairAuditCard() {
           {run.errors.length > 0 && (
             <details className="px-6 py-3 border-t border-outline-variant text-body-sm">
               <summary className="cursor-pointer text-on-surface-variant hover:text-on-surface">
-                {run.errors.length} SKU(s) could not be audited (no Wayfair listing, other classes…)
+                {run.errors.length} SKU(s) could not be audited (no Wayfair listing…)
               </summary>
               <ul className="mt-2 space-y-0.5 text-on-surface-variant">
                 {run.errors.map((e) => (
@@ -279,7 +284,7 @@ export default function WayfairAuditCard() {
 
           {!run.busy && rows.length > 0 && withDiffs.length === 0 && (
             <p className="px-6 py-4 text-body-sm text-on-surface animate-banner-in">
-              Every audited sink matches the PIM. Nothing to fix. ✨
+              Every audited product matches the PIM. Nothing to fix. ✨
             </p>
           )}
         </div>
