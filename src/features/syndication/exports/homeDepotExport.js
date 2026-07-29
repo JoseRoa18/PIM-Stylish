@@ -87,10 +87,22 @@ const hdCollection = (p, categories) => {
   return best;
 };
 
-// UPC-12 → GTIN-14 (left-pad with zeros).
+// GTIN = the UPC with "00" prefixed (HD correction, 2026-07-29).
 const gtin14 = (p) => {
   const upc = String(attr(p).upc ?? '').replace(/\D/g, '');
-  return upc ? upc.padStart(14, '0') : '';
+  return upc ? `00${upc}` : '';
+};
+
+// HD's GLN is one account-wide constant (HD correction, 2026-07-29).
+const HD_GLN = '0840994000057';
+
+// Hard caps from HD content review: cut at a word boundary within `max`.
+const clamp = (text, max) => {
+  const s = String(text ?? '').trim();
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max + 1);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : s.slice(0, max)).trim();
 };
 
 const colorFamily = (finish) => {
@@ -124,6 +136,7 @@ export const HOME_DEPOT_RULES = {
   'Product Name (120)': (p) => (attr(p).general_title_en || p.model_name || p.sku).slice(0, 120),
   'UPC': (p) => attr(p).upc || '',
   'globalTradeItemNumber (GTIN)': gtin14,
+  'GLN': () => HD_GLN,
   'MFG Model #': (p) => p.sku,
   'MFG Part #': (p) => p.sku,
   'MFG Brand Name': (p) => brandMap(p.brand),
@@ -141,20 +154,17 @@ export const HOME_DEPOT_RULES = {
   'Sell UOM (as sold to consumer)': () => 'EA-Each',
   'Made-To-Order': () => 'No',
   'Number of Boxes Shipped to Consumer': () => '1',
-  // 'Vendor Processing Days' + 'GLN': HD-account terms — business fills them.
+  // 'Vendor Processing Days': HD-account term — business fills it.
 
-  'Product Highlight 1': (p) => list(attr(p).bullet_points)[0] ?? '',
-  'Product Highlight 2': (p) => list(attr(p).bullet_points)[1] ?? '',
-  'Product Highlight 3': (p) => list(attr(p).bullet_points)[2] ?? '',
-  'Marketing Copy (1500)': (p) => stripHtml(p.description).slice(0, 1500),
+  // Highlights cap at 65 chars, marketing copy at 1000 (HD content review;
+  // the header still says 1500 but HD trims at 1000).
+  'Product Highlight 1': (p) => clamp(list(attr(p).bullet_points)[0] ?? '', 65),
+  'Product Highlight 2': (p) => clamp(list(attr(p).bullet_points)[1] ?? '', 65),
+  'Product Highlight 3': (p) => clamp(list(attr(p).bullet_points)[2] ?? '', 65),
+  'Marketing Copy (1500)': (p) => clamp(stripHtml(p.description), 1000),
 
-  'Product Image': (p) => (p._images ?? [])[0] ?? '',
-  'Alternate Image View 1': (p) => (p._images ?? [])[1] ?? '',
-  'Alternate Image View 2': (p) => (p._images ?? [])[2] ?? '',
-  'Alternate Image View 3': (p) => (p._images ?? [])[3] ?? '',
-  'Alternate Image View 4': (p) => (p._images ?? [])[4] ?? '',
-  'Alternate Image View 5': (p) => (p._images ?? [])[5] ?? '',
-  'Alternate Image View 6': (p) => (p._images ?? [])[6] ?? '',
+  // Images are NOT rule-mapped: they flow into CONSECUTIVE columns starting
+  // at "Product Image", ignoring the per-view headers — see the fill loop.
 
   // Hazmat / compliance — constants for our faucet catalog.
   'Does the item contain Mercury (ex: fluorescent light bulb, HVAC, switch, thermostat)?': () => 'N',
@@ -340,6 +350,15 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
   const imgBySku = await fetchImagesBySku(skus);
   const docBySku = await fetchDocsBySku(skus, HD_DOC_TYPES, Object.keys(HD_DOC_TYPES));
 
+  // Image URLs land in CONSECUTIVE columns starting at "Product Image",
+  // regardless of the per-view headers between it and the last image slot
+  // (Left/Right/Top…, Alternate 1-6, Catalog, Lifestyle) — HD wants the
+  // links side by side with no gaps. Bounded by the image-column span so a
+  // long gallery can never spill into Color Swatch and beyond.
+  const imgStart = labels.findIndex((l) => norm(l ?? '') === norm('Product Image'));
+  const imgEnd = labels.findIndex((l) => norm(l ?? '') === norm('Lifestyle Image'));
+  const imgSlots = imgStart === -1 ? 0 : (imgEnd > imgStart ? imgEnd - imgStart + 1 : 7);
+
   let rowsXml = '';
   products.forEach((p, pi) => {
     const rowNum = DATA_ROW + pi;
@@ -347,11 +366,17 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
     p._docs = docBySku[p.sku] || [];
     let cells = '';
     for (let ci = 0; ci < labels.length; ci++) {
+      // Consecutive image block wins over whatever rule the header may have.
+      if (imgStart !== -1 && ci >= imgStart && ci < imgStart + imgSlots) {
+        const img = p._images[ci - imgStart];
+        if (img) cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, img);
+        continue;
+      }
       const label = labels[ci];
       if (!label) continue;
       const rule = HOME_DEPOT_RULES[String(label).trim()];
       if (!rule) continue;
-      let v = '';
+      let v;
       try { v = rule(p, ctx); } catch { v = ''; }
       if (v === '' || v == null) continue;
       v = snapTo(v, validByGuid[String(guids[ci] ?? '')]);
