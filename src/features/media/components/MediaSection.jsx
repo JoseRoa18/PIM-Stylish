@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2 } from 'lucide-react';
+import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2, Image as ImageIcon } from 'lucide-react';
 import { draggable, dropTargetForElements, monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
@@ -10,6 +10,7 @@ import {
   setPrimaryMedia,
   setMediaLanguage,
   setMediaAltText,
+  setVideoPoster,
   bulkSetMediaLanguage,
   removeMedia,
   removeMediaBatch,
@@ -31,8 +32,9 @@ import 'yet-another-react-lightbox/styles.css';
 const IMAGE_LANGUAGES = [
   { id: null, label: 'Universal', short: 'ALL' },
   { id: 'en', label: 'English', short: 'EN' },
-  { id: 'en_fr', label: 'English-French', short: 'FR' },
-  { id: 'en_es', label: 'English-Spanish', short: 'ES' },
+  { id: 'fr', label: 'French', short: 'FR' },
+  { id: 'en_fr', label: 'English-French', short: 'EN-FR' },
+  { id: 'en_es', label: 'English-Spanish', short: 'EN-ES' },
 ];
 const langMeta = (id) => IMAGE_LANGUAGES.find((l) => l.id === (id ?? null)) ?? IMAGE_LANGUAGES[0];
 const bucketOf = (m) => m.language ?? 'universal';
@@ -65,6 +67,7 @@ export default function MediaSection({ sku }) {
   const [dragOver, setDragOver] = useState(false);
   const [videoModalOpen, setVideoModalOpen] = useState(false);
   const [altEdit, setAltEdit] = useState(null); // media item being edited | null
+  const [thumbEdit, setThumbEdit] = useState(null); // video whose thumbnail is being picked | null
   const fileInputRef = useRef(null);
 
   // Visual media only, sorted by display_order
@@ -75,9 +78,9 @@ export default function MediaSection({ sku }) {
   // Counts per language bucket — only buckets that actually have images become
   // filter chips. We always show ONE language at a time (no "All") so the
   // EN / EN-FR duplicates of the same shot don't appear side by side.
-  const counts = { universal: 0, en: 0, en_fr: 0, en_es: 0 };
+  const counts = { universal: 0, en: 0, fr: 0, en_fr: 0, en_es: 0 };
   for (const m of visualMedia) counts[bucketOf(m)] = (counts[bucketOf(m)] ?? 0) + 1;
-  const presentBuckets = ['universal', 'en', 'en_fr', 'en_es'].filter((b) => counts[b] > 0);
+  const presentBuckets = ['universal', 'en', 'fr', 'en_fr', 'en_es'].filter((b) => counts[b] > 0);
   const activeFilter = presentBuckets.includes(langFilter) ? langFilter : (presentBuckets[0] ?? null);
 
   const filteredMedia = activeFilter
@@ -88,6 +91,11 @@ export default function MediaSection({ sku }) {
   // into the photo lineup (only images participate in drag-reorder).
   const filteredImages = filteredMedia.filter((m) => m.media_type === 'image');
   const filteredVideos = filteredMedia.filter((m) => m.media_type === 'video');
+
+  // Default video thumbnail: the product's SECOND image (normally the live
+  // shot). A per-video custom pick (thumbnail_path) wins over it.
+  const orderedImages = [...images].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
+  const defaultPoster = orderedImages.length > 1 ? getMediaUrl(orderedImages[1].storage_path) : null;
 
   // Lightbox slides — full-res images from the visible set, in display order.
   const imageSlides = filteredImages;
@@ -210,6 +218,16 @@ export default function MediaSection({ sku }) {
       await setMediaAltText(mediaId, altText);
     } catch (err) {
       setErrorMessage(`Failed to save alt text: ${err.message}`);
+      reload();
+    }
+  };
+
+  const handleSetPoster = async (mediaId, thumbnailPath) => {
+    mutate((prev) => prev.map((m) => (m.id === mediaId ? { ...m, thumbnail_path: thumbnailPath } : m)));
+    try {
+      await setVideoPoster(mediaId, thumbnailPath);
+    } catch (err) {
+      setErrorMessage(`Failed to set thumbnail: ${err.message}`);
       reload();
     }
   };
@@ -358,6 +376,7 @@ export default function MediaSection({ sku }) {
   const BUCKET_LABELS = {
     universal: 'Universal',
     en: 'English',
+    fr: 'French',
     en_fr: 'English-French',
     en_es: 'English-Spanish',
   };
@@ -646,12 +665,14 @@ export default function MediaSection({ sku }) {
                       item={item}
                       canEdit={canEdit}
                       reorderEnabled={false}
+                      defaultPoster={defaultPoster}
                       selected={selectedIds.has(item.id)}
                       onToggleSelect={() => toggleSelect(item.id)}
                       onSetPrimary={() => handleSetPrimary(item.id)}
                       onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
                       onRemove={() => handleRemove(item)}
                       onEditAlt={() => setAltEdit(item)}
+                      onSetThumbnail={() => setThumbEdit(item)}
                       onView={() => {}}
                     />
                   ))}
@@ -713,6 +734,16 @@ export default function MediaSection({ sku }) {
           onSave={handleSaveAlt}
         />
       )}
+
+      {thumbEdit && (
+        <ThumbnailPickerDialog
+          item={thumbEdit}
+          images={orderedImages}
+          defaultPoster={defaultPoster}
+          onClose={() => setThumbEdit(null)}
+          onSave={handleSetPoster}
+        />
+      )}
     </section>
   );
 }
@@ -748,12 +779,14 @@ function MediaCard({
   item,
   canEdit,
   reorderEnabled,
+  defaultPoster = null,
   selected,
   onToggleSelect,
   onSetPrimary,
   onSetLanguage,
   onRemove,
   onEditAlt,
+  onSetThumbnail,
   onView,
 }) {
   const ref = useRef(null);
@@ -766,7 +799,12 @@ function MediaCard({
   const isVideo = item.media_type === 'video';
   const url = getMediaUrl(item.storage_path);
   const thumbUrl = getThumbnailUrl(item.storage_path, 400);
-  const videoThumb = isVideo ? getVideoThumbnail(item.storage_path) : null;
+  // Poster precedence: custom pick → product's 2nd image (default) →
+  // platform thumbnail (YouTube) → the video's own frame at second 1.
+  const posterUrl = isVideo
+    ? item.thumbnail_path || defaultPoster || getVideoThumbnail(item.storage_path)
+    : null;
+  const videoThumb = posterUrl ? getThumbnailUrl(posterUrl, 400) : null;
 
   // Register the card as both a draggable and a drop target (Pragmatic DnD).
   useEffect(() => {
@@ -981,6 +1019,16 @@ function MediaCard({
               title={item.alt_text ? `Alt text: ${item.alt_text}` : 'Add alt text'}
             >
               <Pencil className="w-4 h-4" />
+            </button>
+          )}
+          {canEdit && isVideo && onSetThumbnail && (
+            <button
+              type="button"
+              onClick={onSetThumbnail}
+              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
+              title={item.thumbnail_path ? 'Change thumbnail' : 'Set thumbnail (default: 2nd product image)'}
+            >
+              <ImageIcon className="w-4 h-4" />
             </button>
           )}
           {canEdit && isImage && !item.is_primary && (
@@ -1204,6 +1252,105 @@ function AltTextDialog({ item, onClose, onSave }) {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// Pick which product image acts as a video's thumbnail. "Default" (null)
+// = the product's 2nd image, falling back to the video's own frame.
+function ThumbnailPickerDialog({ item, images, defaultPoster, onClose, onSave }) {
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const pick = async (path) => {
+    setBusy(true);
+    await onSave(item.id, path);
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Choose video thumbnail"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in"
+      >
+        <div className="px-5 py-4 flex items-center justify-between border-b border-outline-variant">
+          <div className="min-w-0">
+            <h3 className="text-title-md text-on-surface flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-primary" />
+              Video thumbnail
+            </h3>
+            <p className="text-body-sm text-on-surface-variant mt-0.5 truncate">{item.file_name}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4" data-lenis-prevent>
+          {images.length === 0 ? (
+            <p className="text-body-md text-on-surface-variant text-center py-8">
+              This product has no images yet — the video's own frame is used.
+            </p>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {images.map((img) => {
+                const path = getMediaUrl(img.storage_path);
+                const active = item.thumbnail_path === path;
+                const isDefault = !item.thumbnail_path && path === defaultPoster;
+                return (
+                  <button
+                    key={img.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => pick(path)}
+                    className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-colors ${
+                      active ? 'border-primary ring-2 ring-primary/40' : 'border-transparent hover:border-outline-variant'
+                    }`}
+                    title={img.file_name}
+                  >
+                    <img src={getThumbnailUrl(img.storage_path, 200)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    {(active || isDefault) && (
+                      <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-primary text-on-primary text-label-sm font-semibold">
+                        {active ? 'Selected' : 'Default'}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 flex items-center justify-between gap-2 border-t border-outline-variant bg-surface-container-lowest">
+          <span className="text-label-md text-on-surface-variant">
+            Default is the product's 2nd image (the live shot).
+          </span>
+          <button
+            type="button"
+            disabled={busy || !item.thumbnail_path}
+            onClick={() => pick(null)}
+            className="px-4 py-2 rounded-full text-label-md text-on-surface border border-outline-variant hover:bg-surface-container-low transition-colors disabled:opacity-50"
+          >
+            Use default
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

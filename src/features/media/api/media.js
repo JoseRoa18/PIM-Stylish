@@ -255,6 +255,18 @@ export async function addVideoByUrl(sku, url, language = null) {
   return data;
 }
 
+/**
+ * Set (or clear with null) the custom thumbnail of a video. NULL falls back
+ * to the default: the product's second image, else the video's own frame.
+ */
+export async function setVideoPoster(mediaId, thumbnailPath) {
+  const { error } = await supabase
+    .from('product_media')
+    .update({ thumbnail_path: thumbnailPath || null })
+    .eq('id', mediaId);
+  if (error) throw error;
+}
+
 /** Update the alt text (accessibility / SEO / syndication) of one media item. */
 export async function setMediaAltText(mediaId, altText) {
   const value = (altText ?? '').trim() || null;

@@ -20,6 +20,7 @@ const isPdfDoc = (doc) => {
 // (spec sheets, installation manuals). Order matters — English first.
 const LANGUAGES = [
   { id: 'en', label: 'English' },
+  { id: 'fr', label: 'French' },
   { id: 'en_fr', label: 'English-French' },
   { id: 'en_es', label: 'English-Spanish' },
 ];
