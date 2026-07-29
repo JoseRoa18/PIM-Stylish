@@ -286,7 +286,10 @@ function ActivityRow({ event }) {
           )}
         </div>
 
-        <p className="text-body-md text-on-surface mt-1">{event.summary || '—'}</p>
+        <p className="text-body-md text-on-surface mt-1">
+          {/* Strip storage-vendor mentions written by stale clients still running old code. */}
+          {(event.summary || '—').replace(/\s*\(supabase\)/gi, '')}
+        </p>
 
         <div className="flex items-center gap-2 text-label-sm text-on-surface-variant mt-1 flex-wrap">
           <span className="font-medium text-on-surface-variant">{who}</span>
