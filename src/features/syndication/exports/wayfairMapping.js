@@ -155,8 +155,11 @@ export const WAYFAIR_RULES = {
   'Replacement Lead Time': () => '24',
   'Carton Weight 1': (p) => num(p.shipping_weight_lb),
   'Carton Height 1': (p) => num(attr(p).shipping_dimensions_in?.height),
-  'Carton Width 1': (p) => num(attr(p).shipping_dimensions_in?.width),
-  'Carton Depth 1': (p) => num(attr(p).shipping_dimensions_in?.length),
+  // Wayfair review (kitchen sinks, kitchen faucets AND bathroom faucets all
+  // flagged the same inversion): their Width is the box's LONG side (PIM
+  // length) and Depth the short one (PIM width).
+  'Carton Width 1': (p) => num(attr(p).shipping_dimensions_in?.length),
+  'Carton Depth 1': (p) => num(attr(p).shipping_dimensions_in?.width),
   // Attributes
   'Product Type': (p) => (attr(p).number_of_handles == 2 ? 'Double Handle Kitchen Facuet' : 'Single Handle Kitchen Faucet'),
   Material: (p) => {
@@ -216,7 +219,16 @@ export const WAYFAIR_RULES = {
   // Valid values are certification levels (1A / 3A or 6A / Does Not Apply) —
   // the PIM only stores yes/no, so anything short of a level is Does Not Apply.
   'ISTA Certified': () => 'Does Not Apply',
-  'Sustainability & Social Responsibility Certifications (North America Only)': () => '',
+  // Compliance/certification questions the business answered No across the
+  // board (Wayfair review 2026-07-30). Every value verified against the
+  // templates' Valid Values lists.
+  'Sustainability & Social Responsibility Certifications (North America Only)': () => 'No',
+  'Laminar Flow': () => 'No',
+  'ASME A112.19.1/CSA B45.2 - 2018 Compliant': () => 'No',
+  'ASME A112.19.3 Compliant': () => 'No',
+  'ASSE 1001 Certified': () => 'No',
+  'UL 1951 Listed': () => 'No',
+  'CSA B45.5/IAPMO Z124 Compliant - Plastic Plumbing Fixtures': () => 'No',
   'Chemical 1': () => '', // Prop 65 — no listed chemicals in our assortment
   'Toxicity 1': () => '',
   'Wayfair Compliance Verified Program (including Baby Safety Alliance fka JPMA) for this product category': () => 'No',
@@ -375,10 +387,6 @@ export const WAYFAIR_CATEGORY_RULES = {
     'Commercial Warranty': (p) => yesNo(attr(p).commercial_warranty) || 'No',
   },
   kitchen_sink: {
-    // Wayfair review (2026-07-30): the carton axes were inverted — their
-    // Width is our box's long side (PIM length) and Depth the short one.
-    'Carton Width 1': (p) => num(attr(p).shipping_dimensions_in?.length),
-    'Carton Depth 1': (p) => num(attr(p).shipping_dimensions_in?.width),
     'Product Type': (p) => (/workstation/i.test(attr(p).general_title_en ?? '') ? 'Kitchen Sink Workstation' : 'Standard Kitchen Sink'),
     'Mounting / Installation': (p) => {
       const t = p.product_type ?? '';
@@ -417,6 +425,13 @@ export const WAYFAIR_CATEGORY_RULES = {
     'Compatible Drain Assembly Part Number': (p) => attr(p).strainer_model ?? '',
     'ASME A112.19.4 Compliant': () => 'No',
     'SCC Compliant': (p) => (/yes/i.test(String(attr(p).scc_compliant ?? '')) ? 'Yes' : 'No'),
+  },
+
+  bathroom_faucet: {
+    // 655's Product Type taxonomy (Mono Basin Mixer / Pillar Tap / Bridge /
+    // Swivel): our single-handle faucets are mono basin mixers; nothing on
+    // the list fits 2-handle widespread sets, so those stay blank.
+    'Product Type': (p) => (Number(attr(p).number_of_handles ?? 1) === 1 ? 'Mono Basin Mixer' : ''),
   },
 
   bathroom_sink: {
