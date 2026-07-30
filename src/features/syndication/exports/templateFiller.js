@@ -233,6 +233,27 @@ export async function fetchImagesBySku(skus) {
   return bySku;
 }
 
+// Video URLs per SKU, in display order. Only direct video files (uploaded to
+// Storage or direct links) — page links (YouTube/Vimeo) aren't ingestible as
+// marketplace video files.
+const VIDEO_FILE_RE = /\.(mp4|webm|mov|m4v)(\?|#|$)|\/storage\/v1\/object\/public\//i;
+export async function fetchVideosBySku(skus) {
+  const bySku = {};
+  for (let i = 0; i < skus.length; i += 40) {
+    const { data } = await supabase
+      .from('product_media')
+      .select('sku, storage_path, display_order')
+      .in('sku', skus.slice(i, i + 40))
+      .eq('media_type', 'video');
+    for (const m of data ?? []) {
+      if (!VIDEO_FILE_RE.test(m.storage_path ?? '')) continue;
+      (bySku[m.sku] = bySku[m.sku] || []).push(m);
+    }
+  }
+  for (const k in bySku) bySku[k].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
+  return bySku;
+}
+
 // Documents per SKU. `typeMap` translates PIM document_type → marketplace label;
 // `priority` orders them (first match wins the low slots).
 export async function fetchDocsBySku(skus, typeMap, priority = []) {

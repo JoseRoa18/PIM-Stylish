@@ -90,13 +90,13 @@ const deckPlate = (v) => {
   if (/does\s*not?\s*app/i.test(v)) return 'Does Not Apply';
   return String(v).replace(/[,:]/g, ';').replace(/\s*;\s*/g, '; ').trim();
 };
-// ADA field stores "No" / "ADA Compliant" (and rarely true/false).
-const adaYesNo = (v) => {
-  if (v == null || v === '') return '';
-  const s = String(v).toLowerCase();
-  if (s.includes('not') || s === 'no' || s === 'false') return 'No';
-  if (s.includes('yes') || s.includes('compliant') || s === 'true') return 'Yes';
-  return 'No';
+// Wayfair's shape list uses noun forms ("Rectangle"), the PIM adjectives.
+const SHAPE_ALIAS = {
+  rectangular: 'Rectangle',
+  circular: 'Circle',
+  round: 'Round',
+  square: 'Square',
+  oval: 'Oval',
 };
 // spray_type (Pull Down / Pull Out / Standard / Pot Filler …) → Construction Features.
 const sprayToConstruction = (v) => {
@@ -130,7 +130,9 @@ export const WAYFAIR_RULES = {
   'Universal Product Code': (p) => attr(p).upc || '',
   'Collection Name': () => '', // faucets have no collection name
   'Manufacturer Product URL': (p) => (/azuni/i.test(p.brand) ? 'https://azuni.ca' : 'https://stylishkb.com'),
-  Designer: (p) => brandMap(p.brand), // Designer = the brand
+  // Designer's Valid Values list is 311 named designers — STYLISH/Azuni are
+  // not on it; "Does Not Apply" is the listed option for unbranded design.
+  Designer: () => 'Does Not Apply',
   'Amazon Seller SKU': () => '',
   // Pricing
   'Base Cost': () => '', // wholesale — deferred
@@ -164,9 +166,15 @@ export const WAYFAIR_RULES = {
       .map((x) => (/composite granite|granite composite/i.test(x) ? 'Granite' : x))
       .join('; ');
   },
+  // The PIM has no durability attribute — derive factual traits from the
+  // material (every value verified against the Durability Valid Values list).
   Durability: (p) => {
-    const d = attr(p).durability_tags || [];
-    return (Array.isArray(d) ? d : [d]).filter(Boolean).join('; ');
+    const m = String(attr(p).material ?? p.material ?? '');
+    if (/stainless/i.test(m)) return 'Rust Resistant; Corrosion Resistant';
+    if (/granite|composite|quartz/i.test(m)) return 'Scratch Resistant; Heat Resistant';
+    if (/porcelain|fireclay|ceramic|vitreous/i.test(m)) return 'Scratch Resistant; Stain Resistant';
+    if (/brass|zinc|metal/i.test(m)) return 'Corrosion Resistant';
+    return 'No Durability Features';
   },
   'Spout Type': (p) => alias(SPOUT_ALIAS, attr(p).spout_type),
   'Construction Features': (p) => sprayToConstruction(attr(p).spray_type),
@@ -201,10 +209,13 @@ export const WAYFAIR_RULES = {
   'Warranty Length': (p) => attr(p).warranty_length || '',
   // Compliance
   'Lead Free': (p) => yesNo(attr(p).lead_free),
-  'ADA Compliant': (p) => adaYesNo(attr(p).ada_compliant),
+  // Business rule (2026-07-30): always No, every product, every template.
+  'ADA Compliant': () => 'No',
   'Commercial Warranty': () => 'No',
   'Commercial Warranty Length': (p) => attr(p).commercial_warranty_length || 'Does Not Apply',
-  'ISTA Certified': (p) => yesNo(attr(p).ista_certified) || 'No',
+  // Valid values are certification levels (1A / 3A or 6A / Does Not Apply) —
+  // the PIM only stores yes/no, so anything short of a level is Does Not Apply.
+  'ISTA Certified': () => 'Does Not Apply',
   'Sustainability & Social Responsibility Certifications (North America Only)': () => '',
   'Chemical 1': () => '', // Prop 65 — no listed chemicals in our assortment
   'Toxicity 1': () => '',
@@ -221,9 +232,10 @@ export const WAYFAIR_RULES = {
   'Country of Origin - Additional Details': () => 'Does Not Apply',
 };
 
-// Numbered image / bullet columns are matched by pattern.
+// Numbered image / bullet / video columns are matched by pattern.
 export const IMAGE_COL_RE = /^Image File Name or URL (\d+)$/;
 export const BULLET_COL_RE = /^Feature Bullet (\d+)$/;
+export const VIDEO_COL_RE = /^Video File Name or URL (\d+)$/;
 
 // Variant columns. Variant Type / Group Reference ID are single; Grouping and
 // Attribute-Name-On-Site are numbered (1..3). Values come from a per-product
@@ -363,6 +375,10 @@ export const WAYFAIR_CATEGORY_RULES = {
     'Commercial Warranty': (p) => yesNo(attr(p).commercial_warranty) || 'No',
   },
   kitchen_sink: {
+    // Wayfair review (2026-07-30): the carton axes were inverted — their
+    // Width is our box's long side (PIM length) and Depth the short one.
+    'Carton Width 1': (p) => num(attr(p).shipping_dimensions_in?.length),
+    'Carton Depth 1': (p) => num(attr(p).shipping_dimensions_in?.width),
     'Product Type': (p) => (/workstation/i.test(attr(p).general_title_en ?? '') ? 'Kitchen Sink Workstation' : 'Standard Kitchen Sink'),
     'Mounting / Installation': (p) => {
       const t = p.product_type ?? '';
@@ -373,7 +389,7 @@ export const WAYFAIR_CATEGORY_RULES = {
       const list = attr(p).installation_type ?? [];
       return list.length > 1 ? 'Dual Mount' : list[0] ?? '';
     },
-    'Overall Shape': (p) => attr(p).sink_shape ?? '',
+    'Overall Shape': (p) => alias(SHAPE_ALIAS, attr(p).sink_shape),
     'Pieces Included': (p) => sinkPieces(p),
     'Construction Features': (p) => (isFarmhouse(p) ? 'Apron' : 'No Construction Features'),
     'Number of Basins': (p) => (attr(p).number_of_bowls != null ? String(attr(p).number_of_bowls) : ''),
@@ -420,7 +436,7 @@ export const WAYFAIR_CATEGORY_RULES = {
       if ((attr(p).number_of_faucet_holes ?? 0) > 0) parts.push('Faucet Holes');
       return parts.join('; ') || 'No Construction Features';
     },
-    'Overall Shape': (p) => attr(p).sink_shape ?? '',
+    'Overall Shape': (p) => alias(SHAPE_ALIAS, attr(p).sink_shape),
     'Mounting / Installation': (p) => attr(p).mounting_type ?? '',
     'Dual Mount Installation Type': () => 'Does Not Apply',
     'Drain Placement': (p) => {

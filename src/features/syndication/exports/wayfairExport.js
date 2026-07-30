@@ -4,6 +4,7 @@ import {
   WAYFAIR_CATEGORY_RULES,
   IMAGE_COL_RE,
   BULLET_COL_RE,
+  VIDEO_COL_RE,
   VARIANT_GROUPING_RE,
   VARIANT_ATTR_NAME_RE,
   WAYFAIR_VARIANT_AXES,
@@ -26,6 +27,7 @@ import {
   downloadZip,
   templateExt,
   fetchImagesBySku,
+  fetchVideosBySku,
   fetchDocsBySku,
 } from './templateFiller';
 
@@ -171,16 +173,34 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
   const groups = await expandFamilies(products);
   const allSkus = [...groups.values()].flat().map((p) => p.sku);
   const imgBySku = await fetchImagesBySku(allSkus);
+  const vidBySku = await fetchVideosBySku(allSkus);
   const docBySku = await fetchDocsBySku(allSkus, DOC_TYPE_MAP, DOC_TYPE_PRIORITY);
   const { ordered, warnings } = assignVariants(groups, imgBySku);
+
+  // How many numbered media slots the main sheet has — anything beyond them
+  // overflows into the "Additional …" sheets.
+  const slotCount = (re) => names.reduce((mx, nm) => {
+    const m = nm && re.exec(nm);
+    return m ? Math.max(mx, Number(m[1])) : mx;
+  }, 0);
+  const imgSlots = slotCount(IMAGE_COL_RE);
+  const vidSlots = slotCount(VIDEO_COL_RE);
+  const docSlots = slotCount(DOC_FILE_RE);
 
   // Data rows start at Excel row 8 (after header rows 1–6 + the example Default Row 7).
   const START = 8;
   let rowsXml = '';
+  const extraImages = []; // [sku, url]
+  const extraVideos = []; // [sku, url]
+  const extraDocs = [];   // [sku, url, type]
   ordered.forEach((p, pi) => {
     const rowNum = START + pi;
     const images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
+    const videos = (vidBySku[p.sku] || []).map((m) => m.storage_path);
     const docs = docBySku[p.sku] || [];
+    for (const u of images.slice(imgSlots)) extraImages.push([p.sku, u]);
+    for (const u of videos.slice(vidSlots)) extraVideos.push([p.sku, u]);
+    for (const d of docs.slice(docSlots)) extraDocs.push([p.sku, d.url, d.type]);
     const bullets = p.attributes?.bullet_points || [];
     const groupings = p._variant?.groupings || [];
     let cells = '';
@@ -190,12 +210,14 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
       let v;
       const img = IMAGE_COL_RE.exec(nm);
       const bul = BULLET_COL_RE.exec(nm);
+      const vid = VIDEO_COL_RE.exec(nm);
       const vg = VARIANT_GROUPING_RE.exec(nm);
       const van = VARIANT_ATTR_NAME_RE.exec(nm);
       const docF = DOC_FILE_RE.exec(nm);
       const docT = DOC_TYPE_RE.exec(nm);
       if (img) v = images[Number(img[1]) - 1] || '';
       else if (bul) v = bullets[Number(bul[1]) - 1] || '';
+      else if (vid) v = videos[Number(vid[1]) - 1] || '';
       else if (docF) v = docs[Number(docF[1]) - 1]?.url || '';
       else if (docT) v = docs[Number(docT[1]) - 1]?.type || '';
       else if (nm === 'Variant Type') v = p._variant?.type || '';
@@ -215,6 +237,27 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
     rowsXml += `<row r="${rowNum}" spans="1:${ncols}">${cells}</row>`;
   });
   zip.file(mainPath, injectRows(sheetXml, rowsXml, START - 1 + ordered.length));
+
+  // Overflow media lands on the template's "Additional …" sheets (same layout:
+  // headers rows 1-6, data from row 8; row 7 holds a template helper formula).
+  const fillAdditional = async (sheetName, rows) => {
+    if (!rows.length) return;
+    const path = await sheetPathByName(zip, sheetName);
+    if (!path) return;
+    const xml = await zip.file(path).async('string');
+    let rx = '';
+    rows.forEach((vals, ri) => {
+      let cells = '';
+      vals.forEach((v, ci) => {
+        if (v) cells += buildCell(`${indexToCol(ci + 1)}${START + ri}`, v);
+      });
+      rx += `<row r="${START + ri}" spans="1:${vals.length}">${cells}</row>`;
+    });
+    zip.file(path, injectRows(xml, rx, START - 1 + rows.length));
+  };
+  await fillAdditional('Additional Images', extraImages);
+  await fillAdditional('Additional Videos', extraVideos);
+  await fillAdditional('Additional Documents', extraDocs);
 
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
 
