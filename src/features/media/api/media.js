@@ -132,6 +132,66 @@ function buildObjectPath(sku, fileName) {
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 
 /**
+ * Videos and documents are FAMILY-SHARED: adding one to any variant registers
+ * it on every product of the same variant family (one file in Storage, one
+ * product_media row per SKU, all pointing at the same URL). Images stay
+ * per-variant. These helpers resolve the family and keep row bookkeeping.
+ */
+function isFamilyShared(mediaType) {
+  return mediaType === 'video' || mediaType === 'document';
+}
+
+/** All SKUs of the product's variant family (always includes `sku` itself). */
+async function getFamilySkus(sku) {
+  const { data: prod } = await supabase
+    .from('products')
+    .select('family_number')
+    .eq('sku', sku)
+    .maybeSingle();
+  if (prod?.family_number == null) return [sku];
+  const { data: fam } = await supabase
+    .from('products')
+    .select('sku')
+    .eq('family_number', prod.family_number);
+  const skus = (fam ?? []).map((p) => p.sku);
+  return skus.includes(sku) ? skus : [sku, ...skus];
+}
+
+/** Next free display_order for each SKU, resolved in a single query. */
+async function nextDisplayOrders(skus) {
+  const next = new Map(skus.map((s) => [s, 0]));
+  const { data } = await supabase
+    .from('product_media')
+    .select('sku, display_order')
+    .in('sku', skus);
+  for (const r of data ?? []) {
+    if (r.display_order != null && r.display_order + 1 > next.get(r.sku)) {
+      next.set(r.sku, r.display_order + 1);
+    }
+  }
+  return next;
+}
+
+/**
+ * Delete Storage files ONLY when no product_media row references them anymore.
+ * Family-shared files are referenced by several rows pointing at the same URL —
+ * deleting the file while a sibling still links it would break that sibling.
+ */
+export async function deleteStorageObjectsIfUnreferenced(storagePaths) {
+  const stored = [...new Set((storagePaths ?? []).filter(isSupabaseStored))];
+  if (stored.length === 0) return;
+  const stillReferenced = new Set();
+  for (let i = 0; i < stored.length; i += 20) {
+    const { data } = await supabase
+      .from('product_media')
+      .select('storage_path')
+      .in('storage_path', stored.slice(i, i + 20));
+    for (const r of data ?? []) stillReferenced.add(r.storage_path);
+  }
+  await deleteStorageObjects(stored.filter((p) => !stillReferenced.has(p)));
+}
+
+/**
  * Upload image AND video files straight from the user's computer to Supabase
  * Storage and register them as product media. Videos are never primary.
  *
@@ -152,6 +212,12 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     );
   }
 
+  // Videos are family-shared: the file uploads once, but every variant of the
+  // family gets its own product_media row pointing at the same URL.
+  const hasVideos = list.some((f) => f.type.startsWith('video/'));
+  const famSkus = hasVideos ? await getFamilySkus(sku) : [sku];
+  const siblings = famSkus.filter((s) => s !== sku);
+
   const { data: existingPrimary } = await supabase
     .from('product_media')
     .select('id')
@@ -159,15 +225,12 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     .eq('is_primary', true)
     .maybeSingle();
 
-  const { data: maxOrderRow } = await supabase
-    .from('product_media')
-    .select('display_order')
-    .eq('sku', sku)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  let nextOrder = (maxOrderRow?.display_order ?? -1) + 1;
+  const orders = await nextDisplayOrders(famSkus);
+  const takeOrder = (s) => {
+    const n = orders.get(s) ?? 0;
+    orders.set(s, n + 1);
+    return n;
+  };
   let primaryAssigned = !!existingPrimary;
 
   const rows = [];
@@ -186,17 +249,21 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     const shouldBePrimary = !isVideo && !primaryAssigned;
     if (shouldBePrimary) primaryAssigned = true;
 
-    rows.push({
-      sku,
+    const baseRow = {
       media_type: isVideo ? 'video' : 'image',
       language,
       storage_path: pub.publicUrl,
       file_name: file.name,
       file_size_bytes: file.size ?? null,
       mime_type: file.type || inferMimeType(file.name),
-      is_primary: shouldBePrimary,
-      display_order: nextOrder++,
-    });
+      is_primary: false,
+    };
+    rows.push({ ...baseRow, sku, is_primary: shouldBePrimary, display_order: takeOrder(sku) });
+    if (isVideo) {
+      for (const sib of siblings) {
+        rows.push({ ...baseRow, sku: sib, display_order: takeOrder(sib) });
+      }
+    }
     done += 1;
     onProgress?.(done, list.length);
   }
@@ -204,16 +271,17 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
   const { data, error } = await supabase.from('product_media').insert(rows).select();
   if (error) throw error;
 
-  const videoCount = rows.filter((r) => r.media_type === 'video').length;
+  const uploaded = rows.filter((r) => r.sku === sku);
+  const videoCount = uploaded.filter((r) => r.media_type === 'video').length;
   logActivity({
     action: 'media',
     entityType: 'media',
     entityId: sku,
     target: 'pim',
-    summary: `Uploaded ${rows.length} media file(s) to ${sku}${videoCount ? ` — ${videoCount} video(s)` : ''}`,
-    metadata: { count: rows.length, videos: videoCount, language },
+    summary: `Uploaded ${uploaded.length} media file(s) to ${sku}${videoCount ? ` — ${videoCount} video(s)` : ''}${videoCount && siblings.length ? `, shared with ${siblings.length} family variant(s)` : ''}`,
+    metadata: { count: uploaded.length, videos: videoCount, language, sharedWith: videoCount ? siblings : [] },
   });
-  return data;
+  return data.filter((r) => r.sku === sku);
 }
 
 /**
@@ -227,13 +295,9 @@ export async function addVideoByUrl(sku, url, language = null) {
     throw new Error('Please paste a valid URL (must start with http:// or https://).');
   }
 
-  const { data: maxOrderRow } = await supabase
-    .from('product_media')
-    .select('display_order')
-    .eq('sku', sku)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Family-shared: the link is registered on every variant of the family.
+  const famSkus = await getFamilySkus(sku);
+  const orders = await nextDisplayOrders(famSkus);
 
   const yt = getVideoThumbnail(trimmed);
   const fileName = yt
@@ -244,18 +308,19 @@ export async function addVideoByUrl(sku, url, language = null) {
 
   const { data, error } = await supabase
     .from('product_media')
-    .insert({
-      sku,
-      media_type: 'video',
-      language,
-      storage_path: trimmed,
-      file_name: fileName,
-      mime_type: 'text/uri-list',
-      is_primary: false,
-      display_order: (maxOrderRow?.display_order ?? -1) + 1,
-    })
-    .select()
-    .single();
+    .insert(
+      famSkus.map((s) => ({
+        sku: s,
+        media_type: 'video',
+        language,
+        storage_path: trimmed,
+        file_name: fileName,
+        mime_type: 'text/uri-list',
+        is_primary: false,
+        display_order: orders.get(s) ?? 0,
+      })),
+    )
+    .select();
 
   if (error) throw error;
 
@@ -263,10 +328,10 @@ export async function addVideoByUrl(sku, url, language = null) {
     action: 'media',
     entityType: 'media',
     entityId: sku,
-    summary: `Added a video link to ${sku}`,
-    metadata: { url: trimmed },
+    summary: `Added a video link to ${sku}${famSkus.length > 1 ? ` (shared with ${famSkus.length - 1} family variant(s))` : ''}`,
+    metadata: { url: trimmed, sharedWith: famSkus.filter((s) => s !== sku) },
   });
-  return data;
+  return data.find((r) => r.sku === sku) ?? data[0];
 }
 
 /**
@@ -302,19 +367,45 @@ export async function bulkSetMediaLanguage(ids, language) {
 }
 
 /**
+ * Remove every document of the family occupying the given (type, language)
+ * slot — the unique index on (sku, document_type, language) requires the slot
+ * to be free before the replacement rows insert. Files are deleted only when
+ * nothing references them anymore. `language === 'en'` also clears legacy
+ * rows with no language (they render in the English slot).
+ */
+async function clearDocumentSlot(famSkus, documentType, language) {
+  let q = supabase
+    .from('product_media')
+    .select('id, storage_path')
+    .in('sku', famSkus)
+    .eq('document_type', documentType);
+  if (language === 'en') q = q.or('language.eq.en,language.is.null');
+  else if (language) q = q.eq('language', language);
+  else q = q.is('language', null);
+
+  const { data: existing, error } = await q;
+  if (error) throw error;
+  if (!existing?.length) return;
+
+  const { error: delErr } = await supabase
+    .from('product_media')
+    .delete()
+    .in('id', existing.map((e) => e.id));
+  if (delErr) throw delErr;
+  await deleteStorageObjectsIfUnreferenced(existing.map((e) => e.storage_path));
+}
+
+/**
  * Upload a document file (PDF, DXF, …) from the user's computer to
- * Supabase Storage and register it.
+ * Supabase Storage and register it. Family-shared: the file uploads once and
+ * every variant of the family gets a row; any document already occupying the
+ * same (type, language) slot on any variant is replaced.
  */
 export async function uploadDocumentFile(sku, documentType, file, language = null) {
   if (!file) throw new Error('No file selected.');
 
-  const { data: maxOrderRow } = await supabase
-    .from('product_media')
-    .select('display_order')
-    .eq('sku', sku)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const famSkus = await getFamilySkus(sku);
+  await clearDocumentSlot(famSkus, documentType, language);
 
   const path = buildObjectPath(sku, file.name);
   const { error: upErr } = await supabase.storage.from(DOCS_BUCKET).upload(path, file, {
@@ -325,23 +416,25 @@ export async function uploadDocumentFile(sku, documentType, file, language = nul
   if (upErr) throw new Error(`Upload failed for ${file.name}: ${upErr.message}`);
 
   const { data: pub } = supabase.storage.from(DOCS_BUCKET).getPublicUrl(path);
+  const orders = await nextDisplayOrders(famSkus);
 
   const { data, error } = await supabase
     .from('product_media')
-    .insert({
-      sku,
-      media_type: 'document',
-      document_type: documentType,
-      language,
-      storage_path: pub.publicUrl,
-      file_name: file.name,
-      file_size_bytes: file.size ?? null,
-      mime_type: file.type || inferMimeType(file.name),
-      is_primary: false,
-      display_order: (maxOrderRow?.display_order ?? -1) + 1,
-    })
-    .select()
-    .single();
+    .insert(
+      famSkus.map((s) => ({
+        sku: s,
+        media_type: 'document',
+        document_type: documentType,
+        language,
+        storage_path: pub.publicUrl,
+        file_name: file.name,
+        file_size_bytes: file.size ?? null,
+        mime_type: file.type || inferMimeType(file.name),
+        is_primary: false,
+        display_order: orders.get(s) ?? 0,
+      })),
+    )
+    .select();
 
   if (error) throw error;
 
@@ -350,15 +443,16 @@ export async function uploadDocumentFile(sku, documentType, file, language = nul
     entityType: 'media',
     entityId: sku,
     target: 'pim',
-    summary: `Uploaded ${documentType} document to ${sku}`,
-    metadata: { documentType, language },
+    summary: `Uploaded ${documentType} document to ${sku}${famSkus.length > 1 ? ` (shared with ${famSkus.length - 1} family variant(s))` : ''}`,
+    metadata: { documentType, language, sharedWith: famSkus.filter((s) => s !== sku) },
   });
-  return data;
+  return data.find((r) => r.sku === sku) ?? data[0];
 }
 
 /**
  * Add a document by pasting a URL directly (any externally hosted file).
- * Replaces nothing — caller handles that.
+ * Family-shared like uploads: registered on every variant, replacing whatever
+ * occupied the same (type, language) slot.
  */
 export async function addDocumentByUrl(sku, documentType, url, fileName = null, language = null) {
   const trimmed = url.trim();
@@ -366,13 +460,9 @@ export async function addDocumentByUrl(sku, documentType, url, fileName = null, 
     throw new Error('Please paste a valid URL (must start with http:// or https://).');
   }
 
-  const { data: maxOrderRow } = await supabase
-    .from('product_media')
-    .select('display_order')
-    .eq('sku', sku)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const famSkus = await getFamilySkus(sku);
+  await clearDocumentSlot(famSkus, documentType, language);
+  const orders = await nextDisplayOrders(famSkus);
 
   const inferredName =
     fileName?.trim() ||
@@ -381,19 +471,20 @@ export async function addDocumentByUrl(sku, documentType, url, fileName = null, 
 
   const { data, error } = await supabase
     .from('product_media')
-    .insert({
-      sku,
-      media_type: 'document',
-      document_type: documentType,
-      language,
-      storage_path: trimmed,
-      file_name: inferredName,
-      mime_type: inferMimeType(inferredName),
-      is_primary: false,
-      display_order: (maxOrderRow?.display_order ?? -1) + 1,
-    })
-    .select()
-    .single();
+    .insert(
+      famSkus.map((s) => ({
+        sku: s,
+        media_type: 'document',
+        document_type: documentType,
+        language,
+        storage_path: trimmed,
+        file_name: inferredName,
+        mime_type: inferMimeType(inferredName),
+        is_primary: false,
+        display_order: orders.get(s) ?? 0,
+      })),
+    )
+    .select();
 
   if (error) throw error;
 
@@ -401,10 +492,10 @@ export async function addDocumentByUrl(sku, documentType, url, fileName = null, 
     action: 'media',
     entityType: 'media',
     entityId: sku,
-    summary: `Added ${documentType} document to ${sku} (by URL)`,
-    metadata: { documentType, language },
+    summary: `Added ${documentType} document to ${sku} (by URL)${famSkus.length > 1 ? ` — shared with ${famSkus.length - 1} family variant(s)` : ''}`,
+    metadata: { documentType, language, sharedWith: famSkus.filter((s) => s !== sku) },
   });
-  return data;
+  return data.find((r) => r.sku === sku) ?? data[0];
 }
 
 /**
@@ -445,26 +536,44 @@ export async function setPrimaryMedia(sku, mediaId) {
 }
 
 /**
- * Remove a media item. If the file is hosted in Supabase Storage, the file
- * itself is deleted too so we don't pay for orphans. Externally hosted files
- * (e.g. videos linked by URL) are never touched.
+ * Remove a media item. Videos and documents are family-shared, so removing
+ * one removes it from every variant of the family; images only from their own
+ * product. The Storage file is deleted once nothing references it anymore —
+ * externally hosted files (e.g. videos linked by URL) are never touched.
  */
 export async function removeMedia(media) {
-  const { error } = await supabase
-    .from('product_media')
-    .delete()
-    .eq('id', media.id);
+  let removedCount = 1;
+  if (isFamilyShared(media.media_type) && media.sku && media.storage_path) {
+    const famSkus = await getFamilySkus(media.sku);
+    const { data: removed, error } = await supabase
+      .from('product_media')
+      .delete()
+      .eq('storage_path', media.storage_path)
+      .in('sku', famSkus)
+      .select('id');
+    if (error) throw error;
+    removedCount = removed?.length ?? 0;
+    // Safety net: if the shared match somehow missed the row itself, fall
+    // back to deleting it by id so the user's action always lands.
+    if (!removed?.some((r) => r.id === media.id)) {
+      await supabase.from('product_media').delete().eq('id', media.id);
+    }
+  } else {
+    const { error } = await supabase
+      .from('product_media')
+      .delete()
+      .eq('id', media.id);
+    if (error) throw error;
+  }
 
-  if (error) throw error;
-
-  await deleteStorageObjects([media.storage_path]);
+  await deleteStorageObjectsIfUnreferenced([media.storage_path]);
 
   logActivity({
     action: 'media',
     entityType: 'media',
     entityId: media.sku ?? null,
-    summary: `Removed media${media.file_name ? ` "${media.file_name}"` : ''}${media.sku ? ` from ${media.sku}` : ''}`,
-    metadata: { mediaId: media.id, deletedFile: isSupabaseStored(media.storage_path) },
+    summary: `Removed media${media.file_name ? ` "${media.file_name}"` : ''}${media.sku ? ` from ${media.sku}` : ''}${removedCount > 1 ? ` and ${removedCount - 1} family variant(s)` : ''}`,
+    metadata: { mediaId: media.id, removedRows: removedCount, deletedFile: isSupabaseStored(media.storage_path) },
   });
 }
 
@@ -492,12 +601,15 @@ export async function deleteStorageObjects(storagePaths) {
 }
 
 /**
- * Delete many media rows at once. Supabase-hosted files are deleted from
- * Storage too; external URLs are not touched. `items` is an array of media
- * objects (need at least { id, storage_path }).
+ * Delete many media rows at once. Family-shared items (videos, documents)
+ * are also removed from every variant of the family. Supabase-hosted files
+ * are deleted from Storage once unreferenced; external URLs are not touched.
+ * `items` need at least { id, sku, media_type, storage_path }.
  */
 export async function removeMediaBatch(items) {
   if (!items || items.length === 0) return;
+
+  const shared = items.filter((m) => isFamilyShared(m.media_type) && m.sku && m.storage_path);
   const ids = items.map((m) => m.id);
   const { error } = await supabase
     .from('product_media')
@@ -505,14 +617,25 @@ export async function removeMediaBatch(items) {
     .in('id', ids);
   if (error) throw error;
 
-  await deleteStorageObjects(items.map((m) => m.storage_path));
+  if (shared.length > 0) {
+    // All items come from one product page, so one family lookup covers them.
+    const famSkus = await getFamilySkus(shared[0].sku);
+    const { error: famErr } = await supabase
+      .from('product_media')
+      .delete()
+      .in('storage_path', shared.map((m) => m.storage_path))
+      .in('sku', famSkus);
+    if (famErr) throw famErr;
+  }
+
+  await deleteStorageObjectsIfUnreferenced(items.map((m) => m.storage_path));
 
   const deletedFiles = items.filter((m) => isSupabaseStored(m.storage_path)).length;
   logActivity({
     action: 'media',
     entityType: 'media',
-    summary: `Removed ${ids.length} media file(s)`,
-    metadata: { count: ids.length, deletedFiles },
+    summary: `Removed ${ids.length} media file(s)${shared.length ? ` (${shared.length} shared with the variant family)` : ''}`,
+    metadata: { count: ids.length, deletedFiles, sharedRemoved: shared.length },
   });
 }
 

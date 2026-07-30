@@ -43,6 +43,7 @@ Supabase Auth + a `profiles` table with roles `admin | editor | viewer`. `Protec
 ### Data model conventions
 
 - `products` keyed by `sku`; media in `product_media` (`is_primary` + `display_order`, storage bucket `product-images/<SKU>/`).
+- Videos and documents are FAMILY-SHARED (since 2026-07-30): uploading to one variant registers a row on every product with the same `family_number`, all pointing at ONE storage object; removal clears the whole family and the file is only deleted from Storage when no row references it (`deleteStorageObjectsIfUnreferenced`). Images stay per-variant. See `src/features/media/api/media.js`; `scripts/dedupe-family-media.mjs` dedupes pre-existing per-variant copies.
 - `workflow_status` values are centralized in [src/features/products/lib/workflowStatus.js](src/features/products/lib/workflowStatus.js) — add new statuses there only.
 - SKUs with and without dashes are DIFFERENT brands (e.g. `A-906` vs `A906`), not duplicates. Never merge/delete on that assumption without asking.
 - Mutations log to the audit trail via `logActivity` ([src/features/activity/api/activityLog.js](src/features/activity/api/activityLog.js)).

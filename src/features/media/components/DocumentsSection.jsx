@@ -72,8 +72,12 @@ const LANG_AWARE = new Set(DOCUMENT_TYPES.filter((t) => t.languages).map((t) => 
 // for stone fabricators cutting countertops for sinks.
 const FAUCET_HIDDEN_TYPES = new Set(['dxf_file', 'cut_out_template']);
 
-export default function DocumentsSection({ sku, category }) {
+export default function DocumentsSection({ sku, category, familyNumber = null }) {
   const confirm = useConfirm();
+  // Documents are family-shared: uploads land on every variant of the family
+  // (replacing the slot family-wide) and removals clear them family-wide.
+  // Only used for messaging — the API resolves the family itself.
+  const inFamily = familyNumber != null;
   const isFaucet = category?.includes('faucet');
   const visibleTypes = DOCUMENT_TYPES.filter(
     (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id)),
@@ -107,8 +111,8 @@ export default function DocumentsSection({ sku, category }) {
     setErrorMessage(null);
     setBusyKey(key);
     try {
-      const existing = docsBySlot[key];
-      if (existing) await removeMedia(existing);
+      // uploadDocumentFile replaces the (type, language) slot across the whole
+      // variant family — no need to pre-delete the existing document here.
       await uploadDocumentFile(sku, docTypeConfig.id, file, language);
       reload();
     } catch (err) {
@@ -120,11 +124,14 @@ export default function DocumentsSection({ sku, category }) {
   };
 
   const handleRemove = async (doc, label) => {
+    const sharedNote = inFamily
+      ? ' The document is also removed from every variant of this family.'
+      : '';
     const confirmed = await confirm({
       title: `Remove the ${label}?`,
       message: isSupabaseStored(doc.storage_path)
-        ? 'This permanently deletes the file. This cannot be undone.'
-        : 'The externally hosted file itself is not deleted.',
+        ? `This permanently deletes the file.${sharedNote} This cannot be undone.`
+        : `The externally hosted file itself is not deleted.${sharedNote}`,
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -164,11 +171,16 @@ export default function DocumentsSection({ sku, category }) {
   return (
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       <div className="px-6 py-4 border-b border-outline-variant">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <h2 className="text-title-lg text-on-surface">Documents</h2>
           <span className="text-body-sm text-on-surface-variant">
             {linkedCount} of {totalSlots} linked
           </span>
+          {inFamily && (
+            <span className="text-body-sm text-on-surface-variant">
+              · Shared with all variants in this family
+            </span>
+          )}
         </div>
       </div>
 

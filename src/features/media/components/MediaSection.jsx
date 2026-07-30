@@ -53,8 +53,12 @@ function reorderByEdge(list, startIndex, indexOfTarget, edge) {
   return result;
 }
 
-export default function MediaSection({ sku }) {
+export default function MediaSection({ sku, familyNumber = null }) {
   const confirm = useConfirm();
+  // Videos are family-shared: uploads/links land on every variant of the
+  // family, and removals clear them family-wide. Only used for messaging —
+  // the API resolves the family itself.
+  const inFamily = familyNumber != null;
   const { canEditMedia: canEdit } = useAuth();
   const { images, videos, loading, error, reload, mutate } = useProductMedia(sku);
   const [busy, setBusy] = useState(false);
@@ -326,11 +330,15 @@ export default function MediaSection({ sku }) {
   };
 
   const handleRemove = async (mediaItem) => {
+    const sharedNote =
+      inFamily && mediaItem.media_type === 'video'
+        ? ' The video is also removed from every variant of this family.'
+        : '';
     const confirmed = await confirm({
       title: `Remove "${mediaItem.file_name}"?`,
       message: isSupabaseStored(mediaItem.storage_path)
-        ? 'This permanently deletes the file. This cannot be undone.'
-        : 'The externally hosted file itself is not deleted.',
+        ? `This permanently deletes the file.${sharedNote} This cannot be undone.`
+        : `The externally hosted file itself is not deleted.${sharedNote}`,
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -363,11 +371,15 @@ export default function MediaSection({ sku }) {
     if (selectedIds.size === 0) return;
     const items = visualMedia.filter((m) => selectedIds.has(m.id));
     const supaCount = items.filter((m) => isSupabaseStored(m.storage_path)).length;
+    const sharedCount = inFamily ? items.filter((m) => m.media_type === 'video').length : 0;
+    const sharedNote = sharedCount
+      ? ` ${sharedCount} video${sharedCount === 1 ? ' is' : 's are'} shared with this family and will be removed from every variant.`
+      : '';
     const confirmed = await confirm({
       title: `Remove ${items.length} item${items.length === 1 ? '' : 's'}?`,
       message: supaCount
-        ? `${supaCount} file${supaCount === 1 ? '' : 's'} will be permanently deleted. This cannot be undone.`
-        : 'The externally hosted files themselves are not deleted.',
+        ? `${supaCount} file${supaCount === 1 ? '' : 's'} will be permanently deleted.${sharedNote} This cannot be undone.`
+        : `The externally hosted files themselves are not deleted.${sharedNote}`,
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -675,6 +687,11 @@ export default function MediaSection({ sku }) {
                       {filteredVideos.length}
                     </span>
                   </h3>
+                  {inFamily && (
+                    <span className="text-body-sm text-on-surface-variant">
+                      Shared with all variants in this family
+                    </span>
+                  )}
                   {presentVideoBuckets.length > 1 && presentVideoBuckets.map((b) => {
                     const active = activeVideoFilter === b;
                     return (

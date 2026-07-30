@@ -548,7 +548,7 @@ export default function ProductDetail() {
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
         {activeTab === 'content' && <ContentTab product={product} edit={editCtx} />}
         {activeTab === 'pricing' && <PricingTab product={product} edit={editCtx} />}
-        {activeTab === 'media' && <MediaTab sku={product.sku} category={product.category} />}
+        {activeTab === 'media' && <MediaTab sku={product.sku} category={product.category} familyNumber={product.family_number} />}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
       </div>
 
@@ -1129,11 +1129,11 @@ function PricingTab({ product, edit }) {
 
 // ===================== Media & Marketplaces =====================
 
-function MediaTab({ sku, category }) {
+function MediaTab({ sku, category, familyNumber }) {
   return (
     <div className="space-y-6">
-      <MediaSection sku={sku} />
-      <DocumentsSection sku={sku} category={category} />
+      <MediaSection sku={sku} familyNumber={familyNumber} />
+      <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} />
     </div>
   );
 }

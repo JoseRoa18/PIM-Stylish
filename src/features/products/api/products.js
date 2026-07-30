@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { deleteStorageObjects } from '@/features/media/api/media';
+import { deleteStorageObjectsIfUnreferenced } from '@/features/media/api/media';
 
 /**
  * List all products from the catalog with their primary image (if any).
@@ -260,7 +260,9 @@ export async function deleteProducts(skus) {
   const { error } = await supabase.from('products').delete().in('sku', skus);
   if (error) throw error;
 
-  await deleteStorageObjects(mediaPaths);
+  // Unreferenced-only: videos/documents are family-shared, so a file can
+  // still be linked by surviving variants of the deleted product's family.
+  await deleteStorageObjectsIfUnreferenced(mediaPaths);
 
   logActivity({
     action: 'delete',
