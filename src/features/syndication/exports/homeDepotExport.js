@@ -96,8 +96,9 @@ const gtin14 = (p) => {
 // HD's GLN is one account-wide constant (HD correction, 2026-07-29).
 const HD_GLN = '0840994000057';
 
-// "No" for sink categories only — faucets pending the business's answer.
-const sinkNo = (p) => (/sink/.test(p.category ?? '') ? 'No' : '');
+// Business confirmed "No" for BOTH sinks and faucets (2026-07-30) on the
+// per-jurisdiction VOC questions and plastic/resin.
+const alwaysNo = () => 'No';
 
 // Hard caps from HD content review: cut at a word boundary within `max`.
 const clamp = (text, max) => {
@@ -197,14 +198,14 @@ export const HOME_DEPOT_RULES = {
   'Will children be exposed to your product for more than an hour (Ex. clothing, footwear, jewelry, certain toys)?': () => 'No',
   'Is this product regulated by a type of VOC guideline or rule at the state level?': () => 'No',
   // Per-jurisdiction VOC questions + plastic/resin — business confirmed "No"
-  // for the sinks category (2026-07-29). Their follow-up columns (Categorize/
-  // Level/UOM/Exempt) stay blank, consistent with a No.
-  'Is this type of product regulated for VOC level by California Code of Regulations for Consumer Products?': sinkNo,
-  'Is this type of product regulated by Delaware for VOC content limits for architectural coatings or consumer products?': sinkNo,
-  'Is this type of product regulated by Maryland for VOC content limits for architectural and industrial maintenance coatings or control of emissions of VOC from consumer products?': sinkNo,
-  'Is this type of product regulated by New Hampshire for VOC limits for Consumer Products?': sinkNo,
-  'Is this type of product regulated for VOC level by California SCAQMD?': sinkNo,
-  'Does your product contain plastic or resin?': sinkNo,
+  // for sinks AND faucets. Their follow-up columns (Categorize/Level/UOM/
+  // Exempt) stay blank, consistent with a No.
+  'Is this type of product regulated for VOC level by California Code of Regulations for Consumer Products?': alwaysNo,
+  'Is this type of product regulated by Delaware for VOC content limits for architectural coatings or consumer products?': alwaysNo,
+  'Is this type of product regulated by Maryland for VOC content limits for architectural and industrial maintenance coatings or control of emissions of VOC from consumer products?': alwaysNo,
+  'Is this type of product regulated by New Hampshire for VOC limits for Consumer Products?': alwaysNo,
+  'Is this type of product regulated for VOC level by California SCAQMD?': alwaysNo,
+  'Does your product contain plastic or resin?': alwaysNo,
   'Proposition 65 warning required?': () => 'No',
   'Is your product a textile, or does it contain a textile article, as described in California AB1817 (the Safer Clothing and Textiles Act)?': () => 'No',
   // This one's list is Y/N, unlike its sibling questions.
