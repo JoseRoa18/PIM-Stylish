@@ -183,7 +183,14 @@ export const WAYFAIR_RULES = {
   'Construction Features': (p) => sprayToConstruction(attr(p).spray_type),
   'Maximum Flow Rate': (p) => num(attr(p).max_flow_rate),
   'Sensor Type': () => 'No Sensor',
-  'Supplier Intended and Approved Use': (p) => attr(p).application || 'Residential Use',
+  // The list is strictly Residential Use / Non Residential Use — PIM texts
+  // like "Commercial and Residential" must collapse to one of them.
+  'Supplier Intended and Approved Use': (p) => {
+    const a = String(attr(p).application ?? '');
+    if (/non.?residential/i.test(a)) return 'Non Residential Use';
+    if (/comm/i.test(a) && !/residen/i.test(a)) return 'Non Residential Use';
+    return 'Residential Use';
+  },
   'Handle Style': (p) => attr(p).handle_style || '',
   'Handle Material': (p) => attr(p).handle_material || '',
   Finish: (p) => alias(FINISH_ALIAS, p.finish),
@@ -301,6 +308,10 @@ export const WAYFAIR_STANDALONE = {
   bathroom_sink: /-2$/i,
 };
 
+// Newer PIM categories reuse the rules of the template family they export to
+// (colanders ship on the strainers template, outdoor sinks on kitchen sinks…).
+// Wired at the bottom of this file, after WAYFAIR_CATEGORY_RULES is defined.
+
 // ---- Kitchen-sink helpers ----
 const isFarmhouse = (p) => /farm|apron/i.test(p.product_type ?? '');
 // PIM accessory entries are model-coded ("A-04 Colander", "ST-01 Strainer (x2)");
@@ -364,13 +375,28 @@ export const WAYFAIR_CATEGORY_RULES = {
     Color: (p) => alias(COLOR_ALIAS, p.finish),
     'Color / Finish': (p) => alias(COLOR_ALIAS, p.finish),
     'Total Number of Pieces Included': (p) => String(attr(p).number_of_pieces ?? 1),
-    'Product Care': (p) => attr(p).product_care ?? '',
+    // Product Care is a closed list; PIM texts like "Please refer to the
+    // Spec Sheet" aren't options — derive the factual care by material.
+    'Product Care': (p) => {
+      const c = String(attr(p).product_care ?? '');
+      if (/dishwasher/i.test(c)) return 'Dishwasher safe';
+      if (/hand ?wash/i.test(c)) return 'Hand wash recommended';
+      const m = `${attr(p).material ?? p.material ?? ''}`;
+      if (/bamboo|wood/i.test(m)) return 'Hand wash recommended';
+      // Present in BOTH the cutting-boards (187) and strainers (831) lists.
+      return 'Wash with warm water and soap';
+    },
     Handheld: () => 'No',
     'Adjustability Features': () => 'Does Not Apply',
     'BPA Free': (p) => yesNo(attr(p).bpa_free) || 'No',
-    'Holiday / Occasion': () => 'Does Not Apply',
+    'Holiday / Occasion': () => 'No Holiday', // the list's "none" option
     'Personalization or Monogramming': () => 'No',
-    'Built-In Features': (p) => (attr(p).juice_grooves === true ? 'Juice Groove' : 'Does Not Apply'),
+    // 187's list is Handle(s) / Boundary Markers / No Built-In Features —
+    // juice grooves aren't representable on it.
+    'Built-In Features': (p) =>
+      /handle/i.test(`${attr(p).general_title_en ?? ''} ${p.product_type ?? ''}`)
+        ? 'Handle(s)'
+        : 'No Built-In Features',
     'Overall Length - End to End': (p) => num(attr(p).external_dimensions_in?.length),
     // Axis semantics depend on the template: when it has a Length column
     // (cutting boards 187), Width means the PIM's width; without one
@@ -471,3 +497,10 @@ export const WAYFAIR_CATEGORY_RULES = {
     'NSF/ANSI 61 Certified': () => 'No',
   },
 };
+
+// Category aliases: these PIM categories export on another family's template,
+// so they use its rules verbatim.
+WAYFAIR_CATEGORY_RULES.colander_drying_rack = WAYFAIR_CATEGORY_RULES.accessory;
+WAYFAIR_CATEGORY_RULES.outdoor_sink = WAYFAIR_CATEGORY_RULES.kitchen_sink;
+WAYFAIR_CATEGORY_RULES.bar_prep_sink = WAYFAIR_CATEGORY_RULES.kitchen_sink;
+WAYFAIR_CATEGORY_RULES.laundry_sink = WAYFAIR_CATEGORY_RULES.kitchen_sink;
