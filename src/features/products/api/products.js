@@ -23,6 +23,10 @@ export async function listProducts() {
       wix_product_id,
       product_media (storage_path, alt_text, is_primary)
     `)
+    // Only the primary image is shown in the table, so filter the embed
+    // server-side — without this, every media row (all photos + the
+    // family-shared videos/docs on each variant) rides along in the payload.
+    .eq('product_media.is_primary', true)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -143,6 +147,7 @@ export async function searchProducts(query, limit = 8) {
       workflow_status,
       product_media (storage_path, is_primary)
     `)
+    .eq('product_media.is_primary', true)
     .or(orParts.join(','))
     .limit(limit);
 
@@ -202,6 +207,7 @@ export async function listVariants(familyNumber, excludeSku = null) {
       attributes,
       product_media (storage_path, is_primary)
     `)
+    .eq('product_media.is_primary', true)
     .eq('family_number', familyNumber);
   if (excludeSku) query = query.neq('sku', excludeSku);
 

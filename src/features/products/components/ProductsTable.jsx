@@ -110,7 +110,7 @@ export default function ProductsTable({
             </tr>
           </thead>
           <tbody>
-            {products.map((product) => {
+            {products.map((product, index) => {
               const isSelected = selectionEnabled && selectedSkus?.has(product.sku);
               const open = () => navigate(`/catalog/${product.sku}`);
               return (
@@ -151,6 +151,7 @@ export default function ProductsTable({
                     <ProductThumbnail
                       primaryImage={product.primary_image}
                       alt={product.model_name}
+                      eager={index < 6}
                     />
                   </td>
                   <td className="py-3 px-4 text-body-sm font-mono text-on-surface whitespace-nowrap">
@@ -231,7 +232,9 @@ function SortableHeader({ col, sortKey, sortDir, onSort }) {
   );
 }
 
-function ProductThumbnail({ primaryImage, alt }) {
+// `eager` marks above-the-fold rows: they skip lazy-loading and get high
+// fetch priority so the first thumbnails the user sees load first.
+function ProductThumbnail({ primaryImage, alt, eager = false }) {
   const [error, setError] = useState(false);
 
   if (!primaryImage || error) {
@@ -248,7 +251,9 @@ function ProductThumbnail({ primaryImage, alt }) {
         src={getThumbnailUrl(primaryImage.storage_path, 128)}
         alt={primaryImage.alt_text || alt || ''}
         onError={() => setError(true)}
-        loading="lazy"
+        loading={eager ? 'eager' : 'lazy'}
+        fetchPriority={eager ? 'high' : 'auto'}
+        decoding="async"
         className="w-full h-full object-cover block transition-transform duration-200 group-hover:scale-105"
       />
     </div>

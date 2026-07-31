@@ -13,6 +13,7 @@ import CreateProductDialog from '@/features/products/components/CreateProductDia
 import Pagination from '@/components/ui/Pagination';
 import { useAuth } from '@/features/auth/AuthContext';
 import { statusMeta, STATUS_ORDER } from '@/features/products/lib/workflowStatus';
+import { getThumbnailUrl } from '@/features/media/api/media';
 
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -159,6 +160,38 @@ export default function Catalog() {
   );
 
   const options = useMemo(() => getFilterOptions(products), [products]);
+
+  // Warm the browser cache with the NEXT page's thumbnails while the user
+  // looks at the current one, so paginating feels instant. Runs when the
+  // browser is idle to never compete with the visible page's own images.
+  useEffect(() => {
+    if (loading) return;
+    const nextPage = sortedProducts.slice(
+      currentPage * pageSize,
+      (currentPage + 1) * pageSize,
+    );
+    const urls = nextPage
+      .map((p) => p.primary_image && getThumbnailUrl(p.primary_image.storage_path, 128))
+      .filter(Boolean);
+    if (urls.length === 0) return;
+
+    const idle =
+      typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb) => window.setTimeout(cb, 500);
+    const cancelIdle =
+      typeof window.cancelIdleCallback === 'function'
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window);
+
+    const id = idle(() => {
+      for (const url of urls) {
+        const img = new Image();
+        img.src = url;
+      }
+    });
+    return () => cancelIdle(id);
+  }, [loading, sortedProducts, currentPage, pageSize]);
 
   const toggleSelect = useCallback((sku) => {
     setSelectedSkus((prev) => {
