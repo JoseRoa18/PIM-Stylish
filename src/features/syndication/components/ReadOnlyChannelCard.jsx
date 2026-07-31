@@ -18,7 +18,8 @@ const CHANNELS = {
       { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} price differences vs PIM MSRP` },
       { icon: OctagonX, tone: 'text-error', label: `${s.errors} out of stock` },
     ],
-    note: 'Offers, stock and prices are pulled from the Mirakl API. Nothing is ever written to Best Buy.',
+    note: 'Offers, stock and prices are pulled from the Mirakl API. The only write-back is the MSRP price sync below — nothing else is ever written.',
+    shield: 'Read connection with one write path: MSRP price sync (admin/editor only).',
   },
   walmart_us: {
     healthTab: 'walmart_us',
@@ -75,7 +76,7 @@ export default function ReadOnlyChannelCard({ channel }) {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2 text-body-sm text-on-surface-variant">
             <ShieldCheck className="w-4 h-4 text-success" />
-            Read-only connection — the PIM never writes to this channel.
+            {def.shield ?? 'Read-only connection — the PIM never writes to this channel.'}
           </div>
           <button
             type="button"

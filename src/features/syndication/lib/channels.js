@@ -39,12 +39,12 @@ export const LIVE_CHANNELS = [
   {
     id: 'bestbuy',
     name: 'Best Buy Canada',
-    tagline: 'Mirakl marketplace — offers, stock & prices (read-only)',
+    tagline: 'Mirakl marketplace — offers & stock pulls + MSRP price sync',
     letter: 'B',
     logo: '/brand/channels/bestbuy.svg',
     avatarClass: 'bg-[#0046BE]/10 text-[#0046BE] dark:bg-[#0046BE]/30 dark:text-[#9DC2FF]',
-    env: 'Read-only',
-    envClass: 'bg-surface-container text-on-surface-variant',
+    env: 'Production',
+    envClass: 'bg-success-container text-on-success-container',
     stat: async () => {
       const snap = await latestSnapshot('bestbuy');
       return snap
