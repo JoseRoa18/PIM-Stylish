@@ -1,5 +1,5 @@
 import { useState, useRef, lazy, Suspense } from 'react';
-import { FileText, ExternalLink, Eye, Trash2, Link as LinkIcon, Check, Loader2, Upload } from 'lucide-react';
+import { FileText, ExternalLink, Eye, Trash2, Link as LinkIcon, Check, Loader2, Upload, ChevronDown } from 'lucide-react';
 import { useProductMedia } from '../hooks/useProductMedia';
 import { uploadDocumentFile, removeMedia, getMediaUrl, isSupabaseStored } from '../api/media';
 import { formatFileSize } from '@/lib/format';
@@ -19,10 +19,10 @@ const isPdfDoc = (doc) => {
 // Language variants for documents that ship in multiple languages
 // (spec sheets, installation manuals). Order matters — English first.
 const LANGUAGES = [
-  { id: 'en', label: 'English' },
-  { id: 'fr', label: 'French' },
-  { id: 'en_fr', label: 'English-French' },
-  { id: 'en_es', label: 'English-Spanish' },
+  { id: 'en', label: 'English', short: 'EN' },
+  { id: 'fr', label: 'French', short: 'FR' },
+  { id: 'en_fr', label: 'English-French', short: 'EN-FR' },
+  { id: 'en_es', label: 'English-Spanish', short: 'EN-ES' },
 ];
 
 // Sink installation manuals AND DXF files split by installation type: a
@@ -266,19 +266,41 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
             Failed to load documents: {error.message}
           </p>
         ) : (
-          visibleTypes.map((docType) =>
-            docType.languages ? (
-              <LanguageGroup
-                key={docType.id}
-                docType={docType}
-                linkedCount={LANGUAGES.filter((l) => docsBySlot[slotKey(docType.id, l.id)]).length}
-              >
-                {LANGUAGES.map((lang) => renderSlot(docType, lang.id))}
-              </LanguageGroup>
-            ) : (
-              renderSlot(docType, null)
-            ),
-          )
+          // Language-aware types render as collapsible groups whose header
+          // chips show completion at a glance; consecutive language-less
+          // types (DXFs, warranty, cut-out) pack into a two-column grid so
+          // single slots don't each claim a full row.
+          (() => {
+            const blocks = [];
+            let singles = [];
+            const flushSingles = () => {
+              if (!singles.length) return;
+              blocks.push(
+                <div key={`singles-${blocks.length}`} className="grid sm:grid-cols-2 gap-2">
+                  {singles.map((t) => renderSlot(t, null))}
+                </div>,
+              );
+              singles = [];
+            };
+            for (const docType of visibleTypes) {
+              if (docType.languages) {
+                flushSingles();
+                blocks.push(
+                  <LanguageGroup
+                    key={docType.id}
+                    docType={docType}
+                    linkedLangs={new Set(LANGUAGES.filter((l) => docsBySlot[slotKey(docType.id, l.id)]).map((l) => l.id))}
+                  >
+                    {LANGUAGES.map((lang) => renderSlot(docType, lang.id))}
+                  </LanguageGroup>,
+                );
+              } else {
+                singles.push(docType);
+              }
+            }
+            flushSingles();
+            return blocks;
+          })()
         )}
       </div>
 
@@ -301,18 +323,47 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
   );
 }
 
-// Groups the per-language rows of a single document type under one heading.
-function LanguageGroup({ docType, linkedCount, children }) {
+// Collapsible group for a language-aware document type. The header chips ARE
+// the status: a filled chip per uploaded language, a ghost chip per missing
+// one — completion reads at a glance without expanding anything.
+function LanguageGroup({ docType, linkedLangs, children }) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="rounded-lg border border-outline-variant bg-surface-container-low overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-outline-variant bg-surface-container">
-        <FileText className="w-4 h-4 text-on-surface-variant" strokeWidth={1.5} />
-        <span className="text-label-md text-on-surface font-semibold">{docType.label}</span>
-        <span className="text-body-sm text-on-surface-variant">
-          {linkedCount} of {LANGUAGES.length} languages
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-surface-container transition-colors"
+      >
+        <ChevronDown
+          className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+        />
+        <FileText className="w-4 h-4 text-on-surface-variant flex-shrink-0" strokeWidth={1.5} />
+        <span className="text-label-md text-on-surface font-semibold flex-1 min-w-0 truncate">
+          {docType.label}
         </span>
-      </div>
-      <div className="p-2 space-y-2">{children}</div>
+        <span className="flex items-center gap-1 flex-shrink-0">
+          {LANGUAGES.map((l) =>
+            linkedLangs.has(l.id) ? (
+              <span
+                key={l.id}
+                className="px-1.5 py-0.5 rounded bg-primary-container text-on-primary-container text-label-sm font-semibold"
+              >
+                {l.short}
+              </span>
+            ) : (
+              <span
+                key={l.id}
+                className="px-1.5 py-0.5 rounded border border-outline-variant text-on-surface-variant/60 text-label-sm"
+              >
+                {l.short}
+              </span>
+            ),
+          )}
+        </span>
+      </button>
+      <div className={open ? 'px-2 pb-2 space-y-1.5' : 'hidden'}>{children}</div>
     </div>
   );
 }
@@ -337,114 +388,107 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
   const iconBtn =
     'p-2 rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-50';
 
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept={accept}
+      hidden
+      onChange={(e) => {
+        if (e.target.files?.[0]) onUploadFile(e.target.files[0]);
+        e.target.value = '';
+      }}
+    />
+  );
+
+  // Empty slot: a quiet one-line ghost — the section should be dominated by
+  // the files that exist, not by the holes.
+  if (!linked) {
+    return (
+      <div
+        className="flex items-center gap-3 px-3 py-2 rounded-lg border border-dashed border-outline-variant text-on-surface-variant"
+        title={description}
+      >
+        <FileText className="w-4 h-4 flex-shrink-0 opacity-60" strokeWidth={1.5} />
+        <span className="flex-1 min-w-0 truncate text-body-sm">{label}</span>
+        {canEdit && (
+          <>
+            {fileInput}
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              title="Upload from your computer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-outline-variant text-label-md text-on-surface-variant hover:text-primary hover:border-primary transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              Upload
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // Filled slot: solid card, file name first, full action set.
   return (
     <div className="rounded-lg border border-outline-variant bg-surface-container-low">
-      <div className="flex items-center gap-4 p-3">
-        <div
-          className={`w-10 h-10 rounded-md flex items-center justify-center flex-shrink-0 ${
-            linked
-              ? 'bg-primary-container text-on-primary-container'
-              : 'bg-surface-container text-on-surface-variant'
-          }`}
-        >
-          <FileText className="w-5 h-5" strokeWidth={1.5} />
+      <div className="flex items-center gap-3 p-2.5">
+        <div className="w-9 h-9 rounded-md flex items-center justify-center flex-shrink-0 bg-primary-container text-on-primary-container">
+          <FileText className="w-4 h-4" strokeWidth={1.5} />
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="text-label-md text-on-surface-variant">{label}</div>
-          {linked ? (
-            <div className="text-body-md text-on-surface truncate">
-              {doc.file_name}
-              {doc.file_size_bytes ? (
-                <span className="text-body-sm text-on-surface-variant ml-2">
-                  ({formatFileSize(doc.file_size_bytes)})
-                </span>
-              ) : null}
-            </div>
-          ) : (
-            <div className="text-body-sm text-on-surface-variant italic">{description}</div>
-          )}
+          <div className="text-label-sm text-on-surface-variant">{label}</div>
+          <div className="text-body-sm text-on-surface truncate">
+            {doc.file_name}
+            {doc.file_size_bytes ? (
+              <span className="text-label-sm text-on-surface-variant ml-2">
+                ({formatFileSize(doc.file_size_bytes)})
+              </span>
+            ) : null}
+          </div>
         </div>
 
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {/* Shared hidden file input for upload / replace */}
-          <input
-            ref={fileRef}
-            type="file"
-            accept={accept}
-            hidden
-            onChange={(e) => {
-              if (e.target.files?.[0]) onUploadFile(e.target.files[0]);
-              e.target.value = '';
-            }}
-          />
-
-          {linked ? (
+        <div className="flex items-center flex-shrink-0">
+          {fileInput}
+          {canPreview && (
+            <button type="button" onClick={onPreview} className={iconBtn} title="Preview PDF">
+              <Eye className="w-4 h-4" />
+            </button>
+          )}
+          <button type="button" onClick={openInNewTab} className={iconBtn} title="Open in new tab">
+            <ExternalLink className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={copyLink}
+            className={copied ? 'p-2 rounded-full bg-primary text-on-primary' : iconBtn}
+            title={copied ? 'Link copied!' : 'Copy link'}
+          >
+            {copied ? <Check className="w-4 h-4" /> : <LinkIcon className="w-4 h-4" />}
+          </button>
+          {canEdit && (
             <>
-              {canPreview && (
-                <button
-                  type="button"
-                  onClick={onPreview}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity"
-                  title="Preview PDF"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  Preview
-                </button>
-              )}
-              <button type="button" onClick={openInNewTab} className={iconBtn} title="Open in new tab">
-                <ExternalLink className="w-4 h-4" />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+                className={iconBtn}
+                title="Replace — upload from your computer"
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
               </button>
               <button
                 type="button"
-                onClick={copyLink}
-                className={copied ? 'p-2 rounded-full bg-primary text-on-primary' : iconBtn}
-                title={copied ? 'Link copied!' : 'Copy link'}
+                onClick={onRemove}
+                disabled={busy}
+                className="p-2 rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-colors disabled:opacity-50"
+                title="Remove"
               >
-                {copied ? <Check className="w-4 h-4" /> : <LinkIcon className="w-4 h-4" />}
+                <Trash2 className="w-4 h-4" />
               </button>
-              {canEdit && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={busy}
-                    className={iconBtn}
-                    title="Replace — upload from your computer"
-                  >
-                    {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onRemove}
-                    disabled={busy}
-                    className="p-2 rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-colors disabled:opacity-50"
-                    title="Remove"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </>
-              )}
             </>
-          ) : (
-            canEdit && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={busy}
-                  title="Upload from your computer"
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  {busy ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Upload className="w-3.5 h-3.5" />
-                  )}
-                  Upload
-                </button>
-              </>
-            )
           )}
         </div>
       </div>
