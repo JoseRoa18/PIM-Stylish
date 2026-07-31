@@ -736,8 +736,28 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
 // right of the 256px sidebar, so its left edge sits at calc(50vw - 448px).
 function TabBar({ tabs, active, onChange, variants = [] }) {
   const sentinelRef = useRef(null);
+  const stripRef = useRef(null);
   const [scrolledPast, setScrolledPast] = useState(false);
+  // Edge fades hint that the strip scrolls sideways when tabs don't all fit.
+  const [edges, setEdges] = useState({ atStart: true, atEnd: true });
   const sortedVariants = [...variants].sort((a, b) => a.sku.localeCompare(b.sku));
+
+  const updateEdges = () => {
+    const el = stripRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    setEdges({ atStart: el.scrollLeft <= 1, atEnd: el.scrollLeft >= max - 1 });
+  };
+
+  useEffect(() => {
+    updateEdges();
+    const el = stripRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(updateEdges);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild); // nav grows when variants load
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -757,9 +777,10 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
           rail-wide screens it scrolls away naturally (the rail takes over).
           The scroll container is <main>, which already starts below the
           topbar — so the pin offset is 0, not the topbar height. */}
-      <div className={`sticky top-0 z-20 bg-surface min-[1820px]:static min-[1820px]:bg-transparent -mx-6 px-6 border-b border-outline-variant overflow-x-auto scrollbar-hide ${
+      <div className={`sticky top-0 z-20 bg-surface min-[1820px]:static min-[1820px]:bg-transparent -mx-6 border-b border-outline-variant relative ${
         scrolledPast ? 'shadow-md shadow-black/5 min-[1820px]:shadow-none' : ''
       }`}>
+        <div ref={stripRef} onScroll={updateEdges} className="overflow-x-auto scrollbar-hide px-6">
         <nav className="flex min-w-max gap-1 items-center" role="tablist">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -808,6 +829,15 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
             </div>
           )}
         </nav>
+        </div>
+
+        {/* Edge fades — visual hint that more tabs hide beyond the fold. */}
+        {!edges.atStart && (
+          <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-surface to-transparent min-[1820px]:hidden" />
+        )}
+        {!edges.atEnd && (
+          <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-surface to-transparent min-[1820px]:hidden" />
+        )}
       </div>
 
       {/* Vertical rail — docks in the left gutter once the strip is out of view. */}

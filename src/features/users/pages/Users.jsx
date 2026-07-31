@@ -119,7 +119,7 @@ export default function Users() {
       )}
 
       {/* Table */}
-      <div className="bg-surface border border-outline-variant rounded-2xl overflow-hidden">
+      <div className="bg-surface border border-outline-variant rounded-2xl overflow-x-auto">
         {loading ? (
           <div className="py-16 flex items-center justify-center text-on-surface-variant text-body-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading users…
@@ -136,7 +136,7 @@ export default function Users() {
             </button>
           </div>
         ) : (
-          <table className="w-full text-left">
+          <table className="w-full min-w-[560px] text-left">
             <thead>
               <tr className="border-b border-outline-variant text-label-md text-on-surface-variant">
                 <th className="px-5 py-3 font-medium">User</th>

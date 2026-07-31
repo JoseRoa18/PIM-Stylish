@@ -54,9 +54,9 @@ export default function Syndication() {
                 {c.logo ? <img src={c.logo} alt="" className="w-6 h-6" /> : c.letter}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-title-md text-on-surface font-medium">{c.name}</p>
-                  <span className={`px-2 py-0.5 rounded-full text-label-sm ${c.envClass}`}>{c.env}</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="text-title-md text-on-surface font-medium truncate">{c.name}</p>
+                  <span className={`px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap flex-shrink-0 ${c.envClass}`}>{c.env}</span>
                 </div>
                 <p className="text-body-sm text-on-surface-variant truncate">{c.tagline}</p>
               </div>

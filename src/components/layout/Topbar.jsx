@@ -22,6 +22,17 @@ export default function Topbar({ onMenuClick }) {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [compact, setCompact] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches,
+  );
+
+  // Short placeholder on phones — the full one clips to a single letter.
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const onChange = (e) => setCompact(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
@@ -35,10 +46,13 @@ export default function Topbar({ onMenuClick }) {
   const showEmpty = showDropdown && !loading && !error && results.length === 0;
   const showLoadingOnly = showDropdown && loading && results.length === 0;
 
-  // Reset highlight when results change
-  useEffect(() => {
+  // Reset highlight when results change — adjusted during render instead of
+  // in an effect so it doesn't trigger a second render pass after commit.
+  const [prevResults, setPrevResults] = useState(results);
+  if (prevResults !== results) {
+    setPrevResults(results);
     setActiveIndex(-1);
-  }, [results]);
+  }
 
   // Click-outside closes the dropdown
   useEffect(() => {
@@ -151,11 +165,11 @@ export default function Topbar({ onMenuClick }) {
             }}
             onFocus={() => trimmed && setIsOpen(true)}
             onKeyDown={handleKeyDown}
-            placeholder="Search by SKU or product name…"
+            placeholder={compact ? 'Search…' : 'Search by SKU or product name…'}
             aria-label="Search products"
             aria-autocomplete="list"
             aria-expanded={showDropdown}
-            className="w-full pl-10 pr-20 py-2 bg-surface-container border border-outline-variant rounded-full text-body-md placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+            className="w-full pl-10 pr-10 sm:pr-20 py-2 bg-surface-container border border-outline-variant rounded-full text-body-md placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
           />
           {/* Right-side affordances inside the input */}
           <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-on-surface-variant">
@@ -265,7 +279,7 @@ export default function Topbar({ onMenuClick }) {
       </div>
 
       {/* Right side: user */}
-      <div className="flex items-center gap-2 ml-6">
+      <div className="flex items-center gap-2 ml-2 sm:ml-6">
         <ThemeToggle />
         <div className="flex items-center gap-2 p-1 pr-3 rounded-full">
           <div className="w-8 h-8 rounded-full bg-primary text-on-primary font-semibold flex items-center justify-center text-sm">
