@@ -127,9 +127,10 @@ function buildObjectPath(sku, fileName) {
   return `${sku}/${base}-${rand}.${ext}`;
 }
 
-// Storage rejects oversized uploads anyway, but failing early gives a clear
-// message instead of a generic 413 after minutes of uploading.
-const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+// Storage rejects oversized uploads anyway (project + bucket limits are set
+// to 400 MB), but failing early gives a clear message instead of a generic
+// 413 after minutes of uploading.
+const MAX_VIDEO_BYTES = 400 * 1024 * 1024;
 
 /**
  * Videos and documents are FAMILY-SHARED: adding one to any variant registers
@@ -219,7 +220,7 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
   const oversized = list.find((f) => f.type.startsWith('video/') && f.size > MAX_VIDEO_BYTES);
   if (oversized) {
     throw new Error(
-      `"${oversized.name}" is ${Math.round(oversized.size / 1024 / 1024)} MB — videos over 200 MB should be hosted externally (add them with "Video URL").`,
+      `"${oversized.name}" is ${Math.round(oversized.size / 1024 / 1024)} MB — videos over 400 MB should be hosted externally (add them with "Video URL").`,
     );
   }
 
