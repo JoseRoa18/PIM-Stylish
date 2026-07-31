@@ -53,12 +53,13 @@ function reorderByEdge(list, startIndex, indexOfTarget, edge) {
   return result;
 }
 
-export default function MediaSection({ sku, familyNumber = null }) {
+export default function MediaSection({ sku, familyNumber = null, category = null }) {
   const confirm = useConfirm();
   // Videos are family-shared: uploads/links land on every variant of the
-  // family, and removals clear them family-wide. Only used for messaging —
-  // the API resolves the family itself.
-  const inFamily = familyNumber != null;
+  // family, and removals clear them family-wide. EXCEPT sinks — their
+  // variants differ in gauge/mount, so media stays per-product. Only used
+  // for messaging — the API resolves this itself.
+  const inFamily = familyNumber != null && !category?.includes('sink');
   const { canEditMedia: canEdit } = useAuth();
   const { images, videos, loading, error, reload, mutate } = useProductMedia(sku);
   const [busy, setBusy] = useState(false);

@@ -136,19 +136,30 @@ const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
  * it on every product of the same variant family (one file in Storage, one
  * product_media row per SKU, all pointing at the same URL). Images stay
  * per-variant. These helpers resolve the family and keep row bookkeeping.
+ *
+ * EXCEPTION — sink categories are never family-shared: sink families group
+ * different constructions (S-300XG is 16G undermount, S-300TG is 18G dual
+ * mount…), so their spec sheets, installation docs and videos genuinely
+ * differ per variant.
  */
 function isFamilyShared(mediaType) {
   return mediaType === 'video' || mediaType === 'document';
 }
 
-/** All SKUs of the product's variant family (always includes `sku` itself). */
+/** Sink categories keep docs/videos per-product (see note above). */
+const familySharableCategory = (category) => !/sink/.test(category ?? '');
+
+/**
+ * All SKUs the media should land on: the product's variant family — or just
+ * the product itself when it's a sink (per-variant documents/videos).
+ */
 async function getFamilySkus(sku) {
   const { data: prod } = await supabase
     .from('products')
-    .select('family_number')
+    .select('family_number, category')
     .eq('sku', sku)
     .maybeSingle();
-  if (prod?.family_number == null) return [sku];
+  if (prod?.family_number == null || !familySharableCategory(prod?.category)) return [sku];
   const { data: fam } = await supabase
     .from('products')
     .select('sku')

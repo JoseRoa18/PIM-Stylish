@@ -1132,7 +1132,7 @@ function PricingTab({ product, edit }) {
 function MediaTab({ sku, category, familyNumber }) {
   return (
     <div className="space-y-6">
-      <MediaSection sku={sku} familyNumber={familyNumber} />
+      <MediaSection sku={sku} familyNumber={familyNumber} category={category} />
       <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} />
     </div>
   );

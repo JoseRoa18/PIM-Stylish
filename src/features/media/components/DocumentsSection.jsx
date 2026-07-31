@@ -76,8 +76,9 @@ export default function DocumentsSection({ sku, category, familyNumber = null })
   const confirm = useConfirm();
   // Documents are family-shared: uploads land on every variant of the family
   // (replacing the slot family-wide) and removals clear them family-wide.
-  // Only used for messaging — the API resolves the family itself.
-  const inFamily = familyNumber != null;
+  // EXCEPT sinks — their variants differ in gauge/mount, so documents stay
+  // per-product. Only used for messaging — the API resolves this itself.
+  const inFamily = familyNumber != null && !category?.includes('sink');
   const isFaucet = category?.includes('faucet');
   const visibleTypes = DOCUMENT_TYPES.filter(
     (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id)),
