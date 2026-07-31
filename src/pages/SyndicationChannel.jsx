@@ -4,7 +4,6 @@ import WixConnectorCard from '@/features/syndication/components/WixConnectorCard
 import WayfairConnectorCard from '@/features/syndication/components/WayfairConnectorCard';
 import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import ReadOnlyChannelCard from '@/features/syndication/components/ReadOnlyChannelCard';
-import BestBuyPriceSyncCard from '@/features/syndication/components/BestBuyPriceSyncCard';
 import { LIVE_CHANNELS } from '@/features/syndication/lib/channels';
 
 function WayfairWorkspace() {
@@ -16,19 +15,10 @@ function WayfairWorkspace() {
   );
 }
 
-function BestBuyWorkspace() {
-  return (
-    <div className="space-y-6">
-      <ReadOnlyChannelCard channel="bestbuy" />
-      <BestBuyPriceSyncCard />
-    </div>
-  );
-}
-
 const WORKSPACES = {
   wix: WixConnectorCard,
   wayfair: WayfairWorkspace,
-  bestbuy: BestBuyWorkspace,
+  bestbuy: () => <ReadOnlyChannelCard channel="bestbuy" />,
   walmart_us: () => <ReadOnlyChannelCard channel="walmart_us" />,
   walmart_ca: () => <ReadOnlyChannelCard channel="walmart_ca" />,
 };

@@ -18,8 +18,7 @@ const CHANNELS = {
       { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} price differences vs PIM MSRP` },
       { icon: OctagonX, tone: 'text-error', label: `${s.errors} out of stock` },
     ],
-    note: 'Offers, stock and prices are pulled from the Mirakl API. The only write-back is the MSRP price sync below — nothing else is ever written.',
-    shield: 'Read connection with one write path: MSRP price sync (admin/editor only).',
+    note: 'Offers, stock and prices are pulled from the Mirakl API. Nothing is ever written to Best Buy — and prices in particular are NEVER pushed.',
   },
   walmart_us: {
     healthTab: 'walmart_us',

@@ -1,11 +1,8 @@
 import { supabase } from '@/lib/supabase';
-import { logActivity } from '@/features/activity/api/activityLog';
 
-// Best Buy Canada (Mirakl).
-// - Pulls (offers/stock/prices) are unrestricted reads.
-// - The ONE write path is price sync (2026-07-31): pushing PIM MSRPs to
-//   offers that already exist, per explicit SKU list, admin/editor only.
-//   Nothing else is ever written (no offer create/delete, no stock).
+// Best Buy Canada (Mirakl) — READ-ONLY integration. The edge function only
+// GETs the seller's offers; nothing is written to Best Buy, and PRICES in
+// particular are never pushed (explicit user rule, 2026-07-31).
 
 async function invokeFn(name, body = {}) {
   const { data, error } = await supabase.functions.invoke(name, { body });
@@ -66,34 +63,4 @@ export async function refreshBestBuyOffers() {
   });
 
   return { total, priceMismatches };
-}
-
-/**
- * Re-read the LIVE offers and return the price updates a push would send
- * ({ sku, from, to }). No write happens. Empty skus = every mismatch.
- */
-export async function previewBestBuyPriceSync(skus) {
-  return invokeFn('bestbuy-push-prices', { action: 'preview', skus });
-}
-
-/**
- * Push PIM MSRPs to the listed SKUs' live Best Buy offers (price only,
- * async Mirakl import). The function re-validates against the live offers,
- * so already-matching SKUs are skipped. Admin/editor only.
- */
-export async function pushBestBuyPrices(skus) {
-  const data = await invokeFn('bestbuy-push-prices', { action: 'push', skus });
-  logActivity({
-    action: 'push',
-    entityType: 'product',
-    target: 'bestbuy',
-    summary: `Pushed ${data.updates?.length ?? 0} MSRP price${(data.updates?.length ?? 0) === 1 ? '' : 's'} to Best Buy`,
-    metadata: { importId: data.importId, updates: data.updates },
-  });
-  return data;
-}
-
-/** Track the async Mirakl price import until it finishes applying. */
-export async function getBestBuyImportStatus(importId) {
-  return invokeFn('bestbuy-push-prices', { action: 'status', importId });
 }
