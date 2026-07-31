@@ -361,6 +361,8 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const { product, loading, error, notFound, mergeProduct, refetch } = useProduct(sku);
   const { primary, media } = useProductMedia(sku);
+  // Family siblings for the quick-switch list under the floating tab rail.
+  const { variants: familyVariants } = useVariants(sku, product?.family_number ?? null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -532,7 +534,7 @@ export default function ProductDetail() {
         <div className="mb-4 px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">{saveError}</div>
       )}
 
-      <TabBar tabs={TABS} active={activeTab} onChange={setTab} />
+      <TabBar tabs={TABS} active={activeTab} onChange={setTab} variants={familyVariants} />
 
       <div className="mt-6">
         {activeTab === 'overview' && (
@@ -732,9 +734,10 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
 // narrower screens the strip itself just pins flat under the 64px topbar.
 // Rail geometry: content column is max-w-6xl (1152px) centered in the area
 // right of the 256px sidebar, so its left edge sits at calc(50vw - 448px).
-function TabBar({ tabs, active, onChange }) {
+function TabBar({ tabs, active, onChange, variants = [] }) {
   const sentinelRef = useRef(null);
   const [scrolledPast, setScrolledPast] = useState(false);
+  const sortedVariants = [...variants].sort((a, b) => a.sku.localeCompare(b.sku));
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -754,8 +757,10 @@ function TabBar({ tabs, active, onChange }) {
           rail-wide screens it scrolls away naturally (the rail takes over).
           The scroll container is <main>, which already starts below the
           topbar — so the pin offset is 0, not the topbar height. */}
-      <div className="sticky top-0 z-20 bg-surface min-[1820px]:static min-[1820px]:bg-transparent -mx-6 px-6 border-b border-outline-variant overflow-x-auto scrollbar-hide">
-        <nav className="flex min-w-max gap-1" role="tablist">
+      <div className={`sticky top-0 z-20 bg-surface min-[1820px]:static min-[1820px]:bg-transparent -mx-6 px-6 border-b border-outline-variant overflow-x-auto scrollbar-hide ${
+        scrolledPast ? 'shadow-md shadow-black/5 min-[1820px]:shadow-none' : ''
+      }`}>
+        <nav className="flex min-w-max gap-1 items-center" role="tablist">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = active === tab.key;
@@ -772,6 +777,36 @@ function TabBar({ tabs, active, onChange }) {
               </button>
             );
           })}
+
+          {/* On screens without room for the side rail, family variants live
+              at the end of the strip as compact pills. */}
+          {sortedVariants.length > 0 && (
+            <div className="ml-auto flex items-center gap-1.5 pl-4 min-[1820px]:hidden">
+              <span className="h-5 w-px bg-outline-variant" aria-hidden />
+              {sortedVariants.map((v) => (
+                <Link
+                  key={v.sku}
+                  to={`/catalog/${encodeURIComponent(v.sku)}${active !== 'overview' ? `?tab=${active}` : ''}`}
+                  className="flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border border-outline-variant text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors whitespace-nowrap"
+                  title={`${v.sku}${v.finish ? ` · ${v.finish}` : ''}`}
+                >
+                  {v.primary_image ? (
+                    <img
+                      src={getThumbnailUrl(v.primary_image.storage_path, 64)}
+                      alt=""
+                      className="w-5 h-5 rounded-full object-cover flex-shrink-0"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="w-5 h-5 rounded-full bg-surface-container flex items-center justify-center flex-shrink-0">
+                      <ImageIcon className="w-3 h-3 text-on-surface-variant" />
+                    </span>
+                  )}
+                  <span className="font-mono">{v.sku}</span>
+                </Link>
+              ))}
+            </div>
+          )}
         </nav>
       </div>
 
@@ -798,6 +833,45 @@ function TabBar({ tabs, active, onChange }) {
               </button>
             );
           })}
+
+          {/* Family variants — quick switch, keeping the current tab open. */}
+          {sortedVariants.length > 0 && (
+            <>
+              <div className="my-1 border-t border-outline-variant" />
+              <span className="px-3 pt-0.5 pb-1 text-label-sm uppercase tracking-wider text-on-surface-variant">
+                Variants
+              </span>
+              <div className="max-h-60 overflow-y-auto flex flex-col gap-0.5" data-lenis-prevent>
+                {sortedVariants.map((v) => (
+                  <Link
+                    key={v.sku}
+                    to={`/catalog/${encodeURIComponent(v.sku)}${active !== 'overview' ? `?tab=${active}` : ''}`}
+                    className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-surface-container-low transition-colors"
+                    title={`${v.sku}${v.finish ? ` · ${v.finish}` : ''}`}
+                  >
+                    {v.primary_image ? (
+                      <img
+                        src={getThumbnailUrl(v.primary_image.storage_path, 64)}
+                        alt=""
+                        className="w-6 h-6 rounded object-cover flex-shrink-0"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="w-6 h-6 rounded bg-surface-container flex items-center justify-center flex-shrink-0">
+                        <ImageIcon className="w-3 h-3 text-on-surface-variant" />
+                      </span>
+                    )}
+                    <span className="min-w-0">
+                      <span className="block text-body-sm font-mono text-on-surface leading-tight truncate">{v.sku}</span>
+                      {v.finish && (
+                        <span className="block text-label-sm text-on-surface-variant leading-tight truncate">{v.finish}</span>
+                      )}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </>
+          )}
         </nav>
       )}
     </>
