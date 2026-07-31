@@ -1,19 +1,21 @@
 import { Loader2, AlertCircle } from 'lucide-react';
-import { useDashboardMetrics } from '@/features/dashboard/hooks/useDashboardMetrics';
-import CatalogSnapshot from '@/features/dashboard/components/CatalogSnapshot';
-import MarketplaceSyncCard from '@/features/dashboard/components/MarketplaceSyncCard';
-import RecentActivityCard from '@/features/dashboard/components/RecentActivityCard';
+import { useDashboardData } from '@/features/dashboard/hooks/useDashboardData';
+import ActionNeededCard from '@/features/dashboard/components/ActionNeededCard';
+import MarketplaceHealthGrid from '@/features/dashboard/components/MarketplaceHealthGrid';
+import CatalogStatusCard from '@/features/dashboard/components/CatalogStatusCard';
+import ContentGapsCard from '@/features/dashboard/components/ContentGapsCard';
 import LaunchPipelineCard from '@/features/dashboard/components/LaunchPipelineCard';
+import RecentActivityCard from '@/features/dashboard/components/RecentActivityCard';
 
 export default function Dashboard() {
-  const { data, loading, error } = useDashboardMetrics();
+  const { data, loading, error } = useDashboardData();
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <header className="mb-6">
         <h1 className="text-display-lg text-on-surface">Dashboard</h1>
         <p className="text-body-md text-on-surface-variant mt-1">
-          Welcome back. Here's a snapshot of your catalog.
+          Welcome back. Here's what needs your attention today.
         </p>
       </header>
 
@@ -33,14 +35,28 @@ export default function Dashboard() {
 
       {!loading && !error && data && (
         <div className="space-y-6">
-          <CatalogSnapshot data={data} />
+          <MarketplaceHealthGrid
+            summaries={data.healthSummaries}
+            refreshing={data.healthRefreshing}
+          />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <MarketplaceSyncCard data={data} />
+            <CatalogStatusCard data={data} />
             <LaunchPipelineCard data={data} />
           </div>
 
-          <RecentActivityCard data={data} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ContentGapsCard
+              gaps={data.contentGaps}
+              hasSummaries={Object.keys(data.healthSummaries).length > 0}
+            />
+            <RecentActivityCard data={data} />
+          </div>
+
+          <ActionNeededCard
+            actions={data.actions}
+            hasChannelSnapshots={data.hasChannelSnapshots}
+          />
         </div>
       )}
     </div>
