@@ -343,19 +343,21 @@ function LanguageGroup({ docType, linkedLangs, children }) {
         <span className="text-label-md text-on-surface font-semibold flex-1 min-w-0 truncate">
           {docType.label}
         </span>
-        <span className="flex items-center gap-1 flex-shrink-0">
+        <span className="flex items-center gap-1.5 flex-shrink-0">
           {LANGUAGES.map((l) =>
             linkedLangs.has(l.id) ? (
               <span
                 key={l.id}
-                className="px-1.5 py-0.5 rounded bg-primary-container text-on-primary-container text-label-sm font-semibold"
+                title={`${l.label} — uploaded`}
+                className="px-1 py-px rounded-sm bg-primary-container text-on-primary-container text-[10px] leading-4 font-semibold tracking-wide"
               >
                 {l.short}
               </span>
             ) : (
               <span
                 key={l.id}
-                className="px-1.5 py-0.5 rounded border border-outline-variant text-on-surface-variant/60 text-label-sm"
+                title={`${l.label} — missing`}
+                className="text-[10px] leading-4 tracking-wide text-on-surface-variant/40"
               >
                 {l.short}
               </span>
