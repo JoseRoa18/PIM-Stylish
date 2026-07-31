@@ -340,7 +340,7 @@ function LanguageGroup({ docType, linkedLangs, children }) {
           className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
         />
         <FileText className="w-4 h-4 text-on-surface-variant flex-shrink-0" strokeWidth={1.5} />
-        <span className="text-label-md text-on-surface font-semibold flex-1 min-w-0 truncate">
+        <span className="text-body-md text-on-surface font-semibold flex-1 min-w-0 truncate">
           {docType.label}
         </span>
         <span className="flex items-center gap-1.5 flex-shrink-0">
