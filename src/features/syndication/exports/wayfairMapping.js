@@ -266,15 +266,31 @@ export const VARIANT_ATTR_NAME_RE = /^Variant Attribute Name On Site (\d+)$/;
 export const DOC_FILE_RE = /^Document File Name or URL (\d+)$/;
 export const DOC_TYPE_RE = /^Document Type (\d+)$/;
 // PIM product_media.document_type → Wayfair "Document Type" valid value.
+// Sink manuals split per installation type in the PIM; Wayfair files them
+// all under Installation & Assembly.
 export const DOC_TYPE_MAP = {
   spec_sheet: 'Specifications',
   installation_manual: 'Installation & Assembly',
+  installation_dual_mount: 'Installation & Assembly',
+  installation_undermount: 'Installation & Assembly',
+  installation_drop_in: 'Installation & Assembly',
+  installation_top_mount: 'Installation & Assembly',
   warranty_file: 'Warranty Information',
   owner_manual: 'Owner Manual',
   cut_out_template: 'Dimensions',
 };
 // Priority when filling the 3 document slots (spec → install → warranty first).
-export const DOC_TYPE_PRIORITY = ['spec_sheet', 'installation_manual', 'warranty_file', 'owner_manual', 'cut_out_template'];
+export const DOC_TYPE_PRIORITY = [
+  'spec_sheet',
+  'installation_manual',
+  'installation_dual_mount',
+  'installation_undermount',
+  'installation_drop_in',
+  'installation_top_mount',
+  'warranty_file',
+  'owner_manual',
+  'cut_out_template',
+];
 
 // Candidate second axes (beyond Finish) for families that repeat a finish,
 // per category. name = the Wayfair "Variant Grouping" Select value for that
@@ -420,8 +436,12 @@ export const WAYFAIR_CATEGORY_RULES = {
       if (/under/i.test(t)) return 'Undermount';
       if (/drop/i.test(t)) return 'Drop-In';
       if (isFarmhouse(p)) return 'Farmhouse / Apron';
-      const list = attr(p).installation_type ?? [];
-      return list.length > 1 ? 'Dual Mount' : list[0] ?? '';
+      // installation_type is a single value since 2026-07-31 (legacy arrays
+      // normalized); Wayfair has no Top Mount option — closest is Drop-In.
+      const it = [attr(p).installation_type ?? []].flat().filter(Boolean);
+      if (it.length > 1 || /dual/i.test(it[0] ?? '')) return 'Dual Mount';
+      if (/top/i.test(it[0] ?? '')) return 'Drop-In';
+      return it[0] ?? '';
     },
     'Overall Shape': (p) => alias(SHAPE_ALIAS, attr(p).sink_shape),
     'Pieces Included': (p) => sinkPieces(p),

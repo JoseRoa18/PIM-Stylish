@@ -25,6 +25,26 @@ const LANGUAGES = [
   { id: 'en_es', label: 'English-Spanish' },
 ];
 
+// Sink installation manuals split by installation type: a Dual Mount sink
+// carries THREE manuals (undermount + drop-in + dual mount), each in its
+// language variants. The generic 'installation_manual' stays for faucets,
+// accessories and legacy sink docs.
+const INSTALL_MANUAL_TYPES = {
+  undermount: { id: 'installation_undermount', label: 'Installation Manual — Undermount' },
+  drop_in: { id: 'installation_drop_in', label: 'Installation Manual — Drop-In' },
+  dual_mount: { id: 'installation_dual_mount', label: 'Installation Manual — Dual Mount' },
+  top_mount: { id: 'installation_top_mount', label: 'Installation Manual — Top Mount' },
+};
+const manualKindsFor = (installationType) => {
+  const t = String(installationType ?? '').toLowerCase();
+  if (/dual/.test(t)) return ['undermount', 'drop_in', 'dual_mount'];
+  if (/under/.test(t)) return ['undermount'];
+  if (/drop|top.?mount/.test(t) && /top/.test(t)) return ['top_mount'];
+  if (/drop/.test(t)) return ['drop_in'];
+  if (/top/.test(t)) return ['top_mount'];
+  return [];
+};
+
 const DOCUMENT_TYPES = [
   {
     id: 'spec_sheet',
@@ -65,14 +85,17 @@ const DOCUMENT_TYPES = [
 // into one slot per language.
 const slotKey = (typeId, language) => (language ? `${typeId}:${language}` : typeId);
 
-const LANG_AWARE = new Set(DOCUMENT_TYPES.filter((t) => t.languages).map((t) => t.id));
+const LANG_AWARE = new Set([
+  ...DOCUMENT_TYPES.filter((t) => t.languages).map((t) => t.id),
+  ...Object.values(INSTALL_MANUAL_TYPES).map((t) => t.id),
+]);
 
 
 // Faucets don't have CAD fabrication docs (DXF / cut-out template) — those are
 // for stone fabricators cutting countertops for sinks.
 const FAUCET_HIDDEN_TYPES = new Set(['dxf_file', 'cut_out_template']);
 
-export default function DocumentsSection({ sku, category, familyNumber = null }) {
+export default function DocumentsSection({ sku, category, familyNumber = null, installationType = null }) {
   const confirm = useConfirm();
   // Documents are family-shared: uploads land on every variant of the family
   // (replacing the slot family-wide) and removals clear them family-wide.
@@ -80,15 +103,32 @@ export default function DocumentsSection({ sku, category, familyNumber = null })
   // per-product. Only used for messaging — the API resolves this itself.
   const inFamily = familyNumber != null && !category?.includes('sink');
   const isFaucet = category?.includes('faucet');
+  const isSink = category?.includes('sink');
+  const { documents, loading, error, reload } = useProductMedia(sku);
+
+  // Sinks: the Installation Manual group expands into one group per manual
+  // the product's installation type requires (Dual Mount → three manuals).
+  // The generic group only remains visible while legacy docs still sit in it.
+  const manualKinds = isSink ? manualKindsFor(installationType) : [];
+  const hasLegacyManuals = documents.some((d) => d.document_type === 'installation_manual');
   const visibleTypes = DOCUMENT_TYPES.filter(
     (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id)),
-  );
+  ).flatMap((t) => {
+    if (t.id !== 'installation_manual' || manualKinds.length === 0) return [t];
+    const perType = manualKinds.map((k) => ({
+      id: INSTALL_MANUAL_TYPES[k].id,
+      label: INSTALL_MANUAL_TYPES[k].label,
+      extensions: ['.pdf'],
+      description: `${INSTALL_MANUAL_TYPES[k].label} PDF`,
+      languages: true,
+    }));
+    return hasLegacyManuals ? [...perType, { ...t, label: 'Installation Manual (generic)' }] : perType;
+  });
   const totalSlots = visibleTypes.reduce(
     (sum, t) => sum + (t.languages ? LANGUAGES.length : 1),
     0,
   );
   const { canEditMedia: canEdit } = useAuth();
-  const { documents, loading, error, reload } = useProductMedia(sku);
   const [busyKey, setBusyKey] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null);

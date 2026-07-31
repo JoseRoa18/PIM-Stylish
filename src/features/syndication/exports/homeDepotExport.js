@@ -27,6 +27,10 @@ import {
 const HD_DOC_TYPES = {
   spec_sheet: 'spec_sheet',
   installation_manual: 'installation_manual',
+  installation_dual_mount: 'installation_manual',
+  installation_undermount: 'installation_manual',
+  installation_drop_in: 'installation_manual',
+  installation_top_mount: 'installation_manual',
   warranty_file: 'warranty_file',
   owner_manual: 'owner_manual',
 };
@@ -49,6 +53,16 @@ const stripHtml = (h) =>
     .trim();
 const brandMap = (b) => (/azuni/i.test(b || '') ? 'AZUNI' : 'Stylish');
 const docUrl = (p, kind) => (p._docs ?? []).find((d) => d.raw === kind)?.url ?? '';
+// Sink manuals split by installation type in the PIM — HD has ONE slot, so
+// pick by relevance: dual-mount manual covers both, then the specific ones.
+const INSTALL_DOC_ORDER = ['installation_manual', 'installation_dual_mount', 'installation_undermount', 'installation_drop_in', 'installation_top_mount'];
+const installDocUrl = (p) => {
+  for (const k of INSTALL_DOC_ORDER) {
+    const u = docUrl(p, k);
+    if (u) return u;
+  }
+  return '';
+};
 
 // HD faucet collection from the PIM's product_type/spray wording.
 const faucetCollection = (p) => {
@@ -214,7 +228,7 @@ export const HOME_DEPOT_RULES = {
 
   // Documents
   'Warranty': (p) => docUrl(p, 'warranty_file'),
-  'Installation Guide': (p) => docUrl(p, 'installation_manual'),
+  'Installation Guide': installDocUrl,
   'Use and Care Manual': (p) => docUrl(p, 'owner_manual'),
   'Specification': (p) => docUrl(p, 'spec_sheet'),
 

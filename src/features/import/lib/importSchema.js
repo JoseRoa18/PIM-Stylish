@@ -109,7 +109,23 @@ export const FIELD_DEFS = [
   { key: 'material', label: 'Material', aliases: ['material'], type: 'text', target: { col: 'material' } },
   { key: 'finish', label: 'Finish / Color', aliases: ['finishcolor', 'colorfinish', 'finish'], type: 'text', target: { col: 'finish' } },
   // Dual-mount sinks list two options ("Undermount; Drop-In") → stored as array
-  { key: 'installation_type', label: 'Installation Options', aliases: ['installationoptions', 'installationtype'], type: 'list', target: { attr: 'installation_type' } },
+  // Single value since 2026-07-31 (Undermount / Drop-In / Dual Mount / Top
+  // Mount) — imports listing both undermount and drop-in mean Dual Mount.
+  {
+    key: 'installation_type',
+    label: 'Installation Options',
+    aliases: ['installationoptions', 'installationtype'],
+    type: 'text',
+    target: { attr: 'installation_type' },
+    transform: (v) => {
+      const parts = String(v ?? '').split(/[;,/]/).map((s) => s.trim()).filter(Boolean);
+      if (parts.length > 1 || /dual/i.test(parts[0] ?? '')) return 'Dual Mount';
+      if (/under/i.test(parts[0] ?? '')) return 'Undermount';
+      if (/drop/i.test(parts[0] ?? '')) return 'Drop-In';
+      if (/top/i.test(parts[0] ?? '')) return 'Top Mount';
+      return parts[0] ?? '';
+    },
+  },
   { key: 'sink_radius_mm', label: 'Sink Radius', aliases: ['sinkradius', 'sinkradiusmm'], type: 'number', target: { attr: 'sink_radius_mm' } },
 
   // ---------- External / internal dimensions ----------

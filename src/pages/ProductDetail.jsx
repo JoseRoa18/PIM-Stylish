@@ -95,7 +95,11 @@ function attr(product, key) {
 }
 
 // List attributes are edited as "A; B" text and stored as arrays.
-const LIST_ATTRS = new Set(['installation_type', 'accessories_included', 'durability_tags']);
+const LIST_ATTRS = new Set(['accessories_included', 'durability_tags']);
+
+// Sink installation is a single choice — dual mount is its own option, not
+// a pair of values (drives the per-type installation manual slots).
+const INSTALLATION_TYPE_OPTIONS = ['Undermount', 'Drop-In', 'Dual Mount', 'Top Mount'];
 
 // Attribute keys that must be coerced to numbers on save.
 const NUMBER_ATTRS = new Set([
@@ -548,7 +552,14 @@ export default function ProductDetail() {
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
         {activeTab === 'content' && <ContentTab product={product} edit={editCtx} />}
         {activeTab === 'pricing' && <PricingTab product={product} edit={editCtx} />}
-        {activeTab === 'media' && <MediaTab sku={product.sku} category={product.category} familyNumber={product.family_number} />}
+        {activeTab === 'media' && (
+          <MediaTab
+            sku={product.sku}
+            category={product.category}
+            familyNumber={product.family_number}
+            installationType={product.attributes?.installation_type}
+          />
+        )}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
       </div>
 
@@ -822,7 +833,8 @@ function SpecsTab({ product, edit }) {
           <EditableField label="Finish" fieldKey="finish" product={product} edit={edit} />
           <AttrField label="Craftsmanship" attrKey="craftsmanship" product={product} edit={edit} />
           {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" product={product} edit={edit} />}
-          {!isFaucet && <AttrListField label="Installation Type" attrKey="installation_type" product={product} edit={edit} hint="Separate multiple options with ; (e.g. Undermount; Drop-In)" />}
+          {isSink && <AttrField label="Installation Type" attrKey="installation_type" type="select" options={INSTALLATION_TYPE_OPTIONS} product={product} edit={edit} />}
+          {!isFaucet && !isSink && <AttrField label="Installation Type" attrKey="installation_type" product={product} edit={edit} />}
           {isKitchenSink && <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />}
           {isFaucet && <AttrField label="Application" attrKey="application" product={product} edit={edit} />}
           {isFaucet && <AttrField label="Lead Free" attrKey="lead_free" type="boolean" product={product} edit={edit} />}
@@ -1129,11 +1141,11 @@ function PricingTab({ product, edit }) {
 
 // ===================== Media & Marketplaces =====================
 
-function MediaTab({ sku, category, familyNumber }) {
+function MediaTab({ sku, category, familyNumber, installationType }) {
   return (
     <div className="space-y-6">
       <MediaSection sku={sku} familyNumber={familyNumber} category={category} />
-      <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} />
+      <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} installationType={installationType} />
     </div>
   );
 }

@@ -132,6 +132,10 @@ export function buildImportRows(parsed) {
       const def = entry.def;
       let value = coerce(def.type, rawVal);
 
+      // Field-specific normalization (e.g. installation_type collapses
+      // "Undermount; Drop-In" into "Dual Mount").
+      if (def.transform && value != null) value = def.transform(value) || null;
+
       // Snap known-dirty values to their canonical form (or drop them)
       const canon = VALUE_CANONICALS[def.key];
       if (canon && typeof value === 'string') {

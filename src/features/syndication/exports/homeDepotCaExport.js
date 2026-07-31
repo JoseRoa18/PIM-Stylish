@@ -35,6 +35,10 @@ import { accessoryKind } from '@/features/templates/api/templates';
 const HDCA_DOC_TYPES = {
   spec_sheet: 'spec_sheet',
   installation_manual: 'installation_manual',
+  installation_dual_mount: 'installation_manual',
+  installation_undermount: 'installation_manual',
+  installation_drop_in: 'installation_manual',
+  installation_top_mount: 'installation_manual',
   warranty_file: 'warranty_file',
   owner_manual: 'owner_manual',
 };
