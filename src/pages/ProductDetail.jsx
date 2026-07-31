@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -726,28 +726,68 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
 
 // ===================== Tab bar =====================
 
+// Sticky under the 64px topbar. While the page header is visible the bar is
+// the classic underline strip; once it pins, it morphs into a floating,
+// centered pill (blur + shadow, inset from the edges) so the tabs stay one
+// tap away no matter how deep the scroll.
 function TabBar({ tabs, active, onChange }) {
+  const sentinelRef = useRef(null);
+  const [stuck, setStuck] = useState(false);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+    const obs = new IntersectionObserver(
+      ([entry]) => setStuck(!entry.isIntersecting),
+      { rootMargin: '-64px 0px 0px 0px' }, // account for the sticky topbar
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   return (
-    <div className="border-b border-outline-variant overflow-x-auto scrollbar-hide -mx-6 px-6">
-      <nav className="flex min-w-max gap-1" role="tablist">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = active === tab.key;
-          return (
-            <button key={tab.key} type="button" role="tab" aria-selected={isActive}
-              onClick={() => onChange(tab.key)}
-              className={`inline-flex items-center gap-2 px-4 py-3 text-body-md whitespace-nowrap border-b-2 -mb-px transition-colors ${
-                isActive
-                  ? 'border-primary text-primary font-semibold'
-                  : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
-              }`}>
-              <Icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </nav>
-    </div>
+    <>
+      <div ref={sentinelRef} aria-hidden className="h-px -mt-px" />
+      <div
+        className={`sticky top-16 z-20 -mx-6 px-6 overflow-x-auto scrollbar-hide transition-all duration-300 ${
+          stuck ? 'py-2' : 'border-b border-outline-variant'
+        }`}
+      >
+        <nav
+          role="tablist"
+          className={`flex min-w-max gap-1 transition-all duration-300 ${
+            stuck
+              ? 'mx-auto w-max rounded-full border border-outline-variant bg-surface/85 backdrop-blur-md shadow-lg px-1.5 py-1'
+              : ''
+          }`}
+        >
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = active === tab.key;
+            return (
+              <button key={tab.key} type="button" role="tab" aria-selected={isActive}
+                onClick={() => onChange(tab.key)}
+                className={
+                  stuck
+                    ? `inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-body-md whitespace-nowrap transition-colors ${
+                        isActive
+                          ? 'bg-primary-container text-on-primary-container font-semibold'
+                          : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low'
+                      }`
+                    : `inline-flex items-center gap-2 px-4 py-3 text-body-md whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                        isActive
+                          ? 'border-primary text-primary font-semibold'
+                          : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
+                      }`
+                }>
+                <Icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+    </>
   );
 }
 
