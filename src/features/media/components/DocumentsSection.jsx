@@ -25,15 +25,22 @@ const LANGUAGES = [
   { id: 'en_es', label: 'English-Spanish' },
 ];
 
-// Sink installation manuals split by installation type: a Dual Mount sink
-// carries THREE manuals (undermount + drop-in + dual mount), each in its
-// language variants. The generic 'installation_manual' stays for faucets,
-// accessories and legacy sink docs.
+// Sink installation manuals AND DXF files split by installation type: a
+// Dual Mount sink carries THREE of each (undermount + drop-in + dual
+// mount). Manuals keep their language variants; DXFs are CAD files with no
+// language. The generic 'installation_manual' / 'dxf_file' stay for
+// faucets, accessories and legacy sink docs.
 const INSTALL_MANUAL_TYPES = {
   undermount: { id: 'installation_undermount', label: 'Installation Manual — Undermount' },
   drop_in: { id: 'installation_drop_in', label: 'Installation Manual — Drop-In' },
   dual_mount: { id: 'installation_dual_mount', label: 'Installation Manual — Dual Mount' },
   top_mount: { id: 'installation_top_mount', label: 'Installation Manual — Top Mount' },
+};
+const DXF_TYPES = {
+  undermount: { id: 'dxf_undermount', label: 'DXF File — Undermount' },
+  drop_in: { id: 'dxf_drop_in', label: 'DXF File — Drop-In' },
+  dual_mount: { id: 'dxf_dual_mount', label: 'DXF File — Dual Mount' },
+  top_mount: { id: 'dxf_top_mount', label: 'DXF File — Top Mount' },
 };
 const manualKindsFor = (installationType) => {
   const t = String(installationType ?? '').toLowerCase();
@@ -88,6 +95,7 @@ const slotKey = (typeId, language) => (language ? `${typeId}:${language}` : type
 const LANG_AWARE = new Set([
   ...DOCUMENT_TYPES.filter((t) => t.languages).map((t) => t.id),
   ...Object.values(INSTALL_MANUAL_TYPES).map((t) => t.id),
+  // DXF_TYPES stay OUT: CAD files carry no language variants.
 ]);
 
 
@@ -106,23 +114,36 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
   const isSink = category?.includes('sink');
   const { documents, loading, error, reload } = useProductMedia(sku);
 
-  // Sinks: the Installation Manual group expands into one group per manual
-  // the product's installation type requires (Dual Mount → three manuals).
-  // The generic group only remains visible while legacy docs still sit in it.
+  // Sinks: the Installation Manual and DXF groups expand into one entry per
+  // manual/DXF the product's installation type requires (Dual Mount → three
+  // of each). The generic groups only remain visible while legacy docs
+  // still sit in them.
   const manualKinds = isSink ? manualKindsFor(installationType) : [];
-  const hasLegacyManuals = documents.some((d) => d.document_type === 'installation_manual');
+  const hasLegacy = (typeId) => documents.some((d) => d.document_type === typeId);
   const visibleTypes = DOCUMENT_TYPES.filter(
     (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id)),
   ).flatMap((t) => {
-    if (t.id !== 'installation_manual' || manualKinds.length === 0) return [t];
-    const perType = manualKinds.map((k) => ({
-      id: INSTALL_MANUAL_TYPES[k].id,
-      label: INSTALL_MANUAL_TYPES[k].label,
-      extensions: ['.pdf'],
-      description: `${INSTALL_MANUAL_TYPES[k].label} PDF`,
-      languages: true,
-    }));
-    return hasLegacyManuals ? [...perType, { ...t, label: 'Installation Manual (generic)' }] : perType;
+    if (manualKinds.length === 0) return [t];
+    if (t.id === 'installation_manual') {
+      const perType = manualKinds.map((k) => ({
+        id: INSTALL_MANUAL_TYPES[k].id,
+        label: INSTALL_MANUAL_TYPES[k].label,
+        extensions: ['.pdf'],
+        description: `${INSTALL_MANUAL_TYPES[k].label} PDF`,
+        languages: true,
+      }));
+      return hasLegacy(t.id) ? [...perType, { ...t, label: 'Installation Manual (generic)' }] : perType;
+    }
+    if (t.id === 'dxf_file') {
+      const perType = manualKinds.map((k) => ({
+        id: DXF_TYPES[k].id,
+        label: DXF_TYPES[k].label,
+        extensions: ['.dxf'],
+        description: `${DXF_TYPES[k].label} — CAD drawing for fabricators`,
+      }));
+      return hasLegacy(t.id) ? [...perType, { ...t, label: 'DXF File (generic)' }] : perType;
+    }
+    return [t];
   });
   const totalSlots = visibleTypes.reduce(
     (sum, t) => sum + (t.languages ? LANGUAGES.length : 1),
