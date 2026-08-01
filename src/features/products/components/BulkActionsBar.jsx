@@ -9,7 +9,9 @@ import {
   AlertCircle,
   Download,
   Trash2,
+  Pencil,
 } from 'lucide-react';
+import BulkEditDialog from './BulkEditDialog';
 import { ThinkingOrb } from 'thinking-orbs';
 import { bulkUpdateProducts, getProduct, deleteProducts } from '../api/products';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
@@ -42,6 +44,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   const [busy, setBusy] = useState(null);
   const [result, setResult] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [editingFields, setEditingFields] = useState(false);
 
   const count = selectedSkus.size;
   if (count === 0) return null;
@@ -361,9 +364,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   }
 
   return (
-    // Fixed to the viewport (offset past the sidebar) so the bar sits at the
-    // bottom even when the table is short; pointer-events pass through the
-    // empty side gutters.
+    <>
+    {/* Fixed to the viewport (offset past the sidebar) so the bar sits at the
+        bottom even when the table is short; pointer-events pass through the
+        empty side gutters. The dialog lives OUTSIDE this wrapper — inside it,
+        pointer-events-none would swallow its clicks. */}
     <div className="fixed bottom-4 left-0 right-0 lg:left-64 z-30 px-4 sm:px-8 flex justify-center pointer-events-none">
       {/* No overflow-hidden here — the dropdown menus open above the bar. */}
       <div className="w-full max-w-5xl pointer-events-auto rounded-2xl border border-outline-variant bg-surface shadow-lg">
@@ -412,6 +417,17 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           <div className="flex items-center gap-2 flex-wrap">
             {canEdit && (
               <>
+                <button
+                  type="button"
+                  onClick={() => setEditingFields(true)}
+                  disabled={!!busy}
+                  title="Set shared attributes on all selected products"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit fields
+                </button>
+
                 <StatusDropdown disabled={!!busy} onChange={handleStatusChange} />
 
                 <button
@@ -478,6 +494,16 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         </div>
       </div>
     </div>
+
+    {editingFields && (
+      <BulkEditDialog
+        selectedSkus={selectedSkus}
+        products={products}
+        onClose={() => setEditingFields(false)}
+        onChanged={onChanged}
+      />
+    )}
+    </>
   );
 }
 
