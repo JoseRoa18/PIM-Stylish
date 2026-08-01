@@ -3,11 +3,14 @@ import { Loader2, CheckCircle2, AlertCircle, ShieldCheck, MinusCircle, Save } fr
 import { ThinkingOrb } from 'thinking-orbs';
 import { pushToWayfair, setWayfairItemGroupId } from '../api/wayfairSync';
 import { formatTimeAgo } from '@/lib/format';
+import { useAuth } from '@/features/auth/AuthContext';
 
 // Per-product Wayfair panel (Marketplaces tab): store the item-group id, then
 // validate or push content (copy + bullets) and images. Validate is a safe
 // dry-run.
 export default function WayfairProductCard({ product, onUpdate }) {
+  // Viewers see the card read-only: no group-id editing, validate or push.
+  const { canEdit } = useAuth();
   const [groupId, setGroupId] = useState(product.wayfair_item_group_id ?? '');
   const [savingId, setSavingId] = useState(false);
   const [busy, setBusy] = useState(null); // 'validate' | 'push' | null
@@ -72,41 +75,46 @@ export default function WayfairProductCard({ product, onUpdate }) {
             <input
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
+              readOnly={!canEdit}
               placeholder="GTQE1086 — needed to push copy + bullets"
-              className="flex-1 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="flex-1 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30 read-only:bg-surface-container-low read-only:text-on-surface-variant"
             />
-            <button
-              type="button"
-              onClick={saveGroupId}
-              disabled={savingId || !dirty}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant text-label-md hover:bg-surface-container-low transition-colors disabled:opacity-40"
-            >
-              {savingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Save
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={saveGroupId}
+                disabled={savingId || !dirty}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant text-label-md hover:bg-surface-container-low transition-colors disabled:opacity-40"
+              >
+                {savingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            )}
           </div>
         </label>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => run(true)}
-            disabled={!!busy}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
-          >
-            {busy === 'validate' ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
-            Validate
-          </button>
-          <button
-            type="button"
-            onClick={() => run(false)}
-            disabled={!!busy}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
-          >
-            {busy === 'push' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            Push to Wayfair
-          </button>
-        </div>
+        {canEdit && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => run(true)}
+              disabled={!!busy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+            >
+              {busy === 'validate' ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+              Validate
+            </button>
+            <button
+              type="button"
+              onClick={() => run(false)}
+              disabled={!!busy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
+            >
+              {busy === 'push' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Push to Wayfair
+            </button>
+          </div>
+        )}
 
         {result &&
           (result.error ? (

@@ -8,9 +8,12 @@ import { searchProducts, updateProduct, getProduct } from '../api/products';
 import { computeFamilyDrift } from '../lib/variantFields';
 import { supabase } from '@/lib/supabase';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { useAuth } from '@/features/auth/AuthContext';
 import Dialog from '@/components/ui/Dialog';
 
 export default function VariantsSection({ product, onProductChanged, onUnify }) {
+  // Viewers get the family info read-only: no linking, managing or unifying.
+  const { canEdit } = useAuth();
   const confirm = useConfirm();
   const { variants, loading, reload } = useVariants(product.sku, product.family_number);
   const [managing, setManaging] = useState(false);
@@ -34,14 +37,16 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
             <Layers className="w-4 h-4 text-on-surface-variant" />
             <h2 className="text-title-lg text-on-surface">Variants</h2>
           </div>
-          <button
-            type="button"
-            onClick={() => setManaging(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Link to variants
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setManaging(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Link to variants
+            </button>
+          )}
         </header>
         <div className="px-6 pb-6">
           <p className="text-body-sm text-on-surface-variant">
@@ -75,14 +80,16 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
             Other products in the same family — different color, finish, gauge, or accessories.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setManaging(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
-        >
-          <Settings className="w-3.5 h-3.5" />
-          Manage
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setManaging(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            Manage
+          </button>
+        )}
       </header>
 
       {drift.length > 0 && (
@@ -94,13 +101,15 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
               {' '}across this family: <span className="text-on-surface-variant">{drift.slice(0, 4).map((d) => d.label).join(', ')}{drift.length > 4 ? '…' : ''}</span>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => onUnify?.(drift)}
-            className="flex-shrink-0 self-end sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
-          >
-            Review &amp; unify
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => onUnify?.(drift)}
+              className="flex-shrink-0 self-end sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+            >
+              Review &amp; unify
+            </button>
+          )}
         </div>
       )}
 

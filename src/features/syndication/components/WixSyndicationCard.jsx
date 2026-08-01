@@ -25,6 +25,7 @@ import { pushProductToWix, readWixProduct } from '../api/wixSync';
 import { useWixCollections } from '../hooks/useWixCollections';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import ProductHealthBadge from '@/features/dashboard/components/ProductHealthBadge';
+import { useAuth } from '@/features/auth/AuthContext';
 
 // Each group has an icon and a short summary string. Colors stay on the
 // brand palette — accents come from interaction state, not per-section hues.
@@ -96,6 +97,8 @@ const FIELD_GROUPS = [
 const ALL_FIELD_KEYS = FIELD_GROUPS.flatMap((g) => g.fields.map((f) => f.key));
 
 export default function WixSyndicationCard({ product, media, onUpdate }) {
+  // Viewers see the link status and health, never the edit-&-push surface.
+  const { canEdit } = useAuth();
   const [form, setForm] = useState(() => buildForm(product));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -273,7 +276,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
         </div>
       ) : null}
 
-      {linked && !wixMissing && (
+      {canEdit && linked && !wixMissing && (
         <button
           type="button"
           onClick={() => setCardExpanded(!cardExpanded)}

@@ -25,6 +25,7 @@ import { generatePimExport, fetchAllProducts } from '@/features/syndication/expo
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { useAuth } from '@/features/auth/AuthContext';
 
 const WORKFLOW_OPTIONS = [
   { value: 'new', label: 'New' },
@@ -35,6 +36,9 @@ const WORKFLOW_OPTIONS = [
 
 export default function BulkActionsBar({ selectedSkus, products, filteredCount = 0, onSelectAll, onClear, onChanged }) {
   const confirm = useConfirm();
+  // Viewers keep the read-only actions (template exports); every mutation
+  // (status, Wix push/refresh, delete) is editor/admin only.
+  const { canEdit } = useAuth();
   const [busy, setBusy] = useState(null);
   const [result, setResult] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -406,32 +410,36 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <StatusDropdown disabled={!!busy} onChange={handleStatusChange} />
+            {canEdit && (
+              <>
+                <StatusDropdown disabled={!!busy} onChange={handleStatusChange} />
 
-            <button
-              type="button"
-              onClick={handlePushAll}
-              disabled={!!busy || linkedSkus.length === 0}
-              title={linkedSkus.length === 0 ? 'No linked products selected' : `Push ${linkedSkus.length} to Wix`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Send className="w-3.5 h-3.5" />
-              Push to Wix
-              {linkedSkus.length > 0 && linkedSkus.length !== count && (
-                <span className="text-on-surface-variant">({linkedSkus.length})</span>
-              )}
-            </button>
+                <button
+                  type="button"
+                  onClick={handlePushAll}
+                  disabled={!!busy || linkedSkus.length === 0}
+                  title={linkedSkus.length === 0 ? 'No linked products selected' : `Push ${linkedSkus.length} to Wix`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Push to Wix
+                  {linkedSkus.length > 0 && linkedSkus.length !== count && (
+                    <span className="text-on-surface-variant">({linkedSkus.length})</span>
+                  )}
+                </button>
 
-            <button
-              type="button"
-              onClick={handleRefreshAll}
-              disabled={!!busy || linkedSkus.length === 0}
-              title="Refresh Wix cache for selected"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Refresh from Wix
-            </button>
+                <button
+                  type="button"
+                  onClick={handleRefreshAll}
+                  disabled={!!busy || linkedSkus.length === 0}
+                  title="Refresh Wix cache for selected"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Refresh from Wix
+                </button>
+              </>
+            )}
 
             <ExportTemplateDropdown
               disabled={!!busy}
@@ -440,18 +448,22 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
               onSelect={handleExportMarketplace}
             />
 
-            <div className="w-px h-5 bg-outline-variant mx-1" />
+            {canEdit && (
+              <>
+                <div className="w-px h-5 bg-outline-variant mx-1" />
 
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={!!busy}
-              title="Permanently delete the selected products"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-error hover:bg-error-container hover:text-on-error-container transition-colors disabled:opacity-50"
-            >
-              {busy === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-              Delete
-            </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={!!busy}
+                  title="Permanently delete the selected products"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-error hover:bg-error-container hover:text-on-error-container transition-colors disabled:opacity-50"
+                >
+                  {busy === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  Delete
+                </button>
+              </>
+            )}
 
             <button
               type="button"
