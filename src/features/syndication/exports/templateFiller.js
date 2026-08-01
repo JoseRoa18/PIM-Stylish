@@ -273,3 +273,26 @@ export async function fetchDocsBySku(skus, typeMap, priority = []) {
   for (const k in bySku) bySku[k].sort((a, b) => rank(a.raw) - rank(b.raw));
   return bySku;
 }
+
+// Column fill counts for the post-export readiness report. Exporters call
+// hit(ci, value) wherever they write a cell, then attach report(labels, rows)
+// to their result so the UI can list which columns came out empty or partial
+// without the user opening the XLSX.
+export function createFillTracker() {
+  const filled = new Map();
+  return {
+    hit(ci, value) {
+      if (value === '' || value == null) return;
+      filled.set(ci, (filled.get(ci) ?? 0) + 1);
+    },
+    report(labels, rows) {
+      const columns = [];
+      for (let ci = 0; ci < labels.length; ci++) {
+        const label = labels[ci];
+        if (!label) continue;
+        columns.push({ label: String(label).trim(), filled: filled.get(ci) ?? 0 });
+      }
+      return { rows, columns };
+    },
+  };
+}

@@ -10,6 +10,7 @@ import {
   norm,
   fetchImagesBySku,
   fetchDocsBySku,
+  createFillTracker,
 } from './templateFiller';
 
 // Fills a Home Depot USA (Mirakl) template in place.
@@ -485,6 +486,7 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
   const imgEnd = labels.findIndex((l) => norm(l ?? '') === norm('Lifestyle Image'));
   const imgSlots = imgStart === -1 ? 0 : (imgEnd > imgStart ? imgEnd - imgStart + 1 : 7);
 
+  const fill = createFillTracker();
   let rowsXml = '';
   products.forEach((p, pi) => {
     const rowNum = DATA_ROW + pi;
@@ -495,7 +497,10 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
       // Consecutive image block wins over whatever rule the header may have.
       if (imgStart !== -1 && ci >= imgStart && ci < imgStart + imgSlots) {
         const img = p._images[ci - imgStart];
-        if (img) cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, img);
+        if (img) {
+          fill.hit(ci, img);
+          cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, img);
+        }
         continue;
       }
       const label = labels[ci];
@@ -511,6 +516,7 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
       if (v === '' || v == null) continue;
       v = resolveForColumn(v, opts);
       if (v === null || v === '') continue;
+      fill.hit(ci, v);
       cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
     }
     rowsXml += `<row r="${rowNum}" spans="1:${labels.length}">${cells}</row>`;
@@ -519,5 +525,5 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
   zip.file(tplPath, injectRows(sheetXml, rowsXml, DATA_ROW - 1 + products.length));
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
 
-  return { count: products.length };
+  return { count: products.length, fillReport: fill.report(labels, products.length) };
 }

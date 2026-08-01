@@ -10,6 +10,7 @@ import {
   templateExt,
   fetchImagesBySku,
   fetchDocsBySku,
+  createFillTracker,
 } from './templateFiller';
 
 // Fills a Walmart Canada "multilocale" spec (Version=3.x) in place.
@@ -203,6 +204,7 @@ export async function generateWalmartFromTemplate(templateStoragePath, products,
   const docBySku = await fetchDocsBySku(skus, WALMART_DOC_TYPES, Object.keys(WALMART_DOC_TYPES));
 
   const sheetXml = await zip.file(tplPath).async('string');
+  const fill = createFillTracker();
   let rowsXml = '';
   products.forEach((p, pi) => {
     const rowNum = DATA_ROW + pi;
@@ -223,6 +225,7 @@ export async function generateWalmartFromTemplate(templateStoragePath, products,
         ? computed[occurrence[ci] - 1] ?? ''
         : occurrence[ci] === 1 ? computed : '';
       if (v === '' || v == null) continue;
+      fill.hit(ci, v);
       cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
     }
     rowsXml += `<row r="${rowNum}" spans="1:${colKeys.length}">${cells}</row>`;
@@ -231,5 +234,7 @@ export async function generateWalmartFromTemplate(templateStoragePath, products,
   zip.file(tplPath, injectRows(sheetXml, rowsXml, DATA_ROW - 1 + products.length));
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
 
-  return { count: products.length };
+  // Report with display labels where available; XML names are the fallback.
+  const reportLabels = colKeys.map((k, ci) => (labels[ci] ? String(labels[ci]).trim() : k));
+  return { count: products.length, fillReport: fill.report(reportLabels, products.length) };
 }

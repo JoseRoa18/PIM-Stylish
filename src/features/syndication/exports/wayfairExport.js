@@ -29,6 +29,7 @@ import {
   fetchImagesBySku,
   fetchVideosBySku,
   fetchDocsBySku,
+  createFillTracker,
 } from './templateFiller';
 
 // Fills a Wayfair Product Addition template. The generic XLSX machinery lives
@@ -193,6 +194,7 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
   const extraImages = []; // [sku, url]
   const extraVideos = []; // [sku, url]
   const extraDocs = [];   // [sku, url, type]
+  const fillTracker = createFillTracker();
   ordered.forEach((p, pi) => {
     const rowNum = START + pi;
     const images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
@@ -232,6 +234,7 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
         try { v = rule(p, headerSet); } catch { v = ''; }
         if (validMaps[nm]) v = snap(v, validMaps[nm]);
       }
+      fillTracker.hit(ci, v);
       cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
     }
     rowsXml += `<row r="${rowNum}" spans="1:${ncols}">${cells}</row>`;
@@ -268,5 +271,10 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
     );
   }
 
-  return { count: ordered.length, families: groups.size, warnings };
+  return {
+    count: ordered.length,
+    families: groups.size,
+    warnings,
+    fillReport: fillTracker.report(names, ordered.length),
+  };
 }

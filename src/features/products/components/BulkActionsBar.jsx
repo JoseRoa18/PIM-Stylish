@@ -12,6 +12,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import BulkEditDialog from './BulkEditDialog';
+import ExportReadinessDialog from '@/features/syndication/components/ExportReadinessDialog';
 import { ThinkingOrb } from 'thinking-orbs';
 import { bulkUpdateProducts, getProduct, deleteProducts } from '../api/products';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
@@ -45,6 +46,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   const [result, setResult] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [editingFields, setEditingFields] = useState(false);
+  // Post-export column readiness ([{file, rows, columns}] → dialog).
+  const [readiness, setReadiness] = useState(null);
 
   const count = selectedSkus.size;
   if (count === 0) return null;
@@ -241,6 +244,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       if (!productList.length) throw new Error('Could not load product data.');
 
       const res = await generateMenardsFromTemplates(usable, productList);
+      const menardsReports = res.results
+        .filter((r) => r.fillReport)
+        .map((r) => ({ file: r.file, ...r.fillReport }));
+      if (menardsReports.length) setReadiness(menardsReports);
       const unmappedTotal = new Set(res.results.flatMap((r) => r.unmapped)).size;
       setResult({
         type: 'success',
@@ -287,7 +294,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       }
 
       // 3. Generate the combined XLSX and trigger download
-      await generateBBBFromTemplateBulk(bbb.storage_path, productList);
+      const res = await generateBBBFromTemplateBulk(bbb.storage_path, productList);
+      if (res?.fillReport) setReadiness([{ file: 'BB&B template', ...res.fillReport }]);
 
       setResult({
         type: 'success',
@@ -342,12 +350,15 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       if (!byTemplate.size && !noTemplate.length) throw new Error('Could not load product data.');
 
       const parts = [];
+      const reports = [];
       let warnings = 0;
       for (const { tmpl, label, products: productList } of byTemplate.values()) {
         const res = await generate(tmpl.storage_path, productList, `${prefix}_${label.replace(/[^a-z0-9_]+/gi, '_')}`);
         warnings += res.warnings?.length ?? 0;
+        if (res.fillReport) reports.push({ file: `${marketplace} — ${label}`, ...res.fillReport });
         parts.push(`${label}: ${res.count} product(s)${res.families != null ? ` / ${res.families} group(s)` : ''}`);
       }
+      if (reports.length) setReadiness(reports);
 
       if (!parts.length) {
         throw new Error(`No ${marketplace} template available for: ${noTemplate.join(', ')}. Upload the matching category template(s).`);
@@ -502,6 +513,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         onClose={() => setEditingFields(false)}
         onChanged={onChanged}
       />
+    )}
+
+    {readiness && (
+      <ExportReadinessDialog reports={readiness} onClose={() => setReadiness(null)} />
     )}
     </>
   );

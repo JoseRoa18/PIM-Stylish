@@ -7,6 +7,7 @@ import {
   indexToCol,
   injectRows,
   fetchImagesBySku,
+  createFillTracker,
 } from './templateFiller';
 
 // Menards (Syndigo "PIM Hierarchy") exporter.
@@ -215,6 +216,7 @@ async function fillOne(template, products) {
   const START = 6; // rows 1-5 are the Syndigo header block
   const unmapped = new Set();
   let rowsXml = '';
+  const fill = createFillTracker();
   products.forEach((p, pi) => {
     const rowNum = START + pi;
     const bullets = attr(p).bullet_points || [];
@@ -231,6 +233,7 @@ async function fillOne(template, products) {
         try { v = rule(p); } catch { v = ''; }
       }
       if (v === '' || v == null) continue;
+      fill.hit(ci, v);
       cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
     }
     rowsXml += `<row r="${rowNum}" spans="1:${ncols}">${cells}</row>`;
@@ -238,7 +241,14 @@ async function fillOne(template, products) {
 
   zip.file(dataPath, injectRows(sheetXml, rowsXml, START - 1 + products.length));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  return { file: template.file_name, blob, dataSheet, columns: ncols, unmapped: [...unmapped] };
+  return {
+    file: template.file_name,
+    blob,
+    dataSheet,
+    columns: ncols,
+    unmapped: [...unmapped],
+    fillReport: fill.report(names, products.length),
+  };
 }
 
 /**

@@ -360,9 +360,10 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
   const sheet = await findDataSheet(zip);
   const baseRow = sheet.headerRow + 1;
 
-  // Build cellData for each product (header → column letter → value)
-  const productCellData = productList.map(({ product, media }) => {
-    const rowData = buildRowData(product, media);
+  // Build cellData for each product (header → column letter → value).
+  // rowDatas is kept header-keyed for the readiness report at the end.
+  const rowDatas = productList.map(({ product, media }) => buildRowData(product, media));
+  const productCellData = rowDatas.map((rowData) => {
     const cellData = {};
     for (const [header, value] of Object.entries(rowData)) {
       const col = sheet.headers[header];
@@ -418,6 +419,18 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
     summary: `Exported ${productList.length} product(s) to a BB&B template`,
     metadata: { count: productList.length, skus: productList.map((p) => p.product?.sku).filter(Boolean) },
   });
+
+  // Readiness report: how many of the template's headed columns each export
+  // actually filled (rowData is header-keyed, so count per header).
+  const headerNames = Object.keys(sheet.headers);
+  const columns = headerNames.map((label) => ({
+    label,
+    filled: rowDatas.reduce(
+      (n, rd) => (rd[label] !== '' && rd[label] != null ? n + 1 : n),
+      0,
+    ),
+  }));
+  return { count: productList.length, fillReport: { rows: productList.length, columns } };
 }
 
 // ===================== Main export (single product) =====================

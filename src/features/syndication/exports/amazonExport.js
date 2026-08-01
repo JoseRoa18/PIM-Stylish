@@ -11,6 +11,7 @@ import {
   norm,
   fetchImagesBySku,
   fetchDocsBySku,
+  createFillTracker,
 } from './templateFiller';
 
 // Fills an Amazon flat-file template ("full-seller" .xlsm/.xlsx) in place.
@@ -102,6 +103,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   const imgBySku = await fetchImagesBySku(skus);
   const docBySku = await fetchDocsBySku(skus, AMAZON_DOC_TYPES, Object.keys(AMAZON_DOC_TYPES));
 
+  const fill = createFillTracker();
   let rowsXml = '';
   products.forEach((p, pi) => {
     const rowNum = dataRow + pi;
@@ -127,6 +129,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
       }
       if (v === '' || v == null) continue;
       v = snapTo(v, validValues[label]);
+      fill.hit(ci, v);
       cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
     }
     rowsXml += `<row r="${rowNum}" spans="1:${labels.length}">${cells}</row>`;
@@ -135,5 +138,5 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   zip.file(tplPath, injectRows(sheetXml, rowsXml, dataRow - 1 + products.length));
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
 
-  return { count: products.length };
+  return { count: products.length, fillReport: fill.report(labels, products.length) };
 }
