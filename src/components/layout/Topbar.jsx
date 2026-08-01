@@ -12,6 +12,7 @@ import {
 import { useAuth } from '@/features/auth/AuthContext';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import AccountMenu from '@/components/layout/AccountMenu';
+import PresenceStack from '@/components/layout/PresenceStack';
 import { useProductSearch } from '@/features/search/hooks/useProductSearch';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCategory } from '@/lib/format';
@@ -303,6 +304,7 @@ export default function Topbar({ onMenuClick }) {
 
       {/* Right side: user */}
       <div className="flex items-center gap-2 ml-2 sm:ml-6">
+        <PresenceStack />
         <ThemeToggle />
         <AccountMenu />
 
