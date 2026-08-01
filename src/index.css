@@ -66,6 +66,12 @@
 
   --color-surface-tint: #8b0000;
 
+  /* Marketplace brand colors — channel chips, logos, accents */
+  --color-brand-wix: #0c6efc;
+  --color-brand-wayfair: #7b189f;
+  --color-brand-bestbuy: #0046be;
+  --color-brand-walmart: #0071ce;
+
   /* ============================================
      STYLISH BRAND FONTS
      Real fonts if installed, Jost as web fallback
@@ -86,6 +92,16 @@
   --text-display-lg--font-weight: 500;
   --text-display-lg--font-family: "Century Gothic", "Jost", system-ui, sans-serif;
 
+  --text-display-md: 2.25rem;
+  --text-display-md--line-height: 1.15;
+  --text-display-md--font-weight: 500;
+  --text-display-md--font-family: "Century Gothic", "Jost", system-ui, sans-serif;
+
+  --text-display-sm: 1.75rem;
+  --text-display-sm--line-height: 1.2;
+  --text-display-sm--font-weight: 500;
+  --text-display-sm--font-family: "Century Gothic", "Jost", system-ui, sans-serif;
+
   /* Headline */
   --text-headline-md: 2rem;
   --text-headline-md--line-height: 1.2;
@@ -103,6 +119,11 @@
   --text-title-lg--font-weight: 500;
   --text-title-lg--font-family: "Century Gothic", "Jost", system-ui, sans-serif;
 
+  --text-title-md: 1rem;
+  --text-title-md--line-height: 1.5;
+  --text-title-md--font-weight: 500;
+  --text-title-md--font-family: "Century Gothic", "Jost", system-ui, sans-serif;
+
   /* Body: Futura Light */
   --text-body-lg: 1.125rem;
   --text-body-lg--line-height: 1.5;
@@ -117,9 +138,17 @@
   --text-body-sm--font-weight: 300;
 
   /* Label: small uppercase labels — slightly heavier weight */
+  --text-label-lg: 0.875rem;
+  --text-label-lg--line-height: 1.4;
+  --text-label-lg--font-weight: 500;
+
   --text-label-md: 0.75rem;
   --text-label-md--line-height: 1.4;
   --text-label-md--font-weight: 500;
+
+  --text-label-sm: 0.6875rem;
+  --text-label-sm--line-height: 1.45;
+  --text-label-sm--font-weight: 500;
 
   /* Code: SKUs, factory codes */
   --text-code-sm: 0.875rem;
@@ -190,6 +219,12 @@
   --color-inverse-primary: #8b0000;
 
   --color-surface-tint: #ffb4a8;
+
+  /* Marketplace brand colors lift to lighter tints on dark surfaces */
+  --color-brand-wix: #6fa9ff;
+  --color-brand-wayfair: #ce93e8;
+  --color-brand-bestbuy: #9dc2ff;
+  --color-brand-walmart: #7fb6ff;
 }
 
 /* ============================================

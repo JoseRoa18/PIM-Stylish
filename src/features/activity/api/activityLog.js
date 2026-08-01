@@ -28,7 +28,7 @@ export function setActivityActor(actor) {
  * @param {string}  e.action      create|update|delete|push|export|import|media
  * @param {string}  e.entityType  product|media|user|template
  * @param {string} [e.entityId]   SKU, media id, user id, ...
- * @param {string} [e.target]     pim|wix|bbb  (the "where"); defaults to 'pim'
+ * @param {string} [e.target]     pim|wix|bbb|wayfair|…  (the "where"); defaults to 'pim'
  * @param {string} [e.summary]    human-readable one-liner
  * @param {Object} [e.metadata]   changed keys, counts, dryRun, ...
  */
@@ -65,7 +65,7 @@ export async function logActivity({
  * @param {Object}  [opts]
  * @param {string}  [opts.actorId]     filter by user
  * @param {string}  [opts.action]      filter by action
- * @param {string}  [opts.target]      filter by site (pim|wix|bbb)
+ * @param {string}  [opts.target]      filter by site (pim|wix|bbb|wayfair|…)
  * @param {string}  [opts.entityType]  filter by entity type
  * @param {string}  [opts.search]      substring match on entity_id / summary
  * @param {string}  [opts.since]       ISO timestamp lower bound (occurred_at >=)

@@ -19,6 +19,8 @@ import {
 import { useActivity } from '@/features/activity/hooks/useActivity';
 import { useUsers } from '@/features/users/hooks/useUsers';
 import { formatTimeAgo } from '@/lib/format';
+import { humanizeSummary } from '@/lib/humanize';
+import Avatar from '@/components/ui/Avatar';
 
 // Action → icon + chip color. Keeps the timeline scannable at a glance.
 const ACTION_META = {
@@ -31,11 +33,20 @@ const ACTION_META = {
   media: { icon: ImageIcon, label: 'Media', className: 'bg-secondary-container text-on-secondary-container' },
 };
 
-// Target (the "where" / site). pim = internal edits.
+// Target (the "where" / site). pim = internal edits. Some channels were logged
+// under their raw API host, so those alias to the same chip.
+const WALMART_TARGET = { label: 'Walmart', className: 'bg-brand-walmart/15 text-brand-walmart' };
+const BESTBUY_TARGET = { label: 'Best Buy', className: 'bg-brand-bestbuy/15 text-brand-bestbuy' };
 const TARGET_META = {
   pim: { label: 'PIM', className: 'bg-surface-container-high text-on-surface-variant' },
-  wix: { label: 'Wix', className: 'bg-blue-500/15 text-blue-700 dark:text-blue-300' },
-  bbb: { label: 'Bed Bath & Beyond', className: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
+  wix: { label: 'Wix', className: 'bg-brand-wix/15 text-brand-wix' },
+  bbb: { label: 'Bed Bath & Beyond', className: 'bg-warning-container/60 text-on-warning-container' },
+  wayfair: { label: 'Wayfair', className: 'bg-brand-wayfair/15 text-brand-wayfair' },
+  walmart_us: WALMART_TARGET,
+  walmart_ca: WALMART_TARGET,
+  'marketplace.walmartapis.com': WALMART_TARGET,
+  bestbuy: BESTBUY_TARGET,
+  'marketplace.bestbuy.ca': BESTBUY_TARGET,
 };
 
 const ACTION_OPTIONS = [
@@ -49,10 +60,14 @@ const ACTION_OPTIONS = [
   { value: 'media', label: 'Media changes' },
 ];
 
+// Filter values must match the stored `target` column verbatim.
 const TARGET_OPTIONS = [
   { value: '', label: 'All locations' },
   { value: 'pim', label: 'PIM (internal)' },
   { value: 'wix', label: 'Wix' },
+  { value: 'wayfair', label: 'Wayfair' },
+  { value: 'marketplace.walmartapis.com', label: 'Walmart' },
+  { value: 'marketplace.bestbuy.ca', label: 'Best Buy' },
   { value: 'bbb', label: 'Bed Bath & Beyond' },
 ];
 
@@ -69,6 +84,23 @@ function skuLinkTarget(event) {
   const id = event.entity_id;
   if (!id || /\s/.test(id)) return null; // "3 products" etc.
   return id;
+}
+
+// Accounts without a full name would otherwise show a raw email while other
+// actors show a name — derive a readable one from the email instead.
+function nameFromEmail(email) {
+  const local = email?.split('@')[0];
+  if (!local) return null;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+// The action chip already announces the verb; drop it from the summary so a
+// row doesn't read "Edited · Edited product …".
+function dedupeLeadingVerb(summary, label) {
+  const lead = new RegExp(`^${label}\\s+`, 'i');
+  if (!lead.test(summary)) return summary;
+  const rest = summary.replace(lead, '');
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
 const PAGE_SIZE = 25;
@@ -115,7 +147,7 @@ export default function Activity() {
   const rangeEnd = Math.min(page * PAGE_SIZE, count);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
+    <div className="max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
@@ -255,19 +287,35 @@ function ActivityRow({ event }) {
     label: event.action,
     className: 'bg-surface-container-high text-on-surface-variant',
   };
-  const targetMeta = TARGET_META[event.target] ?? TARGET_META.pim;
+  const targetMeta = TARGET_META[event.target] ?? {
+    // Unknown channel: show the raw target capitalized rather than mislabeling it "PIM".
+    label: event.target ? event.target.charAt(0).toUpperCase() + event.target.slice(1) : 'PIM',
+    className: 'bg-surface-container-high text-on-surface-variant',
+  };
   const Icon = meta.icon;
-  const who = event.actor_name || event.actor_email || 'Unknown user';
-  const initial = (event.actor_name || event.actor_email || '?').charAt(0).toUpperCase();
+  const who = event.actor_name || nameFromEmail(event.actor_email) || 'Unknown user';
   const sku = skuLinkTarget(event);
   const when = new Date(event.occurred_at);
+
+  // Summaries are stored verbatim, so rows written before the copy fixes are
+  // sanitized at render: storage-vendor mentions, "(? matched)" from counts
+  // that never arrived, "(s)" pseudo-plurals, raw snake_case field names, and
+  // the leading verb the action chip already communicates.
+  const summary = dedupeLeadingVerb(
+    humanizeSummary(
+      (event.summary || '—')
+        .replace(/\s*\(supabase\)/gi, '')
+        .replace(/\s*\(\? matched\)/g, '')
+        .replace(/\b(\d+)\s+((?:[a-z]+ )?[a-z]+)\(s\)/gi, (_, n, noun) =>
+          `${n} ${noun}${Number(n) === 1 ? '' : 's'}`),
+    ),
+    meta.label,
+  );
 
   return (
     <li className="flex items-start gap-3 px-5 py-3.5 hover:bg-surface-container-low/50 transition-colors">
       {/* Actor avatar */}
-      <div className="w-9 h-9 rounded-full bg-primary text-on-primary font-semibold flex items-center justify-center text-sm flex-shrink-0">
-        {initial}
-      </div>
+      <Avatar name={event.actor_name} email={event.actor_email} />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
@@ -286,10 +334,7 @@ function ActivityRow({ event }) {
           )}
         </div>
 
-        <p className="text-body-md text-on-surface mt-1">
-          {/* Strip storage-vendor mentions written by stale clients still running old code. */}
-          {(event.summary || '—').replace(/\s*\(supabase\)/gi, '')}
-        </p>
+        <p className="text-body-md text-on-surface mt-1">{summary}</p>
 
         <div className="flex items-center gap-2 text-label-sm text-on-surface-variant mt-1 flex-wrap">
           <span className="font-medium text-on-surface-variant">{who}</span>
@@ -300,13 +345,18 @@ function ActivityRow({ event }) {
           {sku && (
             <>
               <span aria-hidden>·</span>
-              <Link
-                to={`/catalog/${encodeURIComponent(sku)}`}
-                className="inline-flex items-center gap-1 text-primary hover:underline"
-              >
-                {sku}
-                <ExternalLink className="w-3 h-3" />
-              </Link>
+              {event.action === 'delete' ? (
+                // The product no longer exists — don't link to a dead page.
+                <span className="font-mono text-on-surface-variant">{sku}</span>
+              ) : (
+                <Link
+                  to={`/catalog/${encodeURIComponent(sku)}`}
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                >
+                  {sku}
+                  <ExternalLink className="w-3 h-3" />
+                </Link>
+              )}
             </>
           )}
         </div>

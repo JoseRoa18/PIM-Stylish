@@ -23,7 +23,7 @@ export default function CatalogStatusCard({ data }) {
   });
 
   return (
-    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden flex flex-col">
       <Link
         to="/catalog"
         className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-2 hover:bg-surface-container-low/40 transition-colors group"
@@ -38,11 +38,15 @@ export default function CatalogStatusCard({ data }) {
         </span>
       </Link>
 
-      <div className="px-6 py-5">
+      {/* flex-1 + items-center: the card stretches to its grid neighbor's
+          height, so the donut sits in the vertical middle instead of leaving
+          the bottom half empty. The legend is capped so each value stays at a
+          scannable distance from its label. */}
+      <div className="px-6 py-5 flex-1 flex items-center">
         {segments.length > 0 ? (
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 w-full">
             <DonutChart data={segments} centerValue={total} centerLabel="products" />
-            <ul className="space-y-1.5 min-w-0 flex-1">
+            <ul className="space-y-1.5 min-w-0 w-full max-w-[240px]">
               {segments.map((s) => (
                 <li key={s.key} className="flex items-center gap-2 text-label-md">
                   <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.dot}`} />
@@ -53,7 +57,7 @@ export default function CatalogStatusCard({ data }) {
             </ul>
           </div>
         ) : (
-          <p className="text-body-sm text-on-surface-variant py-6 text-center">No products yet.</p>
+          <p className="text-body-sm text-on-surface-variant py-6 text-center w-full">No products yet.</p>
         )}
       </div>
     </section>

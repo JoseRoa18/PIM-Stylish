@@ -1,8 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ScanSearch, AlertCircle, OctagonX, CheckCircle2 } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
+import { formatTimeAgo } from '@/lib/format';
+import { latestSnapshot } from '../lib/channels';
 import { pushWayfairAttributes } from '../api/wayfairSync';
 
 // Catalog-wide spec-attributes audit: runs the per-SKU attribute diff
@@ -15,8 +17,8 @@ import { pushWayfairAttributes } from '../api/wayfairSync';
 // Wayfair values in.
 
 const TARGETS = {
-  CAN_CA: { supplier: 'CAN', market: 'CA', label: 'Canada — English (CAN_Stylish)' },
-  CAN_CA_FR: { supplier: 'CAN', market: 'CA_FR', label: 'Canada — French (CAN_Stylish)' },
+  CAN_CA: { supplier: 'CAN', market: 'CA', label: 'Canada — English (CAN)' },
+  CAN_CA_FR: { supplier: 'CAN', market: 'CA_FR', label: 'Canada — French (CAN)' },
   USA_US: { supplier: 'USA', market: 'US', label: 'USA (StylishUSAInc)' },
 };
 const CONCURRENCY = 3;
@@ -25,7 +27,16 @@ export default function WayfairAuditCard() {
   const [target, setTarget] = useState('CAN_CA');
   const [run, setRun] = useState(null); // { busy, done, total, rows, errors }
   const [push, setPush] = useState(null); // { busy, done, total, ok, failed }
+  const [lastSnap, setLastSnap] = useState(null); // latest channel_health snapshot (read-only)
   const cancelRef = useRef(false);
+
+  // Surface the last persisted audit so the channel's freshness is visible
+  // without re-running the ~1 min live audit.
+  useEffect(() => {
+    let active = true;
+    latestSnapshot('wayfair').then((s) => { if (active) setLastSnap(s); });
+    return () => { active = false; };
+  }, []);
 
   // Fix every discrepancy at once: push the PIM's spec attributes for each
   // SKU the audit flagged. (Against the sandbox this is processed by Wayfair
@@ -142,6 +153,9 @@ export default function WayfairAuditCard() {
   // component re-renders on every finished SKU, which keeps this fresh.
   const etaOf = (s) => {
     if (!s?.busy || s.done < 3 || !s.startedAt) return null;
+    // Intentionally impure: the component re-renders on every finished SKU, so
+    // reading the clock here keeps the ETA fresh without a ticker interval.
+    // eslint-disable-next-line react-hooks/purity
     const remainMs = ((Date.now() - s.startedAt) / s.done) * (s.total - s.done);
     const mins = Math.floor(remainMs / 60000);
     const secs = Math.round((remainMs % 60000) / 1000);
@@ -161,6 +175,14 @@ export default function WayfairAuditCard() {
             Read-only, nothing changes. Fix diffs by pushing from the PIM
             (the PIM is the source of truth).
           </p>
+          {!run && lastSnap && (
+            <p className="text-body-sm text-on-surface-variant mt-2 tabular-nums">
+              Last audit {formatTimeAgo(lastSnap.run_at)}
+              {lastSnap.target && <span> ({lastSnap.target})</span>}
+              {' '}· {lastSnap.in_sync} in sync · {lastSnap.with_diffs} with differences
+              {lastSnap.errors > 0 && <span> · {lastSnap.errors} not audited</span>}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select

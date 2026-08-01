@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Users as UsersIcon,
   UserPlus,
   Loader2,
   KeyRound,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import Avatar from '@/components/ui/Avatar';
 import { useUsers } from '../hooks/useUsers';
 import { updateUserRole, resetUserPassword, deleteUser } from '../api/users';
 import { generatePassword } from '../password';
@@ -84,14 +86,19 @@ export default function Users() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
-      {/* Header */}
+    <div className="max-w-5xl mx-auto">
+      {/* Header — same icon-tile pattern as the Activity Log page. */}
       <div className="flex items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-headline-sm text-on-surface">Users</h1>
-          <p className="text-body-sm text-on-surface-variant mt-1">
-            Manage who has access to the PIM and what they can do.
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary-container/50 flex items-center justify-center flex-shrink-0">
+            <UsersIcon className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-headline-sm text-on-surface">Users</h1>
+            <p className="text-body-sm text-on-surface-variant mt-0.5">
+              Manage who has access to the PIM and what they can do.
+            </p>
+          </div>
         </div>
         <button
           onClick={() => setShowAdd(true)}
@@ -136,90 +143,99 @@ export default function Users() {
             </button>
           </div>
         ) : (
-          <table className="w-full min-w-[560px] text-left">
-            <thead>
-              <tr className="border-b border-outline-variant text-label-md text-on-surface-variant">
-                <th className="px-5 py-3 font-medium">User</th>
-                <th className="px-5 py-3 font-medium">Role</th>
-                <th className="px-5 py-3 font-medium hidden sm:table-cell">Last sign-in</th>
-                <th className="px-5 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            {/* Phones: stacked cards — the table would clip its role selects
+                and push Actions off-screen at narrow widths. */}
+            <ul className="sm:hidden divide-y divide-outline-variant">
               {users.map((u) => {
                 const isMe = u.id === me?.id;
                 const busy = busyId === u.id;
                 return (
-                  <tr key={u.id} className="border-b border-outline-variant last:border-0">
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-primary text-on-primary font-semibold flex items-center justify-center text-sm flex-shrink-0">
-                          {(u.full_name || u.email || '?').charAt(0).toUpperCase()}
+                  <li key={u.id} className="p-4">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={u.full_name} email={u.email} src={u.avatar_url} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-body-md text-on-surface truncate">
+                          {u.full_name || nameFromEmail(u.email) || '—'}
+                          {isMe && (
+                            <span className="ml-2 text-label-sm text-on-surface-variant">(you)</span>
+                          )}
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-body-md text-on-surface truncate">
-                            {u.full_name || '—'}
-                            {isMe && (
-                              <span className="ml-2 text-label-sm text-on-surface-variant">(you)</span>
-                            )}
-                          </div>
-                          <div className="text-body-sm text-on-surface-variant truncate">
-                            {u.email}
-                          </div>
+                        <div className="text-body-sm text-on-surface-variant truncate">
+                          {u.email}
                         </div>
                       </div>
-                    </td>
-                    <td className="px-5 py-3">
-                      {isMe ? (
-                        <span
-                          className={`inline-flex px-2.5 py-1 rounded-full text-label-sm font-medium ${ROLE_BADGE[u.role]}`}
-                        >
-                          {ROLE_LABELS[u.role]}
-                        </span>
-                      ) : (
-                        <select
-                          value={u.role}
-                          disabled={busy}
-                          onChange={(e) => handleRoleChange(u, e.target.value)}
-                          className="px-2.5 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-                        >
-                          {ROLE_OPTIONS.map((r) => (
-                            <option key={r.value} value={r.value}>
-                              {r.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-body-sm text-on-surface-variant hidden sm:table-cell">
-                      {formatDate(u.last_sign_in_at)}
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        {busy && <Loader2 className="w-4 h-4 animate-spin text-on-surface-variant mr-1" />}
-                        <button
-                          onClick={() => handleReset(u)}
-                          disabled={busy}
-                          title="Reset password"
-                          className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors disabled:opacity-50"
-                        >
-                          <KeyRound className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(u)}
-                          disabled={busy || isMe}
-                          title={isMe ? "You can't remove yourself" : 'Remove user'}
-                          className="p-2 rounded-full text-on-surface-variant hover:bg-error-container/50 hover:text-error transition-colors disabled:opacity-30"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-3">
+                      <RoleControl user={u} isMe={isMe} busy={busy} onChange={handleRoleChange} />
+                      <RowActions
+                        user={u}
+                        isMe={isMe}
+                        busy={busy}
+                        onReset={handleReset}
+                        onDelete={handleDelete}
+                      />
+                    </div>
+                    <p className="text-label-sm text-on-surface-variant mt-2">
+                      Last sign-in: {formatDate(u.last_sign_in_at)}
+                    </p>
+                  </li>
                 );
               })}
-            </tbody>
-          </table>
+            </ul>
+
+            <table className="w-full min-w-[560px] text-left hidden sm:table">
+              <thead>
+                <tr className="border-b border-outline-variant text-label-md text-on-surface-variant">
+                  <th className="px-5 py-3 font-medium">User</th>
+                  <th className="px-5 py-3 font-medium">Role</th>
+                  <th className="px-5 py-3 font-medium">Last sign-in</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => {
+                  const isMe = u.id === me?.id;
+                  const busy = busyId === u.id;
+                  return (
+                    <tr key={u.id} className="border-b border-outline-variant last:border-0">
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar name={u.full_name} email={u.email} src={u.avatar_url} />
+                          <div className="min-w-0">
+                            <div className="text-body-md text-on-surface truncate">
+                              {u.full_name || nameFromEmail(u.email) || '—'}
+                              {isMe && (
+                                <span className="ml-2 text-label-sm text-on-surface-variant">(you)</span>
+                              )}
+                            </div>
+                            <div className="text-body-sm text-on-surface-variant truncate">
+                              {u.email}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3">
+                        <RoleControl user={u} isMe={isMe} busy={busy} onChange={handleRoleChange} />
+                      </td>
+                      <td className="px-5 py-3 text-body-sm text-on-surface-variant">
+                        {formatDate(u.last_sign_in_at)}
+                      </td>
+                      <td className="px-5 py-3">
+                        <RowActions
+                          user={u}
+                          isMe={isMe}
+                          busy={busy}
+                          onReset={handleReset}
+                          onDelete={handleDelete}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
 
@@ -233,6 +249,57 @@ export default function Users() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Your own role is fixed (you can't demote yourself); everyone else gets a select.
+function RoleControl({ user, isMe, busy, onChange }) {
+  if (isMe) {
+    return (
+      <span
+        className={`inline-flex px-2.5 py-1 rounded-full text-label-sm font-medium ${ROLE_BADGE[user.role]}`}
+      >
+        {ROLE_LABELS[user.role]}
+      </span>
+    );
+  }
+  return (
+    <select
+      value={user.role}
+      disabled={busy}
+      onChange={(e) => onChange(user, e.target.value)}
+      className="px-2.5 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+    >
+      {ROLE_OPTIONS.map((r) => (
+        <option key={r.value} value={r.value}>
+          {r.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function RowActions({ user, isMe, busy, onReset, onDelete }) {
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {busy && <Loader2 className="w-4 h-4 animate-spin text-on-surface-variant mr-1" />}
+      <button
+        onClick={() => onReset(user)}
+        disabled={busy}
+        title="Reset password"
+        className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors disabled:opacity-50"
+      >
+        <KeyRound className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => onDelete(user)}
+        disabled={busy || isMe}
+        title={isMe ? "You can't remove yourself" : 'Remove user'}
+        className="p-2 rounded-full text-on-surface-variant hover:bg-error-container/50 hover:text-error transition-colors disabled:opacity-30"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
     </div>
   );
 }
@@ -283,9 +350,18 @@ function CredentialsBanner({ email, password, onDismiss }) {
   );
 }
 
+// Accounts created without a full name fall back to a name derived from the
+// email ("jose@…" → "Jose") instead of an em dash that reads as broken data.
+function nameFromEmail(email) {
+  const local = email?.split('@')[0];
+  if (!local) return null;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
 function formatDate(iso) {
   if (!iso) return 'Never';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  // Fixed locale — the UI is English, so dates shouldn't follow the browser's.
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }

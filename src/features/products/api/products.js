@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { deleteStorageObjectsIfUnreferenced } from '@/features/media/api/media';
+import { formatFieldList } from '@/lib/humanize';
 
 /**
  * List all products from the catalog with their primary image (if any).
@@ -182,7 +183,7 @@ export async function updateProduct(sku, patch) {
     action: 'update',
     entityType: 'product',
     entityId: sku,
-    summary: `Edited product ${sku} (${changedKeys.join(', ') || 'no fields'})`,
+    summary: `Edited product ${sku}${changedKeys.length ? ` (${formatFieldList(changedKeys)})` : ''}`,
     metadata: { fields: changedKeys },
   });
   return data;
@@ -238,7 +239,7 @@ export async function bulkUpdateProducts(skus, patch) {
     action: 'update',
     entityType: 'product',
     entityId: skus.length === 1 ? skus[0] : `${skus.length} products`,
-    summary: `Bulk-edited ${skus.length} product(s) (${changedKeys.join(', ') || 'no fields'})`,
+    summary: `Bulk-edited ${skus.length} ${skus.length === 1 ? 'product' : 'products'}${changedKeys.length ? ` (${formatFieldList(changedKeys)})` : ''}`,
     metadata: { count: skus.length, fields: changedKeys, skus },
   });
   return data ?? [];
@@ -274,7 +275,7 @@ export async function deleteProducts(skus) {
     action: 'delete',
     entityType: 'product',
     entityId: skus.length === 1 ? skus[0] : `${skus.length} products`,
-    summary: `Deleted ${skus.length} product(s): ${skus.slice(0, 10).join(', ')}${skus.length > 10 ? '…' : ''}`,
+    summary: `Deleted ${skus.length} ${skus.length === 1 ? 'product' : 'products'}: ${skus.slice(0, 10).join(', ')}${skus.length > 10 ? '…' : ''}`,
     metadata: { count: skus.length, skus, mediaFiles: mediaPaths.length },
   });
   return { count: skus.length };

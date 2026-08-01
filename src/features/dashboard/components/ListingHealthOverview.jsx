@@ -1,4 +1,5 @@
 import { TrendingUp, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { SCORE_BADGE_STYLES } from '@/lib/scoreBadgeStyles';
 import { categorizeScore, SCORE_CATEGORIES } from '../lib/listingHealth';
 import DonutChart from './charts/DonutChart';
 
@@ -7,13 +8,6 @@ const CATEGORY_ICONS = {
   good: TrendingUp,
   needs_work: Clock,
   critical: XCircle,
-};
-
-const CATEGORY_STYLES = {
-  excellent: 'bg-success-container text-on-success-container',
-  good: 'bg-tertiary-container/40 text-on-tertiary-container',
-  needs_work: 'bg-warning-container text-on-warning-container',
-  critical: 'bg-error-container text-on-error-container',
 };
 
 // Distribution palette → donut strokes + legend dots.
@@ -81,7 +75,7 @@ export default function ListingHealthOverview({ stats, productCount, marketplace
                 key={key}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-outline-variant bg-surface"
               >
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${CATEGORY_STYLES[key]}`}>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${SCORE_BADGE_STYLES[key]}`}>
                   <Icon className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
@@ -89,7 +83,9 @@ export default function ListingHealthOverview({ stats, productCount, marketplace
                     {dist[key]}
                   </div>
                   <div className="text-label-md text-on-surface-variant mt-0.5 truncate">
-                    {c.label} <span className="opacity-60">{c.range}</span>
+                    {/* Legend dot ties the card to its donut segment color */}
+                    <span className={`inline-block w-2 h-2 rounded-full mr-1 ${CATEGORY_VIZ[key].dot}`} />
+                    {c.label} <span className="opacity-60 max-sm:hidden">{c.range}</span>
                   </div>
                 </div>
               </div>
@@ -103,7 +99,7 @@ export default function ListingHealthOverview({ stats, productCount, marketplace
 
 function CategoryBadge({ category, large = false }) {
   const Icon = CATEGORY_ICONS[category];
-  const style = CATEGORY_STYLES[category];
+  const style = SCORE_BADGE_STYLES[category];
   const label = SCORE_CATEGORIES[category].label;
   const padding = large ? 'px-3 py-1.5 text-body-md' : 'px-2 py-0.5 text-label-md';
   return (

@@ -2,6 +2,14 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, CheckCircle2, ScanSearch } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
 
+// Count-chip styling per action tone (set in useDashboardData) — an all-red
+// strip flattens the hierarchy and reads as alarm fatigue.
+const TONE_STYLES = {
+  error: 'bg-error-container text-on-error-container',
+  warning: 'bg-warning-container text-on-warning-container',
+  neutral: 'bg-surface-container-high text-on-surface-variant',
+};
+
 /**
  * The "what needs my attention" strip — one row per channel discrepancy,
  * built from the persisted channel snapshots. Every row links to the
@@ -47,7 +55,7 @@ export default function ActionNeededCard({ actions, hasChannelSnapshots }) {
                 to={a.to}
                 className="flex items-center gap-4 px-6 py-3.5 hover:bg-surface-container-low/40 transition-colors group"
               >
-                <span className="inline-flex items-center justify-center min-w-9 h-9 px-2 rounded-lg bg-error-container text-on-error-container text-title-md font-semibold tabular-nums flex-shrink-0">
+                <span className={`inline-flex items-center justify-center min-w-9 h-9 px-2 rounded-lg text-title-md font-semibold tabular-nums flex-shrink-0 ${TONE_STYLES[a.tone] ?? TONE_STYLES.neutral}`}>
                   {a.count}
                 </span>
                 <span className="min-w-0 flex-1">

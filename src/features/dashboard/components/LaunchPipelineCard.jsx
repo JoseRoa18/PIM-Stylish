@@ -63,7 +63,7 @@ export default function LaunchPipelineCard({ data }) {
 }
 
 const TONE_STYLES = {
-  tertiary: { bg: 'bg-tertiary-container/40', text: 'text-on-tertiary-container' },
+  tertiary: { bg: 'bg-tertiary-container', text: 'text-on-tertiary-container' },
   error: { bg: 'bg-error-container', text: 'text-on-error-container' },
   amber: { bg: 'bg-warning-container', text: 'text-on-warning-container' },
 };

@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { ListChecks, ArrowRight, CheckCircle2 } from 'lucide-react';
 
-const SEVERITY_DOT = {
-  critical: 'bg-error',
-  major: 'bg-warning',
-  minor: 'bg-on-surface-variant',
+// Dot and bar share the severity token so both encodings tell the same story.
+const SEVERITY_STYLES = {
+  critical: { dot: 'bg-error', bar: 'bg-error/70' },
+  major: { dot: 'bg-warning', bar: 'bg-warning/70' },
+  minor: { dot: 'bg-on-surface-variant', bar: 'bg-outline-variant' },
 };
 
 /**
@@ -47,26 +48,31 @@ export default function ContentGapsCard({ gaps, hasSummaries }) {
         </div>
       ) : (
         <ul className="px-6 py-4 space-y-3">
-          {gaps.map((g) => (
-            <li key={g.key} className="min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${SEVERITY_DOT[g.severity] ?? 'bg-on-surface-variant'}`} />
-                <span className="text-body-sm text-on-surface truncate">{g.label}</span>
-                <span className="text-label-md text-on-surface-variant truncate hidden sm:inline">
-                  · {g.marketplaces.join(' · ')}
-                </span>
-                <span className="text-label-md text-on-surface font-semibold tabular-nums ml-auto">
-                  {g.count}
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full bg-surface-container overflow-hidden ml-3.5">
-                <div
-                  className="h-full rounded-full bg-warning/70 transition-[width] duration-500"
-                  style={{ width: `${Math.max(4, (g.count / max) * 100)}%` }}
-                />
-              </div>
-            </li>
-          ))}
+          {gaps.map((g) => {
+            const sev = SEVERITY_STYLES[g.severity] ?? SEVERITY_STYLES.minor;
+            return (
+              <li key={g.key} className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sev.dot}`} />
+                  {/* The gap name never yields its width to the marketplace list —
+                      only the secondary span truncates. */}
+                  <span className="text-body-sm text-on-surface flex-shrink-0">{g.label}</span>
+                  <span className="text-label-md text-on-surface-variant flex-1 min-w-0 truncate hidden sm:inline">
+                    · {g.marketplaces.join(' · ')}
+                  </span>
+                  <span className="text-label-md text-on-surface font-semibold tabular-nums ml-auto">
+                    {g.count}
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-surface-container overflow-hidden ml-3.5">
+                  <div
+                    className={`h-full rounded-full ${sev.bar} transition-[width] duration-500`}
+                    style={{ width: `${Math.max(4, (g.count / max) * 100)}%` }}
+                  />
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

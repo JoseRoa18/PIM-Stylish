@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -11,6 +12,7 @@ import {
   Users,
   History,
   Plus,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -32,6 +34,17 @@ export default function Sidebar({ open = false, onClose }) {
   const navigate = useNavigate();
   const { isAdmin, canEdit } = useAuth();
   const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+
+  // Escape closes the mobile drawer
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e) {
+      if (e.key === 'Escape') onClose?.();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -51,7 +64,7 @@ export default function Sidebar({ open = false, onClose }) {
         )}
       >
       {/* Brand */}
-      <div className="p-6">
+      <div className="p-6 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <img src="/brand/icon.svg" alt="" className="w-11 h-11 flex-shrink-0" />
           <div className="flex flex-col leading-tight">
@@ -59,6 +72,14 @@ export default function Sidebar({ open = false, onClose }) {
             <span className="text-label-md text-on-surface-variant">Enterprise Edition</span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors lg:hidden flex-shrink-0"
+          aria-label="Close menu"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Nav items */}

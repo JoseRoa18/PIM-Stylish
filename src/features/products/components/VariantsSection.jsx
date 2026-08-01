@@ -64,10 +64,10 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       <header className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Layers className="w-4 h-4 text-on-surface-variant" />
             <h2 className="text-title-lg text-on-surface">Variants</h2>
-            <span className="text-label-md text-on-surface-variant">
+            <span className="text-label-md text-on-surface-variant whitespace-nowrap">
               · Family {product.family_number}
             </span>
           </div>
@@ -86,9 +86,9 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
       </header>
 
       {drift.length > 0 && (
-        <div className="mx-4 mt-4 px-4 py-3 rounded-lg border border-outline-variant bg-surface-container flex items-start justify-between gap-3">
+        <div className="mx-4 mt-4 px-4 py-3 rounded-lg border border-warning/30 bg-warning-container/40 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div className="flex items-start gap-2.5 min-w-0">
-            <AlertTriangle className="w-4 h-4 text-on-surface-variant flex-shrink-0 mt-0.5" />
+            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
             <p className="text-body-sm text-on-surface min-w-0">
               <span className="font-medium">{drift.length} shared attribute{drift.length === 1 ? '' : 's'} differ</span>
               {' '}across this family: <span className="text-on-surface-variant">{drift.slice(0, 4).map((d) => d.label).join(', ')}{drift.length > 4 ? '…' : ''}</span>
@@ -97,7 +97,7 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
           <button
             type="button"
             onClick={() => onUnify?.(drift)}
-            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+            className="flex-shrink-0 self-end sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
           >
             Review &amp; unify
           </button>

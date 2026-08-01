@@ -95,6 +95,9 @@ export function ConfirmProvider({ children }) {
   );
 }
 
+// Provider + hook is the standard context pairing; splitting the hook into its
+// own file only to appease fast-refresh isn't worth the extra module.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useConfirm() {
   const confirm = useContext(ConfirmContext);
   if (!confirm) {

@@ -357,7 +357,7 @@ function LanguageGroup({ docType, linkedLangs, children }) {
               <span
                 key={l.id}
                 title={`${l.label} — missing`}
-                className="text-[10px] leading-4 tracking-wide text-on-surface-variant/40"
+                className="px-1 py-px rounded-sm border border-outline-variant text-on-surface-variant/70 text-[10px] leading-4 tracking-wide"
               >
                 {l.short}
               </span>

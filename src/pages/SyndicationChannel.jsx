@@ -56,9 +56,12 @@ export default function SyndicationChannel() {
           {meta.logo ? <img src={meta.logo} alt="" className="w-7 h-7" /> : meta.letter}
         </div>
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-headline-md text-on-surface">{meta.name}</h1>
-            <span className={`px-2 py-0.5 rounded-full text-label-sm ${meta.envClass}`}>{meta.env}</span>
+            <span className={`px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap flex-shrink-0 ${meta.envClass}`}>{meta.env}</span>
+            {meta.mode && (
+              <span className={`px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap flex-shrink-0 ${meta.modeClass}`}>{meta.mode}</span>
+            )}
           </div>
           <p className="text-body-md text-on-surface-variant">{meta.tagline}</p>
         </div>

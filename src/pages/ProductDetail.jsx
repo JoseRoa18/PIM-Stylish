@@ -3,6 +3,8 @@ import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Camera,
   CheckCircle2,
   ClipboardList,
@@ -360,7 +362,7 @@ export default function ProductDetail() {
   const confirm = useConfirm();
   const navigate = useNavigate();
   const { product, loading, error, notFound, mergeProduct, refetch } = useProduct(sku);
-  const { primary, media } = useProductMedia(sku);
+  const { primary, media, documents } = useProductMedia(sku);
   // Family siblings for the quick-switch list under the floating tab rail.
   const { variants: familyVariants } = useVariants(sku, product?.family_number ?? null);
 
@@ -451,7 +453,7 @@ export default function ProductDetail() {
   const editCtx = { isEditing, form, setField };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <Link
         to="/catalog"
         className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"
@@ -541,6 +543,7 @@ export default function ProductDetail() {
           <OverviewTab
             product={product}
             edit={editCtx}
+            documents={documents}
             onProductChanged={refetch}
             onUnify={(driftFields) =>
               setPropagation({
@@ -553,7 +556,9 @@ export default function ProductDetail() {
         )}
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
         {activeTab === 'content' && <ContentTab product={product} edit={editCtx} />}
-        {activeTab === 'pricing' && <PricingTab product={product} edit={editCtx} />}
+        {activeTab === 'pricing' && (
+          <PricingTab product={product} edit={editCtx} onAddPricing={canEdit ? startEditing : undefined} />
+        )}
         {activeTab === 'media' && (
           <MediaTab
             sku={product.sku}
@@ -788,7 +793,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
             return (
               <button key={tab.key} type="button" role="tab" aria-selected={isActive}
                 onClick={() => onChange(tab.key)}
-                className={`inline-flex items-center gap-2 px-4 py-3 text-body-md whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                className={`inline-flex items-center gap-2 px-3 lg:px-4 py-3 text-body-md whitespace-nowrap border-b-2 -mb-px transition-colors ${
                   isActive
                     ? 'border-primary text-primary font-semibold'
                     : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
@@ -831,12 +836,33 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
         </nav>
         </div>
 
-        {/* Edge fades — visual hint that more tabs hide beyond the fold. */}
+        {/* Edge fades + chevrons — the strip hides its scrollbar, so these are
+            the only affordance that more tabs/variants hide beyond the fold. */}
         {!edges.atStart && (
-          <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-surface to-transparent min-[1820px]:hidden" />
+          <>
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-surface to-transparent min-[1820px]:hidden" />
+            <button
+              type="button"
+              aria-label="Scroll tabs left"
+              onClick={() => stripRef.current?.scrollBy({ left: -240, behavior: 'smooth' })}
+              className="absolute left-1 top-1/2 -translate-y-1/2 p-1 rounded-full border border-outline-variant bg-surface shadow-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors min-[1820px]:hidden"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          </>
         )}
         {!edges.atEnd && (
-          <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-surface to-transparent min-[1820px]:hidden" />
+          <>
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-surface to-transparent min-[1820px]:hidden" />
+            <button
+              type="button"
+              aria-label="Scroll tabs right"
+              onClick={() => stripRef.current?.scrollBy({ left: 240, behavior: 'smooth' })}
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full border border-outline-variant bg-surface shadow-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors min-[1820px]:hidden"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </>
         )}
       </div>
 
@@ -910,7 +936,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
 
 // ===================== Overview Tab =====================
 
-function OverviewTab({ product, edit, onProductChanged, onUnify }) {
+function OverviewTab({ product, edit, documents = [], onProductChanged, onUnify }) {
   return (
     <div className="space-y-6">
       <Section title="Identification">
@@ -953,8 +979,20 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
 
       <Section title="Documentation" defaultOpen={false}>
         <div className="space-y-3">
-          <EditableDocFlag label="Spec Sheet" fieldKey="spec_sheet_needs_update" product={product} edit={edit} />
-          <EditableDocFlag label="Installation Sheet" fieldKey="installation_sheet_needs_update" product={product} edit={edit} />
+          <EditableDocFlag
+            label="Spec Sheet"
+            fieldKey="spec_sheet_needs_update"
+            hasFile={documents.some((d) => d.document_type === 'spec_sheet')}
+            product={product}
+            edit={edit}
+          />
+          <EditableDocFlag
+            label="Installation Sheet"
+            fieldKey="installation_sheet_needs_update"
+            hasFile={documents.some((d) => /^installation_/.test(d.document_type ?? ''))}
+            product={product}
+            edit={edit}
+          />
         </div>
       </Section>
     </div>
@@ -1266,14 +1304,31 @@ function ContentTab({ product, edit }) {
 
 // ===================== Pricing Tab =====================
 
-function PricingTab({ product, edit }) {
+function PricingTab({ product, edit, onAddPricing }) {
+  const noPricing = !edit.isEditing && product.msrp_cad == null && product.dealer_cost_cad == null;
   return (
     <div className="space-y-6">
       <Section title="Standard Pricing">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-          <EditableField label="MSRP (CAD)" fieldKey="msrp_cad" type="currency" product={product} edit={edit} />
-          <EditableField label="Dealer Cost (CAD)" fieldKey="dealer_cost_cad" type="currency" product={product} edit={edit} />
-        </div>
+        {noPricing ? (
+          <div className="flex flex-wrap items-center gap-3 py-1">
+            <p className="text-body-sm text-on-surface-variant">No pricing set yet.</p>
+            {onAddPricing && (
+              <button
+                type="button"
+                onClick={onAddPricing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add pricing
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+            <EditableField label="MSRP (CAD)" fieldKey="msrp_cad" type="currency" product={product} edit={edit} />
+            <EditableField label="Dealer Cost (CAD)" fieldKey="dealer_cost_cad" type="currency" product={product} edit={edit} />
+          </div>
+        )}
       </Section>
       <Section title="Sale Pricing">
         <div className="space-y-4">
@@ -1765,7 +1820,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
   );
 }
 
-function EditableDocFlag({ label, fieldKey, product, edit }) {
+function EditableDocFlag({ label, fieldKey, product, edit, hasFile = true }) {
   const { isEditing, form, setField } = edit;
   const needsUpdate = isEditing ? form[fieldKey] : product[fieldKey];
   if (isEditing) {
@@ -1776,6 +1831,19 @@ function EditableDocFlag({ label, fieldKey, product, edit }) {
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${needsUpdate ? 'bg-warning' : 'bg-success'}`}>
           <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${needsUpdate ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
+      </div>
+    );
+  }
+  // Without a file in the Media tab, "Up to date" would misread as "the file
+  // is current" — show a neutral third state instead of the green flag.
+  if (!needsUpdate && !hasFile) {
+    return (
+      <div className="flex items-center justify-between">
+        <span className="text-body-md text-on-surface">{label}</span>
+        <span className="flex items-center gap-1.5 text-body-sm text-on-surface-variant">
+          <span className="w-2 h-2 rounded-full bg-outline-variant" />
+          No file linked
+        </span>
       </div>
     );
   }
@@ -1827,7 +1895,7 @@ function WixLinkBadge({ product }) {
     return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-surface-container text-body-sm text-on-surface-variant">Not linked to Wix</span>;
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-tertiary-container/40 text-body-sm text-on-surface"
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-tertiary-container text-body-sm text-on-tertiary-container whitespace-nowrap"
       title={`Wix product id: ${product.wix_product_id}`}>
       <CheckCircle2 className="w-3.5 h-3.5 text-tertiary" />
       Wix · synced {product.wix_synced_at ? formatTimeAgo(product.wix_synced_at) : 'never'}
@@ -1855,7 +1923,7 @@ function ProductHeroImage({ primary }) {
 
 function LoadingSkeleton() {
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <Skeleton className="h-6 w-32 mb-4" />
       <div className="flex gap-6 mb-6">
         <Skeleton className="w-60 h-60 rounded-xl" />
@@ -1869,7 +1937,7 @@ function LoadingSkeleton() {
 
 function NotFoundState({ sku }) {
   return (
-    <div className="p-6 max-w-6xl mx-auto text-center py-24">
+    <div className="max-w-6xl mx-auto text-center py-24">
       <h1 className="text-display-lg text-on-surface mb-2">Product not found</h1>
       <p className="text-body-md text-on-surface-variant mb-6">The SKU "{sku}" doesn't exist in the catalog.</p>
       <Link to="/catalog" className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold">
@@ -1881,7 +1949,7 @@ function NotFoundState({ sku }) {
 
 function ErrorState({ error }) {
   return (
-    <div className="p-6 max-w-6xl mx-auto text-center py-24">
+    <div className="max-w-6xl mx-auto text-center py-24">
       <h1 className="text-display-lg text-on-surface mb-2">Failed to load product</h1>
       <p className="text-body-md text-error mb-6">{error.message}</p>
       <Link to="/catalog" className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold">

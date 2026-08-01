@@ -89,15 +89,19 @@ function buildContentGaps(summaries) {
     .slice(0, 6);
 }
 
+// Titles never repeat the count — the card renders it in the chip. `tone`
+// grades each chip: 'error' only for genuine channel failures, 'warning' for
+// PIM↔channel desyncs, 'neutral' for informational rows.
 function buildActions({ channelSnapshots, unlinkedWix }) {
   const actions = [];
-  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const plural = (n, word) => (n === 1 ? word : `${word}s`);
 
   const wayfair = channelSnapshots.wayfair;
   if (wayfair?.with_diffs > 0) {
     actions.push({
       key: 'wayfair',
       count: wayfair.with_diffs,
+      tone: 'warning',
       title: `${plural(wayfair.with_diffs, 'SKU')} with spec attributes out of sync`,
       detail: 'Wayfair — push attributes from the PIM to fix',
       to: '/syndication/wayfair',
@@ -110,7 +114,8 @@ function buildActions({ channelSnapshots, unlinkedWix }) {
     actions.push({
       key: 'bestbuy',
       count: bestbuy.with_diffs,
-      title: `${plural(bestbuy.with_diffs, 'offer')} priced differently than the PIM MSRP`,
+      tone: 'warning',
+      title: `${plural(bestbuy.with_diffs, 'Offer')} priced differently than the PIM MSRP`,
       detail: 'Best Buy Canada — PIM pricing is the source of truth',
       to: '/syndication/bestbuy',
       runAt: bestbuy.run_at,
@@ -122,7 +127,8 @@ function buildActions({ channelSnapshots, unlinkedWix }) {
     actions.push({
       key: 'walmart_us',
       count: walmartUs.with_diffs,
-      title: `${plural(walmartUs.with_diffs, 'item')} not published on Walmart US`,
+      tone: 'warning',
+      title: `${plural(walmartUs.with_diffs, 'Item')} not published on Walmart US`,
       detail: 'Walmart US — unpublished or retired listings',
       to: '/syndication/walmart_us',
       runAt: walmartUs.run_at,
@@ -134,6 +140,7 @@ function buildActions({ channelSnapshots, unlinkedWix }) {
     actions.push({
       key: 'walmart_ca',
       count: walmartCa.with_diffs,
+      tone: 'error',
       title: `${plural(walmartCa.with_diffs, 'SKU')} with errors in the inventory feed`,
       detail: 'Walmart Canada — failed feed ingestion',
       to: '/syndication/walmart_ca',
@@ -145,7 +152,8 @@ function buildActions({ channelSnapshots, unlinkedWix }) {
     actions.push({
       key: 'wix',
       count: unlinkedWix,
-      title: `${plural(unlinkedWix, 'product')} not linked to the website yet`,
+      tone: 'neutral',
+      title: `${plural(unlinkedWix, 'Product')} not linked to the website yet`,
       detail: 'Sinks Direct Canada — link or push from the Wix workspace',
       to: '/syndication/wix',
       runAt: null,

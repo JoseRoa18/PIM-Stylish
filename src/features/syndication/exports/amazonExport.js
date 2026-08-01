@@ -112,7 +112,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
     for (let ci = 0; ci < labels.length; ci++) {
       const label = labels[ci];
       if (!label) continue;
-      let v = '';
+      let v;
       if (label === 'Product Type') v = productType;
       else {
         // Rules are keyed with the en_CA compliance-media labels; other

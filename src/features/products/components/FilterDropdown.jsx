@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { formatCategory } from '@/lib/format';
+import Checkbox from '@/components/ui/Checkbox';
 
 export default function FilterDropdown({ label, options, selected, onChange }) {
   const [open, setOpen] = useState(false);
@@ -70,7 +71,7 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
         <div
           role="group"
           aria-label={`${label} filter options`}
-          className="absolute z-20 mt-1 min-w-[220px] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg overflow-hidden"
+          className="absolute z-30 mt-1 min-w-[220px] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg overflow-hidden"
         >
           {options.length === 0 ? (
             <div className="px-3 py-2 text-body-sm text-on-surface-variant">
@@ -82,26 +83,23 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
                 const isSelected = selected.includes(option);
                 return (
                   <li key={option}>
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={isSelected}
+                    <div
                       onClick={() => toggle(option)}
-                      className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-surface-container-low focus:outline-none focus-visible:bg-surface-container-low focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 transition-colors"
+                      className="w-full px-3 py-2 flex items-center gap-2 text-left cursor-pointer hover:bg-surface-container-low transition-colors"
                     >
-                      <div
-                        className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                          isSelected
-                            ? 'bg-primary border-primary text-on-primary'
-                            : 'border-outline'
-                        }`}
-                      >
-                        {isSelected && <Check className="w-3 h-3" strokeWidth={3} />}
-                      </div>
+                      {/* The Checkbox toggles itself; stop its click from
+                          reaching the row handler and toggling twice. */}
+                      <span onClick={(e) => e.stopPropagation()} className="inline-flex">
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={() => toggle(option)}
+                          aria-label={formatCategory(option)}
+                        />
+                      </span>
                       <span className="text-body-md text-on-surface">
                         {formatCategory(option)}
                       </span>
-                    </button>
+                    </div>
                   </li>
                 );
               })}

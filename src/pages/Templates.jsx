@@ -50,6 +50,23 @@ function middleTruncate(name, max) {
   return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
+// Files uploaded as a set share a long export prefix ("StylishInternatio-
+// Menards-…-") that eats the whole truncation budget and leaves every card
+// reading identically. Stripping the common prefix keeps the part that
+// actually distinguishes each file; cut back to a separator so no token is
+// split mid-word.
+function sharedFilePrefix(names) {
+  if (names.length < 2) return '';
+  let prefix = names[0];
+  for (const name of names.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < name.length && prefix[i] === name[i]) i++;
+    prefix = prefix.slice(0, i);
+  }
+  const cut = Math.max(...['-', '_', ' '].map((sep) => prefix.lastIndexOf(sep)));
+  return cut < 7 ? '' : prefix.slice(0, cut + 1);
+}
+
 export default function Templates() {
   const { templates, loading, error, reload } = useTemplates();
   const [showUpload, setShowUpload] = useState(false);
@@ -63,14 +80,18 @@ export default function Templates() {
             Upload marketplace templates (XLSX, XLSM or CSV) to generate pre-filled export files.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowUpload(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
-        >
-          <Plus className="w-4 h-4" />
-          Upload Template
-        </button>
+        {/* The upload form is the page's primary action while open — showing
+            a second live "Upload Template" CTA above it just duplicates it. */}
+        {!showUpload && (
+          <button
+            type="button"
+            onClick={() => setShowUpload(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-4 h-4" />
+            Upload Template
+          </button>
+        )}
       </header>
 
       {showUpload && (
@@ -95,7 +116,7 @@ export default function Templates() {
       )}
 
       {!loading && !error && templates.length === 0 && !showUpload && (
-        <div className="rounded-xl border border-outline-variant bg-surface-container-lowest py-16 px-6 text-center">
+        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest py-16 px-6 text-center">
           <FileSpreadsheet className="w-10 h-10 mx-auto mb-3 text-on-surface-variant opacity-40" strokeWidth={1.5} />
           <p className="text-body-lg text-on-surface mb-2">No templates uploaded yet</p>
           <p className="text-body-md text-on-surface-variant mb-6">
@@ -134,26 +155,41 @@ export default function Templates() {
 function MarketplaceGroup({ marketplace, templates, reload }) {
   const [open, setOpen] = useState(false);
 
-  // category key → templates (multi-category templates label with all of them)
+  // category set → templates. Labels are sorted before keying so the same set
+  // of categories lands in ONE group regardless of the order each file stored
+  // them; past 3 categories the joined label stops scanning, so it collapses
+  // to a count.
   const byCategory = new Map();
   for (const t of templates) {
-    const key = (t.categories ?? []).length ? t.categories.map(templateCategoryLabel).join(' + ') : 'General · all products';
-    if (!byCategory.has(key)) byCategory.set(key, []);
-    byCategory.get(key).push(t);
+    const labels = (t.categories ?? []).map(templateCategoryLabel).sort((a, b) => a.localeCompare(b));
+    const key = labels.length ? labels.join('|') : 'General · all products';
+    if (!byCategory.has(key)) {
+      byCategory.set(key, {
+        key,
+        labels,
+        summaryLabel: labels.length === 0
+          ? 'General · all products'
+          : labels.length > 3
+            ? `${labels.length} categories`
+            : labels.join(' + '),
+        items: [],
+      });
+    }
+    byCategory.get(key).items.push(t);
   }
-  const catGroups = [...byCategory.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const summary = catGroups.map(([label, list]) => `${label} (${list.length})`).join(' · ');
+  const catGroups = [...byCategory.values()].sort((a, b) => a.summaryLabel.localeCompare(b.summaryLabel));
+  const summary = catGroups.map((g) => `${g.summaryLabel} (${g.items.length})`).join(' · ');
 
   return (
-    <div className="rounded-xl border border-outline-variant bg-surface-container-lowest">
+    <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-surface-container-low transition-colors rounded-xl"
+        className="group w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-surface-container transition-colors rounded-2xl"
       >
         <ChevronDown
-          className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform duration-300 [transition-timing-function:var(--ease-out-quint)] ${open ? '' : '-rotate-90'}`}
+          className={`w-4 h-4 text-on-surface-variant group-hover:text-primary flex-shrink-0 transition-[transform,color] duration-300 [transition-timing-function:var(--ease-out-quint)] ${open ? '' : '-rotate-90'}`}
         />
         <div className="w-10 h-10 rounded-lg bg-tertiary-container text-on-tertiary-container flex items-center justify-center flex-shrink-0">
           <FileSpreadsheet className="w-5 h-5" />
@@ -180,18 +216,40 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
               open ? 'opacity-100 duration-300 delay-75' : 'opacity-0 duration-150'
             }`}
           >
-            {catGroups.map(([label, list]) => (
-              <div key={label}>
-                <p className="text-label-md font-semibold text-on-surface-variant uppercase tracking-wide mb-2">
-                  {label} <span className="font-normal normal-case">· {list.length} file{list.length === 1 ? '' : 's'}</span>
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {list.map((t) => (
-                    <TemplateCard key={t.id} template={t} reload={reload} />
-                  ))}
+            {catGroups.map((group) => {
+              const sharedPrefix = sharedFilePrefix(group.items.map((t) => t.file_name));
+              return (
+                <div key={group.key}>
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    {group.labels.length > 0 ? (
+                      group.labels.map((l) => (
+                        <span
+                          key={l}
+                          className="px-2 py-0.5 rounded-lg bg-secondary-container text-on-secondary-container text-label-sm"
+                        >
+                          {l}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-label-md font-semibold text-on-surface-variant uppercase tracking-wide">
+                        General · all products
+                      </span>
+                    )}
+                    <span className="text-label-md text-on-surface-variant">
+                      · {group.items.length} file{group.items.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  {/* auto-fill lets the grid decide how many cards fit (no
+                      ~230px cards at 1024px); items-start keeps a neighbor
+                      from stretching to match a card in edit mode. */}
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 items-start">
+                    {group.items.map((t) => (
+                      <TemplateCard key={t.id} template={t} sharedPrefix={sharedPrefix} reload={reload} />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -199,13 +257,26 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
   );
 }
 
-function TemplateCard({ template, reload }) {
+function TemplateCard({ template, sharedPrefix = '', reload }) {
   const confirm = useConfirm();
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(template.categories ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  const baseName = sharedPrefix && template.file_name.startsWith(sharedPrefix)
+    ? template.file_name.slice(sharedPrefix.length)
+    : template.file_name;
+  const displayName = `${baseName === template.file_name ? '' : '…'}${baseName}`;
+  // Split for CSS middle-truncation: the head ellipsizes to whatever width
+  // the card really has, the distinctive tail ("…2026 (2).xlsx") stays
+  // pinned. A space on the boundary moves into the tail so it can't be
+  // swallowed as trailing whitespace.
+  let tailChars = Math.min(13, Math.floor(displayName.length / 2));
+  if (displayName[displayName.length - tailChars - 1] === ' ') tailChars += 1;
+  const nameHead = displayName.slice(0, displayName.length - tailChars);
+  const nameTail = displayName.slice(displayName.length - tailChars);
 
   function startEdit() {
     setDraft(template.categories ?? []);
@@ -254,45 +325,49 @@ function TemplateCard({ template, reload }) {
   return (
     <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-5 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
-        {/* min-w-0 lets the name column shrink so truncate can kick in */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="w-10 h-10 rounded-lg bg-tertiary-container text-on-tertiary-container flex items-center justify-center flex-shrink-0">
-            <FileSpreadsheet className="w-5 h-5" />
-          </div>
+          {/* The tertiary tile stays on the group header — repeating it on
+              every card is noise and steals width from the name. */}
+          <FileSpreadsheet className="w-5 h-5 text-on-surface-variant flex-shrink-0" />
           <div className="min-w-0">
             {/* The group header already names the marketplace — the card's
-                identity is the FILE. Middle-truncate keeps the distinctive
-                tail of Syndigo-style names ("…Containers-07022026 (2)");
-                full name on hover. */}
-            <p className="text-body-md text-on-surface font-medium truncate" title={template.file_name}>
-              {middleTruncate(template.file_name, 46)}
+                identity is the FILE. One truncation mechanism only: strip
+                the prefix the whole set shares, then the head span
+                ellipsizes to the real column width while the tail keeps
+                the distinctive end; full name on hover. */}
+            <p className="flex min-w-0 text-body-md text-on-surface font-medium" title={template.file_name}>
+              <span className="truncate">{nameHead}</span>
+              <span className="flex-shrink-0 whitespace-pre">{nameTail}</span>
             </p>
-            <p className="text-body-sm text-on-surface-variant">
+            <p className="text-body-sm text-on-surface-variant whitespace-nowrap">
               Uploaded {formatTimeAgo(template.uploaded_at)}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          {!editing && (
+        {/* Save/Cancel own the card while editing — a lone disabled trash can
+            floating in the corner reads as a glitch, so hide both actions. */}
+        {!editing && (
+          <div className="flex items-center flex-shrink-0">
             <button
               type="button"
               onClick={startEdit}
-              className="p-1.5 rounded-full text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+              className="p-2 rounded-full text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
               title="Edit categories"
             >
               <Pencil className="w-4 h-4" />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={deleting || editing}
-            className="p-1.5 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors disabled:opacity-50"
-            title="Delete template"
-          >
-            {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-          </button>
-        </div>
+            <span aria-hidden="true" className="w-px h-4 bg-outline-variant mx-1" />
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="p-2 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors disabled:opacity-50"
+              title="Delete template"
+            >
+              {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            </button>
+          </div>
+        )}
       </div>
 
       {editing ? (
@@ -392,7 +467,7 @@ function UploadCard({ onDone, onCancel }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl border border-outline-variant bg-surface-container-lowest p-6 space-y-4"
+      className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 space-y-4"
     >
       <div className="flex items-center justify-between">
         <h2 className="text-title-lg text-on-surface">Upload Template</h2>
@@ -455,8 +530,10 @@ function UploadCard({ onDone, onCancel }) {
         <label className="text-label-md text-on-surface-variant">
           Available for categories
         </label>
+        {/* The general-template rule lives in the dynamic line under the
+            chips — stating it here too said the same thing twice. */}
         <p className="text-body-sm text-on-surface-variant -mt-0.5 mb-1">
-          The template only shows on products of the selected categories. Leave all unchecked for a general template (available on every product).
+          The template only shows on products of the selected categories.
         </p>
         <div className="flex flex-wrap gap-2">
           {TEMPLATE_CATEGORIES.map((c) => {

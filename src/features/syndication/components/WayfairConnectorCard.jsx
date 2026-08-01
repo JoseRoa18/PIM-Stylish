@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, ShieldCheck, MinusCircle, DownloadCloud } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ShieldCheck, MinusCircle, DownloadCloud } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { pushToWayfair, pullWayfairItemGroups, checkWayfairRequestStatus, pushWayfairAttributes } from '../api/wayfairSync';
 
@@ -12,9 +12,10 @@ export default function WayfairConnectorCard() {
   const [itemGroupId, setItemGroupId] = useState('');
 
   // One dropdown covers both supplier accounts and their storefronts.
+  // Labels stay short so the select never clips its value at narrow widths.
   const TARGETS = {
-    CAN_CA: { supplier: 'CAN', market: 'CA', label: 'Canada — English (CAN_Stylish)' },
-    CAN_CA_FR: { supplier: 'CAN', market: 'CA_FR', label: 'Canada — French (CAN_Stylish)' },
+    CAN_CA: { supplier: 'CAN', market: 'CA', label: 'Canada — English (CAN)' },
+    CAN_CA_FR: { supplier: 'CAN', market: 'CA_FR', label: 'Canada — French (CAN)' },
     USA_US: { supplier: 'USA', market: 'US', label: 'USA (StylishUSAInc)' },
   };
   const { supplier, market } = TARGETS[target];
@@ -76,21 +77,7 @@ export default function WayfairConnectorCard() {
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
-      <div className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#7B189F]/15 text-[#7B189F] dark:bg-[#7B189F]/30 dark:text-[#CE93E8] flex items-center justify-center font-bold">
-            W
-          </div>
-          <div>
-            <h2 className="text-title-md text-on-surface">Wayfair</h2>
-            <p className="text-body-sm text-on-surface-variant">Push marketing copy + feature bullets & images</p>
-          </div>
-        </div>
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm">
-          <ShieldCheck className="w-3.5 h-3.5" /> Sandbox
-        </span>
-      </div>
-
+      {/* The page header already shows the Wayfair identity + env chip — the card starts at its content. */}
       <div className="px-6 py-5 space-y-3">
         <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">Content &amp; images</p>
         <p className="text-body-sm text-on-surface-variant">
@@ -99,7 +86,7 @@ export default function WayfairConnectorCard() {
           entered below); images push by SKU.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           <label className="block">
             <span className="text-label-md text-on-surface-variant">Product SKU</span>
             <input
@@ -146,7 +133,7 @@ export default function WayfairConnectorCard() {
             type="button"
             onClick={() => run(false)}
             disabled={busy || !sku.trim()}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
           >
             Push to Wayfair
           </button>

@@ -16,18 +16,33 @@ import { buildImportRows } from '@/features/import/lib/buildImportRows';
 import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 
-const BLANK_TEMPLATES = [
-  { key: 'sink', label: 'Kitchen Sink' },
-  { key: 'outdoor_sink', label: 'Outdoor Sink & Ice Chest' },
-  { key: 'bathroom_sink', label: 'Bathroom Sink' },
-  { key: 'kitchen_faucet', label: 'Kitchen Faucet' },
-  { key: 'bathroom_faucet', label: 'Bathroom Faucet' },
-  { key: 'cutting_board', label: 'Cutting Board' },
-  { key: 'soap_dispenser', label: 'Soap Dispenser' },
-  { key: 'pop_up_drain', label: 'Pop-Up Drain' },
-  { key: 'basket_strainer', label: 'Basket Strainer' },
-  { key: 'colander_drying_rack', label: 'Colanders & Drying Racks' },
-  { key: 'faucet_plate', label: 'Faucet Plate' },
+const BLANK_TEMPLATE_GROUPS = [
+  {
+    label: 'Sinks',
+    templates: [
+      { key: 'sink', label: 'Kitchen Sink' },
+      { key: 'outdoor_sink', label: 'Outdoor Sink & Ice Chest' },
+      { key: 'bathroom_sink', label: 'Bathroom Sink' },
+    ],
+  },
+  {
+    label: 'Faucets',
+    templates: [
+      { key: 'kitchen_faucet', label: 'Kitchen Faucet' },
+      { key: 'bathroom_faucet', label: 'Bathroom Faucet' },
+    ],
+  },
+  {
+    label: 'Accessories',
+    templates: [
+      { key: 'cutting_board', label: 'Cutting Board' },
+      { key: 'soap_dispenser', label: 'Soap Dispenser' },
+      { key: 'pop_up_drain', label: 'Pop-Up Drain' },
+      { key: 'basket_strainer', label: 'Basket Strainer' },
+      { key: 'colander_drying_rack', label: 'Colanders & Drying Racks' },
+      { key: 'faucet_plate', label: 'Faucet Plate' },
+    ],
+  },
 ];
 
 // One button with a category menu — the pill-per-category row outgrew the
@@ -37,11 +52,11 @@ function BlankTemplateMenu({ onDownload }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-on-surface/8 transition-colors"
       >
         <Download className="w-4 h-4" />
         Blank template
@@ -50,16 +65,23 @@ function BlankTemplateMenu({ onDownload }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full mt-1 right-0 z-20 min-w-[13rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 animate-menu-in">
-            {BLANK_TEMPLATES.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => { setOpen(false); onDownload(t.key); }}
-                className="w-full text-left px-4 py-2 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
-              >
-                {t.label}
-              </button>
+          <div className="absolute top-full mt-1 left-0 sm:left-auto sm:right-0 z-20 min-w-[13rem] max-h-[60vh] overflow-y-auto rounded-xl border border-outline-variant bg-surface shadow-lg py-1 animate-menu-in" data-lenis-prevent>
+            {BLANK_TEMPLATE_GROUPS.map((group, i) => (
+              <div key={group.label} className={i > 0 ? 'mt-1 pt-1 border-t border-outline-variant' : ''}>
+                <div className="px-4 pt-2 pb-1 text-label-md uppercase tracking-wide text-on-surface-variant">
+                  {group.label}
+                </div>
+                {group.templates.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => { setOpen(false); onDownload(t.key); }}
+                    className="w-full text-left px-4 py-2 text-body-sm text-on-surface hover:bg-on-surface/8 transition-colors"
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
         </>
@@ -73,6 +95,10 @@ export default function ImportProducts() {
   const fileRef = useRef(null);
 
   const [phase, setPhase] = useState('upload'); // upload | preview | importing | done
+  const [isDragging, setIsDragging] = useState(false);
+  // dragenter/dragleave fire for every child the cursor crosses — track depth
+  // so the highlight only clears when the pointer truly leaves the zone.
+  const dragDepth = useRef(0);
   const [fileName, setFileName] = useState(null);
   const [parseError, setParseError] = useState(null);
   const [rows, setRows] = useState([]);
@@ -167,7 +193,7 @@ export default function ImportProducts() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <Link
         to="/catalog"
         className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"
@@ -179,7 +205,7 @@ export default function ImportProducts() {
       <header className="mb-6 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-display-lg text-on-surface">Import Products</h1>
-          <p className="text-body-md text-on-surface-variant mt-1">
+          <p className="text-body-md text-on-surface-variant mt-1 max-w-[46ch]">
             Upload a spreadsheet to create or update products in bulk. Images and documents are added separately on each product.
           </p>
         </div>
@@ -188,15 +214,45 @@ export default function ImportProducts() {
 
       {phase === 'upload' && (
         <div
-          className="rounded-2xl border-2 border-dashed border-outline-variant bg-surface-container-lowest py-20 px-6 text-center"
+          role="button"
+          tabIndex={0}
+          className={`rounded-2xl border-2 border-dashed py-20 px-6 text-center cursor-pointer transition-colors ${
+            isDragging
+              ? 'border-primary bg-primary-container/20'
+              : 'border-outline bg-surface-container-lowest'
+          }`}
+          onClick={() => fileRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileRef.current?.click();
+            }
+          }}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            dragDepth.current += 1;
+            setIsDragging(true);
+          }}
+          onDragLeave={() => {
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setIsDragging(false);
+          }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
+            dragDepth.current = 0;
+            setIsDragging(false);
             handleFile(e.dataTransfer.files?.[0]);
           }}
         >
-          <FileSpreadsheet className="w-12 h-12 mx-auto mb-4 text-on-surface-variant opacity-40" strokeWidth={1.5} />
-          <p className="text-body-lg text-on-surface mb-1">Drop your .xlsx or .csv here</p>
+          <FileSpreadsheet
+            className={`w-12 h-12 mx-auto mb-4 transition-colors ${isDragging ? 'text-primary' : 'text-on-surface-variant opacity-40'}`}
+            strokeWidth={1.5}
+          />
+          <p className="hidden sm:block text-body-lg text-on-surface mb-1">
+            {isDragging ? 'Drop to upload' : 'Drop your .xlsx or .csv here'}
+          </p>
+          <p className="sm:hidden text-body-lg text-on-surface mb-1">Select a .xlsx or .csv file</p>
           <p className="text-body-sm text-on-surface-variant mb-6">
             First row must be the column headers. SKU (Model Number), Brand and Category are required per row.
           </p>
@@ -205,11 +261,15 @@ export default function ImportProducts() {
             type="file"
             accept=".xlsx,.csv"
             className="hidden"
+            onClick={(e) => e.stopPropagation()}
             onChange={(e) => handleFile(e.target.files?.[0])}
           />
           <button
             type="button"
-            onClick={() => fileRef.current?.click()}
+            onClick={(e) => {
+              e.stopPropagation();
+              fileRef.current?.click();
+            }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
           >
             <Upload className="w-4 h-4" />
@@ -235,7 +295,7 @@ export default function ImportProducts() {
                 <button
                   type="button"
                   onClick={reset}
-                  className="p-1 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
+                  className="p-1 rounded-full text-on-surface-variant hover:bg-on-surface/8 transition-colors"
                   title="Choose another file"
                 >
                   <X className="w-4 h-4" />
@@ -250,7 +310,7 @@ export default function ImportProducts() {
               type="button"
               onClick={handleImport}
               disabled={validRows.length === 0}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
             >
               <Upload className="w-4 h-4" />
               Import {validRows.length} {validRows.length === 1 ? 'product' : 'products'}
@@ -332,7 +392,7 @@ export default function ImportProducts() {
             <button
               type="button"
               onClick={reset}
-              className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+              className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-on-surface/8 transition-colors"
             >
               Import another file
             </button>
@@ -383,15 +443,15 @@ function RowGroup({ row, hasErrors, isUpdate, isExpanded, onToggle }) {
         </td>
         <td className="px-5 py-3">
           {hasErrors ? (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-label-md bg-error-container text-on-error-container">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-label-md bg-error-container text-on-error-container">
               {row.errors.length} error{row.errors.length === 1 ? '' : 's'}
             </span>
           ) : isUpdate ? (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-label-md bg-tertiary-container/40 text-on-tertiary-container">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-label-md bg-tertiary-container/40 text-on-tertiary-container">
               Update
             </span>
           ) : (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-label-md bg-success-container text-on-success-container">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-label-md bg-success-container text-on-success-container">
               New
             </span>
           )}

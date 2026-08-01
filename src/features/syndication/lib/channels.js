@@ -2,6 +2,8 @@
 
 // Channel registry — the single place a new connector is declared.
 // `stat` returns the one number that tells the channel's health at a glance.
+// `env` is the environment (Production/Sandbox); the optional `mode` chip
+// carries the access mode (Read-only) so the two concepts never share a slot.
 export const LIVE_CHANNELS = [
   {
     id: 'wix',
@@ -9,7 +11,7 @@ export const LIVE_CHANNELS = [
     tagline: 'Website catalog — import & push product data',
     letter: 'W',
     logo: '/brand/channels/wix.svg',
-    avatarClass: 'bg-[#0C6EFC]/10 dark:bg-[#0C6EFC]/25 text-[#0C6EFC]',
+    avatarClass: 'bg-brand-wix/10 text-brand-wix',
     env: 'Production',
     envClass: 'bg-success-container text-on-success-container',
     stat: async (totals) => {
@@ -24,8 +26,8 @@ export const LIVE_CHANNELS = [
     id: 'wayfair',
     name: 'Wayfair',
     tagline: 'Content, images & spec attributes — CA and US suppliers',
-    letter: 'W',
-    avatarClass: 'bg-[#7B189F]/15 text-[#7B189F] dark:bg-[#7B189F]/30 dark:text-[#CE93E8]',
+    letter: 'WF', // no logo asset in the repo — two-letter monogram keeps it apart from Wix's W
+    avatarClass: 'bg-brand-wayfair/15 text-brand-wayfair',
     env: 'Sandbox',
     envClass: 'bg-warning-container text-on-warning-container',
     stat: async (totals) => {
@@ -39,12 +41,13 @@ export const LIVE_CHANNELS = [
   {
     id: 'bestbuy',
     name: 'Best Buy Canada',
-    tagline: 'Mirakl marketplace — offers, stock & prices (read-only)',
-    letter: 'B',
-    logo: '/brand/channels/bestbuy.svg',
-    avatarClass: 'bg-[#0046BE]/10 text-[#0046BE] dark:bg-[#0046BE]/30 dark:text-[#9DC2FF]',
-    env: 'Read-only',
-    envClass: 'bg-surface-container text-on-surface-variant',
+    tagline: 'Mirakl marketplace — offers, stock & prices',
+    letter: 'BB', // the price-tag SVG is illegible at tile size — monogram instead
+    avatarClass: 'bg-brand-bestbuy/10 text-brand-bestbuy',
+    env: 'Production',
+    envClass: 'bg-success-container text-on-success-container',
+    mode: 'Read-only',
+    modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
       const snap = await latestSnapshot('bestbuy');
       return snap
@@ -55,12 +58,14 @@ export const LIVE_CHANNELS = [
   {
     id: 'walmart_us',
     name: 'Walmart US',
-    tagline: 'Marketplace items & publish status (read-only)',
+    tagline: 'Marketplace items & publish status',
     letter: 'W',
     logo: '/brand/channels/walmart.svg',
-    avatarClass: 'bg-[#0071CE]',
-    env: 'Read-only',
-    envClass: 'bg-surface-container text-on-surface-variant',
+    avatarClass: 'bg-brand-walmart/10 text-brand-walmart',
+    env: 'Production',
+    envClass: 'bg-success-container text-on-success-container',
+    mode: 'Read-only',
+    modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
       const snap = await latestSnapshot('walmart_us');
       return snap
@@ -71,12 +76,14 @@ export const LIVE_CHANNELS = [
   {
     id: 'walmart_ca',
     name: 'Walmart Canada',
-    tagline: 'Presence via daily inventory feed (read-only)',
+    tagline: 'Presence via daily inventory feed',
     letter: 'W',
     logo: '/brand/channels/walmart.svg',
-    avatarClass: 'bg-[#0071CE]',
-    env: 'Read-only',
-    envClass: 'bg-surface-container text-on-surface-variant',
+    avatarClass: 'bg-brand-walmart/10 text-brand-walmart',
+    env: 'Production',
+    envClass: 'bg-success-container text-on-success-container',
+    mode: 'Read-only',
+    modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
       const snap = await latestSnapshot('walmart_ca');
       return snap

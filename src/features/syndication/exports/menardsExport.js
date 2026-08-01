@@ -49,7 +49,6 @@ const num = (v) => {
   const m = String(v).match(/-?\d+(\.\d+)?/);
   return m ? m[0] : '';
 };
-const yesNo = (v) => (v === true ? 'Yes' : v === false ? 'No' : '');
 const ext = (p, axis) => num(attr(p).external_dimensions_in?.[axis]);
 const cut = (p, axis) => num(attr(p).cut_out_dimensions_in?.[axis]);
 const ship = (p, axis) => num(attr(p).shipping_dimensions_in?.[axis]);
@@ -223,7 +222,7 @@ async function fillOne(template, products) {
     for (let ci = 0; ci < ncols; ci++) {
       const nm = names[ci];
       if (!nm) continue;
-      let v = '';
+      let v;
       const bul = BULLET_RE.exec(nm);
       if (bul) v = bullets[Number(bul[1]) - 1] || '';
       else {

@@ -815,7 +815,7 @@ function CollectionsPicker({ value, onChange, disabled }) {
               disabled={disabled}
             />
           </div>
-          <div className="max-h-64 overflow-y-auto">
+          <div className="max-h-64 overflow-y-auto" data-lenis-prevent>
             {filtered.length === 0 ? (
               <p className="px-4 py-3 text-body-sm text-on-surface-variant">
                 No matches.
@@ -1084,13 +1084,6 @@ function WixLogo() {
 
 // ============================== Helpers ==============================
 
-function pickSyncable(product) {
-  if (!product) return null;
-  const out = {};
-  for (const key of ALL_FIELD_KEYS) out[key] = product[key];
-  return out;
-}
-
 function buildForm(product) {
   const out = {};
   for (const key of ALL_FIELD_KEYS) {
@@ -1111,22 +1104,6 @@ function buildForm(product) {
     }
   }
   return out;
-}
-
-function buildPatch(form) {
-  const patch = {};
-  for (const key of ALL_FIELD_KEYS) {
-    let v = form[key];
-    if (typeof v === 'string') {
-      const trimmed = v.trim();
-      v = trimmed.length === 0 ? null : trimmed;
-    }
-    if (key === 'additional_info_sections' && Array.isArray(v)) {
-      v = v.filter((s) => (s.title && s.title.trim()) || (s.description && s.description.trim()));
-    }
-    patch[key] = v;
-  }
-  return patch;
 }
 
 // Normalize an HTML snippet by parsing it through the browser, which

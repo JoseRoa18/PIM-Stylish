@@ -16,7 +16,7 @@ export default function ComingSoon() {
   const title = titleFromPath(pathname);
 
   return (
-    <div className="max-w-2xl mx-auto px-6 py-24 text-center">
+    <div className="min-h-[70vh] max-w-2xl mx-auto flex flex-col items-center justify-center text-center">
       <div className="w-16 h-16 rounded-2xl bg-primary-container/50 flex items-center justify-center mx-auto mb-5">
         <Hammer className="w-7 h-7 text-primary" />
       </div>

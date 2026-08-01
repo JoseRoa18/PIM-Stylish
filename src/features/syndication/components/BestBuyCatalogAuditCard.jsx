@@ -136,7 +136,8 @@ export default function BestBuyCatalogAuditCard() {
               <Stat label="Matched SKUs" value={audit.matchedCount} />
               <Stat label="UPC mismatches" value={audit.upcMismatches.length} bad={audit.upcMismatches.length > 0} />
               <Stat label="Brand mismatches" value={audit.brandMismatches.length} bad={audit.brandMismatches.length > 0} />
-              <Stat label="Title differences" value={audit.titleMismatches.length} bad={audit.titleMismatches.length > 0} />
+              {/* Title drift is expected ("some divergence is normal") — warning, not error. */}
+              <Stat label="Title differences" value={audit.titleMismatches.length} warn={audit.titleMismatches.length > 0} />
             </div>
 
             <AuditSection
@@ -197,10 +198,10 @@ export default function BestBuyCatalogAuditCard() {
                 item.kind === 'pim' ? (
                   <Row sku={item.p.sku} left={item.p.model_name ?? ''} right="not listed on Best Buy" />
                 ) : (
-                  <li className="flex items-center justify-between gap-3 text-body-sm py-1">
-                    <span className="font-mono text-on-surface">{item.o.sku}</span>
-                    <span className="text-on-surface-variant truncate">{item.o.product_title ?? 'offer without PIM product'}</span>
-                  </li>
+                  <div className="grid grid-cols-[8rem_1fr_1fr] items-baseline gap-3 text-body-sm py-1.5">
+                    <span className="font-mono text-on-surface truncate">{item.o.sku}</span>
+                    <span className="text-on-surface-variant truncate col-span-2">{item.o.product_title ?? 'offer without PIM product'}</span>
+                  </div>
                 )
               }
             />
@@ -240,10 +241,11 @@ export default function BestBuyCatalogAuditCard() {
   );
 }
 
-function Stat({ label, value, bad = false }) {
+function Stat({ label, value, bad = false, warn = false }) {
+  const tone = bad ? 'text-error' : warn ? 'text-warning' : 'text-on-surface';
   return (
     <div className="rounded-xl border border-outline-variant bg-surface px-4 py-3">
-      <div className={`text-title-lg font-semibold leading-tight tabular-nums ${bad ? 'text-error' : 'text-on-surface'}`}>
+      <div className={`text-title-lg font-semibold leading-tight tabular-nums ${tone}`}>
         {value}
       </div>
       <div className="text-label-md text-on-surface-variant mt-1">{label}</div>
@@ -273,7 +275,7 @@ function AuditSection({ id, open, toggle, icon: Icon, title, intro, empty, items
         <div className="px-4 pb-3 border-t border-outline-variant">
           <p className="text-label-md text-on-surface-variant py-2">{items.length === 0 ? empty : intro}</p>
           {items.length > 0 && (
-            <ul className="max-h-72 overflow-y-auto divide-y divide-outline-variant/60">
+            <ul className="max-h-72 overflow-y-auto divide-y divide-outline-variant/60" data-lenis-prevent>
               {items.map((item, i) => (
                 <li key={i}>{render(item)}</li>
               ))}
@@ -287,8 +289,8 @@ function AuditSection({ id, open, toggle, icon: Icon, title, intro, empty, items
 
 function Row({ sku, left, right, stacked = false }) {
   return (
-    <div className={`py-1.5 text-body-sm ${stacked ? 'space-y-0.5' : 'flex items-center justify-between gap-3'}`}>
-      <Link to={`/catalog/${encodeURIComponent(sku)}`} className="font-mono text-primary hover:underline">
+    <div className={`py-1.5 text-body-sm ${stacked ? 'space-y-0.5' : 'grid grid-cols-[8rem_1fr_1fr] items-baseline gap-3'}`}>
+      <Link to={`/catalog/${encodeURIComponent(sku)}`} className="font-mono text-primary hover:underline truncate">
         {sku}
       </Link>
       {stacked ? (
@@ -297,9 +299,11 @@ function Row({ sku, left, right, stacked = false }) {
           <p className="text-on-surface truncate">{right}</p>
         </>
       ) : (
+        // Fixed columns + tabular digits so BB and PIM values line up for
+        // digit-by-digit comparison instead of zig-zagging row to row.
         <>
-          <span className="text-on-surface-variant truncate">{left}</span>
-          <span className="text-on-surface truncate">{right}</span>
+          <span className="text-on-surface-variant truncate tabular-nums">{left}</span>
+          <span className="text-on-surface truncate tabular-nums">{right}</span>
         </>
       )}
     </div>

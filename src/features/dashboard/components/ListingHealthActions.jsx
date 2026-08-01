@@ -1,19 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, ChevronDown, Package } from 'lucide-react';
+import { SCORE_BADGE_STYLES } from '@/lib/scoreBadgeStyles';
 import { categorizeScore } from '../lib/listingHealth';
 
 const SEVERITY_STYLES = {
   critical: { dot: 'bg-error', text: 'text-error', label: 'Critical' },
   major: { dot: 'bg-warning', text: 'text-warning', label: 'Major' },
   minor: { dot: 'bg-on-surface-variant', text: 'text-on-surface-variant', label: 'Minor' },
-};
-
-const SCORE_BADGE_STYLES = {
-  excellent: 'bg-success-container text-on-success-container',
-  good: 'bg-tertiary-container/40 text-on-tertiary-container',
-  needs_work: 'bg-warning-container text-on-warning-container',
-  critical: 'bg-error-container text-on-error-container',
 };
 
 export default function ListingHealthActions({ stats, products, marketplaceLabel = 'marketplace' }) {
@@ -64,10 +58,14 @@ export default function ListingHealthActions({ stats, products, marketplaceLabel
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`w-1.5 h-1.5 rounded-full ${sev.dot} flex-shrink-0`} />
                         <span className="text-body-md text-on-surface font-medium">{issue.label}</span>
-                        <span className="text-label-md text-on-surface-variant">· {issue.category}</span>
+                        {issue.category !== issue.label && (
+                          <span className="text-label-md text-on-surface-variant">· {issue.category}</span>
+                        )}
                       </div>
+                      {/* "affected", not "missing" — many checks are state checks
+                          (out of stock, price mismatch), not absent fields. */}
                       <p className={`text-body-sm ${sev.text} mt-0.5`}>
-                        Missing in {issue.count} {issue.count === 1 ? 'product' : 'products'} · {sev.label}
+                        {issue.count} {issue.count === 1 ? 'product' : 'products'} affected · {sev.label}
                       </p>
                     </div>
                     <Link

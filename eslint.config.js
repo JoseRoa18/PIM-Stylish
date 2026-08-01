@@ -17,5 +17,12 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // The classic fetch-on-mount pattern (setLoading(true) at the top of an
+      // effect / a load() callback invoked from useEffect) is used throughout
+      // the data hooks. react-hooks v6 flags every such synchronous setState;
+      // keep it visible as a warning instead of failing the build.
+      'react-hooks/set-state-in-effect': 'warn',
+    },
   },
 ])

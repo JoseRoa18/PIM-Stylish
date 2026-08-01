@@ -4,16 +4,33 @@ import { Camera, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { formatCAD, formatCategory } from '@/lib/format';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import Skeleton from '@/components/ui/Skeleton';
+import Checkbox from '@/components/ui/Checkbox';
 import StatusBadge from './StatusBadge';
 
+// Explicit widths (table-fixed) so column positions don't shift between
+// pages; Model has no width and absorbs the remaining space. SKU is the
+// identifying column, so it stays pinned when the table scrolls sideways.
 const COLUMNS = [
-  { key: 'sku', label: 'SKU', align: 'left' },
+  { key: 'sku', label: 'SKU', align: 'left', width: 'w-36', stickyLeft: true },
   { key: 'model', label: 'Model', align: 'left' },
-  { key: 'brand', label: 'Brand', align: 'left' },
-  { key: 'category', label: 'Category', align: 'left' },
-  { key: 'status', label: 'Status', align: 'left' },
-  { key: 'msrp', label: 'MSRP', align: 'right' },
+  { key: 'brand', label: 'Brand', align: 'left', width: 'w-28' },
+  { key: 'category', label: 'Category', align: 'left', width: 'w-44' },
+  { key: 'status', label: 'Status', align: 'left', width: 'w-36' },
+  { key: 'msrp', label: 'MSRP', align: 'right', width: 'w-28' },
 ];
+
+// Header cells are individually sticky (sticky on <thead>/<tr> doesn't
+// survive border-collapse), so each th carries its own opaque background
+// and an inset shadow as bottom rule — borders don't travel with sticky
+// cells either.
+const TH_STICKY =
+  'sticky top-0 bg-surface-container-low shadow-[inset_0_-1px_0_var(--color-outline-variant)]';
+
+// Opaque stand-in for bg-primary-container/30 over the card background —
+// the pinned SKU cell can't be translucent or the columns scrolling
+// underneath would show through it.
+const SELECTED_STICKY_BG =
+  'bg-[color-mix(in_srgb,var(--color-primary-container)_30%,var(--color-surface-container-lowest))]';
 
 export default function ProductsTable({
   products,
@@ -25,17 +42,15 @@ export default function ProductsTable({
   sortKey,
   sortDir,
   onSort,
+  showMsrp = false,
 }) {
   const navigate = useNavigate();
   const selectionEnabled = typeof onToggleSelect === 'function';
-  // A price column that is almost entirely "—" is noise, not information —
-  // show MSRP only when the current list actually carries prices.
-  const showMsrp = (products ?? []).some((p) => p.msrp_cad != null && p.msrp_cad !== '');
   const columns = showMsrp ? COLUMNS : COLUMNS.filter((c) => c.key !== 'msrp');
 
   if (error) {
     return (
-      <div className="p-12 rounded-xl border border-outline-variant bg-surface-container-lowest text-center">
+      <div className="p-12 rounded-2xl border border-outline-variant bg-surface-container-lowest text-center">
         <p className="text-body-md text-error">Failed to load products</p>
         <p className="text-body-sm text-on-surface-variant mt-1">{error.message}</p>
       </div>
@@ -44,11 +59,11 @@ export default function ProductsTable({
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+      <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
         <div className="p-4 space-y-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex gap-4 items-center">
-              <Skeleton className="h-16 w-16 rounded-md" />
+              <Skeleton className="h-12 w-12 rounded-md" />
               <Skeleton className="h-6 w-24" />
               <Skeleton className="h-6 flex-1" />
               <Skeleton className="h-6 w-20" />
@@ -64,7 +79,7 @@ export default function ProductsTable({
 
   if (products.length === 0) {
     return (
-      <div className="p-12 rounded-xl border-2 border-dashed border-outline-variant bg-surface-container-low text-center">
+      <div className="p-12 rounded-2xl border-2 border-dashed border-outline-variant bg-surface-container-low text-center">
         <h3 className="text-headline-sm text-on-surface mb-2">No products yet</h3>
         <p className="text-body-md text-on-surface-variant">
           Click "New Product" to add your first product to the catalog.
@@ -79,25 +94,26 @@ export default function ProductsTable({
     products.every((p) => selectedSkus?.has(p.sku));
 
   return (
-    <div className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full">
+    <div className="relative rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden after:absolute after:inset-y-0 after:right-0 after:w-6 after:z-20 after:bg-gradient-to-l after:from-on-surface/10 after:to-transparent after:pointer-events-none min-[84rem]:after:hidden">
+      {/* This wrapper is the scroll container for BOTH axes — the sticky
+          header only works when its own ancestor scrolls, and <main>'s
+          page scroll never activates it. data-lenis-prevent keeps the
+          Lenis instance on <main> from swallowing wheel events here. */}
+      <div className="max-h-[max(24rem,calc(100vh-16rem))] overflow-auto" data-lenis-prevent>
+        <table className="w-full min-w-[64rem] table-fixed">
           <thead>
-            <tr className="text-on-surface-variant border-b border-outline-variant bg-surface-container-low sticky top-0 z-10">
+            <tr className="text-on-surface-variant">
               {selectionEnabled && (
-                <th className="py-3 pl-4 pr-2 w-10">
-                  <label className="flex items-center justify-center p-2 -m-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={(e) => onToggleSelectAll(e.target.checked)}
-                      aria-label="Select all"
-                      className="w-4 h-4 rounded border-outline-variant accent-primary focus:ring-primary/30 cursor-pointer"
-                    />
-                  </label>
+                <th className={`${TH_STICKY} z-10 py-3 pl-4 pr-2 w-10`}>
+                  <Checkbox
+                    checked={allSelected}
+                    onChange={(e) => onToggleSelectAll(e.target.checked)}
+                    aria-label="Select all"
+                    className="p-2 -m-2"
+                  />
                 </th>
               )}
-              <th className="py-3 px-4 w-20"></th>
+              <th className={`${TH_STICKY} z-10 py-3 px-4 w-20`}></th>
               {columns.map((col) => (
                 <SortableHeader
                   key={col.key}
@@ -130,34 +146,37 @@ export default function ProductsTable({
                       open();
                     }
                   }}
-                  className={`group border-b border-outline-variant last:border-0 hover:bg-primary-container/10 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
-                    isSelected ? 'bg-primary-container/30' : ''
+                  className={`group border-b border-outline-variant last:border-0 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+                    isSelected ? 'bg-primary-container/30' : 'hover:bg-surface-container'
                   }`}
                 >
                   {selectionEnabled && (
-                    <td className="py-3 pl-4 pr-2" onClick={(e) => e.stopPropagation()}>
-                      <label className="flex items-center justify-center p-2 -m-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!isSelected}
-                          onChange={() => onToggleSelect(product.sku)}
-                          aria-label={`Select ${product.sku}`}
-                          className="w-4 h-4 rounded border-outline-variant accent-primary focus:ring-primary/30 cursor-pointer"
-                        />
-                      </label>
+                    <td className="py-2 pl-4 pr-2" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={!!isSelected}
+                        onChange={() => onToggleSelect(product.sku)}
+                        aria-label={`Select ${product.sku}`}
+                        className="p-2 -m-2"
+                      />
                     </td>
                   )}
-                  <td className="py-3 px-4">
+                  <td className="py-2 px-4">
                     <ProductThumbnail
                       primaryImage={product.primary_image}
                       alt={product.model_name}
                       eager={index < 6}
                     />
                   </td>
-                  <td className="py-3 px-4 text-body-sm font-mono text-on-surface whitespace-nowrap">
+                  <td
+                    className={`py-2 px-4 text-body-sm font-mono text-on-surface whitespace-nowrap sticky left-0 z-[1] ${
+                      isSelected
+                        ? SELECTED_STICKY_BG
+                        : 'bg-surface-container-lowest group-hover:bg-surface-container'
+                    }`}
+                  >
                     {product.sku}
                   </td>
-                  <td className="py-3 px-4">
+                  <td className="py-2 px-4">
                     <div className="text-body-md font-semibold text-on-surface">
                       {product.model_name || '—'}
                     </div>
@@ -167,17 +186,17 @@ export default function ProductsTable({
                       </div>
                     )}
                   </td>
-                  <td className="py-3 px-4 text-body-md text-on-surface">
+                  <td className="py-2 px-4 text-body-md text-on-surface">
                     {product.brand || '—'}
                   </td>
-                  <td className="py-3 px-4 text-body-md text-on-surface">
+                  <td className="py-2 px-4 text-body-md text-on-surface">
                     {formatCategory(product.category)}
                   </td>
-                  <td className="py-3 px-4">
+                  <td className="py-2 px-4">
                     <StatusBadge status={product.workflow_status} />
                   </td>
                   {showMsrp && (
-                    <td className="py-3 px-4 text-body-md font-semibold text-on-surface text-right whitespace-nowrap tabular-nums">
+                    <td className="py-2 px-4 text-body-md font-semibold text-on-surface text-right whitespace-nowrap tabular-nums">
                       {formatCAD(product.msrp_cad)}
                     </td>
                   )}
@@ -194,11 +213,12 @@ export default function ProductsTable({
 function SortableHeader({ col, sortKey, sortDir, onSort }) {
   const active = sortKey === col.key;
   const alignRight = col.align === 'right';
+  const base = `${TH_STICKY} ${col.stickyLeft ? 'left-0 z-20' : 'z-10'} ${col.width ?? ''} py-3 px-4`;
 
   if (typeof onSort !== 'function') {
     return (
       <th
-        className={`py-3 px-4 text-label-md font-semibold uppercase tracking-wide ${alignRight ? 'text-right' : 'text-left'}`}
+        className={`${base} text-label-md font-semibold uppercase tracking-wide ${alignRight ? 'text-right' : 'text-left'}`}
       >
         {col.label}
       </th>
@@ -208,7 +228,7 @@ function SortableHeader({ col, sortKey, sortDir, onSort }) {
   return (
     <th
       aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className={`py-3 px-4 text-label-md font-medium ${alignRight ? 'text-right' : 'text-left'}`}
+      className={`${base} text-label-md font-medium ${alignRight ? 'text-right' : 'text-left'}`}
     >
       <button
         type="button"
@@ -239,14 +259,14 @@ function ProductThumbnail({ primaryImage, alt, eager = false }) {
 
   if (!primaryImage || error) {
     return (
-      <div className="w-16 aspect-square rounded-md bg-surface-container border border-outline-variant flex items-center justify-center flex-shrink-0">
+      <div className="w-12 aspect-square rounded-md bg-surface-container border border-outline-variant flex items-center justify-center flex-shrink-0">
         <Camera className="w-5 h-5 text-on-surface-variant opacity-40" strokeWidth={1.5} />
       </div>
     );
   }
 
   return (
-    <div className="w-16 aspect-square rounded-md overflow-hidden flex-shrink-0 border border-outline-variant bg-surface-container">
+    <div className="w-12 aspect-square rounded-md overflow-hidden flex-shrink-0 border border-outline-variant bg-surface-container">
       <img
         src={getThumbnailUrl(primaryImage.storage_path, 128)}
         alt={primaryImage.alt_text || alt || ''}

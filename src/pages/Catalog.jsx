@@ -120,6 +120,14 @@ export default function Catalog() {
     [baseFiltered, statusFilter],
   );
 
+  // A price column that is almost entirely "—" is noise, not information —
+  // but decide on the FULL filtered set, not the visible page, so the column
+  // doesn't appear and vanish while paginating or sorting.
+  const showMsrp = useMemo(
+    () => filteredProducts.some((p) => p.msrp_cad != null && p.msrp_cad !== ''),
+    [filteredProducts],
+  );
+
   // Status breakdown across the whole catalog — drives the KPI strip.
   // Counts every status that's actually present (incl. audit / re_launch).
   const statusCounts = useMemo(() => {
@@ -302,6 +310,7 @@ export default function Catalog() {
             sortKey={sortKey}
             sortDir={sortDir}
             onSort={onSort}
+            showMsrp={showMsrp}
           />
           {!loading && !error && (
             <Pagination
@@ -385,7 +394,7 @@ function CatalogStats({ total, counts, active, onSelect }) {
 
 function EmptyFilterState({ onClearFilters }) {
   return (
-    <div className="rounded-xl border border-outline-variant bg-surface-container-lowest py-16 px-6 text-center">
+    <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest py-16 px-6 text-center">
       <p className="text-body-lg text-on-surface mb-2">No products match your filters</p>
       <p className="text-body-md text-on-surface-variant mb-6">
         Try removing some filters or adjusting your search.

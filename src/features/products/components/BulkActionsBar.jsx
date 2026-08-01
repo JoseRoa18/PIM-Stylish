@@ -357,9 +357,12 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   }
 
   return (
-    <div className="sticky bottom-4 z-30 mx-auto max-w-5xl">
+    // Fixed to the viewport (offset past the sidebar) so the bar sits at the
+    // bottom even when the table is short; pointer-events pass through the
+    // empty side gutters.
+    <div className="fixed bottom-4 left-0 right-0 lg:left-64 z-30 px-4 sm:px-8 flex justify-center pointer-events-none">
       {/* No overflow-hidden here — the dropdown menus open above the bar. */}
-      <div className="rounded-2xl border border-outline-variant bg-surface shadow-lg">
+      <div className="w-full max-w-5xl pointer-events-auto rounded-2xl border border-outline-variant bg-surface shadow-lg">
         {result && (
           <div
             className={`px-5 py-2 rounded-t-2xl text-body-sm flex items-center gap-2 animate-banner-in ${

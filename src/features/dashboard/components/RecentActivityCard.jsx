@@ -4,6 +4,7 @@ import {
   History, Plus, Send, Pencil, Trash2, Download, ArrowDownToLine, Image as ImageIcon, ArrowRight,
 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
+import { humanizeSummary, formatFieldList } from '@/lib/humanize';
 import { listActivity } from '@/features/activity/api/activityLog';
 
 // action → icon + tint for the audit feed.
@@ -16,6 +17,28 @@ const ACTION_META = {
   import: { Icon: ArrowDownToLine, cls: 'bg-tertiary-container/50 text-on-tertiary-container' },
   media: { Icon: ImageIcon, cls: 'bg-secondary-container text-on-secondary-container' },
 };
+
+// Audit summaries are stored with raw column names and full field lists —
+// humanize them, and collapse long "(a, b, c, d…)" tails to "a +2 more"
+// so the single-line row never cuts mid-word. Compaction runs on the raw
+// tokens: humanized labels may themselves contain parentheses. The list is
+// shortened only as far as needed to fit one desktop line.
+const SUMMARY_MAX_CHARS = 60;
+
+function displaySummary(raw) {
+  if (!raw) return '';
+  const m = String(raw).match(/^(.*)\(([^()]+)\)\s*$/);
+  if (m) {
+    const fields = m[2].split(',').map((f) => f.trim()).filter(Boolean);
+    const head = humanizeSummary(m[1]);
+    for (const max of [fields.length, 2, 1]) {
+      const list = formatFieldList(fields, max);
+      if (head.length + list.length + 2 <= SUMMARY_MAX_CHARS) return `${head}(${list})`;
+    }
+    return `${head}(${formatFieldList(fields, 1)})`;
+  }
+  return humanizeSummary(raw);
+}
 
 // A clean SKU (no spaces) links back to the product.
 function skuOf(e) {
@@ -73,7 +96,7 @@ export default function RecentActivityCard({ data }) {
                   <meta.Icon className="w-4 h-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-body-md text-on-surface truncate">{e.summary || e.action}</p>
+                  <p className="text-body-md text-on-surface truncate">{displaySummary(e.summary) || e.action}</p>
                   <p className="text-body-sm text-on-surface-variant mt-0.5 truncate">
                     {who} · {formatTimeAgo(e.occurred_at)}
                   </p>

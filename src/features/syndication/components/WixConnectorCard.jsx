@@ -51,19 +51,13 @@ export default function WixConnectorCard() {
   const busy = phase === 'previewing' || phase === 'applying';
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-6">
-      <header className="flex items-start justify-between gap-4 mb-4">
-        <div className="flex items-start gap-3">
-          <div className="w-12 h-12 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-lg">
-            W
-          </div>
-          <div>
-            <h3 className="text-title-lg text-on-surface">Wix Stores</h3>
-            <p className="text-body-sm text-on-surface-variant">
-              Link PIM products to their Wix counterparts by SKU. Required before pushing edits to Wix.
-            </p>
-          </div>
-        </div>
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
+      {/* The page header already carries the Wix identity — no second avatar here. */}
+      <header className="mb-4">
+        <h3 className="text-title-lg text-on-surface">Wix Stores</h3>
+        <p className="text-body-sm text-on-surface-variant">
+          Link PIM products to their Wix counterparts by SKU. Required before pushing edits to Wix.
+        </p>
       </header>
 
       {phase === 'idle' && (
@@ -141,7 +135,7 @@ function PreviewPanel({ preview, onConfirm, onCancel }) {
           <p className="text-label-md text-on-surface font-semibold mb-1">
             {summary.skippedNoSku} Wix product{summary.skippedNoSku === 1 ? '' : 's'} skipped (no SKU)
           </p>
-          <ul className="text-body-sm text-on-surface-variant list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+          <ul className="text-body-sm text-on-surface-variant list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto" data-lenis-prevent>
             {skippedNoSku.slice(0, 10).map((p) => (
               <li key={p.wix_product_id}>{p.name || `(unnamed, ${p.wix_product_id})`}</li>
             ))}
@@ -189,7 +183,7 @@ function PreviewPanel({ preview, onConfirm, onCancel }) {
           type="button"
           onClick={onConfirm}
           disabled={!canApply}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
         >
           <CheckCircle2 className="w-4 h-4" />
           Apply links

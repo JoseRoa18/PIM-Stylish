@@ -34,11 +34,14 @@ export async function runWixImport({ dryRun = true } = {}) {
 
   // Only the apply run is a real change to the Wix site; skip dry-run previews.
   if (!dryRun) {
+    const matched = data?.linked ?? data?.matched;
     logActivity({
       action: 'import',
       entityType: 'product',
       target: 'wix',
-      summary: `Linked PIM products to Wix (${data?.linked ?? data?.matched ?? '?'} matched)`,
+      summary: matched != null
+        ? `Linked PIM products to Wix (${matched} matched)`
+        : 'Linked PIM products to Wix',
       metadata: { result: data ?? null },
     });
   }

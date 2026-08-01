@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { Search, X } from 'lucide-react';
 import FilterDropdown from './FilterDropdown';
 import { formatCategory } from '@/lib/format';
@@ -9,6 +9,16 @@ const FILTER_FIELDS = [
   { id: 'series', label: 'Series' },
   { id: 'material', label: 'Material' },
 ];
+
+// The full placeholder gets cut off mid-word on narrow phones, so below sm
+// we swap in a shorter version that keeps the highest-priority terms.
+const WIDE_QUERY = '(min-width: 640px)';
+const subscribeWide = (cb) => {
+  const mql = window.matchMedia(WIDE_QUERY);
+  mql.addEventListener('change', cb);
+  return () => mql.removeEventListener('change', cb);
+};
+const getWide = () => window.matchMedia(WIDE_QUERY).matches;
 
 export default function ProductsToolbar({
   searchTerm,
@@ -46,6 +56,7 @@ export default function ProductsToolbar({
   }, [filters]);
 
   const hasActiveFilters = Boolean(searchTerm.trim()) || activePills.length > 0;
+  const wide = useSyncExternalStore(subscribeWide, getWide);
 
   return (
     <div className="space-y-3">
@@ -59,7 +70,11 @@ export default function ProductsToolbar({
           type="text"
           value={searchTerm}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Filter by SKU, model, family number, factory code…"
+          placeholder={
+            wide
+              ? 'Filter by SKU, model, family number, factory code…'
+              : 'Filter by SKU, model, family…'
+          }
           className="w-full pl-11 pr-11 py-2.5 rounded-full bg-surface-container-lowest text-body-md text-on-surface placeholder:text-on-surface-variant border border-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-shadow"
         />
         {searchTerm && (
@@ -122,11 +137,14 @@ export default function ProductsToolbar({
         </div>
       )}
 
-      {/* Result count */}
-      <div className="text-body-sm text-on-surface-variant">
-        Showing <span className="font-semibold text-on-surface">{resultCount}</span>{' '}
-        of {totalCount} {totalCount === 1 ? 'product' : 'products'}
-      </div>
+      {/* Result count — only when filtering actually narrowed the list; the
+          header and pagination already show the full total. */}
+      {resultCount !== totalCount && (
+        <div className="text-body-sm text-on-surface-variant">
+          Showing <span className="font-semibold text-on-surface">{resultCount}</span>{' '}
+          of {totalCount} {totalCount === 1 ? 'product' : 'products'}
+        </div>
+      )}
     </div>
   );
 }

@@ -18,6 +18,20 @@ export default function DonutChart({
   const circumference = 2 * Math.PI * radius;
   const cx = size / 2;
 
+  // Exact proportions make tiny slices (e.g. 2 of 317 ≈ 2°) invisible
+  // hairlines: every non-zero segment gets a ~4° minimum sweep, with the
+  // difference taken proportionally from the larger segments.
+  const visible = data.filter((d) => d.value > 0);
+  const minLen = (4 / 360) * circumference;
+  let lengths = visible.map((d) => (d.value / total) * circumference);
+  const deficit = lengths.reduce((s, l) => s + Math.max(0, minLen - l), 0);
+  const surplus = lengths.reduce((s, l) => s + Math.max(0, l - minLen), 0);
+  if (deficit > 0 && surplus > 0) {
+    lengths = lengths.map((l) =>
+      l < minLen ? minLen : l - ((l - minLen) / surplus) * deficit,
+    );
+  }
+
   let acc = 0;
 
   return (
@@ -32,29 +46,26 @@ export default function DonutChart({
         className="stroke-surface-container"
       />
       {total > 0 &&
-        data
-          .filter((d) => d.value > 0)
-          .map((d) => {
-            const fraction = d.value / total;
-            const len = fraction * circumference;
-            const dasharray = `${len} ${circumference - len}`;
-            const dashoffset = -acc;
-            acc += len;
-            return (
-              <circle
-                key={d.key}
-                cx={cx}
-                cy={cx}
-                r={radius}
-                fill="none"
-                strokeWidth={thickness}
-                strokeDasharray={dasharray}
-                strokeDashoffset={dashoffset}
-                strokeLinecap="butt"
-                className={`${d.stroke} transition-[stroke-dasharray] duration-500`}
-              />
-            );
-          })}
+        visible.map((d, i) => {
+          const len = lengths[i];
+          const dasharray = `${len} ${circumference - len}`;
+          const dashoffset = -acc;
+          acc += len;
+          return (
+            <circle
+              key={d.key}
+              cx={cx}
+              cy={cx}
+              r={radius}
+              fill="none"
+              strokeWidth={thickness}
+              strokeDasharray={dasharray}
+              strokeDashoffset={dashoffset}
+              strokeLinecap="butt"
+              className={`${d.stroke} transition-[stroke-dasharray] duration-500`}
+            />
+          );
+        })}
       {(centerValue != null || centerLabel) && (
         <g className="rotate-90" style={{ transformOrigin: 'center' }}>
           {centerValue != null && (

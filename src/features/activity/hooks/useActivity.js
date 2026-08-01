@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { listActivity } from '../api/activityLog';
 
 /**
@@ -15,7 +15,12 @@ export function useActivity(filters, page, pageSize) {
 
   const { actorId, action, target, search, since } = filters;
 
+  // Monotonic ticket per fetch: when filters change in quick succession the
+  // requests race, and a slower stale response must not overwrite the newest.
+  const requestRef = useRef(0);
+
   const load = useCallback(async () => {
+    const ticket = ++requestRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -28,12 +33,14 @@ export function useActivity(filters, page, pageSize) {
         page,
         pageSize,
       });
+      if (ticket !== requestRef.current) return;
       setEvents(rows);
       setCount(total);
     } catch (err) {
+      if (ticket !== requestRef.current) return;
       setError(err);
     } finally {
-      setLoading(false);
+      if (ticket === requestRef.current) setLoading(false);
     }
   }, [actorId, action, target, search, since, page, pageSize]);
 

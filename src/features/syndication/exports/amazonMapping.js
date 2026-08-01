@@ -91,7 +91,8 @@ export const AMAZON_RULES = {
   // Amazon axes: Width = side-to-side (PIM length), Depth = front-to-back
   // (PIM width), Height = base-to-top (PIM depth for sinks).
   'Item Width Side To Side': (p) => num(attr(p).external_dimensions_in?.length),
-  'Item Width Unit': (p) => (num(attr(p).external_dimensions_in?.length) ? 'Inches' : ''),
+  // NOTE: 'Item Width Unit' is defined once, in the generic dimensions block
+  // below (width-based) — a duplicate key here was shadowed and never ran.
   'Item Depth Front To Back': (p) => num(attr(p).external_dimensions_in?.width),
   'Item Depth Unit': (p) => (num(attr(p).external_dimensions_in?.width) ? 'Inches' : ''),
   'Item Height Base to Top': (p) => num(attr(p).external_dimensions_in?.height ?? attr(p).external_dimensions_in?.depth),

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2, ChevronDown, Image as ImageIcon } from 'lucide-react';
 import { draggable, dropTargetForElements, monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
@@ -852,6 +852,9 @@ function MediaCard({
   const [dragging, setDragging] = useState(false);
   const [closestEdge, setClosestEdge] = useState(null);
   const [copied, setCopied] = useState(false);
+  // Lazy thumbnails leave the card an empty gray box on every filter change —
+  // show a Skeleton until the image decodes.
+  const [thumbLoaded, setThumbLoaded] = useState(false);
   const draggableOn = canEdit && reorderEnabled;
 
   const isImage = item.media_type === 'image';
@@ -925,14 +928,18 @@ function MediaCard({
       )}
 
       {isImage ? (
-        <img
-          src={thumbUrl}
-          alt={item.alt_text || item.file_name}
-          onClick={onView}
-          className="w-full h-full object-cover block cursor-zoom-in"
-          loading="lazy"
-          draggable={false}
-        />
+        <>
+          {!thumbLoaded && <Skeleton className="absolute inset-0 pointer-events-none" />}
+          <img
+            src={thumbUrl}
+            alt={item.alt_text || item.file_name}
+            onClick={onView}
+            onLoad={() => setThumbLoaded(true)}
+            className={`w-full h-full object-cover block cursor-zoom-in ${thumbLoaded ? '' : 'opacity-0'}`}
+            loading="lazy"
+            draggable={false}
+          />
+        </>
       ) : isVideo && videoThumb ? (
         // Videos play IN-APP (onView opens the player dialog), never a new tab.
         <div
@@ -945,10 +952,12 @@ function MediaCard({
           className="relative w-full h-full cursor-pointer"
           title={`Play ${item.file_name}`}
         >
+          {!thumbLoaded && <Skeleton className="absolute inset-0 pointer-events-none" />}
           <img
             src={videoThumb}
             alt={item.alt_text || item.file_name}
-            className="w-full h-full object-cover block"
+            onLoad={() => setThumbLoaded(true)}
+            className={`w-full h-full object-cover block ${thumbLoaded ? '' : 'opacity-0'}`}
             loading="lazy"
             draggable={false}
           />
@@ -1030,21 +1039,36 @@ function MediaCard({
       {/* Language tag — bottom-right. Editors get a selector; viewers see a
           short badge only when the item is language-specific. */}
       {canEdit ? (
-        <select
-          value={item.language ?? ''}
-          onChange={(e) => onSetLanguage(e.target.value || null)}
+        // Closed state shows the short code — full labels don't fit the card
+        // corner and the native select truncates them mid-word. The select is
+        // stretched invisibly over the badge so the dropdown (with full
+        // labels) still opens on click/keyboard.
+        <span
+          className="absolute bottom-2 right-2 z-10 inline-flex rounded bg-black/60 focus-within:ring-2 focus-within:ring-primary"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           draggable={false}
-          aria-label="Image language"
-          className="absolute bottom-2 right-2 z-10 max-w-[88px] text-label-md rounded bg-black/60 text-white border-0 pl-1.5 pr-1 py-0.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
         >
-          {IMAGE_LANGUAGES.map((l) => (
-            <option key={l.id ?? 'universal'} value={l.id ?? ''} className="text-on-surface bg-surface">
-              {l.label}
-            </option>
-          ))}
-        </select>
+          <span
+            aria-hidden="true"
+            className="inline-flex items-center gap-0.5 pl-1.5 pr-1 py-0.5 text-label-md font-semibold text-white pointer-events-none"
+          >
+            {langMeta(item.language).short}
+            <ChevronDown className="w-3 h-3" />
+          </span>
+          <select
+            value={item.language ?? ''}
+            onChange={(e) => onSetLanguage(e.target.value || null)}
+            aria-label="Image language"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          >
+            {IMAGE_LANGUAGES.map((l) => (
+              <option key={l.id ?? 'universal'} value={l.id ?? ''} className="text-on-surface bg-surface">
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </span>
       ) : item.language ? (
         <span className="absolute bottom-2 right-2 z-10 px-1.5 py-0.5 rounded bg-black/60 text-white text-label-md font-semibold">
           {langMeta(item.language).short}
@@ -1065,7 +1089,7 @@ function MediaCard({
             type="button"
             onClick={handleCopyLink}
             className={`p-2 rounded-full transition-colors ${
-              copied ? 'bg-primary text-on-primary' : 'bg-white/90 hover:bg-white text-neutral-800'
+              copied ? 'bg-primary text-on-primary' : 'bg-surface/90 hover:bg-surface text-on-surface'
             }`}
             title={copied ? 'Link copied!' : 'Copy image link'}
           >
@@ -1075,7 +1099,7 @@ function MediaCard({
             <button
               type="button"
               onClick={onEditAlt}
-              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
+              className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title={item.alt_text ? `Alt text: ${item.alt_text}` : 'Add alt text'}
             >
               <Pencil className="w-4 h-4" />
@@ -1085,7 +1109,7 @@ function MediaCard({
             <button
               type="button"
               onClick={onSetThumbnail}
-              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
+              className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title={item.thumbnail_path ? 'Change thumbnail' : 'Set thumbnail (default: 2nd product image)'}
             >
               <ImageIcon className="w-4 h-4" />
@@ -1095,7 +1119,7 @@ function MediaCard({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); openInNewTab(); }}
-              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
+              className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title="Open in new tab"
             >
               <ExternalLink className="w-4 h-4" />
@@ -1105,7 +1129,7 @@ function MediaCard({
             <button
               type="button"
               onClick={onSetPrimary}
-              className="p-2 rounded-full bg-white/90 hover:bg-white text-neutral-800 transition-colors"
+              className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title="Set as primary"
             >
               <Star className="w-4 h-4" />
@@ -1115,7 +1139,7 @@ function MediaCard({
             <button
               type="button"
               onClick={onRemove}
-              className="p-2 rounded-full bg-white/90 hover:bg-error hover:text-on-error text-neutral-800 transition-colors"
+              className="p-2 rounded-full bg-surface/90 hover:bg-error hover:text-on-error text-on-surface transition-colors"
               title="Remove from product"
             >
               <Trash2 className="w-4 h-4" />

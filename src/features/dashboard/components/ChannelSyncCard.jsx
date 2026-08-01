@@ -28,7 +28,7 @@ export default function ChannelSyncCard() {
 
   return (
     <div className="mb-6 rounded-2xl border border-outline-variant bg-surface-container-lowest px-5 py-4 flex items-center gap-4 flex-wrap">
-      <div className="w-9 h-9 rounded-lg bg-[#7B189F]/10 text-[#7B189F] dark:bg-[#7B189F]/30 dark:text-[#CE93E8] flex items-center justify-center font-bold">
+      <div className="w-9 h-9 rounded-lg bg-brand-wayfair/15 text-brand-wayfair flex items-center justify-center font-bold">
         W
       </div>
       <div className="min-w-0">

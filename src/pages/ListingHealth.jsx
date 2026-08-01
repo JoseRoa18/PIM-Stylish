@@ -1,11 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Loader2,
   AlertCircle,
   Search,
   ArrowRight,
   ChevronDown,
+  ChevronRight,
   RefreshCw,
 } from 'lucide-react';
 import { useListingHealth } from '@/features/dashboard/hooks/useListingHealth';
@@ -20,16 +20,10 @@ import { readWixProduct } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers } from '@/features/syndication/api/bestbuySync';
 import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
 import ChannelSyncCard from '@/features/dashboard/components/ChannelSyncCard';
-
-const SCORE_BADGE_STYLES = {
-  excellent: 'bg-success-container text-on-success-container',
-  good: 'bg-tertiary-container/40 text-on-tertiary-container',
-  needs_work: 'bg-warning-container text-on-warning-container',
-  critical: 'bg-error-container text-on-error-container',
-};
+import SCORE_BADGE_STYLES from '@/lib/scoreBadgeStyles';
 
 const SOURCE_STYLES = {
-  wix_cache: { label: 'Wix cache', class: 'bg-tertiary-container/40 text-on-tertiary-container' },
+  wix_cache: { label: 'Wix cache', class: 'bg-tertiary/25 text-on-tertiary-container border border-tertiary/40' },
   pim_fallback: { label: 'PIM (no cache)', class: 'bg-warning-container text-on-warning-container' },
   not_linked: { label: 'Not linked', class: 'bg-surface-container text-on-surface-variant' },
   pim: { label: 'PIM', class: 'bg-surface-container text-on-surface-variant' },
@@ -78,7 +72,9 @@ function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'th
                     <span className="flex items-center gap-2">
                       <span className={`w-1.5 h-1.5 rounded-full ${meta.dot} flex-shrink-0`} />
                       {i.label}
-                      <span className="text-on-surface-variant">· {i.category}</span>
+                      {i.category !== i.label && (
+                        <span className="text-on-surface-variant">· {i.category}</span>
+                      )}
                     </span>
                     {i.key === 'wayfair_specs_synced' && wayfairAudit?.fields?.length > 0 && (
                       <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant max-w-md">
@@ -152,6 +148,25 @@ export default function ListingHealth() {
   const [page, setPage] = useState(1);
   const [expandedSku, setExpandedSku] = useState(null);
   const PAGE_SIZE = 25;
+
+  // The tab strip hides its scrollbar, so edge fades + a chevron are the only
+  // signal that more channels sit off-screen. Re-measured on scroll, resize,
+  // and when the average-score badges arrive (they widen the strip).
+  const tabsRef = useRef(null);
+  const [tabsCanScroll, setTabsCanScroll] = useState({ left: false, right: false });
+  const updateTabsScroll = useCallback(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 4;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+    setTabsCanScroll((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+
+  useEffect(() => {
+    updateTabsScroll();
+    window.addEventListener('resize', updateTabsScroll);
+    return () => window.removeEventListener('resize', updateTabsScroll);
+  }, [updateTabsScroll, byMarketplace]);
 
   const mktDef = MARKETPLACES[marketplace];
   const mktData = byMarketplace[marketplace];
@@ -239,7 +254,7 @@ export default function ListingHealth() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto">
       <header className="mb-4">
         <h1 className="text-display-lg text-on-surface">Listing Health</h1>
         <p className="text-body-md text-on-surface-variant mt-1">
@@ -251,7 +266,12 @@ export default function ListingHealth() {
 
       {/* Marketplace tabs — only API-connected channels */}
       {API_MARKETPLACE_KEYS.length > 1 && (
-      <div className="border-b border-outline-variant mb-6 overflow-x-auto scrollbar-hide">
+      <div className="relative mb-6">
+      <div
+        ref={tabsRef}
+        onScroll={updateTabsScroll}
+        className="border-b border-outline-variant overflow-x-auto scrollbar-hide"
+      >
         <nav className="flex min-w-max gap-1" role="tablist">
           {API_MARKETPLACE_KEYS.map((key) => {
             const def = MARKETPLACES[key];
@@ -282,12 +302,38 @@ export default function ListingHealth() {
           })}
         </nav>
       </div>
+      {tabsCanScroll.left && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-background to-transparent pointer-events-none"
+        />
+      )}
+      {tabsCanScroll.right && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-background to-transparent pointer-events-none flex items-center justify-end"
+        >
+          <ChevronRight className="w-4 h-4 text-on-surface-variant" />
+        </div>
+      )}
+      </div>
       )}
 
       {loading && (
-        <div className="flex items-center justify-center py-24 text-on-surface-variant">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          Loading catalog health…
+        <div role="status" aria-label="Loading catalog health" className="animate-pulse space-y-6">
+          <div className="h-56 rounded-2xl bg-surface-container" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="h-48 rounded-2xl bg-surface-container" />
+            <div className="h-48 rounded-2xl bg-surface-container" />
+          </div>
+          <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+            <div className="h-16 bg-surface-container" />
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="h-14 border-t border-outline-variant flex items-center px-6">
+                <div className="h-3 w-48 max-w-[40%] rounded bg-surface-container" />
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -303,7 +349,9 @@ export default function ListingHealth() {
           {/* Marketplace subtitle + actions */}
           <div className="flex items-center justify-between gap-4 flex-wrap mb-4">
             <p className="text-body-sm text-on-surface-variant">
-              {mktDef.subtitle}
+              {/* The blurbs below already say read-only, so the subtitle's own
+                  "(read-only)" suffix (defined channel-side) is dropped here. */}
+              {mktDef.subtitle.replace(/\s*\(read-only\)\s*$/, '')}
               {mktDef.dataSource === 'wix_cache' && (
                 <> · scoring against cached Wix data</>
               )}
@@ -314,13 +362,13 @@ export default function ListingHealth() {
                 <> · PIM readiness + spec-attribute sync from the latest audit</>
               )}
               {mktDef.dataSource === 'bestbuy' && (
-                <> · offers, stock & prices from the latest read-only pull — nothing is ever written to Best Buy</>
+                <> · offers, stock & prices from the latest pull — nothing is ever written to Best Buy</>
               )}
               {mktDef.dataSource === 'walmart_us' && (
-                <> · items & publish status from the latest read-only pull — nothing is ever written to Walmart</>
+                <> · items & publish status from the latest pull — nothing is ever written to Walmart</>
               )}
               {mktDef.dataSource === 'walmart_ca' && (
-                <> · presence from the latest inventory feed (Walmart CA exposes no item API) — read-only</>
+                <> · Walmart CA exposes no item API — read-only</>
               )}
             </p>
             {CHANNEL_REFRESH[mktDef.dataSource] && (
@@ -410,7 +458,10 @@ export default function ListingHealth() {
                 No products match your filters.
               </div>
             ) : (
-              <table className="w-full">
+              // The section clips to its rounded corners, so narrow viewports
+              // scroll the table inside its own wrapper instead of losing columns.
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">
                     <th className="text-left px-6 py-3 font-medium">Product</th>
@@ -426,6 +477,12 @@ export default function ListingHealth() {
                     const cat = categorizeScore(p.result.score);
                     const critCount = p.result.issues.filter((i) => i.severity === 'critical').length;
                     const source = SOURCE_STYLES[p.source] ?? SOURCE_STYLES.pim;
+                    // Walmart pulls items (publish status), not Mirakl offers —
+                    // same green badge, channel-correct noun.
+                    const sourceLabel =
+                      p.source === 'offer' && mktDef.dataSource.startsWith('walmart_')
+                        ? 'Live item'
+                        : source.label;
                     const isOpen = expandedSku === p.sku;
                     return (
                       <Fragment key={p.sku}>
@@ -446,7 +503,7 @@ export default function ListingHealth() {
                           <td className="px-6 py-3 text-body-md text-on-surface-variant">{p.brand ?? '—'}</td>
                           <td className="px-6 py-3 text-body-sm">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-label-md ${source.class}`}>
-                              {source.label}
+                              {sourceLabel}
                             </span>
                           </td>
                           <td className="px-6 py-3 text-right">
@@ -492,12 +549,14 @@ export default function ListingHealth() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
 
             {filtered.length > PAGE_SIZE && (
               <div className="px-6 py-3 border-t border-outline-variant flex items-center justify-between gap-3 flex-wrap">
                 <span className="text-body-sm text-on-surface-variant tabular-nums">
                   Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+                  {filtered.length !== products.length && <> · filtered from {products.length}</>}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
@@ -523,9 +582,11 @@ export default function ListingHealth() {
               </div>
             )}
 
-            <footer className="px-6 py-3 border-t border-outline-variant text-label-md text-on-surface-variant">
-              Showing {filtered.length} of {products.length} {products.length === 1 ? 'product' : 'products'}
-            </footer>
+            {filtered.length <= PAGE_SIZE && (
+              <footer className="px-6 py-3 border-t border-outline-variant text-label-md text-on-surface-variant">
+                Showing {filtered.length} of {products.length} {products.length === 1 ? 'product' : 'products'}
+              </footer>
+            )}
           </section>
         </>
       )}

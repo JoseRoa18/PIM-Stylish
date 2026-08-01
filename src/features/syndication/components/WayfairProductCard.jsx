@@ -48,8 +48,8 @@ export default function WayfairProductCard({ product, onUpdate }) {
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       <div className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#7B189F]/15 text-[#7B189F] dark:bg-[#7B189F]/30 dark:text-[#CE93E8] flex items-center justify-center font-bold">
-            W
+          <div className="w-9 h-9 rounded-lg bg-brand-wayfair/15 text-brand-wayfair flex items-center justify-center font-bold">
+            WF
           </div>
           <div>
             <h2 className="text-title-md text-on-surface">Wayfair</h2>
@@ -101,7 +101,7 @@ export default function WayfairProductCard({ product, onUpdate }) {
             type="button"
             onClick={() => run(false)}
             disabled={!!busy}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
           >
             {busy === 'push' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             Push to Wayfair
