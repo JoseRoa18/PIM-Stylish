@@ -107,6 +107,11 @@ const PAGE_SIZE = 25;
 
 export default function Activity() {
   const { users } = useUsers();
+  // Actor id → profile photo (listUsers already merges avatar_url in).
+  const avatarByActor = useMemo(
+    () => new Map((users ?? []).map((u) => [u.id, u.avatar_url])),
+    [users],
+  );
   const [actorId, setActorId] = useState('');
   const [action, setAction] = useState('');
   const [target, setTarget] = useState('');
@@ -222,7 +227,7 @@ export default function Activity() {
         ) : (
           <ul className="divide-y divide-outline-variant">
             {events.map((e) => (
-              <ActivityRow key={e.id} event={e} />
+              <ActivityRow key={e.id} event={e} avatarUrl={avatarByActor.get(e.actor_id) ?? null} />
             ))}
           </ul>
         )}
@@ -281,7 +286,7 @@ function FilterSelect({ value, onChange, options, children }) {
   );
 }
 
-function ActivityRow({ event }) {
+function ActivityRow({ event, avatarUrl }) {
   const meta = ACTION_META[event.action] ?? {
     icon: Pencil,
     label: event.action,
@@ -315,7 +320,7 @@ function ActivityRow({ event }) {
   return (
     <li className="flex items-start gap-3 px-5 py-3.5 hover:bg-surface-container-low/50 transition-colors">
       {/* Actor avatar */}
-      <Avatar name={event.actor_name} email={event.actor_email} />
+      <Avatar name={event.actor_name} email={event.actor_email} src={avatarUrl} />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
