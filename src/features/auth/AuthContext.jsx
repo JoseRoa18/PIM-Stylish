@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { setActivityActor } from '@/features/activity/api/activityLog';
 
@@ -50,7 +50,7 @@ export function AuthProvider({ children }) {
     let active = true;
     supabase
       .from('profiles')
-      .select('id, email, full_name, role')
+      .select('id, email, full_name, role, avatar_url')
       .eq('id', userId)
       .maybeSingle()
       .then(({ data }) => {
@@ -69,10 +69,25 @@ export function AuthProvider({ children }) {
     };
   }, [session?.user?.id]);
 
-  async function signIn(email, password) {
+  // Re-fetch the profile on demand (e.g. right after changing the photo) so
+  // every consumer of `profile` updates without a full reload.
+  const refreshProfile = useCallback(async () => {
+    const userId = session?.user?.id;
+    if (!userId) return;
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, email, full_name, role, avatar_url')
+      .eq('id', userId)
+      .maybeSingle();
+    setProfile(data ?? null);
+  }, [session?.user?.id]);
+
+  async function signIn(email, password, captchaToken) {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
+      // Only sent when the login form rendered a captcha (VITE_TURNSTILE_SITE_KEY).
+      ...(captchaToken ? { options: { captchaToken } } : {}),
     });
     if (error) throw error;
     return data;
@@ -100,11 +115,15 @@ export function AuthProvider({ children }) {
     loading: loading || profileLoading,
     signIn,
     signOut,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// Provider + hook is the standard context pairing; splitting the hook into its
+// own file only to appease fast-refresh isn't worth the extra module.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {

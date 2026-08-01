@@ -11,12 +11,16 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import ThemeToggle from '@/components/ui/ThemeToggle';
+import AccountMenu from '@/components/layout/AccountMenu';
 import { useProductSearch } from '@/features/search/hooks/useProductSearch';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCategory } from '@/lib/format';
 
+const IS_MAC =
+  typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
+
 export default function Topbar({ onMenuClick }) {
-  const { user, signOut } = useAuth();
+  const { signOut } = useAuth();
   const navigate = useNavigate();
 
   const [query, setQuery] = useState('');
@@ -136,9 +140,6 @@ export default function Topbar({ onMenuClick }) {
     }
   }
 
-  // Initials from email (first letter)
-  const initial = user?.email?.charAt(0).toUpperCase() ?? '?';
-
   return (
     <header className="sticky top-0 z-30 h-16 flex justify-between items-center px-4 sm:px-6 bg-surface border-b border-outline-variant gap-2">
       {/* Mobile menu toggle */}
@@ -192,16 +193,18 @@ export default function Topbar({ onMenuClick }) {
                 className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-label-md bg-surface-container-high text-on-surface-variant font-mono"
                 aria-hidden
               >
-                ⌘K
+                {IS_MAC ? '⌘K' : 'Ctrl K'}
               </kbd>
             )}
           </div>
         </div>
 
         {showDropdown && (
+          // On phones the input is too narrow to host readable rows, so the
+          // panel breaks out to near-full viewport width below the topbar.
           <div
             role="listbox"
-            className="absolute left-0 right-0 top-full mt-2 rounded-2xl border border-outline-variant bg-surface shadow-lg overflow-hidden z-40 animate-menu-in"
+            className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-0 sm:top-full mt-2 rounded-2xl border border-outline-variant bg-surface shadow-lg overflow-hidden z-40 animate-menu-in"
           >
             {showLoadingOnly && (
               <div className="px-4 py-6 text-center text-body-sm text-on-surface-variant">
@@ -232,37 +235,57 @@ export default function Topbar({ onMenuClick }) {
 
             {showResults && (
               <>
-                <ul className="max-h-[28rem] overflow-y-auto py-1">
-                  {results.map((p, i) => (
-                    <li key={p.sku} role="option" aria-selected={i === activeIndex}>
-                      <button
-                        type="button"
-                        onClick={() => goToProduct(p)}
-                        onMouseEnter={() => setActiveIndex(i)}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                          i === activeIndex
-                            ? 'bg-surface-container-low'
-                            : 'hover:bg-surface-container-low/60'
-                        }`}
-                      >
-                        <ProductThumb product={p} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-body-md text-on-surface font-medium truncate">
-                              <HighlightedText text={p.model_name || `SKU ${p.sku}`} query={trimmed} />
-                            </span>
+                {/* max-h = 6 exact rows (67px each) + py-1, so no row is cut mid-height */}
+                <ul className="max-h-[25.625rem] overflow-y-auto py-1">
+                  {results.map((p, i) => {
+                    // Without a model name the title falls back to the SKU, so
+                    // repeating it in the subtitle would just be noise.
+                    const hasModelName = Boolean(p.model_name);
+                    return (
+                      <li key={p.sku} role="option" aria-selected={i === activeIndex}>
+                        <button
+                          type="button"
+                          onClick={() => goToProduct(p)}
+                          onMouseEnter={() => setActiveIndex(i)}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                            i === activeIndex
+                              ? 'bg-secondary-container/60'
+                              : 'hover:bg-surface-container'
+                          }`}
+                        >
+                          <ProductThumb product={p} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline gap-2">
+                              <span className="min-w-0 text-body-md text-on-surface font-medium truncate">
+                                <HighlightedText text={p.model_name || p.sku} query={trimmed} />
+                              </span>
+                            </div>
+                            {(hasModelName || p.brand || p.category) && (
+                              <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap text-body-sm text-on-surface-variant mt-0.5">
+                                {hasModelName && (
+                                  <span className="font-mono shrink-0">
+                                    <HighlightedText text={p.sku} query={trimmed} />
+                                  </span>
+                                )}
+                                {p.brand && (
+                                  <span className="shrink-0">
+                                    {hasModelName && '· '}
+                                    {p.brand}
+                                  </span>
+                                )}
+                                {p.category && (
+                                  <span className="truncate">
+                                    {(hasModelName || p.brand) && '· '}
+                                    {formatCategory(p.category)}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          <div className="flex items-center gap-2 text-body-sm text-on-surface-variant mt-0.5">
-                            <span className="font-mono">
-                              <HighlightedText text={p.sku} query={trimmed} />
-                            </span>
-                            {p.brand && <span>· {p.brand}</span>}
-                            {p.category && <span>· {formatCategory(p.category)}</span>}
-                          </div>
-                        </div>
-                      </button>
-                    </li>
-                  ))}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <button
                   type="button"
@@ -281,12 +304,7 @@ export default function Topbar({ onMenuClick }) {
       {/* Right side: user */}
       <div className="flex items-center gap-2 ml-2 sm:ml-6">
         <ThemeToggle />
-        <div className="flex items-center gap-2 p-1 pr-3 rounded-full">
-          <div className="w-8 h-8 rounded-full bg-primary text-on-primary font-semibold flex items-center justify-center text-sm">
-            {initial}
-          </div>
-          <span className="text-label-md text-on-surface hidden sm:inline">{user?.email}</span>
-        </div>
+        <AccountMenu />
 
         <button
           onClick={handleSignOut}

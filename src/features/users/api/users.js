@@ -31,7 +31,12 @@ async function invokeAdminUsers(body) {
 
 export async function listUsers() {
   const data = await invokeAdminUsers({ action: 'list' });
-  return data.users ?? [];
+  const users = data.users ?? [];
+  // Profile photos come straight from profiles (readable by any signed-in
+  // user) so the admin list doesn't depend on the Edge Function's payload.
+  const { data: profs } = await supabase.from('profiles').select('id, avatar_url');
+  const avatars = new Map((profs ?? []).map((p) => [p.id, p.avatar_url]));
+  return users.map((u) => ({ ...u, avatar_url: avatars.get(u.id) ?? null }));
 }
 
 export async function createUser({ email, password, full_name, role }) {
