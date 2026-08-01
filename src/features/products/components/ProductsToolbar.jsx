@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Search, X } from 'lucide-react';
 import FilterDropdown from './FilterDropdown';
 import { formatCategory } from '@/lib/format';
@@ -30,6 +30,17 @@ export default function ProductsToolbar({
   resultCount,
   totalCount,
 }) {
+  // The URL is the source of truth for the search, but a controlled input fed
+  // straight from it drops keystrokes when navigation lags behind fast typing.
+  // A local draft owns the input while it's focused; external resets (Clear
+  // all, the X button, back/forward) re-sync because focus is elsewhere.
+  const searchRef = useRef(null);
+  const [draft, setDraft] = useState(searchTerm);
+  const [prevSearchTerm, setPrevSearchTerm] = useState(searchTerm);
+  if (searchTerm !== prevSearchTerm) {
+    setPrevSearchTerm(searchTerm);
+    if (document.activeElement !== searchRef.current) setDraft(searchTerm);
+  }
   const updateFilter = (field, values) => {
     onFiltersChange({ ...filters, [field]: values });
   };
@@ -67,9 +78,13 @@ export default function ProductsToolbar({
           strokeWidth={2}
         />
         <input
+          ref={searchRef}
           type="text"
-          value={searchTerm}
-          onChange={(e) => onSearchChange(e.target.value)}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            onSearchChange(e.target.value);
+          }}
           placeholder={
             wide
               ? 'Filter by SKU, model, family number, factory code…'

@@ -91,8 +91,11 @@ export async function listActivity(opts = {}) {
   if (entityType) query = query.eq('entity_type', entityType);
   if (since) query = query.gte('occurred_at', since);
   if (search?.trim()) {
-    const safe = search.trim().replace(/[\\*,]/g, (c) => `\\${c}`);
-    query = query.or(`entity_id.ilike.*${safe}*,summary.ilike.*${safe}*`);
+    // Double-quoted patterns make PostgREST's or() parser treat commas and
+    // parentheses in the term (e.g. "file(s)") as literals; only " and \
+    // need escaping inside the quotes.
+    const safe = search.trim().replace(/[\\"]/g, (c) => `\\${c}`);
+    query = query.or(`entity_id.ilike."*${safe}*",summary.ilike."*${safe}*"`);
   }
 
   const { data, error, count } = await query;

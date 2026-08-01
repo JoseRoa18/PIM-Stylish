@@ -356,7 +356,10 @@ function formatChangeValue(v) {
 export default function ProductDetail() {
   const { sku } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'overview';
+  // Unknown ?tab= values (hand-edited URLs) fall back to Overview instead of
+  // rendering an empty content area.
+  const tabParam = searchParams.get('tab');
+  const activeTab = TABS.some((t) => t.key === tabParam) ? tabParam : 'overview';
 
   const { canEdit } = useAuth();
   const confirm = useConfirm();
