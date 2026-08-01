@@ -17,22 +17,24 @@ export default function PresenceStack() {
 
   const shown = others.slice(0, MAX_FACES);
   return (
+    // Soft pill so the stack reads as one deliberate element instead of a
+    // face floating between the search bar and the controls.
     <div
-      className="hidden sm:flex items-center -space-x-2"
+      className="hidden sm:flex items-center -space-x-2 p-1 mr-1 rounded-full bg-surface-container-low"
       aria-label={`${others.length} teammate${others.length === 1 ? '' : 's'} working right now`}
     >
       {shown.map((u) => (
         <span
           key={u.id}
-          className="relative inline-flex rounded-full ring-2 ring-surface"
+          className="relative inline-flex rounded-full ring-2 ring-surface-container-low"
           title={`${u.name || u.email || 'Teammate'} · working right now`}
         >
           <Avatar name={u.name} email={u.email} src={u.avatar_url} size="sm" />
-          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-success border-2 border-surface" />
+          <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-success ring-2 ring-surface-container-low" />
         </span>
       ))}
       {others.length > MAX_FACES && (
-        <span className="relative inline-flex items-center justify-center w-8 h-8 rounded-full ring-2 ring-surface bg-surface-container-high text-on-surface-variant text-label-sm font-medium">
+        <span className="relative inline-flex items-center justify-center w-8 h-8 rounded-full ring-2 ring-surface-container-low bg-surface-container-high text-on-surface-variant text-label-sm font-medium">
           +{others.length - MAX_FACES}
         </span>
       )}
