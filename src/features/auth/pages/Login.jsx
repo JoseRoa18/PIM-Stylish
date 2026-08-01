@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
+import ThemeToggle from '@/components/ui/ThemeToggle';
+import TurnstileWidget from '@/features/auth/components/TurnstileWidget';
+
+// Optional bot protection: set VITE_TURNSTILE_SITE_KEY (here + Vercel) AND the
+// matching secret in Supabase Auth → Bot and Abuse Protection. Without the
+// var, the login works exactly as before and no third-party script loads.
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 export default function Login() {
   const { signIn, session } = useAuth();
@@ -9,8 +16,11 @@ export default function Login() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   // If already logged in, redirect away from login
   if (session) {
@@ -23,21 +33,32 @@ export default function Login() {
     setSubmitting(true);
 
     try {
-      await signIn(email, password);
+      await signIn(email, password, captchaToken ?? undefined);
       navigate('/', { replace: true });
     } catch (err) {
       setError(translateError(err.message));
+      // Captcha tokens are single-use — request a fresh challenge for the retry.
+      if (TURNSTILE_SITE_KEY) {
+        setCaptchaToken(null);
+        setCaptchaReset((n) => n + 1);
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="relative min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         {/* Brand header */}
         <div className="mb-8 text-center">
-          <img src="/brand/icon.svg" alt="" className="w-16 h-16 mx-auto mb-3" />
+          {/* Icon pair toggled via the app's .dark class — the `dark:` variant
+              tracks the OS scheme here, not the in-app theme toggle. */}
+          <img src="/brand/icon.svg" alt="" className="w-16 h-16 mx-auto mb-3 [.dark_&]:hidden" />
+          <img src="/brand/icon-dark.svg" alt="" className="w-16 h-16 mx-auto mb-3 hidden [.dark_&]:block" />
           <h1 className="text-headline-md text-on-surface">Stylish PIM</h1>
           <p className="text-on-surface-variant text-body-sm mt-1">
             Centralized Product Management
@@ -87,22 +108,38 @@ export default function Login() {
                 <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={submitting}
-                  className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
-                  placeholder="••••••••"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
+                  placeholder="Enter your password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
+            {TURNSTILE_SITE_KEY && (
+              <TurnstileWidget
+                siteKey={TURNSTILE_SITE_KEY}
+                onToken={setCaptchaToken}
+                resetSignal={captchaReset}
+              />
+            )}
+
             <button
               type="submit"
-              disabled={submitting || !email || !password}
-              className="w-full bg-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-on-primary font-semibold text-body-sm py-2.5 rounded-lg transition-opacity flex items-center justify-center gap-2"
+              disabled={submitting || !email || !password || (TURNSTILE_SITE_KEY && !captchaToken)}
+              className="w-full bg-primary enabled:hover:brightness-110 disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed text-on-primary font-semibold text-body-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2"
             >
               {submitting ? (
                 <>
@@ -114,6 +151,10 @@ export default function Login() {
               )}
             </button>
           </form>
+
+          <p className="mt-4 text-center text-label-md text-on-surface-variant">
+            Forgot your password? Ask an administrator to reset it.
+          </p>
         </div>
 
         {/* Footer */}
@@ -135,6 +176,9 @@ function translateError(message) {
   }
   if (message?.includes('Email rate limit')) {
     return 'Too many attempts. Wait a moment and try again.';
+  }
+  if (message?.toLowerCase().includes('captcha')) {
+    return 'Verification failed. Complete the challenge and try again.';
   }
   return message || 'Something went wrong. Try again.';
 }

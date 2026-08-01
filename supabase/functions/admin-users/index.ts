@@ -111,7 +111,8 @@ Deno.serve(async (req) => {
         const role: Role = ROLES.includes(body.role) ? body.role : "viewer";
 
         if (!email) return json({ error: "Email is required." }, 400);
-        if (password.length < 8) return json({ error: "Password must be at least 8 characters." }, 400);
+        // Matches the project-level password policy (min 10, set 2026-08-01).
+        if (password.length < 10) return json({ error: "Password must be at least 10 characters." }, 400);
 
         const { data, error } = await admin.auth.admin.createUser({
           email,
@@ -147,7 +148,8 @@ Deno.serve(async (req) => {
         const id = typeof body.id === "string" ? body.id : "";
         const password = typeof body.password === "string" ? body.password : "";
         if (!id) return json({ error: "id is required." }, 400);
-        if (password.length < 8) return json({ error: "Password must be at least 8 characters." }, 400);
+        // Matches the project-level password policy (min 10, set 2026-08-01).
+        if (password.length < 10) return json({ error: "Password must be at least 10 characters." }, 400);
 
         const { error } = await admin.auth.admin.updateUserById(id, { password });
         if (error) return json({ error: error.message }, 400);
