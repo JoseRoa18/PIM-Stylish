@@ -182,7 +182,7 @@ export function useDashboardData() {
           supabase
             .from('products')
             .select(
-              'sku, model_name, workflow_status, wix_product_id, wix_synced_at, ready_to_sell_date, created_at',
+              'sku, model_name, workflow_status, category, wix_product_id, wix_synced_at, ready_to_sell_date, created_at',
             ),
           latestHealthSummaries(),
           ...SYNC_CHANNELS.map((c) => latestSnapshotLite(c)),
@@ -201,10 +201,12 @@ export function useDashboardData() {
         thirtyDaysAhead.setDate(today.getDate() + 30);
 
         const byStatus = {};
+        const byCategory = {};
         let linkedWix = 0;
         for (const p of list) {
           const status = p.workflow_status || 'unknown';
           byStatus[status] = (byStatus[status] ?? 0) + 1;
+          if (p.category) byCategory[p.category] = (byCategory[p.category] ?? 0) + 1;
           if (p.wix_product_id) linkedWix++;
         }
 
@@ -243,6 +245,7 @@ export function useDashboardData() {
           setData({
             total: list.length,
             byStatus,
+            byCategory,
             actions: buildActions({ channelSnapshots, unlinkedWix: list.length - linkedWix }),
             hasChannelSnapshots: Object.values(channelSnapshots).some(Boolean),
             healthSummaries,
