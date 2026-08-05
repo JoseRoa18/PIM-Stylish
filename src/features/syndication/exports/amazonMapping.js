@@ -38,10 +38,24 @@ const MANUFACTURER_CONTACT = {
   en_US: '4042 Enterprise Way, Flowery Branch, GA 30542, USA',
 };
 
-const installationType = (p) => {
+const installationType = (p, ctx) => {
   // Kitchen sinks carry it in product_type / installation_type; bathroom sinks
   // in the mounting_type attribute.
   const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')} ${attr(p).mounting_type ?? ''}`;
+
+  // The FAUCET templates offer a completely different list — Centerset /
+  // Single Hole / Vessel / Widespread — so the sink vocabulary never matches
+  // and the column came out blank. Map from how the faucet decks instead.
+  if (ctx?.productType === 'FAUCET') {
+    if (/single.?hole|one.?hole/i.test(t)) return 'Single Hole';
+    if (/widespread/i.test(t)) return 'Widespread';
+    if (/vessel/i.test(t)) return 'Vessel';
+    // Anything multi-hole and deck-mounted is a centerset in Amazon's terms.
+    if (/two.?holes?|three.?holes?|centerset/i.test(t)) return 'Centerset';
+    // Wall-mounted faucets have no option in this list — better blank than wrong.
+    return '';
+  }
+
   if (/dual/i.test(t)) return 'Dual Mount';
   if (/under/i.test(t)) return 'Undermount';
   if (/drop/i.test(t)) return 'Drop-In';
@@ -71,9 +85,13 @@ export const AMAZON_RULES = {
   'Manufacturer': (p) => brandMap(p.brand),
   'Manufacturer Contact Information': (p, ctx) =>
     MANUFACTURER_CONTACT[ctx?.lang === 'en_US' ? 'en_US' : 'en_CA'],
-  // Amazon's own definition: "Choose Unit when package hierarchy is not
-  // provided or applicable" — we never ship cases or pallets as the listing.
-  'Package Level': () => 'Unit',
+  // Sinks are listed as a single unit; faucets ship as a case of one (business
+  // call, 2026-08-05). Amazon's own note: "Choose Unit when package hierarchy
+  // is not provided or applicable".
+  'Package Level': (p, ctx) => (ctx?.productType === 'FAUCET' ? 'Case' : 'Unit'),
+  // Part of the Case hierarchy: only meaningful where Package Level is Case.
+  'Package Contains SKU Quantity': (p, ctx) => (ctx?.productType === 'FAUCET' ? '1' : ''),
+  'Number of Packs': () => '1',
 
   // ---- Images (primary first; the generator attaches p._images) ----
   'Main Image URL': (p) => (p._images ?? [])[0] ?? '',
@@ -87,10 +105,19 @@ export const AMAZON_RULES = {
   'Style': () => 'Modern',
   'Material': (p) => list(attr(p).material ?? p.material).slice(0, 5),
   'Color': (p) => p.finish || '',
-  'Size': (p) => {
+  // Faucets have no external dimensions in the PIM, so the sink's L x W left the
+  // column empty on all 107 of them — they get height x spout reach instead.
+  'Size': (p, ctx) => {
+    if (ctx?.productType === 'FAUCET') {
+      const h = num(attr(p).faucet_height_in);
+      const r = num(attr(p).spout_reach_in);
+      return h && r ? `${h}"H x ${r}"D` : '';
+    }
     const d = attr(p).external_dimensions_in ?? {};
     return d.length && d.width ? `${d.length}"L x ${d.width}"W` : '';
   },
+  // Groups the finishes of one faucet together (the four Fano, the three Modena).
+  'Set Name': (p) => p.model_name || '',
   'Item Shape': (p) => attr(p).sink_shape || attr(p).overall_shape || '',
   'Care Instructions': (p) => list(attr(p).product_care).slice(0, 5),
   'Installation Type': installationType,
@@ -200,7 +227,10 @@ export const AMAZON_RULES = {
   'Number of Boxes': () => '1',
 
   // ---- Safety & Compliance ----
-  'Country of Origin': (p) => attr(p).country_of_origin || '',
+  // Only a third of the catalogue carries the attribute, but the whole
+  // assortment is made in China — the same fallback the Home Depot exporters
+  // already use.
+  'Country of Origin': (p) => attr(p).country_of_origin || 'China',
   'Warranty Description': (p) => {
     const parts = [attr(p).warranty_length, attr(p).warranty].filter(Boolean);
     return parts.length ? [`${parts.join(' ')} warranty`.replace(/\s+/g, ' ')] : [];

@@ -146,7 +146,8 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   const labelRow = Number(settings.labelRow ?? 4);
   const attributeRow = Number(settings.attributeRow ?? 5);
   const dataRow = Number(settings.dataRow ?? 7);
-  // Template context for locale-aware rules (en_CA vs en_US pricing etc.).
+  // Template context for rules that vary by locale (en_CA vs en_US pricing) or
+  // by product type (a FAUCET template ships as a case, a SINK as a unit).
   const ctx = { lang: settings.contentLanguageTag ?? 'en_CA' };
   const labels = grid[labelRow - 1] || [];
   if (!labels.filter(Boolean).length) throw new Error('Could not read the template label row.');
@@ -167,6 +168,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
     ? buildAmazonValidValues(sheetToGrid(await zip.file(vvPath).async('string'), shared))
     : {};
   const productType = resolveProductType(validValues, settings);
+  ctx.productType = productType;
   const unitPairs = buildUnitPairs(grid[attributeRow - 1] || []);
 
   const skus = products.map((p) => p.sku);
