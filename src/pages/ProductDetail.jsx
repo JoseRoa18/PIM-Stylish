@@ -1039,16 +1039,12 @@ function SpecsTab({ product, edit }) {
     || attr(product, 'compatible_drain_assembly') != null;
   const isAccessory = cat === 'accessory';
   const [unit, setUnit] = useLengthUnit();
+  // Lives in the header of every section that holds lengths — one shared
+  // choice, but always on screen next to the numbers it rewrites.
+  const unitToggle = <UnitToggle value={unit} onChange={setUnit} disabled={edit.isEditing} />;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end gap-3">
-        <span className="text-label-md text-on-surface-variant">
-          {edit.isEditing ? 'Editing in inches' : 'Show dimensions in'}
-        </span>
-        <UnitToggle value={unit} onChange={setUnit} disabled={edit.isEditing} />
-      </div>
-
       <Section title="Physical Properties">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField label="Material" fieldKey="material" product={product} edit={edit} />
@@ -1064,7 +1060,7 @@ function SpecsTab({ product, edit }) {
       </Section>
 
       {(isKitchenSink || attr(product, 'number_of_bowls')) && (
-        <Section title="Bowl Configuration">
+        <Section title="Bowl Configuration" action={unitToggle}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
             <AttrField label="Number of Bowls" attrKey="number_of_bowls" type="number" product={product} edit={edit} />
             <AttrField label="Bowl Configuration" attrKey="bowl_configuration" product={product} edit={edit} />
@@ -1208,7 +1204,7 @@ function SpecsTab({ product, edit }) {
             </div>
           </Section>
 
-          <Section title="Faucet Dimensions" defaultOpen={false}>
+          <Section title="Faucet Dimensions" defaultOpen={false} action={unitToggle}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Faucet Height" attrKey="faucet_height_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Spout Reach" attrKey="spout_reach_in" type="number" unit={unit} product={product} edit={edit} />
@@ -1245,7 +1241,7 @@ function SpecsTab({ product, edit }) {
         </>
       )}
 
-      <Section title="Dimensions & Weight">
+      <Section title="Dimensions & Weight" action={unitToggle}>
         <div className="space-y-5">
           {!isFaucet && (
             <AttrDimensionsField label="External Dimensions" unit={unit} attrKey="external_dimensions_in"
@@ -1270,7 +1266,7 @@ function SpecsTab({ product, edit }) {
         </div>
       </Section>
 
-      <Section title="Shipping">
+      <Section title="Shipping" action={unitToggle}>
         <div className="space-y-5">
           <EditableField label="Shipping Weight (lb)" fieldKey="shipping_weight_lb" type="number" product={product} edit={edit} />
           <AttrDimensionsField label="Shipping Dimensions" unit={unit} attrKey="shipping_dimensions_in"
@@ -1914,15 +1910,25 @@ function Field({ label, value, mono = false }) {
 
 // ===================== Section =====================
 
-function Section({ title, children, defaultOpen = true }) {
+// `action` renders a control in the header (e.g. the in/cm toggle) — it sits
+// outside the collapse button so it can hold interactive elements of its own.
+function Section({ title, children, defaultOpen = true, action }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const toggle = () => setIsOpen(!isOpen);
   return (
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
-      <button type="button" onClick={() => setIsOpen(!isOpen)} aria-expanded={isOpen}
-        className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors">
-        <h2 className="text-title-lg text-on-surface">{title}</h2>
-        <ChevronDown className={`w-5 h-5 text-on-surface-variant transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
+      <div className="w-full flex items-center hover:bg-surface-container-low transition-colors">
+        <button type="button" onClick={toggle} aria-expanded={isOpen}
+          className="flex-1 min-w-0 px-6 py-4 text-left">
+          <h2 className="text-title-lg text-on-surface">{title}</h2>
+        </button>
+        {action ? <div className="shrink-0 pl-3">{action}</div> : null}
+        <button type="button" onClick={toggle} aria-expanded={isOpen}
+          aria-label={isOpen ? `Collapse ${title}` : `Expand ${title}`}
+          className="shrink-0 px-6 py-4">
+          <ChevronDown className={`w-5 h-5 text-on-surface-variant transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
       <div className={`grid transition-all duration-200 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
         <div className="overflow-hidden">
           <div className="px-6 pb-6 pt-1 space-y-3">{children}</div>
