@@ -37,16 +37,39 @@ function parseSettings(a1) {
 }
 
 // Valid Values sheet → { label: [options] } (label row format: "Label - [ X ]").
+// The label does NOT live in column A: the sheet opens with a narrow spacer
+// column, so the label sits in B and the options start in C. Locate the first
+// non-empty cell instead of assuming a column — reading A gave an empty map,
+// which silently disabled snapping across every Amazon template.
 function buildAmazonValidValues(grid) {
   const byLabel = {};
   for (const row of grid) {
-    if (!row || !row[0]) continue;
-    const m = String(row[0]).match(/^(.*?)\s*-\s*\[[^\]]*\]\s*$/);
+    if (!row) continue;
+    const li = row.findIndex((v) => v != null && v !== '');
+    if (li < 0) continue;
+    const m = String(row[li]).match(/^(.*?)\s*-\s*\[[^\]]*\]\s*$/);
     if (!m) continue;
-    const options = row.slice(1).filter((v) => v != null && v !== '');
+    const options = row.slice(li + 1).filter((v) => v != null && v !== '');
     if (options.length) byLabel[m[1].trim()] = options;
   }
   return byLabel;
+}
+
+// The product type ("SINK", "FAUCET"…) is the keystone of the whole sheet:
+// every list validation is an INDIRECT() that prefixes the attribute's named
+// range with the value of column B — e.g. B7="SINK" resolves
+// "SINKstyle…1.value". Leave B empty and every INDIRECT points at a name that
+// doesn't exist, so Excel shows NO dropdown options anywhere in the row.
+// Resolve it from the Valid Values sheet (it lists exactly one option) and fall
+// back to the base64 `ptds` field of the A1 settings string.
+function resolveProductType(validValues, settings) {
+  const listed = validValues['Product Type'];
+  if (listed?.length === 1) return listed[0];
+  try {
+    const ptds = atob(settings.ptds ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (ptds.length === 1) return ptds[0];
+  } catch { /* not base64 — fall through */ }
+  return '';
 }
 
 const snapTo = (value, options) => {
@@ -54,6 +77,52 @@ const snapTo = (value, options) => {
   const hit = options.find((o) => norm(o) === norm(value));
   return hit ?? value;
 };
+
+// The PIM stores lengths in inches and weights in pounds, but a template can
+// demand something else COLUMN BY COLUMN: Amazon CA accepts only centimeters on
+// item_depth_width_height while keeping the package block in inches, and the
+// accessory templates mix both in a single file. So the rules keep emitting the
+// PIM's native units and the generator converts each value/unit PAIR to
+// whatever that unit column's Valid Values list actually allows.
+const UNIT_FACTORS = {
+  inches: {
+    inches: 1, centimeters: 2.54, millimeters: 25.4, meters: 0.0254,
+    feet: 1 / 12, yards: 1 / 36, hundredthsinches: 100,
+  },
+  pounds: {
+    pounds: 1, ounces: 16, kilograms: 0.45359237, grams: 453.59237,
+    milligrams: 453592.37, hundredthspounds: 100,
+  },
+};
+
+// Pair up "<attribute>.value" / "<attribute>.unit" columns using the template's
+// attribute row — the only place that states which unit belongs to which value.
+function buildUnitPairs(attrs) {
+  const byPrefix = {};
+  attrs.forEach((a, ci) => {
+    const m = String(a ?? '').match(/^(.*)\.(value|unit)$/);
+    if (!m) return;
+    (byPrefix[m[1]] ??= {})[m[2]] = ci;
+  });
+  return Object.values(byPrefix).filter((p) => p.value != null && p.unit != null);
+}
+
+// Rewrite value+unit pairs whose unit isn't accepted by the template.
+function reconcileUnits(values, pairs, labels, validValues) {
+  for (const { value: vi, unit: ui } of pairs) {
+    const from = values[ui];
+    const amount = Number(values[vi]);
+    if (!from || !Number.isFinite(amount)) continue;
+    const options = validValues[labels[ui]];
+    if (!options || options.some((o) => norm(o) === norm(from))) continue;
+
+    const table = UNIT_FACTORS[norm(from)];
+    const target = table && options.find((o) => table[norm(o)] != null);
+    if (!target) continue; // nothing we know how to convert into — leave as is
+    values[vi] = String(Math.round(amount * table[norm(target)] * 100) / 100);
+    values[ui] = target;
+  }
+}
 
 /**
  * Fill an Amazon flat-file template (in place) and download it.
@@ -75,6 +144,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
 
   const settings = parseSettings(grid[0]?.[0]);
   const labelRow = Number(settings.labelRow ?? 4);
+  const attributeRow = Number(settings.attributeRow ?? 5);
   const dataRow = Number(settings.dataRow ?? 7);
   // Template context for locale-aware rules (en_CA vs en_US pricing etc.).
   const ctx = { lang: settings.contentLanguageTag ?? 'en_CA' };
@@ -96,8 +166,8 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   const validValues = vvPath
     ? buildAmazonValidValues(sheetToGrid(await zip.file(vvPath).async('string'), shared))
     : {};
-  // Single-option fields (Product Type → "SINK") fill themselves.
-  const productType = validValues['Product Type']?.length === 1 ? validValues['Product Type'][0] : '';
+  const productType = resolveProductType(validValues, settings);
+  const unitPairs = buildUnitPairs(grid[attributeRow - 1] || []);
 
   const skus = products.map((p) => p.sku);
   const imgBySku = await fetchImagesBySku(skus);
@@ -110,7 +180,9 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
     p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
     p._docs = docBySku[p.sku] || [];
     const cache = {}; // label → computed value (arrays reused across occurrences)
-    let cells = '';
+    // Values are collected first so units can be reconciled against their
+    // paired value before anything is written out.
+    const values = [];
     for (let ci = 0; ci < labels.length; ci++) {
       const label = labels[ci];
       if (!label) continue;
@@ -128,10 +200,16 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
         v = Array.isArray(computed) ? computed[occurrence[ci] - 1] ?? '' : occurrence[ci] === 1 ? computed : '';
       }
       if (v === '' || v == null) continue;
-      v = snapTo(v, validValues[label]);
+      values[ci] = snapTo(v, validValues[label]);
+    }
+    reconcileUnits(values, unitPairs, labels, validValues);
+
+    let cells = '';
+    values.forEach((v, ci) => {
+      if (v === '' || v == null) return;
       fill.hit(ci, v);
       cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
-    }
+    });
     rowsXml += `<row r="${rowNum}" spans="1:${labels.length}">${cells}</row>`;
   });
 

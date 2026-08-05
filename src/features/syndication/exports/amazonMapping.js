@@ -31,6 +31,13 @@ const brandMap = (b) => (/azuni/i.test(b || '') ? 'AZUNI' : 'Stylish');
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 const dropDNA = (v) => (/does\s*no\w*\s*appl/i.test(String(v ?? '')) ? '' : String(v ?? ''));
 
+// Regulatory contact address, per marketplace (Amazon prints it on the listing
+// for GPSR/consumer-safety purposes). Picked by the template's locale.
+const MANUFACTURER_CONTACT = {
+  en_CA: '85 Thompson Dr, Cambridge, ON N1T 2E4',
+  en_US: '4042 Enterprise Way, Flowery Branch, GA 30542, USA',
+};
+
 const installationType = (p) => {
   // Kitchen sinks carry it in product_type / installation_type; bathroom sinks
   // in the mounting_type attribute.
@@ -62,6 +69,11 @@ export const AMAZON_RULES = {
   'Model Number': (p) => p.sku,
   'Model Name': (p) => p.model_name || '',
   'Manufacturer': (p) => brandMap(p.brand),
+  'Manufacturer Contact Information': (p, ctx) =>
+    MANUFACTURER_CONTACT[ctx?.lang === 'en_US' ? 'en_US' : 'en_CA'],
+  // Amazon's own definition: "Choose Unit when package hierarchy is not
+  // provided or applicable" — we never ship cases or pallets as the listing.
+  'Package Level': () => 'Unit',
 
   // ---- Images (primary first; the generator attaches p._images) ----
   'Main Image URL': (p) => (p._images ?? [])[0] ?? '',
@@ -70,7 +82,9 @@ export const AMAZON_RULES = {
   // ---- Product Details ----
   'Product Description': (p) => stripHtml(p.description),
   'Bullet Point': (p) => list(attr(p).bullet_points).slice(0, 5),
-  'Style': (p) => p.series || '',
+  // Always Modern — it's one of the 22 options Amazon's Style list allows, and
+  // the PIM's `series` (Kelso, Wapta…) is a collection name, never a style.
+  'Style': () => 'Modern',
   'Material': (p) => list(attr(p).material ?? p.material).slice(0, 5),
   'Color': (p) => p.finish || '',
   'Size': (p) => {
@@ -191,6 +205,9 @@ export const AMAZON_RULES = {
     const parts = [attr(p).warranty_length, attr(p).warranty].filter(Boolean);
     return parts.length ? [`${parts.join(' ')} warranty`.replace(/\s+/g, ' ')] : [];
   },
+  // Free text (no Valid Values list) — nothing in the assortment carries a
+  // printed safety warning.
+  'Safety Warning': () => 'Not Applicable',
   'Are batteries required?': () => 'No',
   'Are batteries included?': () => 'No',
   'Contains Liquid Contents?': () => 'No',
