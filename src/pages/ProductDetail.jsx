@@ -51,6 +51,8 @@ import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
+import { useLengthUnit, toDisplayLength, withUnit } from '@/features/products/lib/units';
+import UnitToggle from '@/components/ui/UnitToggle';
 
 // ===================== Constants =====================
 
@@ -1036,9 +1038,17 @@ function SpecsTab({ product, edit }) {
     || attr(product, 'valve_included') != null
     || attr(product, 'compatible_drain_assembly') != null;
   const isAccessory = cat === 'accessory';
+  const [unit, setUnit] = useLengthUnit();
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-end gap-3">
+        <span className="text-label-md text-on-surface-variant">
+          {edit.isEditing ? 'Editing in inches' : 'Show dimensions in'}
+        </span>
+        <UnitToggle value={unit} onChange={setUnit} disabled={edit.isEditing} />
+      </div>
+
       <Section title="Physical Properties">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField label="Material" fieldKey="material" product={product} edit={edit} />
@@ -1062,7 +1072,7 @@ function SpecsTab({ product, edit }) {
             <AttrField label="Low Divider" attrKey="low_divider" type="boolean" product={product} edit={edit} />
             <AttrField label="Strainer Model" attrKey="strainer_model" product={product} edit={edit} />
             <AttrField label="Sink Radius (mm)" attrKey="sink_radius_mm" type="number" product={product} edit={edit} />
-            <AttrField label="Drain Diameter (in)" attrKey="drain_diameter_in" type="number" product={product} edit={edit} />
+            <AttrField label="Drain Diameter" attrKey="drain_diameter_in" type="number" unit={unit} product={product} edit={edit} />
             <AttrField label="Drain Location" attrKey="drain_hole_location" product={product} edit={edit} />
             <AttrField label="Has Grooves" attrKey="has_grooves" type="boolean" product={product} edit={edit} />
             <AttrField label="Includes Grids" attrKey="includes_grids" type="boolean" product={product} edit={edit} />
@@ -1079,7 +1089,7 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Faucet Hole Center Spacing" attrKey="faucet_hole_center_spacing" product={product} edit={edit} />
               <AttrField label="Overflow" attrKey="overflow" product={product} edit={edit} />
               <AttrField label="Drain Location" attrKey="drain_hole_location" product={product} edit={edit} />
-              <AttrField label="Drain Diameter (in)" attrKey="drain_diameter_in" type="number" product={product} edit={edit} />
+              <AttrField label="Drain Diameter" attrKey="drain_diameter_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Pedestal Included" attrKey="pedestal_included" type="boolean" product={product} edit={edit} />
               <AttrField label="Compatible Pedestal #" attrKey="compatible_pedestal" product={product} edit={edit} />
               <AttrField label="Console Included" attrKey="console_included" type="boolean" product={product} edit={edit} />
@@ -1200,12 +1210,12 @@ function SpecsTab({ product, edit }) {
 
           <Section title="Faucet Dimensions" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="Faucet Height (in)" attrKey="faucet_height_in" type="number" product={product} edit={edit} />
-              <AttrField label="Spout Reach (in)" attrKey="spout_reach_in" type="number" product={product} edit={edit} />
-              <AttrField label="Spout Height (in)" attrKey="spout_height_in" type="number" product={product} edit={edit} />
+              <AttrField label="Faucet Height" attrKey="faucet_height_in" type="number" unit={unit} product={product} edit={edit} />
+              <AttrField label="Spout Reach" attrKey="spout_reach_in" type="number" unit={unit} product={product} edit={edit} />
+              <AttrField label="Spout Height" attrKey="spout_height_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Install Hole Ø (mm)" attrKey="install_hole_diameter_mm" type="number" product={product} edit={edit} />
-              <AttrField label="Install Hole Ø (in)" attrKey="install_hole_diameter_in" type="number" product={product} edit={edit} />
-              <AttrField label="Max Deck Thickness (in)" attrKey="max_deck_thickness_in" type="number" product={product} edit={edit} />
+              <AttrField label="Install Hole Ø" attrKey="install_hole_diameter_in" type="number" unit={unit} product={product} edit={edit} />
+              <AttrField label="Max Deck Thickness" attrKey="max_deck_thickness_in" type="number" unit={unit} product={product} edit={edit} />
             </div>
           </Section>
 
@@ -1238,23 +1248,23 @@ function SpecsTab({ product, edit }) {
       <Section title="Dimensions & Weight">
         <div className="space-y-5">
           {!isFaucet && (
-            <AttrDimensionsField label="External Dimensions (in)" attrKey="external_dimensions_in"
+            <AttrDimensionsField label="External Dimensions" unit={unit} attrKey="external_dimensions_in"
               keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
           )}
           {!isFaucet && (
-            <AttrDimensionsField label="Internal Dimensions (in)" attrKey="internal_dimensions_in"
+            <AttrDimensionsField label="Internal Dimensions" unit={unit} attrKey="internal_dimensions_in"
               keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
           )}
           <AttrField label="Product Weight (lb)" attrKey="product_weight_lb" type="number" product={product} edit={edit} />
           {!isFaucet && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="Min External Cabinet (in)" attrKey="min_external_cabinet_size_in" type="number" product={product} edit={edit} />
-              <AttrField label="Min Internal Cabinet (in)" attrKey="min_internal_cabinet_size_in" type="number" product={product} edit={edit} />
-              <AttrField label="Max Deck Thickness (in)" attrKey="max_deck_thickness_in" type="number" product={product} edit={edit} />
+              <AttrField label="Min External Cabinet" attrKey="min_external_cabinet_size_in" type="number" unit={unit} product={product} edit={edit} />
+              <AttrField label="Min Internal Cabinet" attrKey="min_internal_cabinet_size_in" type="number" unit={unit} product={product} edit={edit} />
+              <AttrField label="Max Deck Thickness" attrKey="max_deck_thickness_in" type="number" unit={unit} product={product} edit={edit} />
             </div>
           )}
           {!isFaucet && (
-            <AttrDimensionsField label="Cut-out Dimensions (in)" attrKey="cut_out_dimensions_in"
+            <AttrDimensionsField label="Cut-out Dimensions" unit={unit} attrKey="cut_out_dimensions_in"
               keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
           )}
         </div>
@@ -1263,7 +1273,7 @@ function SpecsTab({ product, edit }) {
       <Section title="Shipping">
         <div className="space-y-5">
           <EditableField label="Shipping Weight (lb)" fieldKey="shipping_weight_lb" type="number" product={product} edit={edit} />
-          <AttrDimensionsField label="Shipping Dimensions (in)" attrKey="shipping_dimensions_in"
+          <AttrDimensionsField label="Shipping Dimensions" unit={unit} attrKey="shipping_dimensions_in"
             keys={['length', 'width', 'height']} labels={['Length', 'Width', 'Height']} product={product} edit={edit} />
         </div>
       </Section>
@@ -1512,13 +1522,21 @@ function ExportTemplatesCard({ product, media }) {
 
 // ===================== AttrField — reads/writes from attributes JSONB =====================
 
-function AttrField({ label, attrKey, type = 'text', product, edit, mono, options }) {
+/**
+ * `unit` marks the attribute as a length stored in inches: the label gets the
+ * unit suffix and the read-only value is converted for display. Editing always
+ * falls back to inches — the stored unit — so a save can never drift.
+ */
+function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;
+  const shownUnit = unit ? (isEditing ? 'in' : unit) : null;
+  if (shownUnit) label = withUnit(label, shownUnit);
 
   if (!isEditing) {
     const val = attr(product, attrKey);
     if (type === 'select') return <Field label={label} value={val} />;
+    if (shownUnit) return <Field label={label} value={toDisplayLength(val, shownUnit)} mono={mono} />;
     if (type === 'boolean') {
       return (
         <div className="flex flex-col gap-1">
@@ -1602,14 +1620,21 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
 
 // ===================== AttrDimensionsField =====================
 
-function AttrDimensionsField({ label, attrKey, keys, labels, product, edit }) {
+function AttrDimensionsField({ label, attrKey, keys, labels, product, edit, unit = 'in' }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;
   const dims = isEditing ? (form[formKey] ?? {}) : (attr(product, attrKey) ?? {});
+  // Inches while editing — the unit the values are actually stored in.
+  const shownUnit = isEditing ? 'in' : unit;
 
   if (!isEditing) {
-    const parts = keys.map((k, i) => dims[k] != null ? `${labels[i]} ${dims[k]}` : null).filter(Boolean);
-    return <Field label={label} value={parts.length > 0 ? parts.join(' × ') : null} />;
+    const parts = keys
+      .map((k, i) => {
+        const shown = toDisplayLength(dims[k], shownUnit);
+        return shown != null ? `${labels[i]} ${shown}` : null;
+      })
+      .filter(Boolean);
+    return <Field label={withUnit(label, shownUnit)} value={parts.length > 0 ? parts.join(' × ') : null} />;
   }
 
   function updateDim(key, value) {
@@ -1618,7 +1643,7 @@ function AttrDimensionsField({ label, attrKey, keys, labels, product, edit }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-label-md text-on-surface-variant">{label}</span>
+      <span className="text-label-md text-on-surface-variant">{withUnit(label, shownUnit)}</span>
       <div className="flex items-center gap-2">
         {keys.map((k, i) => (
           <div key={k} className="flex-1">
