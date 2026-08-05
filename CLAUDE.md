@@ -4,11 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+The package manager is **pnpm** (`pnpm-lock.yaml`; there is no `package-lock.json`). Vercel auto-detects it from the lockfile.
+
 ```bash
-npm run dev        # Vite dev server
-npm run build      # production build
-npm run lint       # ESLint (flat config, eslint.config.js)
-npm run preview    # serve the production build locally
+pnpm install       # install dependencies
+pnpm dev           # Vite dev server
+pnpm build         # production build
+pnpm lint          # ESLint (flat config, eslint.config.js)
+pnpm preview       # serve the production build locally
 ```
 
 There is no test suite. Verification is done by running the app against the live Supabase project.
