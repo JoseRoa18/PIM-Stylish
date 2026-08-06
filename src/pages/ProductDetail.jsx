@@ -51,7 +51,7 @@ import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct } from '@/features/templates/api/templates';
 import { useAuth } from '@/features/auth/AuthContext';
-import { useLengthUnit, toDisplayLength, withUnit } from '@/features/products/lib/units';
+import { useLengthUnit, toDisplayLength, withUnit, toFractionLength } from '@/features/products/lib/units';
 import UnitToggle from '@/components/ui/UnitToggle';
 
 // ===================== Constants =====================
@@ -1037,6 +1037,7 @@ function SpecsTab({ product, edit }) {
     || attr(product, 'laminar_flow') != null
     || attr(product, 'valve_included') != null
     || attr(product, 'compatible_drain_assembly') != null;
+  const isKitchenFaucet = isFaucet && !isBathFaucet;
   const isAccessory = cat === 'accessory';
   const [unit, setUnit] = useLengthUnit();
   // Lives in the header of every section that holds lengths — one shared
@@ -1056,7 +1057,15 @@ function SpecsTab({ product, edit }) {
           {isKitchenSink && <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />}
           {isFaucet && <AttrField label="Application" attrKey="application" product={product} edit={edit} />}
           {isFaucet && <AttrField label="Lead Free" attrKey="lead_free" type="boolean" product={product} edit={edit} />}
+          {/* Same field the accessory sheets call "Product Care" — the sink
+              template just names it differently. */}
+          {isKitchenSink && <AttrField label="Care Instructions" attrKey="product_care" product={product} edit={edit} />}
         </div>
+        {isKitchenSink && (
+          <div className="mt-4">
+            <AttrListField label="Durability" attrKey="durability_tags" product={product} edit={edit} hint="Separate items with ;" />
+          </div>
+        )}
       </Section>
 
       {(isKitchenSink || attr(product, 'number_of_bowls')) && (
@@ -1072,6 +1081,40 @@ function SpecsTab({ product, edit }) {
             <AttrField label="Drain Location" attrKey="drain_hole_location" product={product} edit={edit} />
             <AttrField label="Has Grooves" attrKey="has_grooves" type="boolean" product={product} edit={edit} />
             <AttrField label="Includes Grids" attrKey="includes_grids" type="boolean" product={product} edit={edit} />
+          </div>
+        </Section>
+      )}
+
+      {isKitchenSink && (
+        <Section title="Certifications & Compliance" defaultOpen={false}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+            <AttrField label="cUPC Certified" attrKey="cupc_certified" product={product} edit={edit} />
+            <AttrField label="ADA Compliant" attrKey="ada_compliant" product={product} edit={edit} />
+            <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" product={product} edit={edit} />
+            <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" product={product} edit={edit} />
+            <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" product={product} edit={edit} />
+            <AttrField label="ASME A112.19.4" attrKey="asme_a112_19_4_compliant" product={product} edit={edit} />
+            <AttrField label="ANSI Z124.6-97" attrKey="ansi_z124_6_97_compliant" product={product} edit={edit} />
+            <AttrField label="WW-P-541 Certified" attrKey="ww_p_541_certified" product={product} edit={edit} />
+            <AttrField label="CSA B45.5/IAPMO Z124" attrKey="csa_b45_5_iapmo_z124_compliant" product={product} edit={edit} />
+            <AttrField label="NSF Certified" attrKey="nsf_certified" product={product} edit={edit} />
+            <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" product={product} edit={edit} />
+            <AttrField label="ISTA 1A" attrKey="ista_1a_certified" product={product} edit={edit} />
+            <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" product={product} edit={edit} />
+            <AttrField label="GREENGUARD Certifications" attrKey="greenguard_certifications" product={product} edit={edit} />
+            <AttrField label="GREENGUARD Certified" attrKey="greenguard_certified" product={product} edit={edit} />
+            <AttrField label="GREENGUARD Gold" attrKey="greenguard_gold_certified" product={product} edit={edit} />
+            <AttrField label="Cradle to Cradle Certifications" attrKey="cradle_to_cradle_certifications" product={product} edit={edit} />
+            <AttrField label="Cradle to Cradle Certified" attrKey="cradle_to_cradle_certified" product={product} edit={edit} />
+            <AttrField label="C2C Material Health" attrKey="cradle_to_cradle_material_health" product={product} edit={edit} />
+            <AttrField label="ISO 14021 Recycled" attrKey="iso_14021_certified" product={product} edit={edit} />
+            <AttrField label="EPA WaterSense" attrKey="epa_watersense_certified" product={product} edit={edit} />
+            <AttrField label="Type III EPD" attrKey="epd_type_iii" product={product} edit={edit} />
+            <AttrField label="UPLR Compliant" attrKey="uplr_compliant" product={product} edit={edit} />
+            <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" product={product} edit={edit} />
+            <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
+            <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
+            <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
           </div>
         </Section>
       )}
@@ -1209,6 +1252,10 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Faucet Height" attrKey="faucet_height_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Spout Reach" attrKey="spout_reach_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Spout Height" attrKey="spout_height_in" type="number" unit={unit} product={product} edit={edit} />
+              {/* Sit directly under their decimals in the 3-column grid. */}
+              {isKitchenFaucet && <FractionField label="Faucet Height" attrKey="faucet_height_in" product={product} edit={edit} />}
+              {isKitchenFaucet && <FractionField label="Spout Reach" attrKey="spout_reach_in" product={product} edit={edit} />}
+              {isKitchenFaucet && <FractionField label="Spout Height" attrKey="spout_height_in" product={product} edit={edit} />}
               <AttrField label="Install Hole Ø (mm)" attrKey="install_hole_diameter_mm" type="number" product={product} edit={edit} />
               <AttrField label="Install Hole Ø" attrKey="install_hole_diameter_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Max Deck Thickness" attrKey="max_deck_thickness_in" type="number" unit={unit} product={product} edit={edit} />
@@ -1523,6 +1570,21 @@ function ExportTemplatesCard({ product, media }) {
  * unit suffix and the read-only value is converted for display. Editing always
  * falls back to inches — the stored unit — so a save can never drift.
  */
+/**
+ * A length the retailer sheets want written as a fraction (8.875 → 8 7/8").
+ * Always derived from the stored decimal and never editable, so the two can't
+ * contradict each other. While editing it follows the input live, so the
+ * fraction shown is the one the value being typed will produce.
+ *
+ * Marked with an inch mark because the unit toggle only rewrites the decimals —
+ * a fraction of inches means nothing in centimetres.
+ */
+function FractionField({ label, attrKey, product, edit }) {
+  const raw = edit.isEditing ? edit.form['_' + attrKey] : attr(product, attrKey);
+  const fraction = toFractionLength(raw);
+  return <Field label={`${label} (Fractions)`} value={fraction ? `${fraction}"` : null} />;
+}
+
 function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;

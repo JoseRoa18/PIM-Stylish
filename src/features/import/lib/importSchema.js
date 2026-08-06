@@ -173,7 +173,7 @@ export const FIELD_DEFS = [
   // Faucet sheets reuse identity / material / finish / UPC / shipping /
   // marketing fields above; these cover the faucet-specific attributes.
   { key: 'lead_free', label: 'Lead Free', aliases: ['leadfree'], type: 'bool', target: { attr: 'lead_free' } },
-  { key: 'craftsmanship', label: 'Craftsmanship Type', aliases: ['craftsmanshiptype', 'craftsmanship'], type: 'text', target: { attr: 'craftsmanship' } },
+  { key: 'craftsmanship', label: 'Craftsmanship Type', aliases: ['craftsmanshiptype', 'craftsmanship', 'craftsmanshiptypemanufacturingmethod'], type: 'text', target: { attr: 'craftsmanship' } },
   { key: 'durability', label: 'Durability', aliases: ['durability'], type: 'list', target: { attr: 'durability_tags' } },
   { key: 'warranty', label: 'Full or Limited Warranty', aliases: ['fullorlimitedwarranty', 'warranty'], type: 'text', target: { attr: 'warranty' } },
   { key: 'num_install_holes', label: 'Number of Installation Holes', aliases: ['numberofinstallationholes', 'numberofmountingholes'], type: 'int', target: { attr: 'number_of_installation_holes' } },
@@ -254,11 +254,27 @@ export const FIELD_DEFS = [
   { key: 'nsf_certified', label: 'NSF Certified', aliases: ['nsfcertified'], type: 'text', target: { attr: 'nsf_certified' } },
   { key: 'csa_b45_5', label: 'CSA B45.5/IAPMO Z124 Compliant', aliases: ['csab455iapmoz124compliantplasticplumbingfixtures', 'csab455iapmoz124compliant'], type: 'text', target: { attr: 'csa_b45_5_iapmo_z124_compliant' } },
 
+  // ---------- Kitchen-sink certifications ----------
+  // The rest of the kitchen-sink cert columns reuse the definitions above
+  // (cUPC, ADA, ISTA, UPLR, ASME 19.1/19.2/19.3, NSF, ISO 14021, WaterSense,
+  // EPD, AB-100, …); only these had no home yet.
+  { key: 'ansi_z124_6_97', label: 'ANSI Z124.6-97 Compliant', aliases: ['ansiz124697compliant'], type: 'text', target: { attr: 'ansi_z124_6_97_compliant' } },
+  { key: 'asme_19_4', label: 'ASME A112.19.4 Compliant', aliases: ['asmea112194compliant'], type: 'text', target: { attr: 'asme_a112_19_4_compliant' } },
+  { key: 'ww_p_541', label: 'WW-P-541 Certified', aliases: ['wwp541certified'], type: 'text', target: { attr: 'ww_p_541_certified' } },
+  // GREENGUARD and Cradle to Cradle each ship as three separate template
+  // columns (umbrella / base cert / specific cert), so they stay three fields.
+  { key: 'greenguard_certified', label: 'GREENGUARD Certified', aliases: ['greenguardcertified'], type: 'text', target: { attr: 'greenguard_certified' } },
+  { key: 'greenguard_gold', label: 'GREENGUARD Gold Certified', aliases: ['greenguardgoldcertified'], type: 'text', target: { attr: 'greenguard_gold_certified' } },
+  { key: 'cradle_certified', label: 'Cradle to Cradle Certified', aliases: ['cradletocradlecertified'], type: 'text', target: { attr: 'cradle_to_cradle_certified' } },
+  { key: 'cradle_material_health', label: 'Cradle to Cradle Material Health Certificate', aliases: ['cradletocradlematerialhealthcertificate'], type: 'text', target: { attr: 'cradle_to_cradle_material_health' } },
+
   // ---------- Accessory (cutting board) specific ----------
   { key: 'wood_species', label: 'Wood Species', aliases: ['woodspecies'], type: 'text', target: { attr: 'wood_species' } },
   { key: 'juice_grooves', label: 'Carving Board Juice Grooves', aliases: ['carvingboardjuicegrooves', 'juicegrooves'], type: 'bool', target: { attr: 'juice_grooves' } },
   { key: 'bpa_free', label: 'BPA Free', aliases: ['bpafree'], type: 'bool', target: { attr: 'bpa_free' } },
-  { key: 'product_care', label: 'Product Care', aliases: ['productcare'], type: 'text', target: { attr: 'product_care' } },
+  // "Care instructions" on the kitchen-sink sheet is the same field under a
+  // different name — one place to fill it in, not two.
+  { key: 'product_care', label: 'Product Care', aliases: ['productcare', 'careinstructions'], type: 'text', target: { attr: 'product_care' } },
   { key: 'pattern', label: 'Pattern', aliases: ['pattern'], type: 'text', target: { attr: 'pattern' } },
   { key: 'flexible_board', label: 'Flexible Cutting Board', aliases: ['flexiblecuttingboard'], type: 'bool', target: { attr: 'flexible_cutting_board' } },
   { key: 'reversible', label: 'Reversible', aliases: ['reversible'], type: 'bool', target: { attr: 'reversible' } },
@@ -315,7 +331,9 @@ export const FIELD_DEFS = [
   { key: 'asse_1016', label: 'ASSE 1016 Certified', aliases: ['asse1016certified'], type: 'text', target: { attr: 'asse_1016_certified' } },
   { key: 'ab_1953', label: 'California AB 1953 Compliant', aliases: ['californiaab1953compliant'], type: 'text', target: { attr: 'ab_1953_compliant' } },
   { key: 'wqa_gold_seal', label: 'WQA Gold Seal Certified', aliases: ['wqagoldsealcertified'], type: 'text', target: { attr: 'wqa_gold_seal_certified' } },
-  { key: 'greenguard', label: 'GREENGUARD Certifications', aliases: ['greenguardcertifications', 'greenguardcertified'], type: 'text', target: { attr: 'greenguard_certifications' } },
+  // 'greenguardcertified' used to land here; it now has its own field below,
+  // so a column named "GREENGUARD Certified" goes where its name says.
+  { key: 'greenguard', label: 'GREENGUARD Certifications', aliases: ['greenguardcertifications'], type: 'text', target: { attr: 'greenguard_certifications' } },
 
   // ---------- Retailer listing IDs ----------
   { key: 'bbb_ca_upc', label: 'BB&B.ca UPC (Alias related)', aliases: ['bbbcaupcaliasrelated', 'bbbcaupc'], type: 'text', target: { attr: 'bbb_ca_upc' } },
@@ -390,6 +408,23 @@ export const TEMPLATE_HEADERS = [
   'Maximum Deck Thickness', 'Does it have Grooves?', 'Include grids?',
   'Accessories included', 'Number of pieces Included', 'Drain Hole location',
   'Drain Diameter', 'Product Weight lb', 'Country of Origen', 'SCC Compliant',
+  // Craftsmanship / durability / care, then the full certification block —
+  // added 2026-08-06 to match what the other category sheets already carried.
+  'Craftsmanship Type/ Manufacturing Method', 'Durability', 'Care instructions',
+  'cUPC Certified', 'ASME A112.19.2/CSA B45.1 Compliant',
+  'ANSI Z124.6-97 Compliant', 'ADA Compliant', 'ASME A112.19.4 Compliant',
+  'WW-P-541 Certified', 'ISTA 3A or 6A Certified', 'ISTA 1A Certified',
+  'Uniform Packaging and Labeling Regulations (UPLR) Compliant',
+  'Canada Product Restriction', 'Reason for Restriction',
+  'ASME A112.19.1/CSA B45.2 - 2018 Compliant', 'ASME A112.19.3 Compliant',
+  'UL 1951 Listed', 'NSF Certified',
+  'CSA B45.5/IAPMO Z124 Compliant - Plastic Plumbing Fixtures',
+  'GREENGUARD Certifications', 'GREENGUARD Certified', 'GREENGUARD Gold Certified',
+  'ISO 14021 Recycled Content Standard Certified', 'EPA WaterSense Certified',
+  'Cradle to Cradle Certifications', 'Cradle to Cradle Certified',
+  'Cradle to Cradle Material Health Certificate',
+  'Type III Product Specific Environmental Product Declaration (EPD)',
+  'Energy Efficiency Regulations Compliant', 'California AB-100 Compliant',
   'Safety Listing(s)', 'UPC Certified', 'Vermont Act 193 Compliant', 'HS CODE',
   'Master UPC', 'Shipping Weight Lbs', 'Shipping Height (in)', 'Shipping Width (in)',
   'Shipping Length (in)', 'Cut-Out Below Counter Depth', 'Cut-Out Front to Back',
