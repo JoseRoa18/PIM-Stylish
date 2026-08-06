@@ -351,6 +351,9 @@ export const FIELD_DEFS = [
   { key: 'general_title_en', label: 'General Title (EN)', aliases: ['generaltitleen'], type: 'text', target: { attr: 'general_title_en' } },
   { key: 'description_en', label: 'Description (EN)', aliases: ['descriptionennomorethan1000characters', 'descriptionen'], type: 'description', target: { col: 'description' } },
   { key: 'general_title_fr', label: 'General Title (FR)', aliases: ['generaltitlefr'], type: 'text', target: { attr: 'general_title_fr' } },
+  // Search terms per language. Lists, so a sheet can hold them semicolon-separated.
+  { key: 'keywords_en', label: 'Search Keywords (EN)', aliases: ['searchkeywordsen', 'keywordsen', 'searchtermsen', 'keywords'], type: 'list', target: { attr: 'keywords_en' } },
+  { key: 'keywords_fr', label: 'Search Keywords (FR)', aliases: ['searchkeywordsfr', 'keywordsfr', 'searchtermsfr'], type: 'list', target: { attr: 'keywords_fr' } },
   { key: 'description_fr', label: 'Description (FR)', aliases: ['descriptionfr'], type: 'text', target: { attr: 'description_fr' } },
   { key: 'marketing_copy', label: 'Short Description - Marketing Copy', aliases: ['shortdescriptionmarketingcopy', 'marketingcopy', 'shortdescription'], type: 'text', target: { attr: 'marketing_copy' } },
   { key: 'product_url', label: 'Product URL', aliases: ['stylishproducturl', 'producturl', 'productpageurl'], type: 'text', target: { attr: 'product_url' } },

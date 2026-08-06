@@ -101,7 +101,9 @@ function attr(product, key) {
 }
 
 // List attributes are edited as "A; B" text and stored as arrays.
-const LIST_ATTRS = new Set(['accessories_included', 'durability_tags']);
+const LIST_ATTRS = new Set([
+  'accessories_included', 'durability_tags', 'keywords_en', 'keywords_fr',
+]);
 
 // Sink installation is a single choice — dual mount is its own option, not
 // a pair of values (drives the per-type installation manual slots).
@@ -197,6 +199,8 @@ function buildEditForm(product) {
     _bullet_points: a.bullet_points ?? [],
     _accessories_included: joinList(a.accessories_included),
     _durability_tags: joinList(a.durability_tags),
+    _keywords_en: joinList(a.keywords_en),
+    _keywords_fr: joinList(a.keywords_fr),
     _number_of_pieces: a.number_of_pieces ?? '',
     _scc_compliant: a.scc_compliant ?? '',
     _safety_listings: a.safety_listings ?? '',
@@ -1354,6 +1358,13 @@ function ContentTab({ product, edit }) {
         <BulletPointsEditor product={product} edit={edit} />
       </Section>
 
+      {/* Search terms, not a restatement of the title — what a shopper types.
+          Seeded by scripts/generate-keywords.mjs, refined by hand here. */}
+      <Section title="Search Keywords (EN)" defaultOpen={false}>
+        <AttrListField label="Keywords (EN)" attrKey="keywords_en" product={product} edit={edit}
+          hint="Separate terms with ; — how a shopper searches, not the product title" />
+      </Section>
+
       <Section title="French Content" defaultOpen={false}>
         <div className="space-y-4">
           <AttrField label="General Title (FR)" attrKey="general_title_fr" product={product} edit={edit} />
@@ -1363,6 +1374,11 @@ function ContentTab({ product, edit }) {
 
       <Section title="Bullet Points / Features (FR)" defaultOpen={false}>
         <BulletPointsEditor product={product} edit={edit} attrKey="bullet_points_fr" />
+      </Section>
+
+      <Section title="Search Keywords (FR)" defaultOpen={false}>
+        <AttrListField label="Keywords (FR)" attrKey="keywords_fr" product={product} edit={edit}
+          hint="Separate terms with ; — French search terms, not a translation of the English list" />
       </Section>
 
       <Section title="Notes" defaultOpen={false}>

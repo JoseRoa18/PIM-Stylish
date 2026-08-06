@@ -104,7 +104,13 @@ export const WALMART_RULES = {
   shortDescription_en: (p) => stripHtml(p.description),
   keyFeatures_en: (p) => list(attr(p).bullet_points).slice(0, 3),
   features_en: (p) => list(attr(p).bullet_points).slice(3).join(' | '),
-  keywords_en: (p) => [p.category, p.product_type, p.finish, p.brand].filter(Boolean).join(', '),
+  // Curated keywords when the product has them; otherwise fall back to the
+  // structured fields, which is all this had before the field existed.
+  keywords_en: (p) => {
+    const curated = list(attr(p).keywords_en);
+    if (curated.length) return curated.join(', ');
+    return [p.category, p.product_type, p.finish, p.brand].filter(Boolean).join(', ');
+  },
 
   mainImageUrl: (p) => (p._images ?? [])[0] ?? '',
   productSecondaryImageURL: (p) => (p._images ?? []).slice(1, 5),

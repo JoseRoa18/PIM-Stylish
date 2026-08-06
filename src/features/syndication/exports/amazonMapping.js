@@ -100,6 +100,11 @@ export const AMAZON_RULES = {
   // ---- Product Details ----
   'Product Description': (p) => stripHtml(p.description),
   'Bullet Point': (p) => list(attr(p).bullet_points).slice(0, 5),
+  // Amazon's search terms: five separate cells (generic_keyword #1–#5), one
+  // phrase each, in both the .ca (en_CA) and .com (en_US) templates — the label
+  // is identical, so this one rule covers all twelve. Not to be confused with
+  // 'Item Type Keyword' on the US files, which is product classification.
+  'Generic Keyword': (p) => list(attr(p).keywords_en).slice(0, 5),
   // Always Modern — it's one of the 22 options Amazon's Style list allows, and
   // the PIM's `series` (Kelso, Wapta…) is a collection name, never a style.
   'Style': () => 'Modern',
