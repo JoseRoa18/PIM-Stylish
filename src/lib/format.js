@@ -69,6 +69,17 @@ export function formatDate(value) {
 }
 
 /**
+ * A display name derived from an email address ("pedro@…" → "Pedro"). Used
+ * wherever a person has no full_name on their profile yet, so the UI shows
+ * something readable instead of a raw address or an em dash.
+ */
+export function nameFromEmail(email) {
+  const local = email?.split('@')[0];
+  if (!local) return '';
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+/**
  * Format byte count as human-readable size.
  * Examples: "1.2 MB", "350 KB", "42 B"
  */

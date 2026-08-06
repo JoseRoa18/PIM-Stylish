@@ -63,6 +63,18 @@ export async function updateUserRole(id, role) {
   return result;
 }
 
+export async function updateUserName(id, full_name) {
+  const result = await invokeAdminUsers({ action: 'updateName', id, full_name });
+  logActivity({
+    action: 'update',
+    entityType: 'user',
+    entityId: id,
+    summary: full_name ? `Renamed a user to ${full_name}` : "Cleared a user's name",
+    metadata: { full_name },
+  });
+  return result;
+}
+
 export async function resetUserPassword(id, password) {
   const result = await invokeAdminUsers({ action: 'resetPassword', id, password });
   logActivity({

@@ -9,18 +9,20 @@ import {
   Copy,
   Check,
   X,
+  Pencil,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import Avatar from '@/components/ui/Avatar';
+import { nameFromEmail } from '@/lib/format';
 import { useUsers } from '../hooks/useUsers';
-import { updateUserRole, resetUserPassword, deleteUser } from '../api/users';
+import { updateUserRole, updateUserName, resetUserPassword, deleteUser } from '../api/users';
 import { generatePassword } from '../password';
 import { ROLE_OPTIONS, ROLE_BADGE, ROLE_LABELS } from '../roles';
 import AddUserDialog from '../components/AddUserDialog';
 
 export default function Users() {
-  const { user: me } = useAuth();
+  const { user: me, refreshProfile } = useAuth();
   const confirm = useConfirm();
   const { users, loading, error, reload } = useUsers();
 
@@ -38,6 +40,27 @@ export default function Users() {
       await reload();
     } catch (err) {
       setActionError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Returns true when the rename went through, so the row can leave edit mode
+  // only on success and keep the typed value on failure.
+  async function handleRename(u, fullName) {
+    if (fullName === (u.full_name ?? '')) return true;
+    setActionError(null);
+    setBusyId(u.id);
+    try {
+      await updateUserName(u.id, fullName);
+      await reload();
+      // Renaming yourself must also update the topbar, which reads the profile
+      // from the auth context rather than this list.
+      if (u.id === me?.id) await refreshProfile();
+      return true;
+    } catch (err) {
+      setActionError(err.message);
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -152,20 +175,7 @@ export default function Users() {
                 const busy = busyId === u.id;
                 return (
                   <li key={u.id} className="p-4">
-                    <div className="flex items-center gap-3">
-                      <Avatar name={u.full_name} email={u.email} src={u.avatar_url} />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-body-md text-on-surface truncate">
-                          {u.full_name || nameFromEmail(u.email) || '—'}
-                          {isMe && (
-                            <span className="ml-2 text-label-sm text-on-surface-variant">(you)</span>
-                          )}
-                        </div>
-                        <div className="text-body-sm text-on-surface-variant truncate">
-                          {u.email}
-                        </div>
-                      </div>
-                    </div>
+                    <UserIdentity user={u} isMe={isMe} busy={busy} onRename={handleRename} />
                     <div className="flex items-center justify-between gap-2 mt-3">
                       <RoleControl user={u} isMe={isMe} busy={busy} onChange={handleRoleChange} />
                       <RowActions
@@ -200,20 +210,7 @@ export default function Users() {
                   return (
                     <tr key={u.id} className="border-b border-outline-variant last:border-0">
                       <td className="px-5 py-3">
-                        <div className="flex items-center gap-3">
-                          <Avatar name={u.full_name} email={u.email} src={u.avatar_url} />
-                          <div className="min-w-0">
-                            <div className="text-body-md text-on-surface truncate">
-                              {u.full_name || nameFromEmail(u.email) || '—'}
-                              {isMe && (
-                                <span className="ml-2 text-label-sm text-on-surface-variant">(you)</span>
-                              )}
-                            </div>
-                            <div className="text-body-sm text-on-surface-variant truncate">
-                              {u.email}
-                            </div>
-                          </div>
-                        </div>
+                        <UserIdentity user={u} isMe={isMe} busy={busy} onRename={handleRename} />
                       </td>
                       <td className="px-5 py-3">
                         <RoleControl user={u} isMe={isMe} busy={busy} onChange={handleRoleChange} />
@@ -249,6 +246,94 @@ export default function Users() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Avatar + name + email for one row. The name is editable in place: accounts
+ * are often created without one, and it's what the rest of the app shows
+ * instead of the email address.
+ */
+function UserIdentity({ user, isMe, busy, onRename }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+
+  function startEditing() {
+    setValue(user.full_name ?? '');
+    setEditing(true);
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    const ok = await onRename(user, value.trim());
+    // On failure the row stays open with what they typed; the error shows in
+    // the page-level banner.
+    if (ok) setEditing(false);
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <Avatar name={user.full_name} email={user.email} src={user.avatar_url} />
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <form onSubmit={submit} className="flex items-center gap-1">
+            <input
+              autoFocus
+              value={value}
+              maxLength={80}
+              placeholder={nameFromEmail(user.email)}
+              aria-label={`Full name for ${user.email}`}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setEditing(false);
+              }}
+              className="min-w-0 flex-1 px-2 py-1 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              title="Save name"
+              className="p-1.5 rounded-full text-primary hover:bg-primary-container/50 transition-colors disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              title="Cancel"
+              className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-1 min-w-0">
+            {/* A name derived from the email is muted, so it's obvious at a
+                glance who still hasn't got a real one on file. */}
+            <span
+              className={`text-body-md truncate ${
+                user.full_name ? 'text-on-surface' : 'text-on-surface-variant'
+              }`}
+            >
+              {user.full_name || nameFromEmail(user.email) || '—'}
+            </span>
+            {isMe && (
+              <span className="text-label-sm text-on-surface-variant flex-shrink-0">(you)</span>
+            )}
+            <button
+              type="button"
+              onClick={startEditing}
+              title="Edit name"
+              aria-label={`Edit name for ${user.email}`}
+              className="p-1 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors flex-shrink-0"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        <div className="text-body-sm text-on-surface-variant truncate">{user.email}</div>
+      </div>
     </div>
   );
 }
@@ -348,14 +433,6 @@ function CredentialsBanner({ email, password, onDismiss }) {
       </div>
     </div>
   );
-}
-
-// Accounts created without a full name fall back to a name derived from the
-// email ("jose@…" → "Jose") instead of an em dash that reads as broken data.
-function nameFromEmail(email) {
-  const local = email?.split('@')[0];
-  if (!local) return null;
-  return local.charAt(0).toUpperCase() + local.slice(1);
 }
 
 function formatDate(iso) {

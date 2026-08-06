@@ -5,6 +5,7 @@
 //   action "list"          -> {}                                      -> { users: [...] }
 //   action "create"        -> { email, password, full_name, role }   -> { user }
 //   action "updateRole"    -> { id, role }                           -> { ok }
+//   action "updateName"    -> { id, full_name }                      -> { ok }
 //   action "resetPassword" -> { id, password }                       -> { ok }
 //   action "delete"        -> { id }                                 -> { ok }
 //
@@ -141,6 +142,23 @@ Deno.serve(async (req) => {
         if (error) throw new Error(`Role update failed: ${error.message}`);
         // Keep user_metadata in sync (cosmetic, but avoids stale values).
         await admin.auth.admin.updateUserById(id, { user_metadata: { role } });
+        return json({ ok: true });
+      }
+
+      case "updateName": {
+        const id = typeof body.id === "string" ? body.id : "";
+        // Empty is allowed: it clears the name and the UI falls back to one
+        // derived from the email.
+        const full_name = typeof body.full_name === "string" ? body.full_name.trim() : "";
+        if (!id) return json({ error: "id is required." }, 400);
+        if (full_name.length > 80) {
+          return json({ error: "Name must be 80 characters or fewer." }, 400);
+        }
+
+        const { error } = await admin.from("profiles").update({ full_name }).eq("id", id);
+        if (error) throw new Error(`Name update failed: ${error.message}`);
+        // Keep user_metadata in sync (cosmetic, but avoids stale values).
+        await admin.auth.admin.updateUserById(id, { user_metadata: { full_name } });
         return json({ ok: true });
       }
 

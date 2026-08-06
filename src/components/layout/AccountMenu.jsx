@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Camera, Loader2, Trash2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import Avatar from '@/components/ui/Avatar';
+import AvatarNudge from '@/components/layout/AvatarNudge';
 import { uploadAvatar, removeAvatar } from '@/features/users/api/avatar';
+import { nameFromEmail } from '@/lib/format';
 
 const ROLE_LABELS = {
   admin: 'Admin',
@@ -23,7 +25,7 @@ export default function AccountMenu() {
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
 
-  const displayName = profile?.full_name?.trim() || user?.email?.split('@')[0] || '';
+  const displayName = profile?.full_name?.trim() || nameFromEmail(user?.email);
   const avatarUrl = profile?.avatar_url ?? null;
 
   useEffect(() => {
@@ -72,11 +74,20 @@ export default function AccountMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-label="Account menu"
         aria-expanded={open}
+        title={user?.email}
         className="flex items-center gap-2 p-1 pr-3 rounded-full hover:bg-surface-container-high transition-colors"
       >
         <Avatar name={profile?.full_name} email={user?.email} src={avatarUrl} size="sm" />
-        <span className="text-label-md text-on-surface hidden sm:inline">{user?.email}</span>
+        {/* The name reads better than the address here; the full email is still
+            in the panel below and on hover. */}
+        <span className="text-label-md text-on-surface hidden sm:inline max-w-[12rem] truncate">
+          {displayName}
+        </span>
       </button>
+
+      {/* The "add a photo" reminder hangs off this same chip. Opening the menu
+          retires it — they're already where the photo is managed. */}
+      {!open && <AvatarNudge />}
 
       {open && (
         <>
