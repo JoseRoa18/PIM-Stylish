@@ -20,11 +20,13 @@ import {
   Trash2,
   FileText,
   History,
+  Sparkles,
 } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { useProduct } from '@/features/products/hooks/useProduct';
 import { useProductMedia } from '@/features/media/hooks/useProductMedia';
 import { updateProduct, getProduct, deleteProducts } from '@/features/products/api/products';
+import { generateKeywords } from '@/features/products/api/keywords';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useVariants } from '@/features/products/hooks/useVariants';
 import { VARIANT_DISTINGUISHING, prettifyKey, readField } from '@/features/products/lib/variantFields';
@@ -578,7 +580,7 @@ export default function ProductDetail() {
           />
         )}
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
-        {activeTab === 'content' && <ContentTab product={product} edit={editCtx} />}
+        {activeTab === 'content' && <ContentTab product={product} edit={editCtx} onGenerated={refetch} />}
         {activeTab === 'pricing' && (
           <PricingTab product={product} edit={editCtx} onAddPricing={canEdit ? startEditing : undefined} />
         )}
@@ -1340,7 +1342,62 @@ function SpecsTab({ product, edit }) {
 
 // ===================== Content Tab =====================
 
-function ContentTab({ product, edit }) {
+/**
+ * "Generate" on the Search Keywords section — calls the generate-keywords
+ * edge function (Gemini, server-side key) for this one product and refetches.
+ * Regenerating over existing keywords asks first; while the form is in edit
+ * mode the button is disabled so a refetch can't clash with unsaved changes.
+ */
+function GenerateKeywordsButton({ product, edit, onGenerated }) {
+  const { canEdit } = useAuth();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  if (!canEdit) return null;
+
+  const existing = attr(product, 'keywords_en');
+  const hasKeywords = Array.isArray(existing) && existing.length > 0;
+
+  async function run() {
+    setError(null);
+    if (hasKeywords) {
+      const ok = await confirm({
+        title: 'Regenerate search keywords?',
+        message: 'This replaces the current EN and FR keyword lists for this product with freshly generated ones. Manual edits to the lists are lost.',
+        confirmLabel: 'Regenerate',
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      const { failed } = await generateKeywords([product.sku], { force: true });
+      if (failed.length) throw new Error(failed[0].error ?? 'Generation failed');
+      onGenerated?.();
+    } catch (err) {
+      setError(err.message ?? 'Generation failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      {error && <span className="text-label-sm text-error max-w-56 truncate" title={error}>{error}</span>}
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy || edit.isEditing}
+        title={edit.isEditing ? 'Finish editing first' : hasKeywords ? 'Regenerate EN + FR keywords with AI' : 'Generate EN + FR keywords with AI'}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-primary hover:bg-primary-container/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+        {hasKeywords ? 'Regenerate' : 'Generate'}
+      </button>
+    </span>
+  );
+}
+
+function ContentTab({ product, edit, onGenerated }) {
   return (
     <div className="space-y-6">
       <Section title="English Content">
@@ -1359,8 +1416,9 @@ function ContentTab({ product, edit }) {
       </Section>
 
       {/* Search terms, not a restatement of the title — what a shopper types.
-          Seeded by scripts/generate-keywords.mjs, refined by hand here. */}
-      <Section title="Search Keywords (EN)" defaultOpen={false}>
+          Generated on demand (EN + FR at once), refined by hand here. */}
+      <Section title="Search Keywords (EN)" defaultOpen={false}
+        action={<GenerateKeywordsButton product={product} edit={edit} onGenerated={onGenerated} />}>
         <AttrListField label="Keywords (EN)" attrKey="keywords_en" product={product} edit={edit}
           hint="Separate terms with ; — how a shopper searches, not the product title" />
       </Section>

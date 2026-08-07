@@ -10,11 +10,13 @@ import {
   Download,
   Trash2,
   Pencil,
+  Sparkles,
 } from 'lucide-react';
 import BulkEditDialog from './BulkEditDialog';
 import ExportReadinessDialog from '@/features/syndication/components/ExportReadinessDialog';
 import { ThinkingOrb } from 'thinking-orbs';
 import { bulkUpdateProducts, getProduct, deleteProducts } from '../api/products';
+import { generateKeywords } from '../api/keywords';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
 import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
@@ -95,6 +97,37 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       onClear?.();
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Delete failed' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Fills search keywords (EN + FR) for selected products that don't have any.
+  // Products with keywords are left untouched — regeneration is per-product,
+  // from the product page, where the overwrite can be confirmed deliberately.
+  async function handleGenerateKeywords() {
+    const skus = [...selectedSkus];
+    const ok = await confirm({
+      title: `Generate search keywords for ${count} product${count === 1 ? '' : 's'}?`,
+      message: 'AI writes EN + FR search terms for the selected products that have none yet. Products that already have keywords are kept as they are.',
+      confirmLabel: 'Generate',
+    });
+    if (!ok) return;
+    setBusy('keywords');
+    setResult(null);
+    setProgress({ done: 0, total: skus.length });
+    try {
+      const { generated, skipped, failed } = await generateKeywords(skus, {
+        onProgress: (done, total) => setProgress({ done, total }),
+      });
+      const parts = [`${generated.length} generated`];
+      if (skipped.length) parts.push(`${skipped.length} already had keywords`);
+      if (failed.length) parts.push(`${failed.length} failed (${failed.slice(0, 3).map((f) => f.sku).join(', ')}${failed.length > 3 ? '…' : ''})`);
+      // No onChanged here: keywords aren't a catalog column, and reloading the
+      // list clears the selection — which unmounts this bar and its message.
+      setResult({ type: failed.length ? 'error' : 'success', message: parts.join(', ') + '.' });
+    } catch (err) {
+      setResult({ type: 'error', message: err.message ?? 'Generation failed' });
     } finally {
       setBusy(null);
     }
@@ -440,6 +473,17 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
                 </button>
 
                 <StatusDropdown disabled={!!busy} onChange={handleStatusChange} />
+
+                <button
+                  type="button"
+                  onClick={handleGenerateKeywords}
+                  disabled={!!busy}
+                  title="Generate EN + FR search keywords for selected products that have none"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                >
+                  {busy === 'keywords' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  Keywords
+                </button>
 
                 <button
                   type="button"
