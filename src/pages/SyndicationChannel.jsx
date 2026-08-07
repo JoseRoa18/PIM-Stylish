@@ -5,6 +5,7 @@ import WayfairConnectorCard from '@/features/syndication/components/WayfairConne
 import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import ReadOnlyChannelCard from '@/features/syndication/components/ReadOnlyChannelCard';
 import BestBuyCatalogAuditCard from '@/features/syndication/components/BestBuyCatalogAuditCard';
+import BestBuyContentPushCard from '@/features/syndication/components/BestBuyContentPushCard';
 import { LIVE_CHANNELS } from '@/features/syndication/lib/channels';
 
 function WayfairWorkspace() {
@@ -20,6 +21,7 @@ function BestBuyWorkspace() {
   return (
     <div className="space-y-6">
       <ReadOnlyChannelCard channel="bestbuy" />
+      <BestBuyContentPushCard />
       <BestBuyCatalogAuditCard />
     </div>
   );
