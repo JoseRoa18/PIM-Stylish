@@ -151,6 +151,7 @@ function buildEditForm(product) {
     color: product.color ?? '',
     factory_code: product.factory_code ?? '',
     msrp_cad: product.msrp_cad ?? '',
+    map_cad: product.map_cad ?? '',
     dealer_cost_cad: product.dealer_cost_cad ?? '',
     sale_price_cad: product.sale_price_cad ?? '',
     on_sale: product.on_sale ?? false,
@@ -229,7 +230,7 @@ function buildEditForm(product) {
 }
 
 const NUMBER_COLUMNS = new Set([
-  'family_number', 'msrp_cad', 'dealer_cost_cad', 'sale_price_cad', 'shipping_weight_lb',
+  'family_number', 'msrp_cad', 'map_cad', 'dealer_cost_cad', 'sale_price_cad', 'shipping_weight_lb',
 ]);
 
 function cleanDims(dims) {
@@ -1449,7 +1450,7 @@ function ContentTab({ product, edit, onGenerated }) {
 // ===================== Pricing Tab =====================
 
 function PricingTab({ product, edit, onAddPricing }) {
-  const noPricing = !edit.isEditing && product.msrp_cad == null && product.dealer_cost_cad == null;
+  const noPricing = !edit.isEditing && product.msrp_cad == null && product.dealer_cost_cad == null && product.map_cad == null;
   return (
     <div className="space-y-6">
       <Section title="Standard Pricing">
@@ -1470,6 +1471,7 @@ function PricingTab({ product, edit, onAddPricing }) {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
             <EditableField label="MSRP (CAD)" fieldKey="msrp_cad" type="currency" product={product} edit={edit} />
+            <EditableField label="MAP (CAD)" fieldKey="map_cad" type="currency" product={product} edit={edit} />
             <EditableField label="Dealer Cost (CAD)" fieldKey="dealer_cost_cad" type="currency" product={product} edit={edit} />
           </div>
         )}
