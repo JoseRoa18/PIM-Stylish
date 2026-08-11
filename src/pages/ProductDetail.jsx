@@ -155,7 +155,9 @@ function buildEditForm(product) {
     dealer_cost_cad: product.dealer_cost_cad ?? '',
     msrp_usd: product.msrp_usd ?? '',
     map_usd: product.map_usd ?? '',
-    dealer_cost_usd: product.dealer_cost_usd ?? '',
+    cost_usd_lowes_sod_bbb: product.cost_usd_lowes_sod_bbb ?? '',
+    cost_usd_wayfair: product.cost_usd_wayfair ?? '',
+    cost_usd_menards: product.cost_usd_menards ?? '',
     sale_price_cad: product.sale_price_cad ?? '',
     on_sale: product.on_sale ?? false,
     shipping_weight_lb: product.shipping_weight_lb ?? '',
@@ -234,7 +236,8 @@ function buildEditForm(product) {
 
 const NUMBER_COLUMNS = new Set([
   'family_number', 'msrp_cad', 'map_cad', 'dealer_cost_cad',
-  'msrp_usd', 'map_usd', 'dealer_cost_usd', 'sale_price_cad', 'shipping_weight_lb',
+  'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
+  'sale_price_cad', 'shipping_weight_lb',
 ]);
 
 function cleanDims(dims) {
@@ -1454,7 +1457,10 @@ function ContentTab({ product, edit, onGenerated }) {
 // ===================== Pricing Tab =====================
 
 function PricingTab({ product, edit, onAddPricing }) {
-  const PRICE_KEYS = ['msrp_cad', 'map_cad', 'dealer_cost_cad', 'msrp_usd', 'map_usd', 'dealer_cost_usd'];
+  const PRICE_KEYS = [
+    'msrp_cad', 'map_cad', 'dealer_cost_cad',
+    'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
+  ];
   const noPricing = !edit.isEditing && PRICE_KEYS.every((k) => product[k] == null);
   return (
     <div className="space-y-6">
@@ -1487,7 +1493,9 @@ function PricingTab({ product, edit, onAddPricing }) {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <EditableField label="MSRP" fieldKey="msrp_usd" type="currency" product={product} edit={edit} />
               <EditableField label="MAP" fieldKey="map_usd" type="currency" product={product} edit={edit} />
-              <EditableField label="Dealer Cost" fieldKey="dealer_cost_usd" type="currency" product={product} edit={edit} />
+              <EditableField label="Cost — Lowes / Small Online / BB&B" fieldKey="cost_usd_lowes_sod_bbb" type="currency" product={product} edit={edit} />
+              <EditableField label="Cost — Wayfair" fieldKey="cost_usd_wayfair" type="currency" product={product} edit={edit} />
+              <EditableField label="Cost — Menards" fieldKey="cost_usd_menards" type="currency" product={product} edit={edit} />
             </div>
           </Section>
         </>
