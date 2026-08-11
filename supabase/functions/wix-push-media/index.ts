@@ -19,7 +19,7 @@ const corsHeaders: Record<string, string> = {
 };
 
 const WIX_BASE = "https://www.wixapis.com";
-const CHUNK = 10; // media items per add call
+const CHUNK = 50; // media items per add call — big enough that any real set goes in ONE ordered call
 // Empirical Wix platform cap: ~16 media items stick per product; the excess
 // is dropped SILENTLY (the add call still returns 200). We send the full
 // selected set anyway (per the publish rules: what the PIM has, goes) and
@@ -31,7 +31,12 @@ const WIX_MEDIA_CAP = 16;
 // left (EN/ES artwork and universal/untagged shots). Sets never mix — a
 // product with 15 EN/FR + 15 EN/ES duplicates must not burn Wix's media cap
 // on the Spanish copies.
-function pickLanguageSet<T extends { language: string | null }>(all: T[]): { chosen: T[]; set: string } {
+interface PimImage {
+  storage_path: string;
+  language: string | null;
+}
+
+function pickLanguageSet(all: PimImage[]): { chosen: PimImage[]; set: string } {
   const enFr = all.filter((m) => m.language === "en_fr" || m.language === "fr");
   if (enFr.length) return { chosen: enFr, set: "en_fr" };
   const en = all.filter((m) => m.language === "en");
@@ -119,6 +124,16 @@ Deno.serve(async (req) => {
           throw new Error(`Wix media delete ${del.status}: ${delBody.slice(0, 200)}`);
         }
         report.removed = ids.length;
+        // The delete is ASYNC on Wix's side. Re-adding the same source URLs
+        // before it settles re-attaches the old media items in their old
+        // order — a replace that changes nothing (empirical: reordering the
+        // gallery only works after the product reads back as empty).
+        for (let i = 0; i < 15; i++) {
+          const chk = await wix(`/stores/v1/products/${id}`);
+          const chkBody = await chk.json();
+          if ((chkBody.product?.media?.items ?? []).length === 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
       }
     }
 
@@ -132,7 +147,7 @@ Deno.serve(async (req) => {
         .order("is_primary", { ascending: false })
         .order("display_order", { ascending: true });
       if (mediaErr) throw new Error(`PIM media read failed: ${mediaErr.message}`);
-      const all = (media ?? []).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
+      const all = ((media ?? []) as PimImage[]).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
       if (!all.length) return json({ error: `${sku} has no images in the PIM.` }, 400);
 
       const { chosen, set } = pickLanguageSet(all);
@@ -144,6 +159,9 @@ Deno.serve(async (req) => {
         report.over_wix_cap = urls.length - WIX_MEDIA_CAP;
       }
 
+      // One call with the whole ordered array: Wix preserves the array order
+      // (verified live), while separate chunked calls risk interleaving as
+      // each chunk's ingestion races the next.
       let added = 0;
       for (let i = 0; i < urls.length; i += CHUNK) {
         const chunk = urls.slice(i, i + CHUNK).map((url) => ({ url }));
