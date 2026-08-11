@@ -251,42 +251,61 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   }
 
   // Menards is a file SET per category (content + one container file per
-  // dimension). Fill every applicable file in one action.
+  // dimension). Like the grouped exporters, a mixed selection exports the
+  // categories that HAVE a template set and reports the ones that don't —
+  // it never refuses the whole selection over one uncovered category.
   async function handleExportMenards(templates) {
     setBusy('export');
     setResult(null);
     try {
-      const cats = [...new Set(selectedProducts.map((p) => p.category))];
       // Recipient Reference is documentation, not fillable. NOTE: the five
       // Containers files share a name except the "(n)" suffix but hold
       // DIFFERENT dimensions — real duplicates are detected inside the
       // generator by their data sheet name, never by file name.
-      const usable = templates.filter(
-        (t) => !/recipient|reference\.xls/i.test(t.file_name) && cats.every((c) => templateAppliesTo(t, c)),
-      );
-      if (!usable.length) {
-        throw new Error(`No Menards template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}).`);
+      const fillable = templates.filter((t) => !/recipient|reference\.xls/i.test(t.file_name));
+
+      const cats = [...new Set(selectedProducts.map((p) => p.category))];
+      const coveredCats = cats.filter((c) => fillable.some((t) => templateAppliesTo(t, c)));
+      const skippedCats = cats.filter((c) => !coveredCats.includes(c));
+      if (!coveredCats.length) {
+        throw new Error(
+          `No Menards template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload the set(s) in /templates.`,
+        );
       }
 
-      const skus = [...selectedSkus];
+      const wanted = new Set(coveredCats);
       const productList = [];
-      for (const sku of skus) {
-        const p = await getProduct(sku);
-        if (p) productList.push(p);
+      for (const p of selectedProducts) {
+        if (!wanted.has(p.category)) continue;
+        const full = await getProduct(p.sku);
+        if (full) productList.push(full);
       }
       if (!productList.length) throw new Error('Could not load product data.');
 
-      const res = await generateMenardsFromTemplates(usable, productList);
-      const menardsReports = res.results
-        .filter((r) => r.fillReport)
-        .map((r) => ({ file: r.file, ...r.fillReport }));
+      // One file set per covered category (today that's kitchen sinks; more
+      // sets slot in as they're uploaded).
+      let files = 0;
+      let countTotal = 0;
+      const menardsReports = [];
+      const unmapped = new Set();
+      for (const cat of coveredCats) {
+        const catTemplates = fillable.filter((t) => templateAppliesTo(t, cat));
+        const catProducts = productList.filter((p) => p.category === cat);
+        if (!catProducts.length) continue;
+        const res = await generateMenardsFromTemplates(catTemplates, catProducts);
+        files += res.files;
+        countTotal += res.count;
+        for (const r of res.results) {
+          if (r.fillReport) menardsReports.push({ file: r.file, ...r.fillReport });
+          for (const u of r.unmapped ?? []) unmapped.add(u);
+        }
+      }
       if (menardsReports.length) setReadiness(menardsReports);
-      const unmappedTotal = new Set(res.results.flatMap((r) => r.unmapped)).size;
-      setResult({
-        type: 'success',
-        message: `Exported ${res.files} Menards file(s) for ${res.count} product(s).` +
-          (unmappedTotal ? ` ${unmappedTotal} column(s) left for manual/account data (vendor terms, master packs…).` : ''),
-      });
+
+      let message = `Exported ${files} Menards file(s) for ${countTotal} product(s).`;
+      if (unmapped.size) message += ` ${unmapped.size} column(s) left for manual/account data (vendor terms, master packs…).`;
+      if (skippedCats.length) message += ` ⚠ Skipped (no template): ${skippedCats.join(', ')}.`;
+      setResult({ type: skippedCats.length ? 'error' : 'success', message });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Menards export failed' });
     } finally {
@@ -299,19 +318,25 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     setResult(null);
     setProgress({ done: 0, total: count + 1 });
     try {
-      // 1. Find a BB&B template that applies to EVERY selected category
-      // (one BB&B template can span categories, e.g. kitchen + bathroom sinks).
+      // 1. Pick the BB&B template covering the MOST selected categories (one
+      // template can span several, e.g. kitchen + bathroom sinks). Products
+      // in categories it doesn't cover are skipped and reported — a mixed
+      // selection never blocks the covered ones.
       const cats = [...new Set(selectedProducts.map((p) => p.category))];
-      const bbb = templates.find((t) => cats.every((c) => templateAppliesTo(t, c)));
-      if (!bbb) {
+      const bbb = templates
+        .map((t) => ({ t, covered: cats.filter((c) => templateAppliesTo(t, c)) }))
+        .sort((a, b) => b.covered.length - a.covered.length)[0];
+      if (!bbb || !bbb.covered.length) {
         throw new Error(
-          `No single BB&B / Overstock template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload one in /templates or narrow the selection.`
+          `No BB&B / Overstock template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload one in /templates.`
         );
       }
+      const wanted = new Set(bbb.covered);
+      const skippedCats = cats.filter((c) => !wanted.has(c));
       setProgress({ done: 1, total: count + 1 });
 
-      // 2. Fetch full product + media for each selected SKU
-      const skus = [...selectedSkus];
+      // 2. Fetch full product + media for each covered SKU
+      const skus = selectedProducts.filter((p) => wanted.has(p.category)).map((p) => p.sku);
       const productList = [];
       for (let i = 0; i < skus.length; i++) {
         const [product, media] = await Promise.all([
@@ -327,12 +352,13 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       }
 
       // 3. Generate the combined XLSX and trigger download
-      const res = await generateBBBFromTemplateBulk(bbb.storage_path, productList);
+      const res = await generateBBBFromTemplateBulk(bbb.t.storage_path, productList);
       if (res?.fillReport) setReadiness([{ file: 'BB&B template', ...res.fillReport }]);
 
       setResult({
-        type: 'success',
-        message: `Exported ${productList.length} product${productList.length === 1 ? '' : 's'} to BB&B template.`,
+        type: skippedCats.length ? 'error' : 'success',
+        message: `Exported ${productList.length} product${productList.length === 1 ? '' : 's'} to BB&B template.` +
+          (skippedCats.length ? ` ⚠ Skipped (no template): ${skippedCats.join(', ')}.` : ''),
       });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Export failed' });
