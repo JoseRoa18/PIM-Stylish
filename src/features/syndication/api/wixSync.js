@@ -156,6 +156,44 @@ export async function pushProductToWix(sku, fields = undefined) {
 }
 
 /**
+ * Create a PIM product on Wix (hidden — publishing is a later, deliberate
+ * push). If Wix already has the SKU unlinked, the function links it instead
+ * of duplicating. Returns { created?, linked_existing?, id, name }.
+ */
+export async function createProductOnWix(sku) {
+  const { data, error } = await supabase.functions.invoke('wix-create-product', { body: { sku } });
+  if (error) {
+    let detail = error.message;
+    try {
+      if (error.context && typeof error.context.text === 'function') {
+        const text = await error.context.text();
+        try {
+          detail = JSON.parse(text).error ?? text;
+        } catch {
+          detail = text || detail;
+        }
+      }
+    } catch {
+      // fall back to error.message
+    }
+    throw new Error(detail);
+  }
+  if (data?.error) throw new Error(data.error);
+
+  logActivity({
+    action: data.linked_existing ? 'sync' : 'create',
+    entityType: 'product',
+    entityId: sku,
+    target: 'wix',
+    summary: data.linked_existing
+      ? `Linked ${sku} to its existing Wix product`
+      : `Created ${sku} on Wix (hidden)`,
+    metadata: { wix_product_id: data.id },
+  });
+  return data;
+}
+
+/**
  * Fleet-level Wix monitoring: pull the whole store catalog (read-only), join
  * it against the PIM, and persist a channel_health snapshot — same pattern as
  * the Best Buy / Walmart pulls, so Listing Health and the dashboard can show

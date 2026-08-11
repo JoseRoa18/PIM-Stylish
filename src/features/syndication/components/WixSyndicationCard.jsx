@@ -21,7 +21,8 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
-import { pushProductToWix, readWixProduct } from '../api/wixSync';
+import { pushProductToWix, readWixProduct, createProductOnWix } from '../api/wixSync';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useWixCollections } from '../hooks/useWixCollections';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import ProductHealthBadge from '@/features/dashboard/components/ProductHealthBadge';
@@ -306,7 +307,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
 
       {!linked ? (
         <div className="px-8 pb-8">
-          <NotLinkedNotice />
+          <NotLinkedNotice product={product} canEdit={canEdit} onLinked={onUpdate} />
         </div>
       ) : cardExpanded ? (
         <>
@@ -1032,22 +1033,65 @@ function BrokenLinkNotice() {
   );
 }
 
-function NotLinkedNotice() {
+/**
+ * The unlinked state doubles as the CREATE surface: the PIM comes first, and
+ * whoever owns the Wix channel publishes each new product deliberately from
+ * here. Created hidden — a later push flips visibility when it's ready. If
+ * Wix already has the SKU (never linked), the function links instead of
+ * duplicating, and this card flips straight into the update/diff view.
+ */
+function NotLinkedNotice({ product, canEdit, onLinked }) {
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleCreate() {
+    setError(null);
+    const ok = await confirm({
+      title: `Create ${product.sku} on Wix?`,
+      message: 'The product is created HIDDEN on the site with the PIM\'s name, description, price, weight and brand — customers won\'t see it until you push it visible. If Wix already has this SKU, it links to it instead of creating a duplicate. Images are managed on Wix for now.',
+      confirmLabel: 'Create on Wix',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await createProductOnWix(product.sku);
+      // onLinked is ProductDetail's mergeProduct — patching the link in flips
+      // this card straight into the linked update/diff view.
+      onLinked?.({ wix_product_id: res.id, wix_synced_at: new Date().toISOString() });
+    } catch (err) {
+      setError(err.message ?? 'Create failed');
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-secondary-container bg-secondary-container/40 p-5">
       <div className="flex items-start gap-3">
         <AlertCircle className="w-5 h-5 text-secondary flex-shrink-0 mt-0.5" />
         <div className="flex-1">
           <p className="text-body-md text-on-secondary-container font-semibold">
-            Not linked to Wix yet
+            Not on Wix yet
           </p>
           <p className="text-body-sm text-on-secondary-container mt-1">
-            Go to{' '}
+            Create it from here (it starts hidden), or go to{' '}
             <Link to="/syndication" className="font-semibold underline hover:no-underline">
               Syndication
             </Link>{' '}
-            and run <em>Preview Link with Wix</em> to enable push.
+            and run <em>Preview Link with Wix</em> if it already exists on the site.
           </p>
+          {error && <p className="text-body-sm text-error mt-2">{error}</p>}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={busy}
+              className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
+            >
+              {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {busy ? 'Creating…' : 'Create on Wix'}
+            </button>
+          )}
         </div>
       </div>
     </div>
