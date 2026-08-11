@@ -21,7 +21,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
-import { pushProductToWix, readWixProduct, createProductOnWix } from '../api/wixSync';
+import { pushProductToWix, readWixProduct, createProductOnWix, pushMediaToWix } from '../api/wixSync';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useWixCollections } from '../hooks/useWixCollections';
 import RichTextEditor from '@/components/ui/RichTextEditor';
@@ -100,9 +100,12 @@ const ALL_FIELD_KEYS = FIELD_GROUPS.flatMap((g) => g.fields.map((f) => f.key));
 export default function WixSyndicationCard({ product, media, onUpdate }) {
   // Viewers see the link status and health, never the edit-&-push surface.
   const { canEdit } = useAuth();
+  const confirm = useConfirm();
   const [form, setForm] = useState(() => buildForm(product));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaMsg, setMediaMsg] = useState(null);
   const [success, setSuccess] = useState(false);
   const [openGroups, setOpenGroups] = useState(() => new Set());
   // Card expansion — collapsed by default; user expands to see/edit fields.
@@ -349,11 +352,55 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
             </div>
           </div>
 
-          {wixMedia && wixMedia.length > 0 && (
-            <div className="px-6 pt-5">
-              <WixImagesPreview images={wixMedia} />
+          {/* Wix gallery + push-from-PIM. The button REPLACES the Wix gallery
+              with the PIM's images (primary first; Wix caps ~16 per product
+              and ingests asynchronously, so new images take ~30s to show). */}
+          <div className="px-6 pt-5">
+            <div className="flex items-center gap-3 flex-wrap mb-2">
+              <span className="text-label-md text-on-surface-variant">
+                Images on Wix{wixMedia ? ` (${wixMedia.length})` : ''}
+              </span>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const count = (media ?? []).filter((m) => m.media_type === 'image').length;
+                    if (!count) { setMediaMsg({ tone: 'error', text: 'No images in the PIM to push.' }); return; }
+                    const ok = await confirm({
+                      title: `Push ${product.sku}'s images to Wix?`,
+                      message: `Replaces the product's Wix gallery with the PIM's ${count} image${count === 1 ? '' : 's'} (primary first — Wix keeps at most ~16). Wix takes ~30 seconds to ingest them.`,
+                      confirmLabel: 'Push images',
+                    });
+                    if (!ok) return;
+                    setMediaBusy(true);
+                    setMediaMsg(null);
+                    try {
+                      const res = await pushMediaToWix(product.sku);
+                      setMediaMsg({
+                        tone: 'success',
+                        text: `Sent ${res.added} image${res.added === 1 ? '' : 's'}${res.skipped_over_cap ? ` (${res.skipped_over_cap} over Wix's ~16 cap left out)` : ''} — Wix ingests them in ~30s; reload to see them here.`,
+                      });
+                    } catch (err) {
+                      setMediaMsg({ tone: 'error', text: err.message ?? 'Image push failed' });
+                    } finally {
+                      setMediaBusy(false);
+                    }
+                  }}
+                  disabled={mediaBusy || busy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-primary hover:bg-primary-container/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {mediaBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ImageIcon className="w-3.5 h-3.5" />}
+                  {mediaBusy ? 'Pushing…' : 'Push images from PIM'}
+                </button>
+              )}
+              {mediaMsg && (
+                <span className={`text-body-sm ${mediaMsg.tone === 'error' ? 'text-error' : 'text-on-surface-variant'}`}>
+                  {mediaMsg.text}
+                </span>
+              )}
             </div>
-          )}
+            {wixMedia && wixMedia.length > 0 && <WixImagesPreview images={wixMedia} />}
+          </div>
 
           {/* Groups */}
           <div className="px-6 py-5 space-y-2 bg-surface-container-low/30">
