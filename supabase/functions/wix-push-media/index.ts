@@ -20,11 +20,24 @@ const corsHeaders: Record<string, string> = {
 
 const WIX_BASE = "https://www.wixapis.com";
 const CHUNK = 10; // media items per add call
-// Empirical hard cap: Wix ingests at most 16 media items per product — three
-// independent runs against a 28-image product all converged on exactly 16
-// (the excess is dropped silently, the add call still returns 200). Send
-// only what fits, primary first, and report what was left out.
+// Empirical Wix platform cap: ~16 media items stick per product; the excess
+// is dropped SILENTLY (the add call still returns 200). We send the full
+// selected set anyway (per the publish rules: what the PIM has, goes) and
+// flag in the report when the set exceeds what Wix is known to keep.
 const WIX_MEDIA_CAP = 16;
+
+// Language rule for the Wix site (bilingual Canadian store): push the EN/FR
+// set when the product has one; otherwise the EN set; otherwise everything
+// left (EN/ES artwork and universal/untagged shots). Sets never mix — a
+// product with 15 EN/FR + 15 EN/ES duplicates must not burn Wix's media cap
+// on the Spanish copies.
+function pickLanguageSet<T extends { language: string | null }>(all: T[]): { chosen: T[]; set: string } {
+  const enFr = all.filter((m) => m.language === "en_fr" || m.language === "fr");
+  if (enFr.length) return { chosen: enFr, set: "en_fr" };
+  const en = all.filter((m) => m.language === "en");
+  if (en.length) return { chosen: en, set: "en" };
+  return { chosen: all, set: "en_es_universal" };
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -113,20 +126,23 @@ Deno.serve(async (req) => {
     if (action === "add" || action === "replace") {
       const { data: media, error: mediaErr } = await admin
         .from("product_media")
-        .select("storage_path, is_primary, display_order")
+        .select("storage_path, is_primary, display_order, language")
         .eq("sku", sku)
         .eq("media_type", "image")
         .order("is_primary", { ascending: false })
         .order("display_order", { ascending: true });
       if (mediaErr) throw new Error(`PIM media read failed: ${mediaErr.message}`);
-      const all = (media ?? [])
-        .map((m) => m.storage_path)
-        .filter((u) => /^https?:\/\//i.test(u ?? ""));
+      const all = (media ?? []).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
       if (!all.length) return json({ error: `${sku} has no images in the PIM.` }, 400);
-      const urls = all.slice(0, WIX_MEDIA_CAP);
+
+      const { chosen, set } = pickLanguageSet(all);
+      const urls = chosen.map((m) => m.storage_path);
       report.pim_images = all.length;
-      report.capped = all.length > WIX_MEDIA_CAP;
-      if (all.length > WIX_MEDIA_CAP) report.skipped_over_cap = all.length - WIX_MEDIA_CAP;
+      report.language_set = set;
+      report.skipped_other_language = all.length - chosen.length;
+      if (urls.length > WIX_MEDIA_CAP) {
+        report.over_wix_cap = urls.length - WIX_MEDIA_CAP;
+      }
 
       let added = 0;
       for (let i = 0; i < urls.length; i += CHUNK) {

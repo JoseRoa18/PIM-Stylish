@@ -420,9 +420,13 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
                     setMediaMsg(null);
                     try {
                       const res = await pushMediaToWix(product.sku);
+                      const setLabel = { en_fr: 'EN/FR', en: 'EN', en_es_universal: 'EN/ES + universal' }[res.language_set] ?? '';
+                      const parts = [`Sent ${res.added} ${setLabel} image${res.added === 1 ? '' : 's'}`];
+                      if (res.skipped_other_language) parts.push(`${res.skipped_other_language} other-language skipped`);
+                      if (res.over_wix_cap) parts.push(`${res.over_wix_cap} may be dropped by Wix's ~16 cap`);
                       setMediaMsg({
                         tone: 'success',
-                        text: `Sent ${res.added} image${res.added === 1 ? '' : 's'}${res.skipped_over_cap ? ` (${res.skipped_over_cap} over Wix's ~16 cap left out)` : ''} — Wix ingests them in ~30s; reload to see them here.`,
+                        text: `${parts.join(' · ')} — Wix ingests them in ~30s; reload to see them here.`,
                       });
                     } catch (err) {
                       setMediaMsg({ tone: 'error', text: err.message ?? 'Image push failed' });

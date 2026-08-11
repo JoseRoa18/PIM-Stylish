@@ -195,9 +195,10 @@ export async function createProductOnWix(sku) {
 
 /**
  * Replace the Wix product's gallery with the PIM's images (primary first,
- * PIM order). Wix ingests by URL and caps ~16 media items per product — the
- * function sends what fits and reports what was left out. Ingestion is
- * asynchronous on Wix's side (takes ~15-30s to appear).
+ * PIM order). Language rule for the bilingual Canadian store: the EN/FR set
+ * if the product has one, else EN, else EN/ES + universal — sets never mix.
+ * The full selected set is sent; Wix silently keeps at most ~16 (reported as
+ * over_wix_cap). Ingestion is asynchronous on Wix's side (~15-30s to appear).
  */
 export async function pushMediaToWix(sku) {
   const { data, error } = await supabase.functions.invoke('wix-push-media', {
@@ -227,7 +228,13 @@ export async function pushMediaToWix(sku) {
     entityId: sku,
     target: 'wix',
     summary: `Pushed ${data.added ?? 0} image${(data.added ?? 0) === 1 ? '' : 's'} to Wix for ${sku}`,
-    metadata: { added: data.added, removed: data.removed ?? 0, skipped_over_cap: data.skipped_over_cap ?? 0 },
+    metadata: {
+      added: data.added,
+      removed: data.removed ?? 0,
+      language_set: data.language_set ?? null,
+      skipped_other_language: data.skipped_other_language ?? 0,
+      over_wix_cap: data.over_wix_cap ?? 0,
+    },
   });
   return data;
 }
