@@ -8,18 +8,21 @@ import AppShell from './components/layout/AppShell';
 import Login from './features/auth/pages/Login';
 
 // Route-level code splitting: each page (and its heavy deps like TipTap or
-// JSZip) loads on demand instead of inflating the initial bundle.
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Catalog = lazy(() => import('./pages/Catalog'));
-const ProductDetail = lazy(() => import('./pages/ProductDetail'));
-const Syndication = lazy(() => import('./pages/Syndication'));
-const SyndicationChannel = lazy(() => import('./pages/SyndicationChannel'));
-const Templates = lazy(() => import('./pages/Templates'));
-const ListingHealth = lazy(() => import('./pages/ListingHealth'));
-const ImportProducts = lazy(() => import('./pages/ImportProducts'));
-const Users = lazy(() => import('./features/users/pages/Users'));
-const Activity = lazy(() => import('./pages/Activity'));
-const ComingSoon = lazy(() => import('./pages/ComingSoon'));
+// JSZip) loads on demand instead of inflating the initial bundle. The thunks
+// live in routePrefetch so hovering a link can start the same download early.
+import { ROUTE_IMPORTS } from './lib/routePrefetch';
+
+const Dashboard = lazy(ROUTE_IMPORTS.dashboard);
+const Catalog = lazy(ROUTE_IMPORTS.catalog);
+const ProductDetail = lazy(ROUTE_IMPORTS.productDetail);
+const Syndication = lazy(ROUTE_IMPORTS.syndication);
+const SyndicationChannel = lazy(ROUTE_IMPORTS.syndicationChannel);
+const Templates = lazy(ROUTE_IMPORTS.templates);
+const ListingHealth = lazy(ROUTE_IMPORTS.listingHealth);
+const ImportProducts = lazy(ROUTE_IMPORTS.importProducts);
+const Users = lazy(ROUTE_IMPORTS.users);
+const Activity = lazy(ROUTE_IMPORTS.activity);
+const ComingSoon = lazy(ROUTE_IMPORTS.comingSoon);
 
 function PageFallback() {
   return (

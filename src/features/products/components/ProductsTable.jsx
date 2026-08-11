@@ -6,6 +6,7 @@ import { getThumbnailUrl } from '@/features/media/api/media';
 import Skeleton from '@/components/ui/Skeleton';
 import Checkbox from '@/components/ui/Checkbox';
 import StatusBadge from './StatusBadge';
+import { prefetchRoute } from '@/lib/routePrefetch';
 
 // Explicit widths (table-fixed) so column positions don't shift between
 // pages; Model has no width and absorbs the remaining space. SKU is the
@@ -135,6 +136,10 @@ export default function ProductsTable({
                   role="button"
                   tabIndex={0}
                   aria-label={`Open ${product.sku}`}
+                  // ProductDetail is the heaviest chunk — hovering any row
+                  // warms it up before the click (import() dedupes, so this
+                  // costs nothing after the first row).
+                  onPointerEnter={() => prefetchRoute('productDetail')}
                   onClick={(e) => {
                     if (e.target.tagName === 'INPUT') return;
                     open();

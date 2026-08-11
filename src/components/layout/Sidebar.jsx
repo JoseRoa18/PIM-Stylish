@@ -16,18 +16,19 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useAuth } from '@/features/auth/AuthContext';
+import { prefetchRoute } from '@/lib/routePrefetch';
 
 const NAV_ITEMS = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/catalog', icon: Package, label: 'Catalog' },
-  { to: '/assets', icon: ImageIcon, label: 'Assets', soon: true },
-  { to: '/syndication', icon: Share2, label: 'Syndication' },
-  { to: '/templates', icon: FileSpreadsheet, label: 'Templates' },
-  { to: '/listing-health', icon: Activity, label: 'Listing Health' },
-  { to: '/analytics', icon: BarChart3, label: 'Analytics', soon: true },
-  { to: '/users', icon: Users, label: 'Users', adminOnly: true },
-  { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true },
-  { to: '/settings', icon: Settings, label: 'Settings', soon: true },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', prefetch: 'dashboard' },
+  { to: '/catalog', icon: Package, label: 'Catalog', prefetch: 'catalog' },
+  { to: '/assets', icon: ImageIcon, label: 'Assets', soon: true, prefetch: 'comingSoon' },
+  { to: '/syndication', icon: Share2, label: 'Syndication', prefetch: 'syndication' },
+  { to: '/templates', icon: FileSpreadsheet, label: 'Templates', prefetch: 'templates' },
+  { to: '/listing-health', icon: Activity, label: 'Listing Health', prefetch: 'listingHealth' },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics', soon: true, prefetch: 'comingSoon' },
+  { to: '/users', icon: Users, label: 'Users', adminOnly: true, prefetch: 'users' },
+  { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true, prefetch: 'activity' },
+  { to: '/settings', icon: Settings, label: 'Settings', soon: true, prefetch: 'comingSoon' },
 ];
 
 export default function Sidebar({ open = false, onClose }) {
@@ -90,6 +91,10 @@ export default function Sidebar({ open = false, onClose }) {
             to={item.to}
             end={item.to === '/'}
             onClick={onClose}
+            // Start downloading the route's chunk while the pointer travels —
+            // by click time it's usually already in the module cache.
+            onPointerEnter={() => prefetchRoute(item.prefetch)}
+            onFocus={() => prefetchRoute(item.prefetch)}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-2 px-4 py-2 rounded-lg transition-colors',
