@@ -43,6 +43,17 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
  *
  * Non-image / non-http paths (videos, etc.) are returned as-is.
  */
+// Warm the browser cache for an image URL without rendering anything. Used
+// by the hover/background prefetch — a repeat call for the same URL is free.
+const warmedImages = new Set();
+export function preloadImage(url) {
+  if (!url || warmedImages.has(url)) return;
+  warmedImages.add(url);
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = url;
+}
+
 export function getThumbnailUrl(storagePath, width = 400) {
   const embed = getMediaUrl(storagePath);
   if (!embed) return null;

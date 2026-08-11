@@ -15,7 +15,8 @@ import AccountMenu from '@/components/layout/AccountMenu';
 import PresenceStack from '@/components/layout/PresenceStack';
 import { useProductSearch } from '@/features/search/hooks/useProductSearch';
 import { prefetchRoute } from '@/lib/routePrefetch';
-import { getThumbnailUrl } from '@/features/media/api/media';
+import { getThumbnailUrl, preloadImage } from '@/features/media/api/media';
+import { prefetchProductMedia } from '@/features/media/hooks/useProductMedia';
 import { formatCategory } from '@/lib/format';
 
 const IS_MAC =
@@ -251,6 +252,10 @@ export default function Topbar({ onMenuClick }) {
                           onMouseEnter={() => {
                             setActiveIndex(i);
                             prefetchRoute('productDetail');
+                            prefetchProductMedia(p.sku);
+                            if (p.primary_image?.storage_path) {
+                              preloadImage(getThumbnailUrl(p.primary_image.storage_path, 400));
+                            }
                           }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                             i === activeIndex

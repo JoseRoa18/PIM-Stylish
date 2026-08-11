@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import { listMedia } from '../api/media';
+import { listMedia, getThumbnailUrl, preloadImage } from '../api/media';
 
 // Media state is shared PER SKU across every hook instance. The product page
 // mounts this hook several times at once (header primary image, media grid,
@@ -40,6 +40,7 @@ async function load(sku, { silent = false } = {}) {
     if (id !== s.fetchId) return; // a newer fetch superseded this one
     s.loadedOnce = true;
     setState(s, { media: data, loading: false, error: null });
+    warmGalleryThumbs(data);
   } catch (err) {
     if (id !== s.fetchId) return;
     console.error('useProductMedia:', err);
@@ -47,6 +48,34 @@ async function load(sku, { silent = false } = {}) {
   } finally {
     if (id === s.fetchId) s.inFlight = false;
   }
+}
+
+// Fetch the gallery thumbnails in the background as soon as the media list
+// is known, instead of when each <img> mounts — by the time the person
+// reaches the Media tab (or scrolls the gallery) the thumbs are already in
+// the browser cache. Images only: preloading a video URL would download the
+// whole file. Idle-scheduled so it never competes with the page render.
+function warmGalleryThumbs(media) {
+  const urls = media
+    .filter((m) => m.media_type === 'image')
+    .slice(0, 24)
+    .map((m) => getThumbnailUrl(m.storage_path, 400))
+    .filter(Boolean);
+  if (!urls.length) return;
+  const run = () => urls.forEach(preloadImage);
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 });
+  else setTimeout(run, 300);
+}
+
+/**
+ * Warm a product's media before its page opens (hover on a catalog row or a
+ * search result): loads the media list into the shared store — so the grid
+ * renders instantly — which in turn preloads the gallery thumbnails above.
+ */
+export function prefetchProductMedia(sku) {
+  if (!sku) return;
+  const s = storeFor(sku);
+  if (!s.loadedOnce && !s.inFlight) load(sku);
 }
 
 export function useProductMedia(sku) {

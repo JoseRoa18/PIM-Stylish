@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { formatCAD, formatCategory } from '@/lib/format';
-import { getThumbnailUrl } from '@/features/media/api/media';
+import { getThumbnailUrl, preloadImage } from '@/features/media/api/media';
+import { prefetchProductMedia } from '@/features/media/hooks/useProductMedia';
 import Skeleton from '@/components/ui/Skeleton';
 import Checkbox from '@/components/ui/Checkbox';
 import StatusBadge from './StatusBadge';
@@ -136,10 +137,17 @@ export default function ProductsTable({
                   role="button"
                   tabIndex={0}
                   aria-label={`Open ${product.sku}`}
-                  // ProductDetail is the heaviest chunk — hovering any row
-                  // warms it up before the click (import() dedupes, so this
-                  // costs nothing after the first row).
-                  onPointerEnter={() => prefetchRoute('productDetail')}
+                  // Hovering a row warms everything the product page needs:
+                  // the route chunk (heaviest in the app), the media list,
+                  // and the primary image at the gallery's exact size. All
+                  // deduped — repeat hovers cost nothing.
+                  onPointerEnter={() => {
+                    prefetchRoute('productDetail');
+                    prefetchProductMedia(product.sku);
+                    if (product.primary_image?.storage_path) {
+                      preloadImage(getThumbnailUrl(product.primary_image.storage_path, 400));
+                    }
+                  }}
                   onClick={(e) => {
                     if (e.target.tagName === 'INPUT') return;
                     open();
