@@ -27,6 +27,7 @@ import { useWixCollections } from '../hooks/useWixCollections';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import ProductHealthBadge from '@/features/dashboard/components/ProductHealthBadge';
 import { useAuth } from '@/features/auth/AuthContext';
+import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
 
 // Each group has an icon and a short summary string. Colors stay on the
 // brand palette — accents come from interaction state, not per-section hues.
@@ -90,7 +91,12 @@ const FIELD_GROUPS = [
     icon: FileText,
     summary: 'Dimensions, features, documents',
     fields: [
-      { key: 'additional_info_sections', label: 'Sections', type: 'sections' },
+      {
+        key: 'additional_info_sections',
+        label: 'Sections',
+        type: 'sections',
+        hint: 'Dimensions and Features are rebuilt from the PIM (measurements and bullets); document links are repointed to PIM files when a matching one exists — unmatched links keep their old URL.',
+      },
     ],
   },
 ];
@@ -153,6 +159,44 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
 
   // "Edited" = user changed something vs what Wix currently has
   const baseline = wixBaseline ?? buildForm(product);
+
+  // What the listing's sections SHOULD say per the PIM: Dimensions from the
+  // measurement attributes, Features from bullet_points, document links
+  // repointed at the PIM's files (old URL kept when there's no match).
+  const derivedSections = useMemo(
+    () =>
+      deriveWixSectionsFromPim(
+        product,
+        media,
+        (wixBaseline ?? buildForm(product)).additional_info_sections,
+      ),
+    [product, media, wixBaseline],
+  );
+  // The sections field's "differs from PIM" comparison runs against the
+  // derived value — the raw PIM column just mirrors the last push.
+  const pimView = useMemo(
+    () => ({ ...product, additional_info_sections: derivedSections.sections }),
+    [product, derivedSections],
+  );
+  const [sectionsMsg, setSectionsMsg] = useState(null);
+
+  function rebuildSections() {
+    const { sections, changes } = derivedSections;
+    setField('additional_info_sections', sections);
+    const parts = [];
+    if (changes.dimensions) parts.push('Dimensions rebuilt');
+    if (changes.features) parts.push('Features rebuilt from bullets');
+    if (changes.docsReplaced || changes.docsKept) {
+      parts.push(
+        `Documents: ${changes.docsReplaced} link${changes.docsReplaced === 1 ? '' : 's'} repointed to PIM files, ${changes.docsKept} kept`,
+      );
+    }
+    setSectionsMsg(
+      parts.length
+        ? `${parts.join(' · ')} — review below, then Push.`
+        : 'Nothing to rebuild — this product has no PIM measurements, bullets, or matching documents.',
+    );
+  }
   const dirtyByGroup = useMemo(() => {
     const out = {};
     for (const g of FIELD_GROUPS) {
@@ -170,11 +214,11 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
     const out = {};
     for (const g of FIELD_GROUPS) {
       out[g.key] = g.fields.filter(
-        (f) => !valuesEqual(form[f.key], product?.[f.key]),
+        (f) => !valuesEqual(form[f.key], pimView?.[f.key]),
       ).length;
     }
     return out;
-  }, [form, product]);
+  }, [form, pimView]);
   const totalPimDiffs = Object.values(pimDiffsByGroup).reduce((a, b) => a + b, 0);
 
   function setField(key, value) {
@@ -409,10 +453,11 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
                 key={group.key}
                 group={group}
                 form={form}
-                product={product}
+                product={pimView}
                 baseline={baseline}
                 onChange={setField}
                 disabled={busy}
+                sectionsRebuild={{ onRebuild: rebuildSections, msg: sectionsMsg }}
                 isOpen={openGroups.has(group.key)}
                 onToggle={() => toggleGroup(group.key)}
                 dirtyCount={dirtyByGroup[group.key]}
@@ -482,7 +527,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
 
 // ============================== Field group ==============================
 
-function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen, onToggle, dirtyCount, pimDiffCount }) {
+function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen, onToggle, dirtyCount, pimDiffCount, sectionsRebuild }) {
   const Icon = group.icon;
   return (
     <div
@@ -552,6 +597,7 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
                 pimValue={product?.[field.key]}
                 onChange={(v) => onChange(field.key, v)}
                 disabled={disabled || Boolean(field.dependsOn && !form[field.dependsOn])}
+                sectionsRebuild={field.type === 'sections' ? sectionsRebuild : null}
               />
             ))}
           </div>
@@ -563,7 +609,7 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
 
 // ============================== Field renderers ==============================
 
-function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled }) {
+function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled, sectionsRebuild }) {
   const isEdited = !valuesEqual(value, baselineValue);
   const pimDiffers = !valuesEqual(value, pimValue);
 
@@ -661,11 +707,31 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled 
         />
       )}
       {field.type === 'sections' && (
-        <SectionsEditor
-          value={Array.isArray(value) ? value : []}
-          onChange={onChange}
-          disabled={disabled}
-        />
+        <div className="space-y-3">
+          {sectionsRebuild && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={sectionsRebuild.onRebuild}
+                disabled={disabled}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
+                Rebuild from PIM
+              </button>
+              {sectionsRebuild.msg && (
+                <span className="text-body-sm text-on-surface-variant">
+                  {sectionsRebuild.msg}
+                </span>
+              )}
+            </div>
+          )}
+          <SectionsEditor
+            value={Array.isArray(value) ? value : []}
+            onChange={onChange}
+            disabled={disabled}
+          />
+        </div>
       )}
       {field.hint && (
         <p className="text-body-sm text-on-surface-variant mt-2 max-w-prose">
