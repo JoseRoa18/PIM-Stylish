@@ -1,14 +1,19 @@
-// Load MAP prices (CAD) into products.map_cad from a TSV price list:
-//   SKU<tab>MAP   (one per line; $ signs and thousands commas tolerated)
+// Load a price list into one products price column from a TSV:
+//   SKU<tab>PRICE   (one per line; $ signs and thousands commas tolerated)
 //
-//   node scripts/load-map-prices.mjs <file.tsv>           # dry run
-//   node scripts/load-map-prices.mjs <file.tsv> --apply   # write
+//   node scripts/load-price-list.mjs <file.tsv> --column map_usd           # dry run
+//   node scripts/load-price-list.mjs <file.tsv> --column map_usd --apply   # write
+//
+// Pricing is per-market (USA in USD, Canada in CAD), three levels each:
+//   msrp_usd | map_usd | dealer_cost_usd | msrp_cad | map_cad | dealer_cost_cad
 //
 // SKUs match EXACTLY: dashed and dashless SKUs (A-906 vs A906) are different
-// brands and the price list carries both. Rows whose SKU isn't in the PIM
-// are reported, never created.
+// brands and price lists carry both. Rows whose SKU isn't in the PIM are
+// reported, never created.
 
 import { readFileSync } from 'node:fs';
+
+const COLUMNS = ['msrp_usd', 'map_usd', 'dealer_cost_usd', 'msrp_cad', 'map_cad', 'dealer_cost_cad'];
 
 function readEnv(path) {
   const out = {};
@@ -29,8 +34,9 @@ const HEADERS = { apikey: SR, Authorization: `Bearer ${SR}`, 'Content-Type': 'ap
 
 const file = process.argv[2];
 const APPLY = process.argv.includes('--apply');
-if (!file) {
-  console.error('usage: node scripts/load-map-prices.mjs <file.tsv> [--apply]');
+const column = process.argv[process.argv.indexOf('--column') + 1];
+if (!file || !COLUMNS.includes(column)) {
+  console.error(`usage: node scripts/load-price-list.mjs <file.tsv> --column <${COLUMNS.join('|')}> [--apply]`);
   process.exit(1);
 }
 
@@ -49,25 +55,25 @@ for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
   }
   list.set(sku, price);
 }
-console.log(`price list rows: ${list.size}`);
+console.log(`price list rows: ${list.size} → column ${column}`);
 
-const res = await fetch(`${URL_BASE}/rest/v1/products?select=sku,map_cad`, { headers: HEADERS });
+const res = await fetch(`${URL_BASE}/rest/v1/products?select=sku,${column}`, { headers: HEADERS });
 const products = await res.json();
-const pimSkus = new Map(products.map((p) => [p.sku, p.map_cad]));
+const pimValues = new Map(products.map((p) => [p.sku, p[column]]));
 
 const toSet = [];
 let unchanged = 0;
 const notInPim = [];
 for (const [sku, price] of list) {
-  if (!pimSkus.has(sku)) { notInPim.push(sku); continue; }
-  if (Number(pimSkus.get(sku)) === price) { unchanged += 1; continue; }
+  if (!pimValues.has(sku)) { notInPim.push(sku); continue; }
+  if (Number(pimValues.get(sku)) === price) { unchanged += 1; continue; }
   toSet.push({ sku, price });
 }
-const pimWithoutMap = products.filter((p) => p.map_cad == null && !list.has(p.sku)).map((p) => p.sku);
+const pimWithout = products.filter((p) => p[column] == null && !list.has(p.sku)).map((p) => p.sku);
 
 console.log(`to write: ${toSet.length} | already equal: ${unchanged}`);
 console.log(`list SKUs not in PIM (${notInPim.length}):`, notInPim.join(' '));
-console.log(`PIM products with no MAP in the list (${pimWithoutMap.length}):`, pimWithoutMap.join(' '));
+console.log(`PIM products this list leaves without ${column} (${pimWithout.length}):`, pimWithout.join(' '));
 
 if (!APPLY) {
   console.log('\nDry run — re-run with --apply to write.');
@@ -86,7 +92,7 @@ for (const [price, skus] of byPrice) {
     const chunk = skus.slice(i, i + 80);
     const r = await fetch(
       `${URL_BASE}/rest/v1/products?sku=in.(${chunk.map((x) => `"${x}"`).join(',')})`,
-      { method: 'PATCH', headers: HEADERS, body: JSON.stringify({ map_cad: price }) },
+      { method: 'PATCH', headers: HEADERS, body: JSON.stringify({ [column]: price }) },
     );
     if (!r.ok) throw new Error(`patch ${r.status}: ${await r.text()}`);
     written += chunk.length;

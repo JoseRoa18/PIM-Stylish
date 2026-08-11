@@ -153,6 +153,9 @@ function buildEditForm(product) {
     msrp_cad: product.msrp_cad ?? '',
     map_cad: product.map_cad ?? '',
     dealer_cost_cad: product.dealer_cost_cad ?? '',
+    msrp_usd: product.msrp_usd ?? '',
+    map_usd: product.map_usd ?? '',
+    dealer_cost_usd: product.dealer_cost_usd ?? '',
     sale_price_cad: product.sale_price_cad ?? '',
     on_sale: product.on_sale ?? false,
     shipping_weight_lb: product.shipping_weight_lb ?? '',
@@ -230,7 +233,8 @@ function buildEditForm(product) {
 }
 
 const NUMBER_COLUMNS = new Set([
-  'family_number', 'msrp_cad', 'map_cad', 'dealer_cost_cad', 'sale_price_cad', 'shipping_weight_lb',
+  'family_number', 'msrp_cad', 'map_cad', 'dealer_cost_cad',
+  'msrp_usd', 'map_usd', 'dealer_cost_usd', 'sale_price_cad', 'shipping_weight_lb',
 ]);
 
 function cleanDims(dims) {
@@ -1450,11 +1454,12 @@ function ContentTab({ product, edit, onGenerated }) {
 // ===================== Pricing Tab =====================
 
 function PricingTab({ product, edit, onAddPricing }) {
-  const noPricing = !edit.isEditing && product.msrp_cad == null && product.dealer_cost_cad == null && product.map_cad == null;
+  const PRICE_KEYS = ['msrp_cad', 'map_cad', 'dealer_cost_cad', 'msrp_usd', 'map_usd', 'dealer_cost_usd'];
+  const noPricing = !edit.isEditing && PRICE_KEYS.every((k) => product[k] == null);
   return (
     <div className="space-y-6">
-      <Section title="Standard Pricing">
-        {noPricing ? (
+      {noPricing ? (
+        <Section title="Pricing">
           <div className="flex flex-wrap items-center gap-3 py-1">
             <p className="text-body-sm text-on-surface-variant">No pricing set yet.</p>
             {onAddPricing && (
@@ -1468,14 +1473,25 @@ function PricingTab({ product, edit, onAddPricing }) {
               </button>
             )}
           </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-            <EditableField label="MSRP (CAD)" fieldKey="msrp_cad" type="currency" product={product} edit={edit} />
-            <EditableField label="MAP (CAD)" fieldKey="map_cad" type="currency" product={product} edit={edit} />
-            <EditableField label="Dealer Cost (CAD)" fieldKey="dealer_cost_cad" type="currency" product={product} edit={edit} />
-          </div>
-        )}
-      </Section>
+        </Section>
+      ) : (
+        <>
+          <Section title="Canada Pricing (CAD)">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <EditableField label="MSRP" fieldKey="msrp_cad" type="currency" product={product} edit={edit} />
+              <EditableField label="MAP" fieldKey="map_cad" type="currency" product={product} edit={edit} />
+              <EditableField label="Dealer Cost" fieldKey="dealer_cost_cad" type="currency" product={product} edit={edit} />
+            </div>
+          </Section>
+          <Section title="USA Pricing (USD)">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <EditableField label="MSRP" fieldKey="msrp_usd" type="currency" product={product} edit={edit} />
+              <EditableField label="MAP" fieldKey="map_usd" type="currency" product={product} edit={edit} />
+              <EditableField label="Dealer Cost" fieldKey="dealer_cost_usd" type="currency" product={product} edit={edit} />
+            </div>
+          </Section>
+        </>
+      )}
       <Section title="Sale Pricing">
         <div className="space-y-4">
           <EditableField label="On Sale" fieldKey="on_sale" type="boolean" product={product} edit={edit} />
