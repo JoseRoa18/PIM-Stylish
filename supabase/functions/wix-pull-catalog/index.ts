@@ -60,7 +60,11 @@ Deno.serve(async (req) => {
           "wix-site-id": WIX_SITE_ID,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query: { paging: { limit, offset } } }),
+        // includeHiddenProducts: without it Wix silently omits non-visible
+        // products — a linked product someone hid on the site would read as a
+        // BROKEN LINK instead of "hidden". Found by the CRUD test: a fresh
+        // hidden product never showed up in the pull.
+        body: JSON.stringify({ query: { paging: { limit, offset } }, includeHiddenProducts: true }),
       });
       if (!resp.ok) {
         const errBody = await resp.text();
