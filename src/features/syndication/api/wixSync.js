@@ -154,3 +154,74 @@ export async function pushProductToWix(sku, fields = undefined) {
   });
   return data;
 }
+
+/**
+ * Fleet-level Wix monitoring: pull the whole store catalog (read-only), join
+ * it against the PIM, and persist a channel_health snapshot — same pattern as
+ * the Best Buy / Walmart pulls, so Listing Health and the dashboard can show
+ * PIM↔Wix drift without touching the live API on every page view.
+ *
+ * in_sync    = linked products present and visible on Wix
+ * with_diffs = live price differs from the PIM's MSRP (CAD)
+ * errors     = broken links (PIM points at a Wix id that no longer exists)
+ */
+export async function refreshWixCatalog() {
+  const { data, error: fnError } = await supabase.functions.invoke('wix-pull-catalog', { body: {} });
+  if (fnError) throw new Error(fnError.message ?? 'wix-pull-catalog failed');
+  if (data?.error) throw new Error(data.error);
+  const { total, products: wixProducts } = data;
+
+  const { data: prods, error } = await supabase
+    .from('products')
+    .select('sku, msrp_cad, wix_product_id');
+  if (error) throw error;
+
+  const wixById = new Map(wixProducts.map((w) => [w.id, w]));
+  const linked = (prods ?? []).filter((p) => p.wix_product_id);
+
+  const results = [];
+  let inSync = 0;
+  let priceDiffs = 0;
+  let broken = 0;
+  for (const p of linked) {
+    const w = wixById.get(p.wix_product_id);
+    if (!w) {
+      broken += 1;
+      results.push({ sku: p.sku, wix_id: p.wix_product_id, state: 'missing' });
+      continue;
+    }
+    const livePrice = w.discountedPrice ?? w.price;
+    const priceDiff = p.msrp_cad != null && livePrice != null && Math.abs(livePrice - p.msrp_cad) > 0.01;
+    if (priceDiff) priceDiffs += 1;
+    if (w.visible) inSync += 1;
+    results.push({
+      sku: p.sku,
+      wix_id: p.wix_product_id,
+      state: w.visible ? 'live' : 'hidden',
+      name: w.name,
+      price: livePrice,
+      msrp: p.msrp_cad ?? null,
+      price_diff: priceDiff,
+    });
+  }
+
+  // Wix products that aren't in the PIM at all (orphans on the site).
+  const pimSkus = new Set((prods ?? []).map((p) => p.sku));
+  const orphans = wixProducts
+    .filter((w) => w.sku && !pimSkus.has(w.sku))
+    .map((w) => ({ sku: w.sku, wix_id: w.id, state: 'not_in_pim', name: w.name }));
+
+  await supabase.from('channel_health').insert({
+    channel: 'wix',
+    target: 'wixapis.com',
+    total,
+    in_sync: inSync,
+    with_diffs: priceDiffs,
+    errors: broken,
+    partial: false,
+    top_offenders: results.filter((r) => r.state === 'missing' || r.price_diff).slice(0, 10),
+    results: [...results, ...orphans],
+  });
+
+  return { total, linked: linked.length, inSync, priceDiffs, broken, orphans: orphans.length };
+}

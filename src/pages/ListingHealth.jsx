@@ -16,7 +16,7 @@ import {
   MARKETPLACES,
   API_MARKETPLACE_KEYS,
 } from '@/features/dashboard/lib/listingHealth';
-import { readWixProduct } from '@/features/syndication/api/wixSync';
+import { readWixProduct, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers } from '@/features/syndication/api/bestbuySync';
 import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
 import ChannelSyncCard from '@/features/dashboard/components/ChannelSyncCard';
@@ -220,6 +220,9 @@ export default function ListingHealth() {
     bestbuy: { run: refreshBestBuyOffers, label: 'Best Buy' },
     walmart_us: { run: () => refreshWalmartItems('us'), label: 'Walmart' },
     walmart_ca: { run: () => refreshWalmartItems('ca'), label: 'Walmart CA' },
+    // Fleet snapshot (whole store in one pull) — the per-product cache
+    // refresh below remains its own, slower button.
+    wix_cache: { run: refreshWixCatalog, label: 'Wix' },
   };
 
   async function refreshChannel(key) {

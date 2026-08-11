@@ -138,6 +138,54 @@ async function refreshWalmart(market: "us" | "ca") {
   return { total, okCount };
 }
 
+// Mirror of wixSync.refreshWixCatalog — fleet-level PIM↔Wix drift snapshot.
+async function refreshWix() {
+  const { total, products: wixProducts } = await invokeFn("wix-pull-catalog");
+  const prods = await restSelect("products?select=sku,msrp_cad,wix_product_id");
+
+  type WixItem = { id: string; sku: string | null; name: string; visible: boolean; price: number | null; discountedPrice: number | null };
+  const wixById = new Map((wixProducts as WixItem[]).map((w) => [w.id, w]));
+  const linked = prods.filter((p: { wix_product_id: string | null }) => p.wix_product_id);
+
+  const results: Record<string, unknown>[] = [];
+  let inSync = 0;
+  let priceDiffs = 0;
+  let broken = 0;
+  for (const p of linked) {
+    const w = wixById.get(p.wix_product_id);
+    if (!w) {
+      broken += 1;
+      results.push({ sku: p.sku, wix_id: p.wix_product_id, state: "missing" });
+      continue;
+    }
+    const livePrice = w.discountedPrice ?? w.price;
+    const priceDiff = p.msrp_cad != null && livePrice != null && Math.abs(livePrice - p.msrp_cad) > 0.01;
+    if (priceDiff) priceDiffs += 1;
+    if (w.visible) inSync += 1;
+    results.push({
+      sku: p.sku, wix_id: p.wix_product_id, state: w.visible ? "live" : "hidden",
+      name: w.name, price: livePrice, msrp: p.msrp_cad ?? null, price_diff: priceDiff,
+    });
+  }
+  const pimSkus = new Set(prods.map((p: { sku: string }) => p.sku));
+  const orphans = (wixProducts as WixItem[])
+    .filter((w) => w.sku && !pimSkus.has(w.sku))
+    .map((w) => ({ sku: w.sku, wix_id: w.id, state: "not_in_pim", name: w.name }));
+
+  await restInsert("channel_health", [{
+    channel: "wix",
+    target: "wixapis.com",
+    total,
+    in_sync: inSync,
+    with_diffs: priceDiffs,
+    errors: broken,
+    partial: false,
+    top_offenders: results.filter((r) => r.state === "missing" || r.price_diff).slice(0, 10),
+    results: [...results, ...orphans],
+  }]);
+  return { total, linked: linked.length, inSync, priceDiffs, broken, orphans: orphans.length };
+}
+
 // ---- The full refresh ----
 
 async function runRefresh() {
@@ -148,10 +196,11 @@ async function runRefresh() {
   } = { ok: true, steps: {}, errors: [] };
 
   // Channel pulls in parallel; one channel being down must not stop the rest.
-  const [bb, wmUs, wmCa] = await Promise.allSettled([
+  const [bb, wmUs, wmCa, wix] = await Promise.allSettled([
     refreshBestBuy(),
     refreshWalmart("us"),
     refreshWalmart("ca"),
+    refreshWix(),
   ]);
   if (bb.status === "fulfilled") report.steps.bestbuy = bb.value;
   else report.errors.push(`bestbuy: ${bb.reason?.message ?? bb.reason}`);
@@ -159,6 +208,8 @@ async function runRefresh() {
   else report.errors.push(`walmart_us: ${wmUs.reason?.message ?? wmUs.reason}`);
   if (wmCa.status === "fulfilled") report.steps.walmart_ca = wmCa.value;
   else report.errors.push(`walmart_ca: ${wmCa.reason?.message ?? wmCa.reason}`);
+  if (wix.status === "fulfilled") report.steps.wix = wix.value;
+  else report.errors.push(`wix: ${wix.reason?.message ?? wix.reason}`);
 
   // Re-score the catalog against the (now fresh) snapshots.
   try {

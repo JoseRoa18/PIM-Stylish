@@ -1,0 +1,92 @@
+// Read the ENTIRE Wix store catalog in one call (paginated server-side) —
+// the fleet-level read that channel monitoring needs. Read-only: nothing is
+// written to Wix. Callers (wixSync.refreshWixCatalog in the browser, the
+// health-refresh cron) join the result against the PIM and persist the
+// channel_health snapshot.
+
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+interface WixProduct {
+  id?: string;
+  sku?: string;
+  name?: string;
+  visible?: boolean;
+  priceData?: { price?: number; discountedPrice?: number };
+  variants?: Array<{ variant?: { sku?: string } }>;
+}
+
+function pickSku(p: WixProduct): string | null {
+  if (p.sku && p.sku.trim()) return p.sku.trim();
+  const variantSku = p.variants?.[0]?.variant?.sku;
+  if (variantSku && variantSku.trim()) return variantSku.trim();
+  return null;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const WIX_API_KEY = Deno.env.get("WIX_API_KEY");
+    const WIX_SITE_ID = Deno.env.get("WIX_SITE_ID");
+    if (!WIX_API_KEY || !WIX_SITE_ID) {
+      return json({ error: "Missing WIX_API_KEY or WIX_SITE_ID secret." }, 500);
+    }
+
+    const products: {
+      id: string; sku: string | null; name: string; visible: boolean;
+      price: number | null; discountedPrice: number | null;
+    }[] = [];
+    let offset = 0;
+    const limit = 100;
+
+    while (true) {
+      const resp = await fetch("https://www.wixapis.com/stores/v1/products/query", {
+        method: "POST",
+        headers: {
+          "Authorization": WIX_API_KEY,
+          "wix-site-id": WIX_SITE_ID,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: { paging: { limit, offset } } }),
+      });
+      if (!resp.ok) {
+        const errBody = await resp.text();
+        throw new Error(`Wix API ${resp.status}: ${errBody.slice(0, 200)}`);
+      }
+      const data = await resp.json();
+      const batch: WixProduct[] = data.products ?? [];
+      for (const p of batch) {
+        products.push({
+          id: p.id ?? "",
+          sku: pickSku(p),
+          name: p.name ?? "",
+          visible: p.visible !== false,
+          price: p.priceData?.price ?? null,
+          discountedPrice: p.priceData?.discountedPrice ?? null,
+        });
+      }
+      const total = data.totalResults ?? data.metadata?.count ?? products.length;
+      offset += batch.length;
+      if (batch.length === 0 || offset >= total) break;
+    }
+
+    return json({ total: products.length, products });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[wix-pull-catalog] FAILED:", message);
+    return json({ error: message }, 500);
+  }
+});

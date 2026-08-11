@@ -44,7 +44,15 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Cached per client id for the life of the warm instance. Wayfair rate-limits
+// the TOKEN endpoint hard — a 317-SKU audit fetching a fresh token per call
+// is what tripped "Retry after 52s", not the catalog queries themselves.
+const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+
 async function getToken(clientId: string, clientSecret: string): Promise<string> {
+  const hit = tokenCache.get(clientId);
+  if (hit && Date.now() < hit.expiresAt) return hit.token;
+
   const res = await fetch("https://sso.auth.wayfair.com/oauth/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -57,6 +65,11 @@ async function getToken(clientId: string, clientSecret: string): Promise<string>
   });
   const data = await res.json();
   if (!data.access_token) throw new Error(`Wayfair auth failed: ${JSON.stringify(data).slice(0, 200)}`);
+  tokenCache.set(clientId, {
+    token: data.access_token,
+    // Refresh a minute early; Wayfair tokens report expires_in in seconds.
+    expiresAt: Date.now() + ((data.expires_in ?? 3600) - 60) * 1000,
+  });
   return data.access_token;
 }
 

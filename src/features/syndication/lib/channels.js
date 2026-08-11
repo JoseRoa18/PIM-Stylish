@@ -15,6 +15,10 @@ export const LIVE_CHANNELS = [
     env: 'Production',
     envClass: 'bg-success-container text-on-success-container',
     stat: async (totals) => {
+      // Prefer the fleet snapshot (live on site); fall back to the linked
+      // count for installs that haven't pulled yet.
+      const snap = await latestSnapshot('wix');
+      if (snap) return { value: `${snap.in_sync}/${snap.total}`, label: 'live on site' };
       const { count } = await supabase
         .from('products')
         .select('sku', { count: 'exact', head: true })
