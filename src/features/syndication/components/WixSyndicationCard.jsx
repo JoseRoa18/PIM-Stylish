@@ -730,6 +730,7 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
             value={Array.isArray(value) ? value : []}
             onChange={onChange}
             disabled={disabled}
+            pimSections={pimValue}
           />
         </div>
       )}
@@ -963,7 +964,7 @@ function CollectionsPicker({ value, onChange, disabled }) {
 
 // ============================== Additional info sections editor ==============================
 
-function SectionsEditor({ value, onChange, disabled }) {
+function SectionsEditor({ value, onChange, disabled, pimSections }) {
   function update(idx, key, v) {
     onChange(value.map((s, i) => (i === idx ? { ...s, [key]: v } : s)));
   }
@@ -973,6 +974,15 @@ function SectionsEditor({ value, onChange, disabled }) {
   function remove(idx) {
     onChange(value.filter((_, i) => i !== idx));
   }
+
+  const normTitle = (t) => String(t ?? '').trim().toUpperCase();
+  const pimByTitle = new Map(
+    (Array.isArray(pimSections) ? pimSections : []).map((s) => [normTitle(s.title), s]),
+  );
+  // PIM-derivable sections the listing doesn't have yet.
+  const missingFromListing = (Array.isArray(pimSections) ? pimSections : []).filter(
+    (s) => !value.some((v) => normTitle(v.title) === normTitle(s.title)),
+  );
 
   return (
     <div className="space-y-4">
@@ -1020,6 +1030,35 @@ function SectionsEditor({ value, onChange, disabled }) {
               minRows={4}
             />
           </div>
+          {(() => {
+            const pim = pimByTitle.get(normTitle(section.title));
+            if (!pim || valuesEqual(section.description, pim.description)) return null;
+            return (
+              <SectionPimHint
+                html={pim.description}
+                actionLabel="Use PIM value"
+                onApply={disabled ? null : () => update(i, 'description', pim.description)}
+              />
+            );
+          })()}
+        </div>
+      ))}
+      {missingFromListing.map((pim) => (
+        <div
+          key={`missing-${pim.title}`}
+          className="rounded-xl border border-dashed border-outline-variant bg-surface overflow-hidden"
+        >
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-outline-variant/60 bg-surface-container-low/40">
+            <span className="flex-1 px-2 py-1 text-body-md text-on-surface-variant font-medium">
+              {pim.title}
+            </span>
+            <span className="text-label-md text-on-surface-variant/70">Not on Wix yet</span>
+          </div>
+          <SectionPimHint
+            html={pim.description}
+            actionLabel="Add from PIM"
+            onApply={disabled ? null : () => onChange([...value, { ...pim }])}
+          />
         </div>
       ))}
       <button
@@ -1031,6 +1070,36 @@ function SectionsEditor({ value, onChange, disabled }) {
         <Plus className="w-3.5 h-3.5" />
         Add section
       </button>
+    </div>
+  );
+}
+
+// The sections counterpart of PimHint: shown under a section whose content
+// differs from what the PIM derives — current value stays in the editor
+// above, the PIM's version renders here with a one-click apply.
+function SectionPimHint({ html, actionLabel, onApply }) {
+  return (
+    <div className="border-t border-outline-variant/60 bg-primary-container/15 px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-label-md text-on-surface-variant flex items-center gap-1.5">
+          <span className="w-1 h-1 rounded-full bg-primary inline-block flex-shrink-0" />
+          PIM
+        </p>
+        {onApply && (
+          <button
+            type="button"
+            onClick={onApply}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-label-md font-medium text-primary hover:bg-primary-container/60 transition-colors"
+          >
+            <RotateCcw className="w-3 h-3" strokeWidth={2} />
+            {actionLabel}
+          </button>
+        )}
+      </div>
+      <div
+        className="mt-2 max-h-56 overflow-y-auto text-body-sm text-on-surface-variant [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_li]:my-0.5 [&_a]:text-primary [&_a]:underline [&_strong]:text-on-surface"
+        dangerouslySetInnerHTML={{ __html: html ?? '' }}
+      />
     </div>
   );
 }
@@ -1279,6 +1348,28 @@ function normalizeHtml(value) {
   return tmp.innerHTML;
 }
 
+// Semantic fingerprint of an HTML snippet: visible text plus link targets.
+// TipTap restructures markup it merely passes through (wraps <li> content in
+// <p>, appends trailing-break paragraphs), so two snippets can differ as
+// strings while being the same content — this is the tiebreaker.
+function htmlSignature(value) {
+  if (typeof value !== 'string') return String(value ?? '');
+  if (typeof document === 'undefined' || !value.includes('<')) {
+    return String(value).replace(/\s+/g, ' ').trim();
+  }
+  const tmp = document.createElement('div');
+  // A space before every tag keeps words apart across <br>/<li>/<p>
+  // boundaries once tags are stripped ("A<br>B" → "A B", not "AB").
+  tmp.innerHTML = String(value).replace(/</g, ' <');
+  const links = [...tmp.querySelectorAll('a[href]')]
+    .map((a) => a.getAttribute('href'))
+    .join('|');
+  const text = (tmp.textContent ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${text}::${links}`;
+}
+
 function valuesEqual(a, b) {
   if (a === b) return true;
   // null / undefined / empty-string / empty-array all mean "no value".
@@ -1315,10 +1406,11 @@ function valuesEqual(a, b) {
     }
     return true;
   }
-  // Strings that look like HTML — try a normalized comparison.
+  // Strings that look like HTML — normalized comparison first, semantic
+  // (text + links) fallback for editor-canonicalization differences.
   if (typeof a === 'string' && typeof b === 'string') {
     if (a.includes('<') || b.includes('<')) {
-      return normalizeHtml(a) === normalizeHtml(b);
+      return normalizeHtml(a) === normalizeHtml(b) || htmlSignature(a) === htmlSignature(b);
     }
     return a === b;
   }
