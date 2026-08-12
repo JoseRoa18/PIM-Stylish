@@ -19,6 +19,7 @@ const Syndication = lazy(ROUTE_IMPORTS.syndication);
 const SyndicationChannel = lazy(ROUTE_IMPORTS.syndicationChannel);
 const Templates = lazy(ROUTE_IMPORTS.templates);
 const ListingHealth = lazy(ROUTE_IMPORTS.listingHealth);
+const PricingPage = lazy(ROUTE_IMPORTS.pricing);
 const ImportProducts = lazy(ROUTE_IMPORTS.importProducts);
 const Users = lazy(ROUTE_IMPORTS.users);
 const Activity = lazy(ROUTE_IMPORTS.activity);
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/syndication/:channel" element={<SyndicationChannel />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/listing-health" element={<ListingHealth />} />
+          <Route path="/pricing" element={<PricingPage />} />
           <Route
             path="/import"
             element={

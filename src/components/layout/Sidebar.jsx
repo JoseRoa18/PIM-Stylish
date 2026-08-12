@@ -13,6 +13,7 @@ import {
   History,
   Plus,
   X,
+  DollarSign,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { to: '/assets', icon: ImageIcon, label: 'Assets', soon: true, prefetch: 'comingSoon' },
   { to: '/syndication', icon: Share2, label: 'Syndication', prefetch: 'syndication' },
   { to: '/templates', icon: FileSpreadsheet, label: 'Templates', prefetch: 'templates' },
+  { to: '/pricing', icon: DollarSign, label: 'Pricing', prefetch: 'pricing' },
   { to: '/listing-health', icon: Activity, label: 'Listing Health', prefetch: 'listingHealth' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics', soon: true, prefetch: 'comingSoon' },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true, prefetch: 'users' },

@@ -13,6 +13,7 @@ export const ROUTE_IMPORTS = {
   syndicationChannel: () => import('@/pages/SyndicationChannel'),
   templates: () => import('@/pages/Templates'),
   listingHealth: () => import('@/pages/ListingHealth'),
+  pricing: () => import('@/pages/PricingPage'),
   importProducts: () => import('@/pages/ImportProducts'),
   users: () => import('@/features/users/pages/Users'),
   activity: () => import('@/pages/Activity'),
