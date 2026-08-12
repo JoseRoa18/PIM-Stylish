@@ -90,6 +90,66 @@ export async function createPromotion({ name, period, currency, rows }) {
 }
 
 /**
+ * Create a promotion from full row objects (the file-import path):
+ *   [{ sku, promo_price_cad, promo_price_usd, promo_costs }]
+ */
+export async function createPromotionFromFile({ name, period, rows }) {
+  const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
+  if (prodErr) throw prodErr;
+  const pimSkus = new Set((prods ?? []).map((p) => p.sku));
+
+  const valid = rows.filter((r) => pimSkus.has(r.sku));
+  const notInPim = rows.filter((r) => !pimSkus.has(r.sku)).map((r) => r.sku);
+  if (!valid.length) throw new Error('None of the SKUs in the file exist in the PIM.');
+
+  const { data: promo, error } = await supabase
+    .from('promotions')
+    .insert({ name, period, status: 'draft' })
+    .select()
+    .single();
+  if (error) throw error;
+
+  const priceRows = valid.map((r) => ({
+    promotion_id: promo.id,
+    sku: r.sku,
+    promo_price_cad: r.promo_price_cad ?? null,
+    promo_price_usd: r.promo_price_usd ?? null,
+    promo_costs: r.promo_costs ?? {},
+  }));
+  for (let i = 0; i < priceRows.length; i += 200) {
+    const { error: insErr } = await supabase.from('promotion_prices').insert(priceRows.slice(i, i + 200));
+    if (insErr) throw insErr;
+  }
+
+  logActivity({
+    action: 'create',
+    entityType: 'promotion',
+    entityId: String(promo.id),
+    summary: `Created promotion "${name}" from file (${valid.length} SKUs)`,
+    metadata: { period, skus: valid.length, not_in_pim: notInPim.length },
+  });
+  return { promotion: promo, added: valid.length, notInPim };
+}
+
+/**
+ * Mark a draft promotion as active WITHOUT touching store pricing — for
+ * promotions that were already uploaded to the marketplaces outside the PIM.
+ */
+export async function markPromotionActive(promotion) {
+  const { error } = await supabase
+    .from('promotions')
+    .update({ status: 'active', activated_at: new Date().toISOString() })
+    .eq('id', promotion.id);
+  if (error) throw error;
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    summary: `Marked promotion "${promotion.name}" as active (already live on marketplaces)`,
+  });
+}
+
+/**
  * Merge more pasted rows into an existing promotion (upsert by SKU).
  */
 export async function addPricesToPromotion(promotionId, { currency, rows }) {

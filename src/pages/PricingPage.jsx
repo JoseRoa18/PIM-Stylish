@@ -20,11 +20,14 @@ import {
   getPromotionPrices,
   parsePriceList,
   createPromotion,
+  createPromotionFromFile,
+  markPromotionActive,
   deletePromotion,
   applyPromotion,
   endPromotion,
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
+import { downloadPromoTemplate, parsePromoFile } from '@/features/pricing/lib/promoImport';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
 // Each slug belongs to one market view (Canada or USA) — Wayfair Canada is
@@ -144,23 +147,45 @@ function NewPromotionForm({ onClose, onCreated }) {
   const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const [name, setName] = useState('');
   const [month, setMonth] = useState(defaultPeriod);
+  const [mode, setMode] = useState('file'); // 'file' | 'paste'
   const [currency, setCurrency] = useState('cad');
   const [text, setText] = useState('');
+  const [fileRows, setFileRows] = useState(null);
+  const [fileSummary, setFileSummary] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   const parsed = useMemo(() => parsePriceList(text), [text]);
 
+  async function handleFile(file) {
+    setError(null);
+    setFileRows(null);
+    setFileSummary(null);
+    if (!file) return;
+    try {
+      const res = await parsePromoFile(file);
+      setFileRows(res.rows);
+      const cols = res.matchedColumns.filter((c) => c !== 'sku').length;
+      setFileSummary(
+        `${res.rows.length} SKUs · ${cols} price column${cols === 1 ? '' : 's'} detected` +
+        (res.unknownHeaders.length ? ` · ignored columns: ${res.unknownHeaders.join(', ')}` : ''),
+      );
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function handleCreate() {
     setBusy(true);
     setError(null);
     try {
-      const res = await createPromotion({
+      const payload = {
         name: name.trim() || `${monthLabel(month)} promotion`,
         period: `${month}-01`,
-        currency,
-        rows: parsed.rows,
-      });
+      };
+      const res = mode === 'file'
+        ? await createPromotionFromFile({ ...payload, rows: fileRows ?? [] })
+        : await createPromotion({ ...payload, currency, rows: parsed.rows });
       if (res.notInPim.length) {
         setError(`Created — ${res.added} SKUs added. Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
       }
@@ -170,6 +195,8 @@ function NewPromotionForm({ onClose, onCreated }) {
       setBusy(false);
     }
   }
+
+  const canCreate = mode === 'file' ? (fileRows?.length ?? 0) > 0 : parsed.rows.length > 0;
 
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
@@ -199,38 +226,87 @@ function NewPromotionForm({ onClose, onCreated }) {
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </label>
-        <label className="block">
-          <span className="text-label-lg text-on-surface-variant">List currency</span>
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            <option value="cad">CAD (Canada / SinksDirect)</option>
-            <option value="usd">USD (USA marketplaces)</option>
-          </select>
-        </label>
+        <div className="block">
+          <span className="text-label-lg text-on-surface-variant">Source</span>
+          <div className="mt-1 inline-flex w-full rounded-lg bg-surface-container p-1">
+            {[['file', 'Upload file'], ['paste', 'Paste list']].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMode(key)}
+                className={`flex-1 px-3 py-1.5 rounded-md text-label-lg font-medium transition-colors ${
+                  mode === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      <label className="block">
-        <span className="text-label-lg text-on-surface-variant">
-          Price list — one per line: <span className="font-mono">SKU&nbsp;&nbsp;price</span>
-        </span>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={8}
-          placeholder={'S-822H\t379\nK-131NR\t289\n…'}
-          className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-        />
-      </label>
+
+      {mode === 'file' ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer">
+              <Plus className="w-3.5 h-3.5" />
+              Choose file (.xlsx / .csv)
+              <input
+                type="file"
+                accept=".xlsx,.csv"
+                className="hidden"
+                onChange={(e) => handleFile(e.target.files?.[0])}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={downloadPromoTemplate}
+              className="text-label-lg font-medium text-primary hover:underline"
+            >
+              Download template
+            </button>
+          </div>
+          <p className="text-body-sm text-on-surface-variant">
+            One file with every promo column — SKU, Promo MAP CAD/USD, and the promo costs
+            per channel. Leave blank the cells that don't apply.
+          </p>
+          {fileSummary && <p className="text-body-sm text-on-surface bg-surface-container rounded-lg px-3 py-2">{fileSummary}</p>}
+        </div>
+      ) : (
+        <>
+          <label className="block">
+            <span className="text-label-lg text-on-surface-variant">List currency</span>
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="mt-1 w-full sm:w-64 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <option value="cad">CAD (Canada / SinksDirect)</option>
+              <option value="usd">USD (USA marketplaces)</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-label-lg text-on-surface-variant">
+              Price list — one per line: <span className="font-mono">SKU&nbsp;&nbsp;price</span>
+            </span>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={8}
+              placeholder={'S-822H\t379\nK-131NR\t289\n…'}
+              className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </label>
+        </>
+      )}
+
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-body-sm text-on-surface-variant">
-          {parsed.rows.length} price{parsed.rows.length === 1 ? '' : 's'} parsed
-          {parsed.skipped.length > 0 && ` · ${parsed.skipped.length} line${parsed.skipped.length === 1 ? '' : 's'} skipped`}
+          {mode === 'paste' && `${parsed.rows.length} price${parsed.rows.length === 1 ? '' : 's'} parsed${parsed.skipped.length > 0 ? ` · ${parsed.skipped.length} line${parsed.skipped.length === 1 ? '' : 's'} skipped` : ''}`}
         </p>
         <button
           type="button"
-          disabled={busy || parsed.rows.length === 0}
+          disabled={busy || !canCreate}
           onClick={handleCreate}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
@@ -345,19 +421,34 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
           {canEdit && (
             <div className="flex items-center gap-2 flex-wrap">
               {promo.status === 'draft' && (
-                <ActionButton
-                  icon={Play}
-                  label="Apply to store pricing"
-                  busy={busy === 'apply'}
-                  onClick={() => run('apply', async () => {
-                    const r = await applyPromotion(promo);
-                    return { text: `${r.applied} products set on sale in the PIM. Now push to Wix to publish.` };
-                  }, {
-                    title: `Apply "${promo.name}"?`,
-                    message: 'Sets the CAD promo price as the sale price on every SKU in the list (in the PIM only — pushing to Wix is the next step).',
-                    confirmLabel: 'Apply',
-                  })}
-                />
+                <>
+                  <ActionButton
+                    icon={Play}
+                    label="Apply to store pricing"
+                    busy={busy === 'apply'}
+                    onClick={() => run('apply', async () => {
+                      const r = await applyPromotion(promo);
+                      return { text: `${r.applied} products set on sale in the PIM. Now push to Wix to publish.` };
+                    }, {
+                      title: `Apply "${promo.name}"?`,
+                      message: 'Sets the CAD promo price as the sale price on every SKU in the list (in the PIM only — pushing to Wix is the next step).',
+                      confirmLabel: 'Apply',
+                    })}
+                  />
+                  <ActionButton
+                    icon={CheckCircle2}
+                    label="Mark as active"
+                    busy={busy === 'activate'}
+                    onClick={() => run('activate', async () => {
+                      await markPromotionActive(promo);
+                      return { text: 'Marked as active — store pricing untouched.' };
+                    }, {
+                      title: `Mark "${promo.name}" as active?`,
+                      message: 'For promotions already live on the marketplaces: only changes the status here — no product pricing is touched.',
+                      confirmLabel: 'Mark active',
+                    })}
+                  />
+                </>
               )}
               {(promo.status === 'active' || promo.status === 'ended') && (
                 <ActionButton
