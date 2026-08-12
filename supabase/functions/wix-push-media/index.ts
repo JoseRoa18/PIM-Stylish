@@ -35,6 +35,7 @@ interface PimImage {
   storage_path: string;
   language: string | null;
   image_role: string | null;
+  is_primary: boolean | null;
 }
 
 function pickLanguageSet(all: PimImage[]): { chosen: PimImage[]; set: string } {
@@ -152,13 +153,18 @@ Deno.serve(async (req) => {
       if (!valid.length) return json({ error: `${sku} has no images in the PIM.` }, 400);
 
       // The gray-background SinksDirect hero always leads the Wix gallery,
-      // regardless of the language tiers below (it carries no text).
+      // regardless of the language tiers below (it carries no text). When it
+      // exists, the white marketplace main (is_primary) stays OUT of the Wix
+      // push — it's the same shot on a white background, a duplicate here;
+      // it only leads when the product has no SinksDirect hero.
       const sdMain = valid.find((m) => m.image_role === "sinksdirect_main");
-      const all = valid.filter((m) => m.image_role !== "sinksdirect_main");
+      const all = valid.filter((m) =>
+        m.image_role !== "sinksdirect_main" && !(sdMain && m.is_primary));
 
       const { chosen, set } = pickLanguageSet(all);
       const urls = [...(sdMain ? [sdMain] : []), ...chosen].map((m) => m.storage_path);
       report.sinksdirect_main = Boolean(sdMain);
+      if (sdMain) report.marketplace_main_skipped = valid.some((m) => m.is_primary);
       report.pim_images = all.length;
       report.language_set = set;
       report.skipped_other_language = all.length - chosen.length;
