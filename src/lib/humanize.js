@@ -12,7 +12,6 @@ const FIELD_LABELS = {
   upc: 'UPC',
   msrp_cad: 'MSRP (CAD)',
   msrp_usd: 'MSRP (USD)',
-  dealer_cost_cad: 'dealer cost (CAD)',
   quickbooks_description: 'QuickBooks description',
   spec_sheet: 'spec sheet',
   installation_manual: 'installation manual',

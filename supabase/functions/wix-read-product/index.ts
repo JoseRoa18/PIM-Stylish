@@ -168,7 +168,6 @@ Deno.serve(async (req) => {
       ribbon: w.ribbon ?? null,
       shipping_weight_lb: typeof w.weight === "number" ? w.weight : null,
       msrp_cad: price,
-      dealer_cost_cad: w.costAndProfitData?.itemCost ?? null,
       on_sale,
       sale_price_cad,
       visible_online: w.visible ?? null,

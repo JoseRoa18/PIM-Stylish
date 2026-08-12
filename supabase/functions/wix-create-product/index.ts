@@ -44,7 +44,6 @@ interface PimRow {
   msrp_cad: number | null;
   sale_price_cad: number | null;
   on_sale: boolean | null;
-  dealer_cost_cad: number | null;
   shipping_weight_lb: number | null;
   additional_info_sections: { title?: string; description?: string }[] | null;
   wix_product_id: string | null;
@@ -64,7 +63,6 @@ function buildCreateBody(pim: PimRow): Record<string, unknown> {
   if (pim.brand != null) product.brand = pim.brand;
   if (pim.ribbon != null) product.ribbon = pim.ribbon;
   if (pim.shipping_weight_lb != null) product.weight = Number(pim.shipping_weight_lb);
-  if (pim.dealer_cost_cad != null) product.costAndProfitData = { itemCost: Number(pim.dealer_cost_cad) };
   if (pim.on_sale && pim.sale_price_cad != null && pim.msrp_cad != null) {
     const amount = Math.max(0, Number(pim.msrp_cad) - Number(pim.sale_price_cad));
     product.discount = { type: "AMOUNT", value: amount };
@@ -107,7 +105,7 @@ Deno.serve(async (req) => {
 
     const { data: pim, error: pimErr } = await admin
       .from("products")
-      .select("sku, model_name, brand, description, ribbon, msrp_cad, sale_price_cad, on_sale, dealer_cost_cad, shipping_weight_lb, additional_info_sections, wix_product_id")
+      .select("sku, model_name, brand, description, ribbon, msrp_cad, sale_price_cad, on_sale, shipping_weight_lb, additional_info_sections, wix_product_id")
       .eq("sku", sku)
       .maybeSingle();
     if (pimErr) throw new Error(`PIM read failed: ${pimErr.message}`);

@@ -44,7 +44,6 @@ interface PimRow {
   msrp_cad: number | null;
   sale_price_cad: number | null;
   on_sale: boolean | null;
-  dealer_cost_cad: number | null;
   shipping_weight_lb: number | null;
   visible_online: boolean | null;
   additional_info_sections: AdditionalInfoSection[] | null;
@@ -144,10 +143,6 @@ function buildProductPatch(pim: PimRow): Record<string, unknown> {
   if (pim.msrp_cad != null) {
     patch.price = { price: Number(pim.msrp_cad), currency: "CAD" };
   }
-  if (pim.dealer_cost_cad != null) {
-    patch.costAndProfitData = { itemCost: Number(pim.dealer_cost_cad) };
-  }
-
   // Discount: if on_sale, compute discount as AMOUNT off MSRP.
   // If off-sale, zero it out so Wix removes the sale.
   if (pim.on_sale && pim.sale_price_cad != null && pim.msrp_cad != null) {
@@ -204,7 +199,7 @@ Deno.serve(async (req) => {
     const { data: pimRow, error: loadErr } = await supabase
       .from("products")
       .select(
-        "sku, model_name, brand, description, ribbon, msrp_cad, sale_price_cad, on_sale, dealer_cost_cad, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id",
+        "sku, model_name, brand, description, ribbon, msrp_cad, sale_price_cad, on_sale, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id",
       )
       .eq("sku", sku)
       .maybeSingle<PimRow>();

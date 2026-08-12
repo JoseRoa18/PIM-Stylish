@@ -5,7 +5,7 @@
 export const VARIANT_DISTINGUISHING = new Set([
   'finish', 'color', 'upc', 'general_title_en', 'general_title_fr',
   'description', 'description_fr', 'bullet_points', 'bullet_points_fr',
-  'msrp_cad', 'dealer_cost_cad', 'sale_price_cad', 'factory_code',
+  'msrp_cad', 'sale_price_cad', 'factory_code',
   'sku', 'model_name', 'family_number',
   // Finish-specific: deck-plate part numbers match the faucet's finish
   // (A-803G for gold, A-803N for black, …), so they differ per variant.

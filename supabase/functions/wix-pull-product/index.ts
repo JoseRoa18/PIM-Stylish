@@ -6,7 +6,7 @@
 //
 // Overwrites the following columns:
 //   model_name, description, brand, ribbon, shipping_weight_lb,
-//   msrp_cad, dealer_cost_cad, sale_price_cad, on_sale,
+//   msrp_cad, sale_price_cad, on_sale,
 //   visible_online, wix_collection_ids, additional_info_sections,
 //   wix_synced_at, wix_raw
 //
@@ -145,7 +145,6 @@ Deno.serve(async (req) => {
     setText("ribbon", w.ribbon);
     setNumber("shipping_weight_lb", w.weight);
     setNumber("msrp_cad", w.price?.price);
-    setNumber("dealer_cost_cad", w.costAndProfitData?.itemCost);
     setBool("visible_online", w.visible);
 
     // Arrays: an empty array is a meaningful state ("no categories", "no

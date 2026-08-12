@@ -152,7 +152,6 @@ function buildEditForm(product) {
     factory_code: product.factory_code ?? '',
     msrp_cad: product.msrp_cad ?? '',
     map_cad: product.map_cad ?? '',
-    dealer_cost_cad: product.dealer_cost_cad ?? '',
     cost_cad_rona_hd: product.cost_cad_rona_hd ?? '',
     cost_cad_wayfair_sod: product.cost_cad_wayfair_sod ?? '',
     msrp_usd: product.msrp_usd ?? '',
@@ -237,7 +236,7 @@ function buildEditForm(product) {
 }
 
 const NUMBER_COLUMNS = new Set([
-  'family_number', 'msrp_cad', 'map_cad', 'dealer_cost_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
+  'family_number', 'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
   'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
   'sale_price_cad', 'shipping_weight_lb',
 ]);
@@ -1460,7 +1459,7 @@ function ContentTab({ product, edit, onGenerated }) {
 
 function PricingTab({ product, edit, onAddPricing }) {
   const PRICE_KEYS = [
-    'msrp_cad', 'map_cad', 'dealer_cost_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
+    'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
     'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
   ];
   const noPricing = !edit.isEditing && PRICE_KEYS.every((k) => product[k] == null);
@@ -1490,7 +1489,6 @@ function PricingTab({ product, edit, onAddPricing }) {
               <EditableField label="MAP — all marketplaces" fieldKey="map_cad" type="currency" product={product} edit={edit} />
               <EditableField label="Cost — Rona / Home Depot" fieldKey="cost_cad_rona_hd" type="currency" product={product} edit={edit} />
               <EditableField label="Cost — Wayfair / Small Online" fieldKey="cost_cad_wayfair_sod" type="currency" product={product} edit={edit} />
-              <EditableField label="Cost of goods (Wix)" fieldKey="dealer_cost_cad" type="currency" product={product} edit={edit} />
             </div>
           </Section>
           <Section title="USA Pricing (USD)">

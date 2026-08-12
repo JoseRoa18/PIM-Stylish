@@ -91,7 +91,6 @@ export const FIELD_DEFS = [
   { key: 'brand', label: 'Brand', aliases: ['brand'], type: 'text', target: { col: 'brand' }, required: true },
   { key: 'category', label: 'Category', aliases: ['category'], type: 'category', target: { col: 'category' }, required: true },
   { key: 'msrp_cad', label: 'MSRP CAD$', aliases: ['msrpcad', 'msrp', 'msrpcad$'], type: 'number', target: { col: 'msrp_cad' } },
-  { key: 'dealer_cost_cad', label: 'Dealer Cost CAD$', aliases: ['bmdealercostcad', 'dealercostcad', 'bmdealercost', 'bmdealercostcadinternaldatadonotuse'], type: 'number', target: { col: 'dealer_cost_cad' } },
   { key: 'launch_lead', label: 'Launch Lead', aliases: ['launchlead'], type: 'date', target: { col: 'launch_lead' } },
   { key: 'sample_available_date', label: 'When is sample available', aliases: ['whenissampleavailable', 'sampleavailable', 'whensampleavailable', 'sampleavailabledate'], type: 'date', target: { col: 'sample_available_date' } },
   { key: 'ready_to_sell_date', label: 'When will it be ready to sell?', aliases: ['whenwillitbereadytosell', 'readytosell', 'readytoselldate'], type: 'date', target: { col: 'ready_to_sell_date' } },

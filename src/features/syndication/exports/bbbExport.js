@@ -122,9 +122,11 @@ function buildRowData(product, media) {
   r['Warranty Company'] = product.brand ?? '';
   r['Warranty Length'] = 'Limited Lifetime Manufacturer';
   r['Quality'] = 'New';
-  r['Supplier Cost'] = product.dealer_cost_cad ?? '';
+  // BB&B is a US channel: its cost comes from the official Lowes/Small
+  // Online Dealers/BB&B list and prices are USD.
+  r['Supplier Cost'] = product.cost_usd_lowes_sod_bbb ?? '';
   r['Hard or Soft MAP'] = 'Hard';
-  r['MSRP'] = product.msrp_cad ?? '';
+  r['MSRP'] = product.msrp_usd ?? '';
   r['Country of Origin'] = COUNTRY_MAP[a.country_of_origin] ?? a.country_of_origin ?? '';
   r['UPC'] = a.upc ?? '';
   r['Model/Style#'] = product.sku;

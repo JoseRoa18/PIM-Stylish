@@ -60,7 +60,9 @@ const FIELDS = {
   brand: { label: 'Brand', check: (p) => hasText(p.brand) },
   description: { label: 'Description', check: (p) => hasText(p.description) && p.description.length > 100 },
   price: { label: 'Price', check: (p) => hasNumber(p.msrp_cad) && p.msrp_cad > 0 },
-  dealer_cost: { label: 'Dealer Cost', check: (p) => hasNumber(p.dealer_cost_cad) && p.dealer_cost_cad > 0 },
+  // Dealer costs are per channel group since 2026-08-12; having either
+  // Canadian cost list counts as "has cost data".
+  dealer_cost: { label: 'Dealer Cost', check: (p) => (hasNumber(p.cost_cad_rona_hd) && p.cost_cad_rona_hd > 0) || (hasNumber(p.cost_cad_wayfair_sod) && p.cost_cad_wayfair_sod > 0) },
   shipping_weight: { label: 'Shipping Weight', check: (p) => hasNumber(p.shipping_weight_lb) && p.shipping_weight_lb > 0 },
   material: { label: 'Material', check: (p) => hasText(p.material) },
   finish: { label: 'Finish', check: (p) => hasText(p.finish) },

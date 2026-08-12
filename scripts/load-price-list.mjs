@@ -8,7 +8,7 @@
 // MSRP and MAP (the CAD MAP covers all marketplaces); costs are per channel
 // group — three US lists, two Canadian lists:
 //   msrp_usd | map_usd | cost_usd_lowes_sod_bbb | cost_usd_wayfair | cost_usd_menards
-//   msrp_cad | map_cad | cost_cad_rona_hd | cost_cad_wayfair_sod | dealer_cost_cad (legacy/Wix)
+//   msrp_cad | map_cad | cost_cad_rona_hd | cost_cad_wayfair_sod
 //
 // SKUs match EXACTLY: dashed and dashless SKUs (A-906 vs A906) are different
 // brands and price lists carry both. Rows whose SKU isn't in the PIM are
@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 
 const COLUMNS = [
   'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
-  'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod', 'dealer_cost_cad',
+  'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
 ];
 
 function readEnv(path) {
