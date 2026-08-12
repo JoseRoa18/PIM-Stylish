@@ -27,15 +27,20 @@ import {
 } from '@/features/pricing/api/promotions';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
-// Known slugs get a friendly column header; unknown ones fall back to the slug.
-const PROMO_COST_LABELS = {
-  sod_cad: 'Promo Cost — Small Online (CAD)',
-  rona_hd_cad: 'Promo Cost — Rona/HD (CAD)',
-  wayfair_ca_usd: 'Promo Cost — Wayfair Canada (USD)',
-  lowes_sod_bbb_usd: 'Promo Cost — Lowes/SOD/BB&B (USD)',
-  wayfair_usd: 'Promo Cost — Wayfair US (USD)',
-  menards_usd: 'Promo Cost — Menards (USD)',
+// Each slug belongs to one market view (Canada or USA) — Wayfair Canada is
+// billed in USD but it's still a Canadian channel.
+const PROMO_COST_META = {
+  rona_hd_cad: { label: 'Rona / Home Depot', unit: 'CAD', market: 'ca' },
+  sod_cad: { label: 'Small Online Dealers', unit: 'CAD', market: 'ca' },
+  wayfair_ca_usd: { label: 'Wayfair Canada', unit: 'USD', market: 'ca' },
+  lowes_sod_bbb_usd: { label: 'Lowes / SOD / BB&B', unit: 'USD', market: 'us' },
+  wayfair_usd: { label: 'Wayfair US', unit: 'USD', market: 'us' },
+  menards_usd: { label: 'Menards', unit: 'USD', market: 'us' },
 };
+const costMeta = (slug) =>
+  PROMO_COST_META[slug] ?? { label: slug, unit: slug.endsWith('_usd') ? 'USD' : 'CAD', market: slug.includes('usd') && !slug.includes('_ca_') ? 'us' : 'ca' };
+
+const fmt = (v) => (v == null ? '—' : `$${Number(v).toFixed(2)}`);
 
 const STATUS_META = {
   draft: { label: 'Draft', class: 'bg-surface-container text-on-surface-variant' },
@@ -272,16 +277,22 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
     })();
   }, [open, rows, promo.id]);
 
-  const belowMap = useMemo(() => {
-    if (!rows || !mapBySku) return [];
+  const [market, setMarket] = useState('ca');
+
+  // A promo price below its own promo COST is a real anomaly (negative
+  // margin) — below MAP is just what promotions are, so no alarm for that.
+  const belowCost = useMemo(() => {
+    if (!rows) return [];
     return rows.filter((r) => {
-      const p = mapBySku[r.sku];
-      if (!p) return false;
-      const cadBelow = r.promo_price_cad != null && p.map_cad != null && r.promo_price_cad < p.map_cad;
-      const usdBelow = r.promo_price_usd != null && p.map_usd != null && r.promo_price_usd < p.map_usd;
-      return cadBelow || usdBelow;
+      const costs = r.promo_costs ?? {};
+      return Object.entries(costs).some(([slug, cost]) => {
+        const m = costMeta(slug);
+        const price = m.market === 'ca' && m.unit === 'CAD' ? r.promo_price_cad
+          : m.market === 'us' ? r.promo_price_usd : null;
+        return price != null && cost != null && price < cost;
+      });
     });
-  }, [rows, mapBySku]);
+  }, [rows]);
 
   async function run(kind, fn, confirmOpts) {
     if (confirmOpts) {
@@ -410,55 +421,87 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             </p>
           )}
 
-          {belowMap.length > 0 && (
+          {belowCost.length > 0 && (
             <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/40 text-on-error-container inline-flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              {belowMap.length} promo price{belowMap.length === 1 ? ' is' : 's are'} below MAP: {belowMap.slice(0, 6).map((r) => r.sku).join(', ')}{belowMap.length > 6 ? '…' : ''}
+              {belowCost.length} promo price{belowCost.length === 1 ? ' is' : 's are'} below its promo cost: {belowCost.slice(0, 6).map((r) => r.sku).join(', ')}{belowCost.length > 6 ? '…' : ''}
             </p>
           )}
 
           {rows === null ? (
             <p className="text-body-sm text-on-surface-variant"><Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading prices…</p>
           ) : (() => {
-            const costKeys = [...new Set(rows.flatMap((r) => Object.keys(r.promo_costs ?? {})))].sort();
+            const costKeys = [...new Set(rows.flatMap((r) => Object.keys(r.promo_costs ?? {})))]
+              .filter((k) => costMeta(k).market === market)
+              .sort();
+            const priceKey = market === 'ca' ? 'promo_price_cad' : 'promo_price_usd';
+            const mapKey = market === 'ca' ? 'map_cad' : 'map_usd';
+            const marketRows = rows.filter((r) => r[priceKey] != null || costKeys.some((k) => r.promo_costs?.[k] != null));
             return (
-              <div className="overflow-x-auto rounded-xl border border-outline-variant">
-                <table className="w-full text-body-sm">
-                  <thead>
-                    <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
-                      <th className="text-left px-4 py-2 font-medium">SKU</th>
-                      <th className="text-right px-4 py-2 font-medium">Promo CAD</th>
-                      <th className="text-right px-4 py-2 font-medium">MAP CAD</th>
-                      <th className="text-right px-4 py-2 font-medium">Promo USD</th>
-                      <th className="text-right px-4 py-2 font-medium">MAP USD</th>
-                      {costKeys.map((k) => (
-                        <th key={k} className="text-right px-4 py-2 font-medium whitespace-nowrap">{PROMO_COST_LABELS[k] ?? k}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r) => {
-                      const p = mapBySku?.[r.sku];
-                      const cadBelow = r.promo_price_cad != null && p?.map_cad != null && r.promo_price_cad < p.map_cad;
-                      return (
-                        <tr key={r.id} className="border-t border-outline-variant/50">
-                          <td className="px-4 py-1.5 font-mono text-on-surface">{r.sku}</td>
-                          <td className={`px-4 py-1.5 text-right ${cadBelow ? 'text-error font-semibold' : 'text-on-surface'}`}>
-                            {r.promo_price_cad != null ? `$${r.promo_price_cad}` : '—'}
-                          </td>
-                          <td className="px-4 py-1.5 text-right text-on-surface-variant">{p?.map_cad != null ? `$${p.map_cad}` : '—'}</td>
-                          <td className="px-4 py-1.5 text-right text-on-surface">{r.promo_price_usd != null ? `$${r.promo_price_usd}` : '—'}</td>
-                          <td className="px-4 py-1.5 text-right text-on-surface-variant">{p?.map_usd != null ? `$${p.map_usd}` : '—'}</td>
-                          {costKeys.map((k) => (
-                            <td key={k} className="px-4 py-1.5 text-right text-on-surface">
-                              {r.promo_costs?.[k] != null ? `$${r.promo_costs[k]}` : '—'}
-                            </td>
-                          ))}
+              <div className="space-y-3">
+                <div className="inline-flex rounded-full bg-surface-container p-1">
+                  {[['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setMarket(key)}
+                      className={`px-4 py-1.5 rounded-full text-label-lg font-medium transition-colors ${
+                        market === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {marketRows.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
+                    <p className="text-body-md text-on-surface font-medium">No {market === 'ca' ? 'Canadian' : 'US'} promo prices yet</p>
+                    <p className="text-body-sm text-on-surface-variant mt-1">
+                      Paste the {market === 'ca' ? 'CAD' : 'USD'} promo lists to add this market to the promotion.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-outline-variant">
+                    <table className="w-full text-body-sm">
+                      <thead>
+                        <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
+                          <th className="text-left px-4 py-2.5 font-medium">SKU</th>
+                          <th className="text-right px-4 py-2.5 font-medium whitespace-nowrap">Promo MAP</th>
+                          <th className="text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
+                          {costKeys.map((k) => {
+                            const m = costMeta(k);
+                            return (
+                              <th key={k} className="text-right px-4 py-2.5 font-medium whitespace-nowrap">
+                                Cost · {m.label}
+                                {m.unit !== (market === 'ca' ? 'CAD' : 'USD') && (
+                                  <span className="ml-1 text-on-surface-variant/70">({m.unit})</span>
+                                )}
+                              </th>
+                            );
+                          })}
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {marketRows.map((r) => {
+                          const p = mapBySku?.[r.sku];
+                          return (
+                            <tr key={r.id} className="border-t border-outline-variant/40 odd:bg-surface-container-low/30">
+                              <td className="px-4 py-2 font-mono text-on-surface">{r.sku}</td>
+                              <td className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
+                              <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[mapKey])}</td>
+                              {costKeys.map((k) => (
+                                <td key={k} className="px-4 py-2 text-right text-on-surface-variant tabular-nums">
+                                  {fmt(r.promo_costs?.[k])}
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             );
           })()}
