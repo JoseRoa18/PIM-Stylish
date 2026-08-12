@@ -1055,7 +1055,7 @@ function MediaCard({
         </div>
       )}
       {item.image_role === 'sinksdirect_main' && (
-        <div className={`absolute ${item.is_primary ? 'top-9' : 'top-2'} right-2 px-2 py-0.5 rounded-full bg-inverse-surface text-inverse-on-surface text-label-md font-semibold inline-flex items-center gap-1 z-10`}>
+        <div className={`absolute ${item.is_primary ? 'top-9' : 'top-2'} right-2 px-2 py-0.5 rounded-full bg-inverse-surface text-on-inverse-surface text-label-md font-semibold inline-flex items-center gap-1 z-10`}>
           <Store className="w-3 h-3" />
           SinksDirect
         </div>
