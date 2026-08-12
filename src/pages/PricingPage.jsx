@@ -30,6 +30,7 @@ import {
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, parsePromoFile } from '@/features/pricing/lib/promoImport';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment } from '@/features/pricing/api/priceAlignment';
+import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { Link } from 'react-router-dom';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
@@ -770,6 +771,34 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                   })}
                 />
               )}
+              <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy === 'wayfair' ? 'opacity-40 pointer-events-none' : ''}`}>
+                {busy === 'wayfair' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" strokeWidth={2} />}
+                Fill Wayfair template
+                <input
+                  type="file"
+                  accept=".xlsx,.xlsm"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    setBusy('wayfair');
+                    setMsg(null);
+                    try {
+                      const r = await fillWayfairPromoFile(file, promo);
+                      setMsg({
+                        tone: 'success',
+                        text: `Wayfair file ready — ${r.filled} of ${r.templateRows} template rows filled` +
+                          (r.notInTemplate.length ? ` · in promo but not in Wayfair's list (${r.notInTemplate.length}): ${r.notInTemplate.slice(0, 8).join(', ')}${r.notInTemplate.length > 8 ? '…' : ''}` : ''),
+                      });
+                    } catch (err) {
+                      setMsg({ tone: 'error', text: err.message });
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                />
+              </label>
               {promo.status !== 'ended' && (
                 <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy === 'import' ? 'opacity-40 pointer-events-none' : ''}`}>
                   {busy === 'import' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" strokeWidth={2} />}
