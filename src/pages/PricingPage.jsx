@@ -29,7 +29,7 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, parsePromoFile } from '@/features/pricing/lib/promoImport';
-import { runPriceAlignment, pushExpectedPrice, fixAlignment } from '@/features/pricing/api/priceAlignment';
+import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment } from '@/features/pricing/api/priceAlignment';
 import { Link } from 'react-router-dom';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
@@ -181,10 +181,21 @@ const STATUS_TEXT = {
 
 function PriceAlignmentCard({ canEdit, confirm }) {
   const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [fixing, setFixing] = useState(null); // sku | 'all'
   const [progress, setProgress] = useState(null);
   const [msg, setMsg] = useState(null);
+
+  // The last saved report (cron or manual run) shows instantly on open.
+  useEffect(() => {
+    let active = true;
+    loadLatestAlignment()
+      .then((r) => { if (active) setResult(r); })
+      .catch((err) => { if (active) setMsg({ tone: 'error', text: err.message }); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   async function analyze() {
     setRunning(true);
@@ -263,6 +274,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
           <p className="text-body-sm text-on-surface-variant mt-0.5">
             Compares every linked product's live store price against its expected price —
             the active promo price for promo members, the regular MAP for everyone else.
+            Reports save automatically twice a day; run a fresh one anytime.
           </p>
         </div>
         <button
@@ -272,9 +284,22 @@ function PriceAlignmentCard({ canEdit, confirm }) {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
           {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? 'Analyzing…' : 'Run analysis'}
+          {running ? 'Analyzing…' : 'Run fresh analysis'}
         </button>
       </div>
+
+      {loading && (
+        <p className="text-body-sm text-on-surface-variant"><Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading last report…</p>
+      )}
+      {!loading && !result && !msg && (
+        <p className="text-body-sm text-on-surface-variant">No saved report yet — run the first analysis.</p>
+      )}
+      {result?.legacy && (
+        <p className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant">
+          The last saved report ({new Date(result.ranAt).toLocaleString()}) predates the
+          expected-price upgrade and can't be classified — run a fresh analysis.
+        </p>
+      )}
 
       {msg && (
         <p className={`text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
@@ -284,7 +309,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
       )}
       {progress && <p className="text-body-sm text-on-surface-variant">Pushing… {progress.done}/{progress.total}</p>}
 
-      {result && (
+      {result && !result.legacy && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {ALIGN_TILES.map((t) => {
@@ -303,7 +328,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
             })}
           </div>
           <p className="text-body-sm text-on-surface-variant">
-            {result.total} linked products analyzed · {new Date(result.ranAt).toLocaleTimeString()}
+            {result.total} linked products · report from {new Date(result.ranAt).toLocaleString()}
           </p>
 
           {result.problems.length === 0 ? (
@@ -350,7 +375,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                         <td className="px-4 py-2">
                           {p.expected != null ? (
                             <span className={`px-2 py-0.5 rounded-full text-label-md font-medium ${p.source === 'promo' ? 'bg-tertiary-container/60 text-on-tertiary-container' : 'bg-surface-container text-on-surface-variant'}`}>
-                              {p.source === 'promo' ? `Promo · ${p.promoName}` : 'MAP'}
+                              {p.source === 'promo' ? 'Promo' : 'MAP'}
                             </span>
                           ) : (
                             <span className="text-on-surface-variant">{STATUS_TEXT[p.status]}</span>

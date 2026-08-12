@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { pushProductToWix } from '@/features/syndication/api/wixSync';
+import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 
 /**
  * Price Alignment Analyzer — Wix (SinksDirect) phase.
@@ -10,6 +10,11 @@ import { pushProductToWix } from '@/features/syndication/api/wixSync';
  * price). Only PIM products count — Wix-only orphans are out of scope by
  * the source-of-truth rule.
  *
+ * Reports are PERSISTED: the analysis reads the latest channel_health 'wix'
+ * snapshot — written by the twice-daily cron AND by "Run analysis" (which
+ * is just a fresh pull + snapshot). Opening the tab shows the last report
+ * without running anything.
+ *
  * Classifications:
  *   promo_ok      — live price = active promo price ✓
  *   map_ok        — live price = regular MAP ✓ (not in a promo)
@@ -18,66 +23,61 @@ import { pushProductToWix } from '@/features/syndication/api/wixSync';
  *   no_map        — nothing to compare against (no MAP in the PIM) ⚪
  *   missing       — linked but the Wix product no longer exists 🔴
  */
-export async function runPriceAlignment() {
-  const { data: pullData, error: fnError } = await supabase.functions.invoke('wix-pull-catalog', { body: {} });
-  if (fnError) throw new Error(fnError.message ?? 'wix-pull-catalog failed');
-  if (pullData?.error) throw new Error(pullData.error);
-  const wixById = new Map((pullData.products ?? []).map((w) => [w.id, w]));
 
-  const { data: prods, error } = await supabase
-    .from('products')
-    .select('sku, map_cad, wix_product_id')
-    .not('wix_product_id', 'is', null);
-  if (error) throw error;
+const eq = (a, b) => a != null && b != null && Math.abs(a - b) <= 0.01;
 
-  // Active promos' CAD prices; if several are active, the newest month wins.
-  const { data: promos, error: promoErr } = await supabase
-    .from('promotions')
-    .select('id, name, period, promotion_prices(sku, promo_price_cad)')
-    .eq('status', 'active')
-    .order('period', { ascending: true });
-  if (promoErr) throw promoErr;
-  const promoBySku = new Map();
-  for (const promo of promos ?? []) {
-    for (const row of promo.promotion_prices ?? []) {
-      if (row.promo_price_cad != null) {
-        promoBySku.set(row.sku, { price: row.promo_price_cad, promoName: promo.name });
-      }
-    }
-  }
-
-  const eq = (a, b) => a != null && b != null && Math.abs(a - b) <= 0.01;
+function classifySnapshot(snapshot) {
   const counts = { promo_ok: 0, map_ok: 0, promo_missing: 0, misaligned: 0, no_map: 0, missing: 0 };
   const problems = [];
+  let total = 0;
+  let legacy = false;
 
-  for (const p of prods ?? []) {
-    const w = wixById.get(p.wix_product_id);
-    if (!w) {
+  for (const r of snapshot.results ?? []) {
+    if (r.state === 'not_in_pim') continue; // Wix orphans — out of scope
+    total += 1;
+    if (r.state === 'missing') {
       counts.missing += 1;
-      problems.push({ sku: p.sku, status: 'missing', live: null, expected: null, source: null });
+      problems.push({ sku: r.sku, status: 'missing', live: null, expected: null, source: null });
       continue;
     }
-    const live = w.discountedPrice ?? w.price;
-    const promo = promoBySku.get(p.sku);
-    const expected = promo?.price ?? p.map_cad ?? null;
-    const source = promo ? 'promo' : 'map';
+    // Snapshots older than the expected-price rollout can't be classified.
+    if (!('expected' in r)) { legacy = true; continue; }
 
-    if (expected == null) {
+    if (r.expected == null) {
       counts.no_map += 1;
-      problems.push({ sku: p.sku, status: 'no_map', live, expected: null, source: null });
-    } else if (eq(live, expected)) {
-      counts[promo ? 'promo_ok' : 'map_ok'] += 1;
-    } else if (promo && eq(live, p.map_cad)) {
+      problems.push({ sku: r.sku, status: 'no_map', live: r.price ?? null, expected: null, source: null });
+    } else if (!r.price_diff) {
+      counts[r.expected_source === 'promo' ? 'promo_ok' : 'map_ok'] += 1;
+    } else if (r.expected_source === 'promo' && eq(r.price, r.map)) {
       counts.promo_missing += 1;
-      problems.push({ sku: p.sku, status: 'promo_missing', live, expected, source, promoName: promo.promoName });
+      problems.push({ sku: r.sku, status: 'promo_missing', live: r.price, expected: r.expected, source: 'promo' });
     } else {
       counts.misaligned += 1;
-      problems.push({ sku: p.sku, status: 'misaligned', live, expected, source, promoName: promo?.promoName });
+      problems.push({ sku: r.sku, status: 'misaligned', live: r.price, expected: r.expected, source: r.expected_source });
     }
   }
 
   problems.sort((a, b) => a.sku.localeCompare(b.sku));
-  return { ranAt: new Date().toISOString(), total: (prods ?? []).length, counts, problems };
+  return { ranAt: snapshot.run_at, total, counts, problems, legacy };
+}
+
+/** Latest saved report (cron or manual) — instant, no live pull. */
+export async function loadLatestAlignment() {
+  const { data, error } = await supabase
+    .from('channel_health')
+    .select('run_at, results')
+    .eq('channel', 'wix')
+    .order('run_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  if (!data?.length) return null;
+  return classifySnapshot(data[0]);
+}
+
+/** Fresh live analysis — pulls Wix now and PERSISTS the snapshot. */
+export async function runPriceAlignment() {
+  await refreshWixCatalog();
+  return loadLatestAlignment();
 }
 
 /**

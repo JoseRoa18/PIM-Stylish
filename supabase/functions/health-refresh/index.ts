@@ -179,7 +179,8 @@ async function refreshWix() {
     results.push({
       sku: p.sku, wix_id: p.wix_product_id, state: w.visible ? "live" : "hidden",
       name: w.name, price: livePrice, expected: expected ?? null,
-      expected_source: promoPrice != null ? "promo" : "map", price_diff: priceDiff,
+      expected_source: promoPrice != null ? "promo" : "map",
+      map: p.map_cad ?? null, price_diff: priceDiff,
     });
   }
   const pimSkus = new Set(prods.map((p: { sku: string }) => p.sku));

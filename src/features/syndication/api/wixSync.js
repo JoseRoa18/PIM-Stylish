@@ -304,6 +304,7 @@ export async function refreshWixCatalog() {
       price: livePrice,
       expected: expected ?? null,
       expected_source: promoPrice != null ? 'promo' : 'map',
+      map: p.map_cad ?? null,
       price_diff: priceDiff,
     });
   }
