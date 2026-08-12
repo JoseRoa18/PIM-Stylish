@@ -113,10 +113,27 @@ export async function generateWayfairPromoFile(promotion) {
     if (String(grid[i]?.[0] ?? '').trim()) { lastRow = i + 1; break; }
   }
   if (toAppend.length) {
+    // Wayfair's API exposes no pricing, so the "Current" info columns of
+    // appended rows come from the PIM — the source of truth those values
+    // are supposed to mirror anyway: H = Current MAP (CAD), I = Current
+    // MSRP (CAD). Status/base-cost/B2B stay blank (Wayfair-side data).
+    const { data: pimRows } = await supabase
+      .from('products')
+      .select('sku, map_cad, msrp_cad')
+      .in('sku', toAppend);
+    const pimBySku = new Map((pimRows ?? []).map((p) => [p.sku, p]));
+
     let rowsXml = '';
     for (const [idx, sku] of toAppend.entries()) {
       const rn = lastRow + 1 + idx;
-      rowsXml += `<row r="${rn}">${buildCell(`A${rn}`, sku)}${buildCell(`K${rn}`, 0)}${buildCell(`L${rn}`, costBySku.get(sku))}</row>`;
+      const pim = pimBySku.get(sku);
+      rowsXml += `<row r="${rn}">` +
+        buildCell(`A${rn}`, sku) +
+        (pim?.map_cad != null ? buildCell(`H${rn}`, Number(pim.map_cad)) : '') +
+        (pim?.msrp_cad != null ? buildCell(`I${rn}`, Number(pim.msrp_cad)) : '') +
+        buildCell(`K${rn}`, 0) +
+        buildCell(`L${rn}`, costBySku.get(sku)) +
+        '</row>';
     }
     merged = injectRows(merged, rowsXml, lastRow + toAppend.length);
   }
