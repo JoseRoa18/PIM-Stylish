@@ -30,10 +30,10 @@ import {
 // Known slugs get a friendly column header; unknown ones fall back to the slug.
 const PROMO_COST_LABELS = {
   sod_cad: 'Promo Cost — Small Online (CAD)',
-  wayfair_cad: 'Promo Cost — Wayfair (CAD)',
   rona_hd_cad: 'Promo Cost — Rona/HD (CAD)',
+  wayfair_ca_usd: 'Promo Cost — Wayfair Canada (USD)',
   lowes_sod_bbb_usd: 'Promo Cost — Lowes/SOD/BB&B (USD)',
-  wayfair_usd: 'Promo Cost — Wayfair (USD)',
+  wayfair_usd: 'Promo Cost — Wayfair US (USD)',
   menards_usd: 'Promo Cost — Menards (USD)',
 };
 
