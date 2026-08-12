@@ -25,7 +25,6 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 const MARKETPLACE_OPTIONS = [
   'Wayfair CA',
   'Wayfair US',
-  'Wayfair Promotions',
   'Amazon CA',
   'Amazon US',
   'BB&B / Overstock CA',
