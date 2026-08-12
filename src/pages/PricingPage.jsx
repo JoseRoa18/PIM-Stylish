@@ -63,6 +63,7 @@ function monthLabel(period) {
 export default function PricingPage() {
   const { canEdit } = useAuth();
   const confirm = useConfirm();
+  const [tab, setTab] = useState('promotions'); // 'promotions' | 'alignment'
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
@@ -86,7 +87,7 @@ export default function PricingPage() {
             lists — paste them per month; marketplace promo templates will generate from here.
           </p>
         </div>
-        {canEdit && (
+        {canEdit && tab === 'promotions' && (
           <button
             type="button"
             onClick={() => setShowNew((v) => !v)}
@@ -98,22 +99,37 @@ export default function PricingPage() {
         )}
       </div>
 
+      <div className="inline-flex rounded-full bg-surface-container p-1">
+        {[['promotions', 'Promotions'], ['alignment', 'Price Alignment']].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`px-5 py-2 rounded-full text-label-lg font-medium transition-colors ${
+              tab === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {error && (
         <div className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-3 text-body-sm">
           {error}
         </div>
       )}
 
-      {showNew && (
+      {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} />}
+
+      {tab === 'promotions' && showNew && (
         <NewPromotionForm
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); reload(); }}
         />
       )}
 
-      <PriceAlignmentCard canEdit={canEdit} confirm={confirm} />
-
-      {promotions === null ? (
+      {tab !== 'promotions' ? null : promotions === null ? (
         <div className="rounded-2xl bg-surface p-8 text-center text-on-surface-variant text-body-md">
           <Loader2 className="w-5 h-5 animate-spin inline-block mr-2 align-middle" />
           Loading promotions…
