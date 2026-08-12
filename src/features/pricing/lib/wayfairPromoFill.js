@@ -1,10 +1,8 @@
-// Fill Wayfair's Partner Home PROMOTIONS template from a PIM promotion.
-//
-// The monthly file is downloaded fresh from Partner Home: Wayfair pre-fills
-// its own SKU list (cols A-J, do not edit) and a hidden WAYFAIR_USE_ONLY
-// sheet carries a per-download processId — so this NEVER builds a file from
-// scratch; it fills the user's uploaded template in place (JSZip XML edit,
-// same architecture as every marketplace export).
+// Generate Wayfair's Partner Home PROMOTIONS file from a PIM promotion —
+// same one-click flow as the listing exports: the template lives in the
+// Templates system (marketplace "Wayfair Promotions") and gets filled in
+// place (JSZip XML edit), never rebuilt. When Wayfair issues a new file
+// (new SKU list / processId), replace it in the Templates page.
 //
 // Fill rule (confirmed against the July submission):
 //   K (B2C Promotion Discount %)   = 0
@@ -12,14 +10,15 @@
 //   M (Promotional MAP USD)         = left empty (Canada supplier)
 // Rows whose SKU isn't in the promotion stay untouched.
 
+import { supabase } from '@/lib/supabase';
 import {
-  loadJSZip,
-  parseSharedStrings,
+  openTemplate,
   sheetPathByName,
   sheetToGrid,
   buildCell,
   mergeRows,
   downloadZip,
+  templateExt,
 } from '@/features/syndication/exports/templateFiller';
 import { getPromotionPrices } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
@@ -27,16 +26,24 @@ import { logActivity } from '@/features/activity/api/activityLog';
 const HEADER_ROW = 2; // technical names: SupplierPartNumber, ..., PromotionalDiscountPercent
 const FIRST_DATA_ROW = 5;
 
-export async function fillWayfairPromoFile(file, promotion) {
-  const JSZip = await loadJSZip();
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+export async function generateWayfairPromoFile(promotion) {
+  const { data: templates, error: tErr } = await supabase
+    .from('marketplace_templates')
+    .select('storage_path, file_name')
+    .eq('marketplace', 'Wayfair Promotions')
+    .order('uploaded_at', { ascending: false })
+    .limit(1);
+  if (tErr) throw tErr;
+  if (!templates?.length) {
+    throw new Error('No "Wayfair Promotions" template uploaded — add it in the Templates page first.');
+  }
+  const template = templates[0];
 
-  const sharedFile = zip.file('xl/sharedStrings.xml');
-  const shared = parseSharedStrings(sharedFile ? await sharedFile.async('string') : '');
+  const { zip, shared } = await openTemplate(template.storage_path);
 
   const path = await sheetPathByName(zip, 'Promotions');
   if (!path) {
-    throw new Error('No "Promotions" sheet found — upload the promotions template downloaded from Wayfair Partner Home.');
+    throw new Error('The stored template has no "Promotions" sheet — replace it in the Templates page with the file from Wayfair Partner Home.');
   }
   const xml = await zip.file(path).async('string');
   const grid = sheetToGrid(xml, shared);
@@ -78,9 +85,8 @@ export async function fillWayfairPromoFile(file, promotion) {
   zip.file(path, mergeRows(xml, cellsByRow));
 
   const notInTemplate = [...costBySku.keys()].filter((s) => !templateSkus.has(s)).sort();
-  const ext = /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx';
-  const baseName = `Wayfair_Promotions_${String(promotion.period).slice(0, 7)}_filled`;
-  await downloadZip(zip, baseName, ext);
+  const baseName = `Wayfair_Promotions_${String(promotion.period).slice(0, 7)}`;
+  await downloadZip(zip, baseName, templateExt(template.storage_path));
 
   logActivity({
     action: 'export',
