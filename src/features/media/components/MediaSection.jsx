@@ -87,7 +87,12 @@ export default function MediaSection({ sku, familyNumber = null, category = null
   // Images and videos filter independently: each block has its own language
   // chips and its own active bucket — filtering photos never hides videos
   // and vice versa.
-  const allImages = visualMedia.filter((m) => m.media_type === 'image');
+  const allImagesRaw = visualMedia.filter((m) => m.media_type === 'image');
+  // The SinksDirect hero is language-neutral: it stays out of the language
+  // buckets/chips entirely and instead gets pinned into EVERY filter view,
+  // leading the grid next to the marketplace Primary.
+  const sdMainImage = allImagesRaw.find((m) => m.image_role === 'sinksdirect_main') ?? null;
+  const allImages = allImagesRaw.filter((m) => m.image_role !== 'sinksdirect_main');
   const allVideos = visualMedia.filter((m) => m.media_type === 'video');
   const BUCKET_ORDER = ['universal', 'en', 'fr', 'en_fr', 'en_es'];
 
@@ -105,9 +110,10 @@ export default function MediaSection({ sku, familyNumber = null, category = null
 
   // Videos render in their OWN block under the image grid — they never mix
   // into the photo lineup (only images participate in drag-reorder).
-  const filteredImages = activeFilter
+  const langFilteredImages = activeFilter
     ? allImages.filter((m) => bucketOf(m) === activeFilter)
     : allImages;
+  const filteredImages = sdMainImage ? [sdMainImage, ...langFilteredImages] : langFilteredImages;
   const filteredVideos = activeVideoFilter
     ? allVideos.filter((m) => bucketOf(m) === activeVideoFilter)
     : allVideos;
@@ -664,7 +670,7 @@ export default function MediaSection({ sku, familyNumber = null, category = null
                   key={item.id}
                   item={item}
                   canEdit={canEdit}
-                  reorderEnabled={reorderEnabled}
+                  reorderEnabled={reorderEnabled && item.image_role !== 'sinksdirect_main'}
                   selected={selectedIds.has(item.id)}
                   onToggleSelect={() => toggleSelect(item.id)}
                   onSetPrimary={() => handleSetPrimary(item.id)}
@@ -1056,8 +1062,9 @@ function MediaCard({
       )}
 
       {/* Language tag — bottom-right. Editors get a selector; viewers see a
-          short badge only when the item is language-specific. */}
-      {canEdit ? (
+          short badge only when the item is language-specific. The SinksDirect
+          hero is language-neutral by definition, so it carries no tag. */}
+      {item.image_role === 'sinksdirect_main' ? null : canEdit ? (
         // Closed state shows the short code — full labels don't fit the card
         // corner and the native select truncates them mid-word. The select is
         // stretched invisibly over the badge so the dropdown (with full
