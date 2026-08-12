@@ -132,6 +132,48 @@ export async function createPromotionFromFile({ name, period, rows }) {
 }
 
 /**
+ * Merge full row objects (a market file) into an existing promotion. Values
+ * present in the file win; everything else on the row is preserved — so the
+ * Canada file and the USA file can arrive at different times.
+ */
+export async function addFileToPromotion(promotion, rows) {
+  const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
+  if (prodErr) throw prodErr;
+  const pimSkus = new Set((prods ?? []).map((p) => p.sku));
+  const valid = rows.filter((r) => pimSkus.has(r.sku));
+  const notInPim = rows.filter((r) => !pimSkus.has(r.sku)).map((r) => r.sku);
+
+  const existing = await getPromotionPrices(promotion.id);
+  const bySku = new Map(existing.map((r) => [r.sku, r]));
+
+  const upserts = valid.map((r) => {
+    const prev = bySku.get(r.sku);
+    return {
+      promotion_id: promotion.id,
+      sku: r.sku,
+      promo_price_cad: r.promo_price_cad ?? prev?.promo_price_cad ?? null,
+      promo_price_usd: r.promo_price_usd ?? prev?.promo_price_usd ?? null,
+      promo_costs: { ...(prev?.promo_costs ?? {}), ...(r.promo_costs ?? {}) },
+    };
+  });
+  for (let i = 0; i < upserts.length; i += 200) {
+    const { error } = await supabase
+      .from('promotion_prices')
+      .upsert(upserts.slice(i, i + 200), { onConflict: 'promotion_id,sku' });
+    if (error) throw error;
+  }
+
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    summary: `Imported file into promotion "${promotion.name}" (${valid.length} SKUs)`,
+    metadata: { skus: valid.length, not_in_pim: notInPim.length },
+  });
+  return { added: valid.length, notInPim };
+}
+
+/**
  * Mark a draft promotion as active WITHOUT touching store pricing — for
  * promotions that were already uploaded to the marketplaces outside the PIM.
  */

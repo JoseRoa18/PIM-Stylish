@@ -21,6 +21,7 @@ import {
   parsePriceList,
   createPromotion,
   createPromotionFromFile,
+  addFileToPromotion,
   markPromotionActive,
   deletePromotion,
   applyPromotion,
@@ -150,30 +151,43 @@ function NewPromotionForm({ onClose, onCreated }) {
   const [mode, setMode] = useState('file'); // 'file' | 'paste'
   const [currency, setCurrency] = useState('cad');
   const [text, setText] = useState('');
-  const [fileRows, setFileRows] = useState(null);
-  const [fileSummary, setFileSummary] = useState(null);
+  // One file per market — memberships differ, so each market has its own
+  // template and slot. Either alone is enough to create the promotion.
+  const [files, setFiles] = useState({ ca: null, us: null }); // {rows, summary}
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   const parsed = useMemo(() => parsePriceList(text), [text]);
 
-  async function handleFile(file) {
+  async function handleFile(market, file) {
     setError(null);
-    setFileRows(null);
-    setFileSummary(null);
-    if (!file) return;
+    if (!file) { setFiles((f) => ({ ...f, [market]: null })); return; }
     try {
       const res = await parsePromoFile(file);
-      setFileRows(res.rows);
       const cols = res.matchedColumns.filter((c) => c !== 'sku').length;
-      setFileSummary(
-        `${res.rows.length} SKUs · ${cols} price column${cols === 1 ? '' : 's'} detected` +
-        (res.unknownHeaders.length ? ` · ignored columns: ${res.unknownHeaders.join(', ')}` : ''),
-      );
+      const summary = `${file.name} — ${res.rows.length} SKUs · ${cols} price column${cols === 1 ? '' : 's'}` +
+        (res.unknownHeaders.length ? ` · ignored: ${res.unknownHeaders.join(', ')}` : '');
+      setFiles((f) => ({ ...f, [market]: { rows: res.rows, summary } }));
     } catch (err) {
       setError(err.message);
     }
   }
+
+  const mergedFileRows = useMemo(() => {
+    const bySku = new Map();
+    for (const part of [files.ca, files.us]) {
+      for (const r of part?.rows ?? []) {
+        const prev = bySku.get(r.sku);
+        bySku.set(r.sku, {
+          sku: r.sku,
+          promo_price_cad: r.promo_price_cad ?? prev?.promo_price_cad ?? null,
+          promo_price_usd: r.promo_price_usd ?? prev?.promo_price_usd ?? null,
+          promo_costs: { ...(prev?.promo_costs ?? {}), ...(r.promo_costs ?? {}) },
+        });
+      }
+    }
+    return [...bySku.values()];
+  }, [files]);
 
   async function handleCreate() {
     setBusy(true);
@@ -184,7 +198,7 @@ function NewPromotionForm({ onClose, onCreated }) {
         period: `${month}-01`,
       };
       const res = mode === 'file'
-        ? await createPromotionFromFile({ ...payload, rows: fileRows ?? [] })
+        ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
         : await createPromotion({ ...payload, currency, rows: parsed.rows });
       if (res.notInPim.length) {
         setError(`Created — ${res.added} SKUs added. Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
@@ -196,7 +210,7 @@ function NewPromotionForm({ onClose, onCreated }) {
     }
   }
 
-  const canCreate = mode === 'file' ? (fileRows?.length ?? 0) > 0 : parsed.rows.length > 0;
+  const canCreate = mode === 'file' ? mergedFileRows.length > 0 : parsed.rows.length > 0;
 
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
@@ -246,31 +260,35 @@ function NewPromotionForm({ onClose, onCreated }) {
       </div>
 
       {mode === 'file' ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-3 flex-wrap">
-            <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer">
-              <Plus className="w-3.5 h-3.5" />
-              Choose file (.xlsx / .csv)
-              <input
-                type="file"
-                accept=".xlsx,.csv"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files?.[0])}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={downloadPromoTemplate}
-              className="text-label-lg font-medium text-primary hover:underline"
-            >
-              Download template
-            </button>
-          </div>
-          <p className="text-body-sm text-on-surface-variant">
-            One file with every promo column — SKU, Promo MAP CAD/USD, and the promo costs
-            per channel. Leave blank the cells that don't apply.
-          </p>
-          {fileSummary && <p className="text-body-sm text-on-surface bg-surface-container rounded-lg px-3 py-2">{fileSummary}</p>}
+        <div className="grid sm:grid-cols-2 gap-4">
+          {[['ca', 'Canada file', 'Promo MAP CAD + costs Rona/HD · Small Online · Wayfair CA'], ['us', 'USA file', 'Promo MAP USD + costs Lowes/SOD/BB&B · Wayfair US · Menards']].map(([market, title, hint]) => (
+            <div key={market} className="rounded-xl border border-outline-variant p-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-label-lg font-semibold text-on-surface">{title}</span>
+                <button
+                  type="button"
+                  onClick={() => downloadPromoTemplate(market)}
+                  className="text-label-md font-medium text-primary hover:underline"
+                >
+                  Download template
+                </button>
+              </div>
+              <p className="text-body-sm text-on-surface-variant">{hint}. Each market has its own product list — upload one or both.</p>
+              <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer">
+                <Plus className="w-3.5 h-3.5" />
+                Choose file (.xlsx / .csv)
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  className="hidden"
+                  onChange={(e) => handleFile(market, e.target.files?.[0])}
+                />
+              </label>
+              {files[market]?.summary && (
+                <p className="text-body-sm text-on-surface bg-surface-container rounded-lg px-3 py-2">{files[market].summary}</p>
+              )}
+            </div>
+          ))}
         </div>
       ) : (
         <>
@@ -480,6 +498,36 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                     danger: true,
                   })}
                 />
+              )}
+              {promo.status !== 'ended' && (
+                <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy === 'import' ? 'opacity-40 pointer-events-none' : ''}`}>
+                  {busy === 'import' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" strokeWidth={2} />}
+                  Import file
+                  <input
+                    type="file"
+                    accept=".xlsx,.csv"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      setBusy('import');
+                      setMsg(null);
+                      try {
+                        const { rows: parsedRows } = await parsePromoFile(file);
+                        const r = await addFileToPromotion(promo, parsedRows);
+                        setMsg({ tone: 'success', text: `Imported ${r.added} SKUs from ${file.name}${r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''}` });
+                        setRows(null);
+                        setMapBySku(null);
+                        onChanged();
+                      } catch (err) {
+                        setMsg({ tone: 'error', text: err.message });
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}
+                  />
+                </label>
               )}
               {promo.status !== 'active' && (
                 <ActionButton

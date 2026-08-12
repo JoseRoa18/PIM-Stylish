@@ -19,15 +19,36 @@ const COLUMN_SPEC = [
 
 const norm = (h) => String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-export function downloadPromoTemplate() {
-  const headers = COLUMN_SPEC.map((c) => c.header);
-  const example = ['S-822H', '394', '236', '265.29', '192.24', '263', '151', '171', '184'];
-  const csv = [headers.join(','), example.join(','), ['K-131NR', '289', '', '', '', '149', '86', '97', '104'].join(',')].join('\r\n');
+// Each market keeps its own template — promo membership differs per market
+// (August 2026: 120 Canadian SKUs vs 93 US, only 63 shared).
+const TEMPLATES = {
+  ca: {
+    file: 'promotion-template-canada.csv',
+    fields: ['sku', 'promo_price_cad', 'cost:rona_hd_cad', 'cost:sod_cad', 'cost:wayfair_ca_usd'],
+    examples: [
+      ['S-822H', '394', '236', '265.29', '192.24'],
+      ['K-131NR', '289', '173', '194.14', '140.68'],
+    ],
+  },
+  us: {
+    file: 'promotion-template-usa.csv',
+    fields: ['sku', 'promo_price_usd', 'cost:lowes_sod_bbb_usd', 'cost:wayfair_usd', 'cost:menards_usd'],
+    examples: [
+      ['S-822N', '263', '151', '171', '184'],
+      ['K-131NR', '149', '86', '97', '104'],
+    ],
+  },
+};
+
+export function downloadPromoTemplate(market) {
+  const t = TEMPLATES[market] ?? TEMPLATES.ca;
+  const headers = t.fields.map((f) => COLUMN_SPEC.find((c) => c.field === f).header);
+  const csv = [headers.join(','), ...t.examples.map((r) => r.join(','))].join('\r\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'promotion-template.csv';
+  link.download = t.file;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
