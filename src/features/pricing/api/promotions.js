@@ -24,7 +24,7 @@ export async function listPromotions() {
 export async function getPromotionPrices(promotionId) {
   const { data, error } = await supabase
     .from('promotion_prices')
-    .select('id, sku, promo_price_cad, promo_price_usd')
+    .select('id, sku, promo_price_cad, promo_price_usd, promo_costs')
     .eq('promotion_id', promotionId)
     .order('sku');
   if (error) throw error;

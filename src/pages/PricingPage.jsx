@@ -26,6 +26,17 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 
+// Promotional dealer costs live in promo_costs keyed by channel-group slug.
+// Known slugs get a friendly column header; unknown ones fall back to the slug.
+const PROMO_COST_LABELS = {
+  sod_cad: 'Promo Cost — Small Online (CAD)',
+  wayfair_cad: 'Promo Cost — Wayfair (CAD)',
+  rona_hd_cad: 'Promo Cost — Rona/HD (CAD)',
+  lowes_sod_bbb_usd: 'Promo Cost — Lowes/SOD/BB&B (USD)',
+  wayfair_usd: 'Promo Cost — Wayfair (USD)',
+  menards_usd: 'Promo Cost — Menards (USD)',
+};
+
 const STATUS_META = {
   draft: { label: 'Draft', class: 'bg-surface-container text-on-surface-variant' },
   active: { label: 'Active', class: 'bg-primary-container text-on-primary-container' },
@@ -408,38 +419,49 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
 
           {rows === null ? (
             <p className="text-body-sm text-on-surface-variant"><Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading prices…</p>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-outline-variant">
-              <table className="w-full text-body-sm">
-                <thead>
-                  <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
-                    <th className="text-left px-4 py-2 font-medium">SKU</th>
-                    <th className="text-right px-4 py-2 font-medium">Promo CAD</th>
-                    <th className="text-right px-4 py-2 font-medium">MAP CAD</th>
-                    <th className="text-right px-4 py-2 font-medium">Promo USD</th>
-                    <th className="text-right px-4 py-2 font-medium">MAP USD</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => {
-                    const p = mapBySku?.[r.sku];
-                    const cadBelow = r.promo_price_cad != null && p?.map_cad != null && r.promo_price_cad < p.map_cad;
-                    return (
-                      <tr key={r.id} className="border-t border-outline-variant/50">
-                        <td className="px-4 py-1.5 font-mono text-on-surface">{r.sku}</td>
-                        <td className={`px-4 py-1.5 text-right ${cadBelow ? 'text-error font-semibold' : 'text-on-surface'}`}>
-                          {r.promo_price_cad != null ? `$${r.promo_price_cad}` : '—'}
-                        </td>
-                        <td className="px-4 py-1.5 text-right text-on-surface-variant">{p?.map_cad != null ? `$${p.map_cad}` : '—'}</td>
-                        <td className="px-4 py-1.5 text-right text-on-surface">{r.promo_price_usd != null ? `$${r.promo_price_usd}` : '—'}</td>
-                        <td className="px-4 py-1.5 text-right text-on-surface-variant">{p?.map_usd != null ? `$${p.map_usd}` : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          ) : (() => {
+            const costKeys = [...new Set(rows.flatMap((r) => Object.keys(r.promo_costs ?? {})))].sort();
+            return (
+              <div className="overflow-x-auto rounded-xl border border-outline-variant">
+                <table className="w-full text-body-sm">
+                  <thead>
+                    <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
+                      <th className="text-left px-4 py-2 font-medium">SKU</th>
+                      <th className="text-right px-4 py-2 font-medium">Promo CAD</th>
+                      <th className="text-right px-4 py-2 font-medium">MAP CAD</th>
+                      <th className="text-right px-4 py-2 font-medium">Promo USD</th>
+                      <th className="text-right px-4 py-2 font-medium">MAP USD</th>
+                      {costKeys.map((k) => (
+                        <th key={k} className="text-right px-4 py-2 font-medium whitespace-nowrap">{PROMO_COST_LABELS[k] ?? k}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => {
+                      const p = mapBySku?.[r.sku];
+                      const cadBelow = r.promo_price_cad != null && p?.map_cad != null && r.promo_price_cad < p.map_cad;
+                      return (
+                        <tr key={r.id} className="border-t border-outline-variant/50">
+                          <td className="px-4 py-1.5 font-mono text-on-surface">{r.sku}</td>
+                          <td className={`px-4 py-1.5 text-right ${cadBelow ? 'text-error font-semibold' : 'text-on-surface'}`}>
+                            {r.promo_price_cad != null ? `$${r.promo_price_cad}` : '—'}
+                          </td>
+                          <td className="px-4 py-1.5 text-right text-on-surface-variant">{p?.map_cad != null ? `$${p.map_cad}` : '—'}</td>
+                          <td className="px-4 py-1.5 text-right text-on-surface">{r.promo_price_usd != null ? `$${r.promo_price_usd}` : '—'}</td>
+                          <td className="px-4 py-1.5 text-right text-on-surface-variant">{p?.map_usd != null ? `$${p.map_usd}` : '—'}</td>
+                          {costKeys.map((k) => (
+                            <td key={k} className="px-4 py-1.5 text-right text-on-surface">
+                              {r.promo_costs?.[k] != null ? `$${r.promo_costs[k]}` : '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
