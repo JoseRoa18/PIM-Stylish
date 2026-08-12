@@ -231,6 +231,14 @@ Deno.serve(async (req) => {
       : pimRow;
 
     const productPatch = buildProductPatch(source);
+    // `only` restricts the patch to the named Wix keys (e.g. ["priceData"])
+    // — used by the price-alignment fixes so a correction can never touch
+    // visibility, content, or anything else.
+    if (Array.isArray(body.only) && body.only.length > 0) {
+      for (const key of Object.keys(productPatch)) {
+        if (!body.only.includes(key)) delete productPatch[key];
+      }
+    }
     if (Object.keys(productPatch).length === 0) {
       return new Response(
         JSON.stringify({ error: "Nothing to sync — all syncable fields are empty in PIM." }),

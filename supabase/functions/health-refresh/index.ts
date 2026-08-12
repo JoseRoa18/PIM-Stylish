@@ -141,8 +141,19 @@ async function refreshWalmart(market: "us" | "ca") {
 // Mirror of wixSync.refreshWixCatalog — fleet-level PIM↔Wix drift snapshot.
 async function refreshWix() {
   const { total, products: wixProducts } = await invokeFn("wix-pull-catalog");
-  // SinksDirect sells at the Canadian MAP — that's the price to compare.
+  // SinksDirect sells at the Canadian MAP — that's the price to compare,
+  // EXCEPT for members of an active promotion, whose expected price is the
+  // promo MAP (else every promo month reads as a wall of false diffs).
   const prods = await restSelect("products?select=sku,map_cad,wix_product_id");
+  const activePromos = await restSelect(
+    "promotions?select=period,promotion_prices(sku,promo_price_cad)&status=eq.active&order=period.asc",
+  );
+  const promoBySku = new Map<string, number>();
+  for (const promo of activePromos as { promotion_prices: { sku: string; promo_price_cad: number | null }[] }[]) {
+    for (const row of promo.promotion_prices ?? []) {
+      if (row.promo_price_cad != null) promoBySku.set(row.sku, row.promo_price_cad);
+    }
+  }
 
   type WixItem = { id: string; sku: string | null; name: string; visible: boolean; price: number | null; discountedPrice: number | null };
   const wixById = new Map((wixProducts as WixItem[]).map((w) => [w.id, w]));
@@ -160,12 +171,15 @@ async function refreshWix() {
       continue;
     }
     const livePrice = w.discountedPrice ?? w.price;
-    const priceDiff = p.map_cad != null && livePrice != null && Math.abs(livePrice - p.map_cad) > 0.01;
+    const promoPrice = promoBySku.get(p.sku);
+    const expected = promoPrice ?? p.map_cad;
+    const priceDiff = expected != null && livePrice != null && Math.abs(livePrice - expected) > 0.01;
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
     results.push({
       sku: p.sku, wix_id: p.wix_product_id, state: w.visible ? "live" : "hidden",
-      name: w.name, price: livePrice, map: p.map_cad ?? null, price_diff: priceDiff,
+      name: w.name, price: livePrice, expected: expected ?? null,
+      expected_source: promoPrice != null ? "promo" : "map", price_diff: priceDiff,
     });
   }
   const pimSkus = new Set(prods.map((p: { sku: string }) => p.sku));

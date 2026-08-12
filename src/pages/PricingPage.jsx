@@ -29,6 +29,8 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, parsePromoFile } from '@/features/pricing/lib/promoImport';
+import { runPriceAlignment, pushExpectedPrice, fixAlignment } from '@/features/pricing/api/priceAlignment';
+import { Link } from 'react-router-dom';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
 // Each slug belongs to one market view (Canada or USA) — Wayfair Canada is
@@ -109,6 +111,8 @@ export default function PricingPage() {
         />
       )}
 
+      <PriceAlignmentCard canEdit={canEdit} confirm={confirm} />
+
       {promotions === null ? (
         <div className="rounded-2xl bg-surface p-8 text-center text-on-surface-variant text-body-md">
           <Loader2 className="w-5 h-5 animate-spin inline-block mr-2 align-middle" />
@@ -136,6 +140,231 @@ export default function PricingPage() {
             />
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ============================== Price alignment ==============================
+
+const ALIGN_TILES = [
+  { key: 'promo_ok', label: 'At promo price', tone: 'ok' },
+  { key: 'map_ok', label: 'At regular MAP', tone: 'ok' },
+  { key: 'promo_missing', label: 'Missing promo price', tone: 'warn' },
+  { key: 'misaligned', label: 'Misaligned', tone: 'error' },
+  { key: 'no_map', label: 'No MAP in PIM', tone: 'muted' },
+];
+
+const STATUS_TEXT = {
+  promo_missing: 'still at regular MAP',
+  misaligned: 'unexpected price',
+  no_map: 'no MAP in the PIM',
+  missing: 'product missing on Wix',
+};
+
+function PriceAlignmentCard({ canEdit, confirm }) {
+  const [result, setResult] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [fixing, setFixing] = useState(null); // sku | 'all'
+  const [progress, setProgress] = useState(null);
+  const [msg, setMsg] = useState(null);
+
+  async function analyze() {
+    setRunning(true);
+    setMsg(null);
+    try {
+      setResult(await runPriceAlignment());
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const fixable = result?.problems.filter((p) => p.expected != null) ?? [];
+
+  // Wix's query index (what the analysis reads) lags writes by ~15-30s —
+  // re-running immediately would show the just-fixed rows as still broken.
+  async function reanalyzeAfterIndexLag(prefix) {
+    setMsg({ tone: 'success', text: `${prefix} Waiting ~20s for Wix's index before re-checking…` });
+    await new Promise((resolve) => setTimeout(resolve, 20000));
+    await analyze();
+    setMsg({ tone: 'success', text: `${prefix} Analysis refreshed.` });
+  }
+
+  async function fixOne(problem) {
+    const ok = await confirm({
+      title: `Push $${Number(problem.expected).toFixed(2)} to Wix for ${problem.sku}?`,
+      message: `Updates ONLY the price on the live store (currently $${Number(problem.live).toFixed(2)}). Nothing else on the listing is touched.`,
+      confirmLabel: 'Push price',
+    });
+    if (!ok) return;
+    setFixing(problem.sku);
+    setMsg(null);
+    try {
+      await pushExpectedPrice(problem.sku, problem.expected);
+      await reanalyzeAfterIndexLag(`${problem.sku} → $${Number(problem.expected).toFixed(2)} pushed.`);
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setFixing(null);
+    }
+  }
+
+  async function fixAll() {
+    const list = fixable.map((p) => `${p.sku}: $${Number(p.live).toFixed(2)} → $${Number(p.expected).toFixed(2)}`).join('\n');
+    const ok = await confirm({
+      title: `Push ${fixable.length} corrected price${fixable.length === 1 ? '' : 's'} to Wix?`,
+      message: `Only prices are updated — nothing else on the listings.\n\n${list}`,
+      confirmLabel: `Push ${fixable.length}`,
+    });
+    if (!ok) return;
+    setFixing('all');
+    setMsg(null);
+    setProgress(null);
+    try {
+      const r = await fixAlignment(fixable, setProgress);
+      setProgress(null);
+      if (r.failures.length) {
+        setMsg({ tone: 'error', text: `${r.fixed} pushed · failed: ${r.failures.join('; ')}` });
+      } else {
+        await reanalyzeAfterIndexLag(`${r.fixed} price${r.fixed === 1 ? '' : 's'} pushed.`);
+      }
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setFixing(null);
+      setProgress(null);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-surface p-6 space-y-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-title-md text-on-surface font-semibold">Price Alignment — SinksDirect (Wix)</h2>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">
+            Compares every linked product's live store price against its expected price —
+            the active promo price for promo members, the regular MAP for everyone else.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={analyze}
+          disabled={running}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+        >
+          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+          {running ? 'Analyzing…' : 'Run analysis'}
+        </button>
+      </div>
+
+      {msg && (
+        <p className={`text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+          {msg.tone === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+          {msg.text}
+        </p>
+      )}
+      {progress && <p className="text-body-sm text-on-surface-variant">Pushing… {progress.done}/{progress.total}</p>}
+
+      {result && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {ALIGN_TILES.map((t) => {
+              const n = result.counts[t.key] ?? 0;
+              const tone = n === 0 && t.tone !== 'ok' ? 'muted' : t.tone;
+              const cls = tone === 'ok' ? 'bg-primary-container/40 text-on-surface'
+                : tone === 'warn' ? 'bg-tertiary-container/50 text-on-surface'
+                : tone === 'error' ? 'bg-error-container/50 text-on-surface'
+                : 'bg-surface-container-low text-on-surface-variant';
+              return (
+                <div key={t.key} className={`rounded-xl px-4 py-3 ${cls}`}>
+                  <div className="text-headline-sm font-semibold tabular-nums">{n}</div>
+                  <div className="text-label-md text-on-surface-variant">{t.label}</div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-body-sm text-on-surface-variant">
+            {result.total} linked products analyzed · {new Date(result.ranAt).toLocaleTimeString()}
+          </p>
+
+          {result.problems.length === 0 ? (
+            <p className="text-body-md text-on-surface inline-flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-primary" />
+              Everything aligned — all {result.total} products are at their expected price.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-title-sm text-on-surface font-medium">Problems ({result.problems.length})</h3>
+                {canEdit && fixable.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={fixAll}
+                    disabled={fixing !== null}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+                  >
+                    {fixing === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    Fix all — push {fixable.length}
+                  </button>
+                )}
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-outline-variant">
+                <table className="w-full text-body-sm">
+                  <thead>
+                    <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
+                      <th className="text-left px-4 py-2.5 font-medium">SKU</th>
+                      <th className="text-right px-4 py-2.5 font-medium">On Wix</th>
+                      <th className="text-right px-4 py-2.5 font-medium">Expected</th>
+                      <th className="text-left px-4 py-2.5 font-medium">Source</th>
+                      <th className="text-right px-4 py-2.5 font-medium">Δ</th>
+                      {canEdit && <th className="px-4 py-2.5" />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.problems.map((p) => (
+                      <tr key={p.sku} className="border-t border-outline-variant/40 odd:bg-surface-container-low/30">
+                        <td className="px-4 py-2">
+                          <Link to={`/catalog/${p.sku}`} className="font-mono text-on-surface hover:text-primary hover:underline">{p.sku}</Link>
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-on-surface">{p.live != null ? `$${Number(p.live).toFixed(2)}` : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums font-semibold text-on-surface">{p.expected != null ? `$${Number(p.expected).toFixed(2)}` : '—'}</td>
+                        <td className="px-4 py-2">
+                          {p.expected != null ? (
+                            <span className={`px-2 py-0.5 rounded-full text-label-md font-medium ${p.source === 'promo' ? 'bg-tertiary-container/60 text-on-tertiary-container' : 'bg-surface-container text-on-surface-variant'}`}>
+                              {p.source === 'promo' ? `Promo · ${p.promoName}` : 'MAP'}
+                            </span>
+                          ) : (
+                            <span className="text-on-surface-variant">{STATUS_TEXT[p.status]}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-on-surface-variant">
+                          {p.live != null && p.expected != null ? `${p.live > p.expected ? '+' : '−'}$${Math.abs(p.live - p.expected).toFixed(2)}` : '—'}
+                        </td>
+                        {canEdit && (
+                          <td className="px-4 py-2 text-right">
+                            {p.expected != null && (
+                              <button
+                                type="button"
+                                onClick={() => fixOne(p)}
+                                disabled={fixing !== null}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-label-md font-medium text-primary hover:bg-primary-container/50 transition-colors disabled:opacity-40"
+                              >
+                                {fixing === p.sku ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                                Push
+                              </button>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

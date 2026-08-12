@@ -118,9 +118,10 @@ export async function readWixProduct(sku) {
  * sent directly to Wix WITHOUT writing to the PIM (PIM stays untouched).
  * If omitted, the Edge Function reads from PIM columns as before.
  */
-export async function pushProductToWix(sku, fields = undefined) {
+export async function pushProductToWix(sku, fields = undefined, only = undefined) {
   const body = { sku };
   if (fields) body.fields = fields;
+  if (only) body.only = only;
   const { data, error } = await supabase.functions.invoke('wix-push-product', {
     body,
   });
@@ -150,7 +151,7 @@ export async function pushProductToWix(sku, fields = undefined) {
     entityId: sku,
     target: 'wix',
     summary: `Pushed ${sku} to Wix`,
-    metadata: fields ? { fields: Object.keys(fields) } : { source: 'pim' },
+    metadata: { ...(fields ? { fields: Object.keys(fields) } : { source: 'pim' }), ...(only ? { only } : {}) },
   });
   return data;
 }
@@ -246,8 +247,9 @@ export async function pushMediaToWix(sku) {
  * PIM↔Wix drift without touching the live API on every page view.
  *
  * in_sync    = linked products present and visible on Wix
- * with_diffs = live price differs from the PIM's MAP (CAD) — the SinksDirect
- *              selling price is the Canadian MAP, not MSRP
+ * with_diffs = live price differs from the EXPECTED price: the active promo
+ *              price for promo members, else the regular MAP (CAD) — the
+ *              SinksDirect selling price is the Canadian MAP, not MSRP
  * errors     = broken links (PIM points at a Wix id that no longer exists)
  */
 export async function refreshWixCatalog() {
@@ -260,6 +262,19 @@ export async function refreshWixCatalog() {
     .from('products')
     .select('sku, map_cad, wix_product_id');
   if (error) throw error;
+
+  const { data: activePromos, error: promoErr } = await supabase
+    .from('promotions')
+    .select('period, promotion_prices(sku, promo_price_cad)')
+    .eq('status', 'active')
+    .order('period', { ascending: true });
+  if (promoErr) throw promoErr;
+  const promoBySku = new Map();
+  for (const promo of activePromos ?? []) {
+    for (const row of promo.promotion_prices ?? []) {
+      if (row.promo_price_cad != null) promoBySku.set(row.sku, row.promo_price_cad);
+    }
+  }
 
   const wixById = new Map(wixProducts.map((w) => [w.id, w]));
   const linked = (prods ?? []).filter((p) => p.wix_product_id);
@@ -276,7 +291,9 @@ export async function refreshWixCatalog() {
       continue;
     }
     const livePrice = w.discountedPrice ?? w.price;
-    const priceDiff = p.map_cad != null && livePrice != null && Math.abs(livePrice - p.map_cad) > 0.01;
+    const promoPrice = promoBySku.get(p.sku);
+    const expected = promoPrice ?? p.map_cad;
+    const priceDiff = expected != null && livePrice != null && Math.abs(livePrice - expected) > 0.01;
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
     results.push({
@@ -285,7 +302,8 @@ export async function refreshWixCatalog() {
       state: w.visible ? 'live' : 'hidden',
       name: w.name,
       price: livePrice,
-      map: p.map_cad ?? null,
+      expected: expected ?? null,
+      expected_source: promoPrice != null ? 'promo' : 'map',
       price_diff: priceDiff,
     });
   }
