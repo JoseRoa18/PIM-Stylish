@@ -224,10 +224,14 @@ export async function fetchImagesBySku(skus) {
   for (let i = 0; i < skus.length; i += 40) {
     const { data } = await supabase
       .from('product_media')
-      .select('sku, storage_path, is_primary, display_order')
+      .select('sku, storage_path, is_primary, display_order, image_role')
       .in('sku', skus.slice(i, i + 40))
       .eq('media_type', 'image');
-    for (const m of data ?? []) (bySku[m.sku] = bySku[m.sku] || []).push(m);
+    for (const m of data ?? []) {
+      // The gray-background SinksDirect hero never goes to other marketplaces.
+      if (m.image_role === 'sinksdirect_main') continue;
+      (bySku[m.sku] = bySku[m.sku] || []).push(m);
+    }
   }
   for (const k in bySku) bySku[k].sort((a, b) => (b.is_primary - a.is_primary) || (a.display_order - b.display_order));
   return bySku;

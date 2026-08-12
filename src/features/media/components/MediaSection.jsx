@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2, ChevronDown, Image as ImageIcon } from 'lucide-react';
+import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2, ChevronDown, Image as ImageIcon, Store } from 'lucide-react';
 import { draggable, dropTargetForElements, monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
@@ -8,6 +8,7 @@ import {
   uploadMediaFiles,
   addVideoByUrl,
   setPrimaryMedia,
+  setSinksDirectMain,
   setMediaLanguage,
   setMediaAltText,
   setVideoPoster,
@@ -316,6 +317,16 @@ export default function MediaSection({ sku, familyNumber = null, category = null
     } catch (err) {
       console.error('Set primary error:', err);
       setErrorMessage(`Failed to set primary: ${err.message}`);
+    }
+  };
+
+  const handleSetSdMain = async (item) => {
+    try {
+      await setSinksDirectMain(sku, item.id, { unset: item.image_role === 'sinksdirect_main' });
+      reload();
+    } catch (err) {
+      console.error('Set SinksDirect main error:', err);
+      setErrorMessage(`Failed to set SinksDirect main: ${err.message}`);
     }
   };
 
@@ -657,6 +668,7 @@ export default function MediaSection({ sku, familyNumber = null, category = null
                   selected={selectedIds.has(item.id)}
                   onToggleSelect={() => toggleSelect(item.id)}
                   onSetPrimary={() => handleSetPrimary(item.id)}
+                  onSetSdMain={() => handleSetSdMain(item)}
                   onSetLanguage={(lang) => handleSetLanguage(item.id, lang)}
                   onRemove={() => handleRemove(item)}
                   onEditAlt={() => setAltEdit(item)}
@@ -842,6 +854,7 @@ function MediaCard({
   selected,
   onToggleSelect,
   onSetPrimary,
+  onSetSdMain,
   onSetLanguage,
   onRemove,
   onEditAlt,
@@ -1035,6 +1048,12 @@ function MediaCard({
           Primary
         </div>
       )}
+      {item.image_role === 'sinksdirect_main' && (
+        <div className={`absolute ${item.is_primary ? 'top-9' : 'top-2'} right-2 px-2 py-0.5 rounded-full bg-inverse-surface text-inverse-on-surface text-label-md font-semibold inline-flex items-center gap-1 z-10`}>
+          <Store className="w-3 h-3" />
+          SinksDirect
+        </div>
+      )}
 
       {/* Language tag — bottom-right. Editors get a selector; viewers see a
           short badge only when the item is language-specific. */}
@@ -1133,6 +1152,16 @@ function MediaCard({
               title="Set as primary"
             >
               <Star className="w-4 h-4" />
+            </button>
+          )}
+          {canEdit && isImage && (
+            <button
+              type="button"
+              onClick={onSetSdMain}
+              className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
+              title={item.image_role === 'sinksdirect_main' ? 'Unset SinksDirect main' : 'Set as SinksDirect main (gray-background hero, website only)'}
+            >
+              <Store className="w-4 h-4" />
             </button>
           )}
           {canEdit && (

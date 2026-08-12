@@ -214,11 +214,14 @@ Deno.serve(async (req) => {
     if (pushMedia) {
       const { data: media } = await supabase
         .from("product_media")
-        .select("storage_path, is_primary, display_order")
+        .select("storage_path, is_primary, display_order, image_role")
         .eq("sku", sku)
         .eq("media_type", "image")
         .order("display_order", { ascending: true });
-      const images = (media ?? []).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
+      const images = (media ?? []).filter((m) =>
+        /^https?:\/\//i.test(m.storage_path ?? "") &&
+        // The gray-background SinksDirect hero stays off other marketplaces.
+        m.image_role !== "sinksdirect_main");
       if (images.length === 0) {
         result.media = { skipped: "no public image URLs" };
       } else {

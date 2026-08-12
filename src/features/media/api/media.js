@@ -533,6 +533,39 @@ export async function setMediaLanguage(mediaId, language) {
   if (error) throw error;
 }
 
+/**
+ * Toggle an image as the product's SinksDirect main — the gray-background
+ * hero shown FIRST on the SinksDirect (Wix) site only. is_primary stays the
+ * marketplace main (white background) used by every other channel/export.
+ * Passing the current SinksDirect main unsets it.
+ */
+export async function setSinksDirectMain(sku, mediaId, { unset = false } = {}) {
+  const { error: clearError } = await supabase
+    .from('product_media')
+    .update({ image_role: null })
+    .eq('sku', sku)
+    .eq('image_role', 'sinksdirect_main');
+  if (clearError) throw clearError;
+
+  if (!unset) {
+    const { error } = await supabase
+      .from('product_media')
+      .update({ image_role: 'sinksdirect_main' })
+      .eq('id', mediaId);
+    if (error) throw error;
+  }
+
+  logActivity({
+    action: 'media',
+    entityType: 'media',
+    entityId: sku,
+    summary: unset
+      ? `Cleared SinksDirect main image for ${sku}`
+      : `Set SinksDirect main image for ${sku}`,
+    metadata: { mediaId },
+  });
+}
+
 export async function setPrimaryMedia(sku, mediaId) {
   const { error: clearError } = await supabase
     .from('product_media')

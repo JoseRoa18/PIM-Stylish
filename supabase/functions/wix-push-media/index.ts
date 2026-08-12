@@ -34,6 +34,7 @@ const WIX_MEDIA_CAP = 16;
 interface PimImage {
   storage_path: string;
   language: string | null;
+  image_role: string | null;
 }
 
 function pickLanguageSet(all: PimImage[]): { chosen: PimImage[]; set: string } {
@@ -141,17 +142,23 @@ Deno.serve(async (req) => {
     if (action === "add" || action === "replace") {
       const { data: media, error: mediaErr } = await admin
         .from("product_media")
-        .select("storage_path, is_primary, display_order, language")
+        .select("storage_path, is_primary, display_order, language, image_role")
         .eq("sku", sku)
         .eq("media_type", "image")
         .order("is_primary", { ascending: false })
         .order("display_order", { ascending: true });
       if (mediaErr) throw new Error(`PIM media read failed: ${mediaErr.message}`);
-      const all = ((media ?? []) as PimImage[]).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
-      if (!all.length) return json({ error: `${sku} has no images in the PIM.` }, 400);
+      const valid = ((media ?? []) as PimImage[]).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
+      if (!valid.length) return json({ error: `${sku} has no images in the PIM.` }, 400);
+
+      // The gray-background SinksDirect hero always leads the Wix gallery,
+      // regardless of the language tiers below (it carries no text).
+      const sdMain = valid.find((m) => m.image_role === "sinksdirect_main");
+      const all = valid.filter((m) => m.image_role !== "sinksdirect_main");
 
       const { chosen, set } = pickLanguageSet(all);
-      const urls = chosen.map((m) => m.storage_path);
+      const urls = [...(sdMain ? [sdMain] : []), ...chosen].map((m) => m.storage_path);
+      report.sinksdirect_main = Boolean(sdMain);
       report.pim_images = all.length;
       report.language_set = set;
       report.skipped_other_language = all.length - chosen.length;
