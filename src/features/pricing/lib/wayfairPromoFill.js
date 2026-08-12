@@ -84,7 +84,24 @@ export async function generateWayfairPromoFile(promotion) {
 
   zip.file(path, mergeRows(xml, cellsByRow));
 
+  // Cross-check the gaps against what's actually listed on Wayfair (latest
+  // API audit snapshot, refreshed twice daily): a promo member missing from
+  // the event file is only worth chasing if Wayfair carries the product.
   const notInTemplate = [...costBySku.keys()].filter((s) => !templateSkus.has(s)).sort();
+  let listedButMissing = notInTemplate;
+  let notOnWayfair = [];
+  const { data: snaps } = await supabase
+    .from('channel_health')
+    .select('results')
+    .eq('channel', 'wayfair')
+    .order('run_at', { ascending: false })
+    .limit(1);
+  if (snaps?.length) {
+    const listed = new Set((snaps[0].results ?? []).map((r) => r.sku));
+    listedButMissing = notInTemplate.filter((s) => listed.has(s));
+    notOnWayfair = notInTemplate.filter((s) => !listed.has(s));
+  }
+
   const baseName = `Wayfair_Promotions_${String(promotion.period).slice(0, 7)}`;
   await downloadZip(zip, baseName, templateExt(template.storage_path));
 
@@ -94,8 +111,13 @@ export async function generateWayfairPromoFile(promotion) {
     entityId: String(promotion.id),
     target: 'wayfair',
     summary: `Filled Wayfair promotions template for "${promotion.name}" (${filled} rows)`,
-    metadata: { filled, template_rows: templateSkus.size, not_in_template: notInTemplate.length },
+    metadata: {
+      filled,
+      template_rows: templateSkus.size,
+      listed_but_missing: listedButMissing.length,
+      not_on_wayfair: notOnWayfair.length,
+    },
   });
 
-  return { filled, templateRows: templateSkus.size, notInTemplate };
+  return { filled, templateRows: templateSkus.size, listedButMissing, notOnWayfair };
 }
