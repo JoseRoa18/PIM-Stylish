@@ -246,7 +246,8 @@ export async function pushMediaToWix(sku) {
  * PIM↔Wix drift without touching the live API on every page view.
  *
  * in_sync    = linked products present and visible on Wix
- * with_diffs = live price differs from the PIM's MSRP (CAD)
+ * with_diffs = live price differs from the PIM's MAP (CAD) — the SinksDirect
+ *              selling price is the Canadian MAP, not MSRP
  * errors     = broken links (PIM points at a Wix id that no longer exists)
  */
 export async function refreshWixCatalog() {
@@ -257,7 +258,7 @@ export async function refreshWixCatalog() {
 
   const { data: prods, error } = await supabase
     .from('products')
-    .select('sku, msrp_cad, wix_product_id');
+    .select('sku, map_cad, wix_product_id');
   if (error) throw error;
 
   const wixById = new Map(wixProducts.map((w) => [w.id, w]));
@@ -275,7 +276,7 @@ export async function refreshWixCatalog() {
       continue;
     }
     const livePrice = w.discountedPrice ?? w.price;
-    const priceDiff = p.msrp_cad != null && livePrice != null && Math.abs(livePrice - p.msrp_cad) > 0.01;
+    const priceDiff = p.map_cad != null && livePrice != null && Math.abs(livePrice - p.map_cad) > 0.01;
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
     results.push({
@@ -284,7 +285,7 @@ export async function refreshWixCatalog() {
       state: w.visible ? 'live' : 'hidden',
       name: w.name,
       price: livePrice,
-      msrp: p.msrp_cad ?? null,
+      map: p.map_cad ?? null,
       price_diff: priceDiff,
     });
   }

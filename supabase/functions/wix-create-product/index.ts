@@ -41,7 +41,7 @@ interface PimRow {
   brand: string | null;
   description: string | null;
   ribbon: string | null;
-  msrp_cad: number | null;
+  map_cad: number | null;
   sale_price_cad: number | null;
   on_sale: boolean | null;
   shipping_weight_lb: number | null;
@@ -57,14 +57,15 @@ function buildCreateBody(pim: PimRow): Record<string, unknown> {
     productType: "physical",
     sku: pim.sku,
     visible: false,
-    priceData: { price: pim.msrp_cad != null ? Number(pim.msrp_cad) : 0, currency: "CAD" },
+    // SinksDirect sells at the Canadian MAP, not MSRP (user rule 2026-08-12).
+    priceData: { price: pim.map_cad != null ? Number(pim.map_cad) : 0, currency: "CAD" },
   };
   if (pim.description != null) product.description = pim.description;
   if (pim.brand != null) product.brand = pim.brand;
   if (pim.ribbon != null) product.ribbon = pim.ribbon;
   if (pim.shipping_weight_lb != null) product.weight = Number(pim.shipping_weight_lb);
-  if (pim.on_sale && pim.sale_price_cad != null && pim.msrp_cad != null) {
-    const amount = Math.max(0, Number(pim.msrp_cad) - Number(pim.sale_price_cad));
+  if (pim.on_sale && pim.sale_price_cad != null && pim.map_cad != null) {
+    const amount = Math.max(0, Number(pim.map_cad) - Number(pim.sale_price_cad));
     product.discount = { type: "AMOUNT", value: amount };
   }
   if (Array.isArray(pim.additional_info_sections)) {
@@ -105,7 +106,7 @@ Deno.serve(async (req) => {
 
     const { data: pim, error: pimErr } = await admin
       .from("products")
-      .select("sku, model_name, brand, description, ribbon, msrp_cad, sale_price_cad, on_sale, shipping_weight_lb, additional_info_sections, wix_product_id")
+      .select("sku, model_name, brand, description, ribbon, map_cad, sale_price_cad, on_sale, shipping_weight_lb, additional_info_sections, wix_product_id")
       .eq("sku", sku)
       .maybeSingle();
     if (pimErr) throw new Error(`PIM read failed: ${pimErr.message}`);
@@ -115,8 +116,8 @@ Deno.serve(async (req) => {
     }
     // No price, no listing: a hidden $0 product is one careless visibility
     // push away from being sold for nothing. Complete the PIM first.
-    if (pim.msrp_cad == null) {
-      return json({ error: `${sku} has no MSRP in the PIM — set its pricing first, then create it on Wix.` }, 400);
+    if (pim.map_cad == null) {
+      return json({ error: `${sku} has no MAP (CAD) in the PIM — the SinksDirect selling price. Set its pricing first, then create it on Wix.` }, 400);
     }
 
     const wix = (path: string, init: RequestInit = {}) =>

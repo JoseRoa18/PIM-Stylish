@@ -6,7 +6,7 @@
 //
 // Overwrites the following columns:
 //   model_name, description, brand, ribbon, shipping_weight_lb,
-//   msrp_cad, sale_price_cad, on_sale,
+//   map_cad, sale_price_cad, on_sale,
 //   visible_online, wix_collection_ids, additional_info_sections,
 //   wix_synced_at, wix_raw
 //
@@ -144,7 +144,8 @@ Deno.serve(async (req) => {
     setText("brand", w.brand);
     setText("ribbon", w.ribbon);
     setNumber("shipping_weight_lb", w.weight);
-    setNumber("msrp_cad", w.price?.price);
+    // The Wix selling price is the Canadian MAP (user rule 2026-08-12).
+    setNumber("map_cad", w.price?.price);
     setBool("visible_online", w.visible);
 
     // Arrays: an empty array is a meaningful state ("no categories", "no

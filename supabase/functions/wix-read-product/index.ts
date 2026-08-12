@@ -167,7 +167,8 @@ Deno.serve(async (req) => {
       brand: w.brand ?? null,
       ribbon: w.ribbon ?? null,
       shipping_weight_lb: typeof w.weight === "number" ? w.weight : null,
-      msrp_cad: price,
+      // The SinksDirect selling price is the Canadian MAP (user rule).
+      map_cad: price,
       on_sale,
       sale_price_cad,
       visible_online: w.visible ?? null,

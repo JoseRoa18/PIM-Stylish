@@ -50,7 +50,7 @@ const FIELD_GROUPS = [
     icon: DollarSign,
     summary: 'Price, sale, cost of goods',
     fields: [
-      { key: 'msrp_cad', label: 'Price (CAD)', type: 'currency' },
+      { key: 'map_cad', label: 'Price (CAD) — MAP', type: 'currency', hint: 'SinksDirect sells at the Canadian MAP.' },
       { key: 'on_sale', label: 'On sale', type: 'boolean', hint: 'Show a discounted price on the Wix store.' },
       { key: 'sale_price_cad', label: 'Sale price (CAD)', type: 'currency', dependsOn: 'on_sale' },
     ],

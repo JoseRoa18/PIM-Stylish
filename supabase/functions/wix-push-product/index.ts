@@ -41,7 +41,7 @@ interface PimRow {
   brand: string | null;
   description: string | null;
   ribbon: string | null;
-  msrp_cad: number | null;
+  map_cad: number | null;
   sale_price_cad: number | null;
   on_sale: boolean | null;
   shipping_weight_lb: number | null;
@@ -140,13 +140,16 @@ function buildProductPatch(pim: PimRow): Record<string, unknown> {
   if (pim.ribbon != null) patch.ribbon = pim.ribbon;
   if (pim.shipping_weight_lb != null) patch.weight = Number(pim.shipping_weight_lb);
 
-  if (pim.msrp_cad != null) {
-    patch.price = { price: Number(pim.msrp_cad), currency: "CAD" };
+  // SinksDirect sells at the Canadian MAP, not MSRP (user rule 2026-08-12).
+  // Wix v1 updates take the price under priceData (same shape the create
+  // endpoint uses) — a top-level `price` field is silently ignored.
+  if (pim.map_cad != null) {
+    patch.priceData = { price: Number(pim.map_cad), currency: "CAD" };
   }
-  // Discount: if on_sale, compute discount as AMOUNT off MSRP.
+  // Discount: if on_sale, compute discount as AMOUNT off the selling price.
   // If off-sale, zero it out so Wix removes the sale.
-  if (pim.on_sale && pim.sale_price_cad != null && pim.msrp_cad != null) {
-    const amount = Math.max(0, Number(pim.msrp_cad) - Number(pim.sale_price_cad));
+  if (pim.on_sale && pim.sale_price_cad != null && pim.map_cad != null) {
+    const amount = Math.max(0, Number(pim.map_cad) - Number(pim.sale_price_cad));
     patch.discount = { type: "AMOUNT", value: amount };
   } else {
     patch.discount = { type: "AMOUNT", value: 0 };
@@ -199,7 +202,7 @@ Deno.serve(async (req) => {
     const { data: pimRow, error: loadErr } = await supabase
       .from("products")
       .select(
-        "sku, model_name, brand, description, ribbon, msrp_cad, sale_price_cad, on_sale, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id",
+        "sku, model_name, brand, description, ribbon, map_cad, sale_price_cad, on_sale, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id",
       )
       .eq("sku", sku)
       .maybeSingle<PimRow>();

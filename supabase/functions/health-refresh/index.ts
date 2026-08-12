@@ -141,7 +141,8 @@ async function refreshWalmart(market: "us" | "ca") {
 // Mirror of wixSync.refreshWixCatalog — fleet-level PIM↔Wix drift snapshot.
 async function refreshWix() {
   const { total, products: wixProducts } = await invokeFn("wix-pull-catalog");
-  const prods = await restSelect("products?select=sku,msrp_cad,wix_product_id");
+  // SinksDirect sells at the Canadian MAP — that's the price to compare.
+  const prods = await restSelect("products?select=sku,map_cad,wix_product_id");
 
   type WixItem = { id: string; sku: string | null; name: string; visible: boolean; price: number | null; discountedPrice: number | null };
   const wixById = new Map((wixProducts as WixItem[]).map((w) => [w.id, w]));
@@ -159,12 +160,12 @@ async function refreshWix() {
       continue;
     }
     const livePrice = w.discountedPrice ?? w.price;
-    const priceDiff = p.msrp_cad != null && livePrice != null && Math.abs(livePrice - p.msrp_cad) > 0.01;
+    const priceDiff = p.map_cad != null && livePrice != null && Math.abs(livePrice - p.map_cad) > 0.01;
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
     results.push({
       sku: p.sku, wix_id: p.wix_product_id, state: w.visible ? "live" : "hidden",
-      name: w.name, price: livePrice, msrp: p.msrp_cad ?? null, price_diff: priceDiff,
+      name: w.name, price: livePrice, map: p.map_cad ?? null, price_diff: priceDiff,
     });
   }
   const pimSkus = new Set(prods.map((p: { sku: string }) => p.sku));
