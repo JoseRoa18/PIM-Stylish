@@ -79,24 +79,12 @@ export default function PricingPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-headline-md text-on-surface font-semibold">Pricing</h1>
-          <p className="text-body-md text-on-surface-variant mt-1">
-            Monthly promotions for all marketplaces. Promo prices come from the official
-            lists — paste them per month; marketplace promo templates will generate from here.
-          </p>
-        </div>
-        {canEdit && tab === 'promotions' && (
-          <button
-            type="button"
-            onClick={() => setShowNew((v) => !v)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
-          >
-            <Plus className="w-4 h-4" />
-            New promotion
-          </button>
-        )}
+      <div>
+        <h1 className="text-headline-md text-on-surface font-semibold">Pricing</h1>
+        <p className="text-body-md text-on-surface-variant mt-1">
+          Monthly promotions for all marketplaces. Promo prices come from the official
+          lists — paste them per month; marketplace promo templates will generate from here.
+        </p>
       </div>
 
       <div className="inline-flex rounded-full bg-surface-container p-1">
@@ -121,6 +109,19 @@ export default function PricingPage() {
       )}
 
       {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} />}
+
+      {tab === 'promotions' && canEdit && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowNew((v) => !v)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-4 h-4" />
+            New promotion
+          </button>
+        </div>
+      )}
 
       {tab === 'promotions' && showNew && (
         <NewPromotionForm
