@@ -780,13 +780,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                   setMsg(null);
                   try {
                     const r = await generateWayfairPromoFile(promo);
-                    const parts = [`Wayfair file ready — ${r.filled} of ${r.templateRows} template rows filled`];
-                    if (r.listedButMissing.length) {
-                      parts.push(`⚠ listed on Wayfair but MISSING from the event file (ask Wayfair to include them): ${r.listedButMissing.join(', ')}`);
-                    }
-                    if (r.notOnWayfair.length) {
-                      parts.push(`not listed on Wayfair (nothing to do): ${r.notOnWayfair.join(', ')}`);
-                    }
+                    const parts = [`Wayfair file ready — ${r.filled} existing rows filled`];
+                    if (r.appended.length) parts.push(`${r.appended.length} rows added (${r.appended.slice(0, 8).join(', ')}${r.appended.length > 8 ? '…' : ''})`);
+                    if (r.notOnWayfair.length) parts.push(`skipped, not listed on Wayfair: ${r.notOnWayfair.join(', ')}`);
                     setMsg({ tone: 'success', text: parts.join(' · ') });
                   } catch (err) {
                     setMsg({ tone: 'error', text: err.message });

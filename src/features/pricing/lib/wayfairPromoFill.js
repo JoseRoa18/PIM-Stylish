@@ -1,14 +1,19 @@
 // Generate Wayfair's Partner Home PROMOTIONS file from a PIM promotion —
 // same one-click flow as the listing exports: the template lives in the
 // Templates system (marketplace "Wayfair Promotions") and gets filled in
-// place (JSZip XML edit), never rebuilt. When Wayfair issues a new file
-// (new SKU list / processId), replace it in the Templates page.
+// place (JSZip XML edit), never rebuilt.
+//
+// The row list comes from the PIM (the promotion's members), validated
+// against what Wayfair actually lists (latest API audit snapshot): rows
+// already present in the template get their promo columns filled; listed
+// members missing from the template are APPENDED as new rows (Wayfair
+// delivers the file empty — the supplier adds the rows); members Wayfair
+// doesn't carry are skipped and reported.
 //
 // Fill rule (confirmed against the July submission):
-//   K (B2C Promotion Discount %)   = 0
+//   A = SKU · K (B2C Promotion Discount %) = 0
 //   L (B2C Promotion Base Cost USD) = the promotion's wayfair_ca_usd cost
-//   M (Promotional MAP USD)         = left empty (Canada supplier)
-// Rows whose SKU isn't in the promotion stay untouched.
+//   M (Promotional MAP USD) = left empty (Canada supplier)
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -17,6 +22,7 @@ import {
   sheetToGrid,
   buildCell,
   mergeRows,
+  injectRows,
   downloadZip,
   templateExt,
 } from '@/features/syndication/exports/templateFiller';
@@ -82,13 +88,13 @@ export async function generateWayfairPromoFile(promotion) {
     filled += 1;
   }
 
-  zip.file(path, mergeRows(xml, cellsByRow));
+  let merged = mergeRows(xml, cellsByRow);
 
-  // Cross-check the gaps against what's actually listed on Wayfair (latest
-  // API audit snapshot, refreshed twice daily): a promo member missing from
-  // the event file is only worth chasing if Wayfair carries the product.
+  // Members missing from the template: append them as new rows — but only
+  // those Wayfair actually lists (latest API audit snapshot, 2×/day); a SKU
+  // Wayfair doesn't carry has no business in the event file.
   const notInTemplate = [...costBySku.keys()].filter((s) => !templateSkus.has(s)).sort();
-  let listedButMissing = notInTemplate;
+  let toAppend = notInTemplate;
   let notOnWayfair = [];
   const { data: snaps } = await supabase
     .from('channel_health')
@@ -98,9 +104,23 @@ export async function generateWayfairPromoFile(promotion) {
     .limit(1);
   if (snaps?.length) {
     const listed = new Set((snaps[0].results ?? []).map((r) => r.sku));
-    listedButMissing = notInTemplate.filter((s) => listed.has(s));
+    toAppend = notInTemplate.filter((s) => listed.has(s));
     notOnWayfair = notInTemplate.filter((s) => !listed.has(s));
   }
+
+  let lastRow = FIRST_DATA_ROW - 1;
+  for (let i = grid.length - 1; i >= 0; i--) {
+    if (String(grid[i]?.[0] ?? '').trim()) { lastRow = i + 1; break; }
+  }
+  if (toAppend.length) {
+    let rowsXml = '';
+    for (const [idx, sku] of toAppend.entries()) {
+      const rn = lastRow + 1 + idx;
+      rowsXml += `<row r="${rn}">${buildCell(`A${rn}`, sku)}${buildCell(`K${rn}`, 0)}${buildCell(`L${rn}`, costBySku.get(sku))}</row>`;
+    }
+    merged = injectRows(merged, rowsXml, lastRow + toAppend.length);
+  }
+  zip.file(path, merged);
 
   const baseName = `Wayfair_Promotions_${String(promotion.period).slice(0, 7)}`;
   await downloadZip(zip, baseName, templateExt(template.storage_path));
@@ -113,11 +133,11 @@ export async function generateWayfairPromoFile(promotion) {
     summary: `Filled Wayfair promotions template for "${promotion.name}" (${filled} rows)`,
     metadata: {
       filled,
+      appended: toAppend.length,
       template_rows: templateSkus.size,
-      listed_but_missing: listedButMissing.length,
       not_on_wayfair: notOnWayfair.length,
     },
   });
 
-  return { filled, templateRows: templateSkus.size, listedButMissing, notOnWayfair };
+  return { filled, appended: toAppend, templateRows: templateSkus.size, notOnWayfair };
 }
