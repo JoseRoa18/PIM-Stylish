@@ -40,19 +40,50 @@ const TEMPLATES = {
   },
 };
 
-export function downloadPromoTemplate(market) {
-  const t = TEMPLATES[market] ?? TEMPLATES.ca;
-  const headers = t.fields.map((f) => COLUMN_SPEC.find((c) => c.field === f).header);
-  const csv = [headers.join(','), ...t.examples.map((r) => r.join(','))].join('\r\n');
+// Which parsed fields belong to each market — used to route imports and to
+// sanity-check that an uploaded file matches the chosen market.
+export const MARKET_FIELDS = {
+  ca: TEMPLATES.ca.fields.filter((f) => f !== 'sku'),
+  us: TEMPLATES.us.fields.filter((f) => f !== 'sku'),
+};
+
+function downloadCsv(fileName, headerFields, dataRows) {
+  const headers = headerFields.map((f) => COLUMN_SPEC.find((c) => c.field === f).header);
+  const csv = [headers.join(','), ...dataRows.map((r) => r.join(','))].join('\r\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = t.file;
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+export function downloadPromoTemplate(market) {
+  const t = TEMPLATES[market] ?? TEMPLATES.ca;
+  downloadCsv(t.file, t.fields, t.examples);
+}
+
+/**
+ * Download the chosen market's CURRENT data of a promotion as a template-
+ * shaped CSV — the "update" path: edit the file and import it back.
+ * `rows` are the promotion_prices rows already loaded by the caller.
+ */
+export function downloadPromoMarketData(promotion, rows, market) {
+  const t = TEMPLATES[market] ?? TEMPLATES.ca;
+  const priceField = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
+  const dataRows = rows
+    .filter((r) => r[priceField] != null || MARKET_FIELDS[market].some((f) => f.startsWith('cost:') && r.promo_costs?.[f.slice(5)] != null))
+    .map((r) => t.fields.map((f) => {
+      if (f === 'sku') return r.sku;
+      if (f.startsWith('cost:')) return r.promo_costs?.[f.slice(5)] ?? '';
+      return r[f] ?? '';
+    }));
+  const period = String(promotion.period).slice(0, 7);
+  downloadCsv(`promotion-${period}-${market === 'us' ? 'usa' : 'canada'}-current.csv`, t.fields, dataRows);
+  return dataRows.length;
 }
 
 function toNumber(raw) {

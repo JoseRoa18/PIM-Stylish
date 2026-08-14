@@ -28,7 +28,8 @@ import {
   endPromotion,
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
-import { downloadPromoTemplate, parsePromoFile } from '@/features/pricing/lib/promoImport';
+import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
+import Dialog from '@/components/ui/Dialog';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment } from '@/features/pricing/api/priceAlignment';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { Link } from 'react-router-dom';
@@ -618,6 +619,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
   const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete'
   const [msg, setMsg] = useState(null);
   const [progress, setProgress] = useState(null);
+  const [importModal, setImportModal] = useState(false);
 
   const meta = STATUS_META[promo.status] ?? STATUS_META.draft;
 
@@ -799,34 +801,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                 />
               </label>
               {promo.status !== 'ended' && (
-                <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy === 'import' ? 'opacity-40 pointer-events-none' : ''}`}>
-                  {busy === 'import' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" strokeWidth={2} />}
-                  Import file
-                  <input
-                    type="file"
-                    accept=".xlsx,.csv"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = '';
-                      if (!file) return;
-                      setBusy('import');
-                      setMsg(null);
-                      try {
-                        const { rows: parsedRows } = await parsePromoFile(file);
-                        const r = await addFileToPromotion(promo, parsedRows);
-                        setMsg({ tone: 'success', text: `Imported ${r.added} SKUs from ${file.name}${r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''}` });
-                        setRows(null);
-                        setMapBySku(null);
-                        onChanged();
-                      } catch (err) {
-                        setMsg({ tone: 'error', text: err.message });
-                      } finally {
-                        setBusy(null);
-                      }
-                    }}
-                  />
-                </label>
+                <ActionButton
+                  icon={Plus}
+                  label="Import file"
+                  busy={busy === 'import'}
+                  onClick={() => setImportModal(true)}
+                />
               )}
               {promo.status !== 'active' && (
                 <ActionButton
@@ -847,13 +827,19 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             </div>
           )}
 
-          {canEdit && promo.status !== 'ended' && (
-            <p className="text-body-sm text-on-surface-variant">
-              Import file templates:{' '}
-              <button type="button" onClick={() => downloadPromoTemplate('ca')} className="text-primary font-medium hover:underline">Canada</button>
-              {' · '}
-              <button type="button" onClick={() => downloadPromoTemplate('us')} className="text-primary font-medium hover:underline">USA</button>
-            </p>
+          {importModal && (
+            <ImportPromoDialog
+              promo={promo}
+              rows={rows}
+              onClose={() => setImportModal(false)}
+              onImported={(text) => {
+                setImportModal(false);
+                setMsg({ tone: 'success', text });
+                setRows(null);
+                setMapBySku(null);
+                onChanged();
+              }}
+            />
           )}
 
           {progress && (
@@ -955,6 +941,123 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ============================== Import dialog ==============================
+
+// Guided import: pick the market first; if that market already has data in
+// the promotion, the download is the CURRENT data (update path); otherwise
+// it's the blank template (new upload path). Then upload the filled file.
+function ImportPromoDialog({ promo, rows, onClose, onImported }) {
+  const [market, setMarket] = useState(null); // null | 'ca' | 'us'
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const marketCount = (m) => {
+    const priceField = m === 'us' ? 'promo_price_usd' : 'promo_price_cad';
+    return (rows ?? []).filter((r) =>
+      r[priceField] != null ||
+      MARKET_FIELDS[m].some((f) => f.startsWith('cost:') && r.promo_costs?.[f.slice(5)] != null),
+    ).length;
+  };
+  const counts = { ca: marketCount('ca'), us: marketCount('us') };
+  const loaded = market ? counts[market] > 0 : false;
+  const marketLabel = market === 'us' ? 'USA' : 'Canada';
+
+  async function handleUpload(file) {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const parsed = await parsePromoFile(file);
+      const marketCols = parsed.matchedColumns.filter((c) => MARKET_FIELDS[market].includes(c));
+      if (!marketCols.length) {
+        const other = market === 'us' ? 'Canada' : 'USA';
+        throw new Error(`This file has no ${marketLabel} price columns — it looks like a ${other} file. Download the ${marketLabel} template from this dialog.`);
+      }
+      const r = await addFileToPromotion(promo, parsed.rows);
+      onImported(
+        `${marketLabel}: imported ${r.added} SKUs from ${file.name}` +
+        (r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''),
+      );
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      onClose={onClose}
+      title="Import promotion file"
+      subtitle={promo.name}
+      maxWidth="max-w-lg"
+    >
+      <div className="space-y-4">
+        <div>
+          <p className="text-label-lg text-on-surface-variant mb-2">Which market?</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setMarket(key); setError(null); }}
+                className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                  market === key
+                    ? 'border-primary bg-primary-container/40'
+                    : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+                }`}
+              >
+                <div className="text-body-md font-semibold text-on-surface">{label}</div>
+                <div className="text-body-sm text-on-surface-variant mt-0.5">
+                  {counts[key] > 0 ? `${counts[key]} SKUs loaded` : 'Not loaded yet'}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {market && (
+          <div className="rounded-xl bg-surface-container-low/60 p-4 space-y-3">
+            {loaded ? (
+              <p className="text-body-sm text-on-surface-variant">
+                <span className="font-semibold text-on-surface">{marketLabel} is already loaded</span> ({counts[market]} SKUs).
+                Download the current data, edit it, and upload it back to update.
+              </p>
+            ) : (
+              <p className="text-body-sm text-on-surface-variant">
+                <span className="font-semibold text-on-surface">{marketLabel} isn't loaded yet.</span>{' '}
+                Download the blank template, fill it, and upload it here.
+              </p>
+            )}
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={() => (loaded ? downloadPromoMarketData(promo, rows ?? [], market) : downloadPromoTemplate(market))}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container transition-colors"
+              >
+                {loaded ? 'Download current data' : 'Download blank template'}
+              </button>
+              <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity cursor-pointer ${busy ? 'opacity-40 pointer-events-none' : ''}`}>
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                {loaded ? 'Upload updated file' : 'Upload filled file'}
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; handleUpload(f); }}
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
+        )}
+      </div>
+    </Dialog>
   );
 }
 
