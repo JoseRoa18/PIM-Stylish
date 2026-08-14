@@ -181,7 +181,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
         }
         const snap = res.snapshot;
         if (snap) {
-          const built = buildForm(snap);
+          const built = buildForm(snap, fieldGroups);
           setWixBaseline(built);
           setForm(built);
           if (Array.isArray(snap._wix_media)) setWixMedia(snap._wix_media);
