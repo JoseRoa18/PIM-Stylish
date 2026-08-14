@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Loader2, AlertCircle } from 'lucide-react';
-import { createProduct } from '../api/products';
+import { Plus, Loader2, AlertCircle, Copy, X, Search } from 'lucide-react';
+import { createProduct, cloneProduct, searchProducts } from '../api/products';
 import { syncVariantFamilies } from '../api/variantFamilies';
 import Dialog from '@/components/ui/Dialog';
 
@@ -23,6 +23,7 @@ const inputClass =
 
 export default function CreateProductDialog({ onClose }) {
   const navigate = useNavigate();
+  const [mode, setMode] = useState('new'); // 'new' | 'clone'
   const [form, setForm] = useState({
     sku: '',
     model_name: '',
@@ -31,10 +32,27 @@ export default function CreateProductDialog({ onClose }) {
     series: '',
     msrp_cad: '',
   });
+  // Clone mode: source product picked via typeahead.
+  const [source, setSource] = useState(null);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const canSubmit = form.sku.trim() && form.brand.trim() && form.category && !busy;
+  useEffect(() => {
+    if (mode !== 'clone' || source || !query.trim()) { setResults([]); return; }
+    let active = true;
+    const t = setTimeout(() => {
+      searchProducts(query, 6)
+        .then((r) => { if (active) setResults(r); })
+        .catch(() => {});
+    }, 250);
+    return () => { active = false; clearTimeout(t); };
+  }, [query, mode, source]);
+
+  const canSubmit = mode === 'clone'
+    ? Boolean(source && form.sku.trim()) && !busy
+    : Boolean(form.sku.trim() && form.brand.trim() && form.category) && !busy;
 
   function setField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -46,7 +64,11 @@ export default function CreateProductDialog({ onClose }) {
     setBusy(true);
     setError(null);
     try {
-      const created = await createProduct(form);
+      const created = mode === 'clone'
+        ? await cloneProduct(source.sku, form.sku, {
+            model_name: form.model_name.trim() || undefined,
+          })
+        : await createProduct(form);
       // Auto-group with siblings that share the SKU base model (S-300XG → S-300).
       try {
         await syncVariantFamilies([created.sku]);
@@ -91,17 +113,94 @@ export default function CreateProductDialog({ onClose }) {
       }
     >
         <div className="space-y-4">
+          <div className="inline-flex w-full rounded-lg bg-surface-container p-1">
+            {[['new', 'From scratch'], ['clone', 'Clone existing']].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setMode(key); setError(null); }}
+                className={`flex-1 px-3 py-1.5 rounded-md text-label-lg font-medium transition-colors ${
+                  mode === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'clone' && (
+            <div className="space-y-3">
+              {source ? (
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary-container/30 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-body-md font-semibold text-on-surface font-mono">{source.sku}</div>
+                    <div className="text-body-sm text-on-surface-variant truncate">
+                      {[source.model_name, source.brand].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setSource(null); setQuery(''); setForm((f) => ({ ...f, model_name: '' })); }}
+                    className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant flex-shrink-0"
+                    title="Choose another product"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-label-md text-on-surface-variant">
+                      Product to clone <span className="text-error">*</span>
+                    </span>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search by SKU or name…"
+                        autoFocus
+                        className={`${inputClass} pl-9`}
+                      />
+                    </div>
+                  </label>
+                  {results.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full rounded-xl border border-outline-variant bg-surface shadow-lg overflow-hidden">
+                      {results.map((r) => (
+                        <button
+                          key={r.sku}
+                          type="button"
+                          onClick={() => { setSource(r); setResults([]); setForm((f) => ({ ...f, model_name: r.model_name ?? '' })); }}
+                          className="w-full px-4 py-2.5 text-left hover:bg-surface-container-low transition-colors"
+                        >
+                          <span className="font-mono text-body-md text-on-surface">{r.sku}</span>
+                          <span className="text-body-sm text-on-surface-variant ml-2">{r.model_name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="text-body-sm text-on-surface-variant flex items-start gap-1.5">
+                <Copy className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                Copies everything — attributes, descriptions, bullets, pricing, and the family's
+                shared videos/documents. Images and marketplace links are not copied.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <label className="flex flex-col gap-1.5">
               <span className="text-label-md text-on-surface-variant">
-                SKU <span className="text-error">*</span>
+                {mode === 'clone' ? 'New SKU' : 'SKU'} <span className="text-error">*</span>
               </span>
               <input
                 type="text"
                 value={form.sku}
                 onChange={(e) => setField('sku', e.target.value)}
                 placeholder="e.g. S-845W"
-                autoFocus
+                autoFocus={mode === 'new'}
                 className={`${inputClass} font-mono`}
               />
             </label>
@@ -117,43 +216,47 @@ export default function CreateProductDialog({ onClose }) {
               />
             </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-label-md text-on-surface-variant">
-                Brand <span className="text-error">*</span>
-              </span>
-              <input
-                type="text"
-                value={form.brand}
-                onChange={(e) => setField('brand', e.target.value)}
-                className={inputClass}
-              />
-            </label>
+            {mode === 'new' && (
+              <>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-label-md text-on-surface-variant">
+                    Brand <span className="text-error">*</span>
+                  </span>
+                  <input
+                    type="text"
+                    value={form.brand}
+                    onChange={(e) => setField('brand', e.target.value)}
+                    className={inputClass}
+                  />
+                </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-label-md text-on-surface-variant">
-                Category <span className="text-error">*</span>
-              </span>
-              <select
-                value={form.category}
-                onChange={(e) => setField('category', e.target.value)}
-                className={inputClass}
-              >
-                {CATEGORY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-label-md text-on-surface-variant">
+                    Category <span className="text-error">*</span>
+                  </span>
+                  <select
+                    value={form.category}
+                    onChange={(e) => setField('category', e.target.value)}
+                    className={inputClass}
+                  >
+                    {CATEGORY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-label-md text-on-surface-variant">Series</span>
-              <input
-                type="text"
-                value={form.series}
-                onChange={(e) => setField('series', e.target.value)}
-                placeholder="e.g. Versa"
-                className={inputClass}
-              />
-            </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-label-md text-on-surface-variant">Series</span>
+                  <input
+                    type="text"
+                    value={form.series}
+                    onChange={(e) => setField('series', e.target.value)}
+                    placeholder="e.g. Versa"
+                    className={inputClass}
+                  />
+                </label>
+              </>
+            )}
 
           </div>
 
@@ -162,18 +265,20 @@ export default function CreateProductDialog({ onClose }) {
             (e.g. <span className="font-mono">S-300XG</span> and <span className="font-mono">S-300TG</span>) become a family.
           </p>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-label-md text-on-surface-variant">MSRP (CAD)</span>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.msrp_cad}
-              onChange={(e) => setField('msrp_cad', e.target.value)}
-              placeholder="0.00"
-              className={inputClass}
-            />
-          </label>
+          {mode === 'new' && (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-label-md text-on-surface-variant">MSRP (CAD)</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.msrp_cad}
+                onChange={(e) => setField('msrp_cad', e.target.value)}
+                placeholder="0.00"
+                className={inputClass}
+              />
+            </label>
+          )}
 
           {error && (
             <div className="px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm flex items-center gap-2 animate-banner-in">

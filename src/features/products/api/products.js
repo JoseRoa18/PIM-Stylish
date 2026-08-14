@@ -117,6 +117,68 @@ export async function getProduct(sku) {
  * Search products by SKU, name, or family number (case-insensitive substring).
  * Used by the global Topbar search.
  */
+// Fields that must never travel to a clone: identity, channel links, and
+// system columns. Everything else — content, attributes, pricing — copies.
+const CLONE_EXCLUDE = ['sku', 'wix_product_id', 'wix_synced_at', 'created_at', 'updated_at'];
+
+/**
+ * Create a new product as a copy of an existing one. Copies every content
+ * column (attributes, descriptions, bullets, pricing, dimensions…), resets
+ * workflow to "new", and never carries channel links. Family-shared media
+ * (videos/documents) is re-registered on the clone pointing at the SAME
+ * storage objects — a clone joins its source's family, so per the
+ * family-shared rule those files belong to it too. Images are per-variant
+ * and are NOT copied.
+ */
+export async function cloneProduct(sourceSku, newSku, overrides = {}) {
+  const source = await getProduct(sourceSku);
+  if (!source) throw new Error(`Source product "${sourceSku}" not found.`);
+
+  const row = { ...source };
+  for (const key of CLONE_EXCLUDE) delete row[key];
+  row.sku = newSku.trim();
+  row.workflow_status = 'new';
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) row[key] = value;
+  }
+
+  const { data, error } = await supabase
+    .from('products')
+    .insert(row)
+    .select('*')
+    .single();
+  if (error) {
+    if (error.code === '23505') throw new Error(`A product with SKU "${row.sku}" already exists.`);
+    throw new Error(error.message ?? 'Failed to clone product');
+  }
+
+  // Family-shared docs/videos: same storage objects, one row per variant.
+  const { data: sharedMedia, error: mediaErr } = await supabase
+    .from('product_media')
+    .select('*')
+    .eq('sku', sourceSku)
+    .in('media_type', ['video', 'document']);
+  if (!mediaErr && sharedMedia?.length) {
+    const mediaRows = sharedMedia.map((m) => {
+      const copy = { ...m, sku: data.sku };
+      delete copy.id;
+      delete copy.created_at;
+      return copy;
+    });
+    const { error: insErr } = await supabase.from('product_media').insert(mediaRows);
+    if (insErr) console.error('Clone: family-shared media copy failed (non-fatal):', insErr);
+  }
+
+  logActivity({
+    action: 'create',
+    entityType: 'product',
+    entityId: data.sku,
+    summary: `Created ${data.sku} as a clone of ${sourceSku}`,
+    metadata: { cloned_from: sourceSku, shared_media: sharedMedia?.length ?? 0 },
+  });
+  return data;
+}
+
 export async function searchProducts(query, limit = 8) {
   const q = (query ?? '').trim();
   if (!q) return [];
