@@ -21,19 +21,19 @@ const CATEGORY_OPTIONS = [
 const inputClass =
   'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
-export default function CreateProductDialog({ onClose }) {
+export default function CreateProductDialog({ onClose, cloneSource = null }) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState('new'); // 'new' | 'clone'
+  const [mode, setMode] = useState(cloneSource ? 'clone' : 'new'); // 'new' | 'clone'
   const [form, setForm] = useState({
     sku: '',
-    model_name: '',
+    model_name: cloneSource?.model_name ?? '',
     brand: 'Stylish',
     category: 'kitchen_sink',
     series: '',
     msrp_cad: '',
   });
-  // Clone mode: source product picked via typeahead.
-  const [source, setSource] = useState(null);
+  // Clone mode: source product picked via typeahead (or preset by caller).
+  const [source, setSource] = useState(cloneSource);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [busy, setBusy] = useState(false);

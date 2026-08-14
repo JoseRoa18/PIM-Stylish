@@ -117,9 +117,17 @@ export async function getProduct(sku) {
  * Search products by SKU, name, or family number (case-insensitive substring).
  * Used by the global Topbar search.
  */
-// Fields that must never travel to a clone: identity, channel links, and
-// system columns. Everything else — content, attributes, pricing — copies.
-const CLONE_EXCLUDE = ['sku', 'wix_product_id', 'wix_synced_at', 'created_at', 'updated_at'];
+// Fields that must never travel to a clone (user rule: everything copies
+// EXCEPT images, UPC, SKU, and any API/channel connection): identity,
+// every channel link/sync column, and system columns.
+const CLONE_EXCLUDE = [
+  'sku', 'created_at', 'updated_at',
+  'wix_product_id', 'wix_synced_at', 'wix_raw', 'wix_collection_ids',
+  'wayfair_item_group_id', 'wayfair_synced_at',
+];
+// Identity attributes stripped from the cloned attributes object. The UPC
+// barcode is unique per product; upc_certified (plumbing code cert) stays.
+const CLONE_EXCLUDE_ATTRS = ['upc'];
 
 /**
  * Create a new product as a copy of an existing one. Copies every content
@@ -136,6 +144,10 @@ export async function cloneProduct(sourceSku, newSku, overrides = {}) {
 
   const row = { ...source };
   for (const key of CLONE_EXCLUDE) delete row[key];
+  if (row.attributes && typeof row.attributes === 'object') {
+    row.attributes = { ...row.attributes };
+    for (const key of CLONE_EXCLUDE_ATTRS) delete row.attributes[key];
+  }
   row.sku = newSku.trim();
   row.workflow_status = 'new';
   for (const [key, value] of Object.entries(overrides)) {

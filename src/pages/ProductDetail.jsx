@@ -21,6 +21,7 @@ import {
   FileText,
   History,
   Sparkles,
+  Copy as CopyIcon,
 } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { useProduct } from '@/features/products/hooks/useProduct';
@@ -42,6 +43,7 @@ import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
 import ProductHistoryDialog from '@/features/products/components/ProductHistoryDialog';
+import CreateProductDialog from '@/features/products/components/CreateProductDialog';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
@@ -390,6 +392,7 @@ export default function ProductDetail() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showClone, setShowClone] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -533,6 +536,13 @@ export default function ProductDetail() {
               <History className="w-4 h-4" /> History
             </button>
           )}
+          {!isEditing && canEdit && (
+            <button type="button" onClick={() => setShowClone(true)}
+              title="Create a new product as a copy of this one"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
+              <CopyIcon className="w-4 h-4" /> Clone
+            </button>
+          )}
           {isEditing ? (
             <>
               <button type="button" onClick={cancelEditing} disabled={saving}
@@ -566,6 +576,9 @@ export default function ProductDetail() {
         <div className="mb-4 px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">{saveError}</div>
       )}
 
+      {showClone && (
+        <CreateProductDialog cloneSource={product} onClose={() => setShowClone(false)} />
+      )}
       {showHistory && (
         <ProductHistoryDialog sku={sku} onClose={() => setShowHistory(false)} onReverted={refetch} />
       )}
