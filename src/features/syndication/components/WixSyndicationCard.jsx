@@ -326,7 +326,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
           <div className="min-w-0">
             <h3 className="text-title-lg text-on-surface leading-tight">{cfg.label}</h3>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Wix Stores · sells at {cfg.priceLabel.replace('Price ', '')} · edit the fields below, then push to update.
+              Wix Stores · sells at {cfg.priceShort} · edit the fields below, then push to update.
             </p>
             {wixUrl && !wixMissing && (
               <a

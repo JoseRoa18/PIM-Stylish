@@ -23,6 +23,7 @@ import {
   Sparkles,
   Copy as CopyIcon,
   Info,
+  Download,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
@@ -1583,32 +1584,96 @@ function MarketplacesTab({ product, media, onUpdate }) {
   // One Wix card at a time — each site is its own store (own catalog, own
   // price rule); keying by site remounts the card so it reads that site live.
   const [wixSite, setWixSite] = useState(DEFAULT_WIX_SITE);
+  const wayfairRef = useRef(null);
+
+  // One query answers "where is this product?" for every Wix site at once —
+  // the strip below doubles as the overview and the site selector.
+  const [wixLinks, setWixLinks] = useState(null);
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from('wix_links')
+      .select('site, wix_product_id, synced_at')
+      .eq('sku', product.sku)
+      .then(({ data }) => {
+        if (active) setWixLinks(new Map((data ?? []).map((r) => [r.site, r])));
+      });
+    return () => { active = false; };
+  }, [product.sku]);
+
+  function wixStatus(key) {
+    if (!wixLinks) {
+      // Legacy column answers for SinksDirect CA before the fetch lands.
+      return key === DEFAULT_WIX_SITE ? Boolean(product.wix_product_id) : null;
+    }
+    return wixLinks.has(key) || (key === DEFAULT_WIX_SITE && Boolean(product.wix_product_id));
+  }
+
   return (
     <div className="space-y-6">
-      <p className="text-body-md text-on-surface-variant">Manage per-channel fields below, then push the changes to each marketplace.</p>
-      <div>
-        <div className="flex items-center gap-1.5 flex-wrap mb-3">
-          <span className="text-label-md text-on-surface-variant mr-1.5">Wix site:</span>
-          {WIX_SITE_KEYS.map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setWixSite(key)}
-              className={`px-3 py-1.5 rounded-full text-label-md font-medium transition-colors ${
-                wixSite === key
-                  ? 'bg-primary text-on-primary'
-                  : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-              }`}
-            >
-              {WIX_SITES[key].short}
-            </button>
-          ))}
-        </div>
-        <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
+      {/* Channel overview — one tile per connection; Wix tiles switch the card below. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        {WIX_SITE_KEYS.map((key) => (
+          <ChannelTile
+            key={key}
+            label={WIX_SITES[key].short}
+            avatar="W"
+            avatarClass="bg-brand-wix/15 text-brand-wix"
+            active={wixSite === key}
+            linked={wixStatus(key)}
+            onClick={() => setWixSite(key)}
+          />
+        ))}
+        <ChannelTile
+          label="Wayfair"
+          avatar="WF"
+          avatarClass="bg-brand-wayfair/15 text-brand-wayfair"
+          linked={Boolean(product.wayfair_item_group_id)}
+          linkedText="Connected"
+          notLinkedText="No group id"
+          onClick={() => wayfairRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        />
       </div>
-      <WayfairProductCard product={product} onUpdate={onUpdate} />
+
+      <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
+      <div ref={wayfairRef} className="scroll-mt-24">
+        <WayfairProductCard product={product} onUpdate={onUpdate} />
+      </div>
       <ExportTemplatesCard product={product} media={media} />
     </div>
+  );
+}
+
+// Compact channel tile: brand avatar, name, link-status dot. `active` marks
+// the Wix site whose card is currently shown below.
+function ChannelTile({ label, avatar, avatarClass, active = false, linked, linkedText = 'Linked', notLinkedText = 'Not linked', onClick }) {
+  const status = linked === null
+    ? { dot: 'bg-on-surface-variant/30 animate-pulse', text: 'Checking…' }
+    : linked
+      ? { dot: 'bg-tertiary', text: linkedText }
+      : { dot: 'bg-on-surface-variant/40', text: notLinkedText };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+        active
+          ? 'border-primary bg-primary-container/25'
+          : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+      }`}
+    >
+      <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-label-lg font-bold flex-shrink-0 ${avatarClass}`}>
+        {avatar}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-label-lg font-medium text-on-surface truncate">{label}</span>
+        <span className="flex items-center gap-1.5 text-label-md text-on-surface-variant">
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.dot}`} />
+          {status.text}
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -1695,31 +1760,45 @@ function ExportTemplatesCard({ product, media }) {
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
-      <header className="px-8 pt-6 pb-4">
-        <h3 className="text-title-lg text-on-surface">Export Templates</h3>
-        <p className="text-body-sm text-on-surface-variant mt-1">
-          Generate pre-filled XLSX files for manual upload to marketplaces.
-        </p>
+      <header className="px-8 py-5 border-b border-outline-variant flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-secondary-container/60 text-on-secondary-container flex items-center justify-center flex-shrink-0">
+            <FileText className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-title-lg text-on-surface leading-tight">Export Templates</h3>
+            <p className="text-body-sm text-on-surface-variant mt-0.5">
+              Pre-filled XLSX files for manual upload to each marketplace.
+            </p>
+          </div>
+        </div>
+        <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm">
+          {entries.length} marketplace{entries.length === 1 ? '' : 's'}
+        </span>
       </header>
-      <div className="px-8 pb-6">
-        <div className="grid sm:grid-cols-2 gap-2">
+      <div className="px-8 py-6">
+        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">
           {entries.map((entry) => (
             <button
               key={entry.key}
               type="button"
               onClick={() => handleExport(entry)}
               disabled={exporting === entry.key}
-              className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-outline-variant bg-surface hover:bg-surface-container-low transition-colors text-left disabled:opacity-60"
+              className="group flex items-center gap-3 px-3.5 py-3 rounded-xl border border-outline-variant bg-surface hover:border-primary/40 hover:bg-surface-container-low transition-colors text-left disabled:opacity-60"
             >
-              <div className="min-w-0">
-                <span className="text-body-md text-on-surface font-medium">{entry.marketplace}</span>
-                <p className="text-body-sm text-on-surface-variant mt-0.5 truncate" title={entry.detail}>
+              <span className="w-9 h-9 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-lg font-bold flex-shrink-0">
+                {marketplaceInitials(entry.marketplace)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-body-md text-on-surface font-medium truncate">{entry.marketplace}</span>
+                <span className="block text-body-sm text-on-surface-variant truncate" title={entry.detail}>
                   {entry.detail}
-                </p>
-              </div>
-              <span className="text-label-md text-primary font-semibold flex-shrink-0 inline-flex items-center gap-1.5">
-                {exporting === entry.key && <ThinkingOrb state="composing" size={20} className="w-4 h-4" />}
-                {exporting === entry.key ? 'Generating…' : 'Export'}
+                </span>
+              </span>
+              <span className="flex-shrink-0 text-on-surface-variant group-hover:text-primary transition-colors">
+                {exporting === entry.key
+                  ? <ThinkingOrb state="composing" size={20} className="w-4 h-4" />
+                  : <Download className="w-4 h-4" />}
               </span>
             </button>
           ))}
@@ -1730,6 +1809,16 @@ function ExportTemplatesCard({ product, media }) {
       </div>
     </section>
   );
+}
+
+// "Home Depot CA" → HD, "Amazon US" → AM, "BB&B / Overstock" → BO. Market
+// suffixes don't make it into the monogram — the name next to it carries them.
+function marketplaceInitials(name) {
+  const words = name
+    .split(/[\s/]+/)
+    .filter((w) => w && !/^(ca|us|usa|canada)$/i.test(w));
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return (words[0] ?? name).slice(0, 2).toUpperCase();
 }
 
 // ===================== AttrField — reads/writes from attributes JSONB =====================

@@ -49,17 +49,17 @@ export default function WayfairProductCard({ product, onUpdate }) {
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
-      <div className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-3">
+      <div className="px-8 py-5 border-b border-outline-variant flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-brand-wayfair/15 text-brand-wayfair flex items-center justify-center font-bold">
+          <div className="w-9 h-9 rounded-lg bg-brand-wayfair/15 text-brand-wayfair flex items-center justify-center text-label-lg font-bold flex-shrink-0">
             WF
           </div>
           <div>
-            <h2 className="text-title-md text-on-surface">Wayfair</h2>
-            <p className="text-body-sm text-on-surface-variant">
-              {product.wayfair_synced_at
-                ? `Last pushed ${formatTimeAgo(product.wayfair_synced_at)}`
-                : 'Not pushed yet'}
+            <h2 className="text-title-lg text-on-surface leading-tight">Wayfair</h2>
+            <p className="text-body-sm text-on-surface-variant mt-0.5">
+              Wayfair API · {product.wayfair_synced_at
+                ? `last pushed ${formatTimeAgo(product.wayfair_synced_at)}`
+                : 'not pushed yet'}
             </p>
           </div>
         </div>
@@ -68,7 +68,7 @@ export default function WayfairProductCard({ product, onUpdate }) {
         </span>
       </div>
 
-      <div className="px-6 py-5 space-y-3">
+      <div className="px-8 py-5 space-y-3">
         <label className="block">
           <span className="text-label-md text-on-surface-variant">Wayfair item-group id (for content)</span>
           <div className="mt-1 flex items-center gap-2">
