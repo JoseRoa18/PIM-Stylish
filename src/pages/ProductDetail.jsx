@@ -25,6 +25,7 @@ import {
   Info,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
 import { ThinkingOrb } from 'thinking-orbs';
 import { useProduct } from '@/features/products/hooks/useProduct';
 import { useProductMedia } from '@/features/media/hooks/useProductMedia';
@@ -1735,7 +1736,8 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
   const formKey = '_' + attrKey;
   const shownUnit = unit ? (isEditing ? 'in' : unit) : null;
   if (shownUnit) label = withUnit(label, shownUnit);
-  if (help) label = <>{label}<HelpTip text={help} /></>;
+  const helpText = help ?? FIELD_HELP[attrKey];
+  if (helpText) label = <>{label}<HelpTip text={helpText} /></>;
 
   if (!isEditing) {
     const val = attr(product, attrKey);
@@ -1976,7 +1978,8 @@ function BulletPointsEditor({ product, edit, attrKey = 'bullet_points' }) {
 
 function EditableField({ label, fieldKey, type = 'text', product, edit, mono, options, suggest, help }) {
   const { isEditing, form, setField } = edit;
-  if (help) label = <>{label}<HelpTip text={help} /></>;
+  const helpText = help ?? FIELD_HELP[fieldKey];
+  if (helpText) label = <>{label}<HelpTip text={helpText} /></>;
 
   if (!isEditing) {
     let displayValue = product[fieldKey];
