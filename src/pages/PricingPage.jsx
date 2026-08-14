@@ -847,6 +847,15 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             </div>
           )}
 
+          {canEdit && promo.status !== 'ended' && (
+            <p className="text-body-sm text-on-surface-variant">
+              Import file templates:{' '}
+              <button type="button" onClick={() => downloadPromoTemplate('ca')} className="text-primary font-medium hover:underline">Canada</button>
+              {' · '}
+              <button type="button" onClick={() => downloadPromoTemplate('us')} className="text-primary font-medium hover:underline">USA</button>
+            </p>
+          )}
+
           {progress && (
             <p className="text-body-sm text-on-surface-variant">
               Pushing… {progress.done}/{progress.total}
