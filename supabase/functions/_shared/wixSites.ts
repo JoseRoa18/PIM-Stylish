@@ -16,6 +16,12 @@ export interface WixSite {
   currency: "CAD" | "USD";
   priceField: "map_cad" | "map_usd" | "msrp_cad" | "msrp_usd";
   market: "ca" | "us";
+  /** channel_health channel key for this site's snapshots ('wix' = legacy CA). */
+  channel: string;
+  /** SinksDirect sites follow the monthly promo (expected = promo ?? base and
+   *  the discounted price counts); Stylish brand sites run their own sales,
+   *  so only the base price is compared against MSRP. */
+  promoAware: boolean;
   /** Only SinksDirect CA keeps the legacy products.* link/cache columns. */
   legacyColumns: boolean;
   /** PIM sale fields (on_sale / sale_price_cad) are CAD — only pushed here. */
@@ -27,6 +33,8 @@ export interface WixSite {
 export const WIX_SITES: Record<string, WixSite> = {
   sinksdirect_ca: {
     key: "sinksdirect_ca",
+    channel: "wix",
+    promoAware: true,
     label: "Sinks Direct Canada",
     siteId: Deno.env.get("WIX_SITE_ID") ?? "a4b3f611-7e41-4b75-93df-f869cf376e0c",
     currency: "CAD",
@@ -38,6 +46,8 @@ export const WIX_SITES: Record<string, WixSite> = {
   },
   sinksdirect_us: {
     key: "sinksdirect_us",
+    channel: "wix_sinksdirect_us",
+    promoAware: true,
     label: "Sinks Direct USA",
     siteId: "bf567955-60ed-4ca8-9a5c-89810dc6fbcf",
     currency: "USD",
@@ -49,6 +59,8 @@ export const WIX_SITES: Record<string, WixSite> = {
   },
   stylish_ca: {
     key: "stylish_ca",
+    channel: "wix_stylish_ca",
+    promoAware: false,
     label: "Stylish Canada",
     siteId: "2c055557-06fe-401c-b0b7-9593c6e5a34e",
     currency: "CAD",
@@ -60,6 +72,8 @@ export const WIX_SITES: Record<string, WixSite> = {
   },
   stylish_us: {
     key: "stylish_us",
+    channel: "wix_stylish_us",
+    promoAware: false,
     label: "Stylish USA",
     siteId: "467de3bb-6702-4201-a816-a4fbe5bd3ecf",
     currency: "USD",

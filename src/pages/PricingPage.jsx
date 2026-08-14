@@ -31,6 +31,7 @@ import {
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
 import Dialog from '@/components/ui/Dialog';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment } from '@/features/pricing/api/priceAlignment';
+import { WIX_SITES, WIX_SITE_KEYS, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { Link } from 'react-router-dom';
 
@@ -166,22 +167,31 @@ export default function PricingPage() {
 
 // ============================== Price alignment ==============================
 
-const ALIGN_TILES = [
-  { key: 'promo_ok', label: 'At promo price', tone: 'ok' },
-  { key: 'map_ok', label: 'At regular MAP', tone: 'ok' },
-  { key: 'promo_missing', label: 'Missing promo price', tone: 'warn' },
-  { key: 'misaligned', label: 'Misaligned', tone: 'error' },
-  { key: 'no_map', label: 'No MAP in PIM', tone: 'muted' },
-];
+// Tiles per site: SinksDirect sites are promo-aware (5 buckets), Stylish
+// brand sites compare only the base price against MSRP (3 buckets — their
+// own storefront sales are not drift).
+function alignTiles(cfg) {
+  const priceName = cfg.priceField.startsWith('map') ? 'MAP' : 'MSRP';
+  return [
+    ...(cfg.promoAware ? [{ key: 'promo_ok', label: 'At promo price', tone: 'ok' }] : []),
+    { key: 'map_ok', label: `At regular ${priceName}`, tone: 'ok' },
+    ...(cfg.promoAware ? [{ key: 'promo_missing', label: 'Missing promo price', tone: 'warn' }] : []),
+    { key: 'misaligned', label: 'Misaligned', tone: 'error' },
+    { key: 'no_map', label: `No ${priceName} in PIM`, tone: 'muted' },
+  ];
+}
 
 const STATUS_TEXT = {
-  promo_missing: 'still at regular MAP',
+  promo_missing: 'still at the regular price',
   misaligned: 'unexpected price',
-  no_map: 'no MAP in the PIM',
+  no_map: 'no price in the PIM',
   missing: 'product missing on Wix',
 };
 
 function PriceAlignmentCard({ canEdit, confirm }) {
+  const [site, setSite] = useState(DEFAULT_WIX_SITE);
+  const cfg = WIX_SITES[site];
+  const money = (v) => `${cfg.symbol}${Number(v).toFixed(2)}`;
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -189,21 +199,24 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   const [progress, setProgress] = useState(null);
   const [msg, setMsg] = useState(null);
 
-  // The last saved report (cron or manual run) shows instantly on open.
+  // The last saved report for the site (cron or manual run) shows instantly.
   useEffect(() => {
     let active = true;
-    loadLatestAlignment()
+    setLoading(true);
+    setResult(null);
+    setMsg(null);
+    loadLatestAlignment(site)
       .then((r) => { if (active) setResult(r); })
       .catch((err) => { if (active) setMsg({ tone: 'error', text: err.message }); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [site]);
 
   async function analyze() {
     setRunning(true);
     setMsg(null);
     try {
-      setResult(await runPriceAlignment());
+      setResult(await runPriceAlignment(site));
     } catch (err) {
       setMsg({ tone: 'error', text: err.message });
     } finally {
@@ -224,16 +237,16 @@ function PriceAlignmentCard({ canEdit, confirm }) {
 
   async function fixOne(problem) {
     const ok = await confirm({
-      title: `Push $${Number(problem.expected).toFixed(2)} to Wix for ${problem.sku}?`,
-      message: `Updates ONLY the price on the live store (currently $${Number(problem.live).toFixed(2)}). Nothing else on the listing is touched.`,
+      title: `Push ${money(problem.expected)} to ${cfg.label} for ${problem.sku}?`,
+      message: `Updates ONLY the price on the live store (currently ${money(problem.live)}). Nothing else on the listing is touched.`,
       confirmLabel: 'Push price',
     });
     if (!ok) return;
     setFixing(problem.sku);
     setMsg(null);
     try {
-      await pushExpectedPrice(problem.sku, problem.expected);
-      await reanalyzeAfterIndexLag(`${problem.sku} → $${Number(problem.expected).toFixed(2)} pushed.`);
+      await pushExpectedPrice(problem.sku, problem.expected, site);
+      await reanalyzeAfterIndexLag(`${problem.sku} → ${money(problem.expected)} pushed.`);
     } catch (err) {
       setMsg({ tone: 'error', text: err.message });
     } finally {
@@ -242,9 +255,9 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   }
 
   async function fixAll() {
-    const list = fixable.map((p) => `${p.sku}: $${Number(p.live).toFixed(2)} → $${Number(p.expected).toFixed(2)}`).join('\n');
+    const list = fixable.map((p) => `${p.sku}: ${money(p.live)} → ${money(p.expected)}`).join('\n');
     const ok = await confirm({
-      title: `Push ${fixable.length} corrected price${fixable.length === 1 ? '' : 's'} to Wix?`,
+      title: `Push ${fixable.length} corrected price${fixable.length === 1 ? '' : 's'} to ${cfg.label}?`,
       message: `Only prices are updated — nothing else on the listings.\n\n${list}`,
       confirmLabel: `Push ${fixable.length}`,
     });
@@ -253,7 +266,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
     setMsg(null);
     setProgress(null);
     try {
-      const r = await fixAlignment(fixable, setProgress);
+      const r = await fixAlignment(fixable, setProgress, site);
       setProgress(null);
       if (r.failures.length) {
         setMsg({ tone: 'error', text: `${r.fixed} pushed · failed: ${r.failures.join('; ')}` });
@@ -270,13 +283,41 @@ function PriceAlignmentCard({ canEdit, confirm }) {
 
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4">
+      {/* One tile per Wix site — mirrors the Marketplaces strip. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {WIX_SITE_KEYS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setSite(key)}
+            aria-pressed={site === key}
+            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+              site === key
+                ? 'border-primary bg-primary-container/25'
+                : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+            }`}
+          >
+            <span className="w-8 h-8 rounded-lg bg-brand-wix/15 text-brand-wix flex items-center justify-center text-label-lg font-bold flex-shrink-0">
+              W
+            </span>
+            <span className="min-w-0">
+              <span className="block text-label-lg font-medium text-on-surface truncate">{WIX_SITES[key].short}</span>
+              <span className="block text-label-md text-on-surface-variant">{WIX_SITES[key].priceShort}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-title-md text-on-surface font-semibold">Price Alignment — SinksDirect (Wix)</h2>
+          <h2 className="text-title-md text-on-surface font-semibold">Price Alignment — {cfg.label}</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5">
-            Compares every linked product's live store price against its expected price —
-            the active promo price for promo members, the regular MAP for everyone else.
-            Reports save automatically twice a day; run a fresh one anytime.
+            {cfg.promoAware
+              ? `Compares every linked product's live store price against its expected price —
+                 the active promo price for promo members, the regular ${cfg.priceShort} for everyone else.`
+              : `Compares every linked product's base price against its ${cfg.priceShort} — this store
+                 runs its own storefront sales, so percent-off discounts are not counted as drift.`}
+            {' '}Reports save automatically twice a day; run a fresh one anytime.
           </p>
         </div>
         <button
@@ -313,8 +354,8 @@ function PriceAlignmentCard({ canEdit, confirm }) {
 
       {result && !result.legacy && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            {ALIGN_TILES.map((t) => {
+          <div className={`grid grid-cols-2 gap-3 ${cfg.promoAware ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}>
+            {alignTiles(cfg).map((t) => {
               const n = result.counts[t.key] ?? 0;
               const tone = n === 0 && t.tone !== 'ok' ? 'muted' : t.tone;
               const cls = tone === 'ok' ? 'bg-primary-container/40 text-on-surface'
@@ -372,19 +413,19 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                         <td className="px-4 py-2">
                           <Link to={`/catalog/${p.sku}`} className="font-mono text-on-surface hover:text-primary hover:underline">{p.sku}</Link>
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-on-surface">{p.live != null ? `$${Number(p.live).toFixed(2)}` : '—'}</td>
-                        <td className="px-4 py-2 text-right tabular-nums font-semibold text-on-surface">{p.expected != null ? `$${Number(p.expected).toFixed(2)}` : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-on-surface">{p.live != null ? money(p.live) : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums font-semibold text-on-surface">{p.expected != null ? money(p.expected) : '—'}</td>
                         <td className="px-4 py-2">
                           {p.expected != null ? (
                             <span className={`px-2 py-0.5 rounded-full text-label-md font-medium ${p.source === 'promo' ? 'bg-tertiary-container/60 text-on-tertiary-container' : 'bg-surface-container text-on-surface-variant'}`}>
-                              {p.source === 'promo' ? 'Promo' : 'MAP'}
+                              {p.source === 'promo' ? 'Promo' : (cfg.priceField.startsWith('map') ? 'MAP' : 'MSRP')}
                             </span>
                           ) : (
                             <span className="text-on-surface-variant">{STATUS_TEXT[p.status]}</span>
                           )}
                         </td>
                         <td className="px-4 py-2 text-right tabular-nums text-on-surface-variant">
-                          {p.live != null && p.expected != null ? `${p.live > p.expected ? '+' : '−'}$${Math.abs(p.live - p.expected).toFixed(2)}` : '—'}
+                          {p.live != null && p.expected != null ? `${p.live > p.expected ? '+' : '−'}${money(Math.abs(p.live - p.expected))}` : '—'}
                         </td>
                         {canEdit && (
                           <td className="px-4 py-2 text-right">

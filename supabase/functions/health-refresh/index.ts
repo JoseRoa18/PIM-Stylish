@@ -21,6 +21,7 @@
 
 // @ts-ignore — plain JS module shared with the browser app
 import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHealth.js";
+import { WIX_SITES, type WixSite } from "../_shared/wixSites.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -138,41 +139,49 @@ async function refreshWalmart(market: "us" | "ca") {
   return { total, okCount };
 }
 
-// Mirror of wixSync.refreshWixCatalog — fleet-level PIM↔Wix drift snapshot.
-async function refreshWix() {
-  const { total, products: wixProducts } = await invokeFn("wix-pull-catalog");
-  // SinksDirect sells at the Canadian MAP — that's the price to compare,
-  // EXCEPT for members of an active promotion, whose expected price is the
-  // promo MAP (else every promo month reads as a wall of false diffs).
-  const prods = await restSelect("products?select=sku,map_cad,wix_product_id");
-  const activePromos = await restSelect(
-    "promotions?select=period,promotion_prices(sku,promo_price_cad)&status=eq.active&order=period.asc",
-  );
+// Mirror of wixSync.refreshWixCatalog — fleet-level PIM↔Wix drift snapshot,
+// one per Wix site. Expected price per site: SinksDirect sites follow the
+// monthly promo (market's promo price for members, else MAP; discounted
+// price counts as live). Stylish brand sites run their own storefront sales,
+// so only the BASE price is compared against MSRP.
+async function refreshWix(site: WixSite) {
+  const { total, products: wixProducts } = await invokeFn("wix-pull-catalog", { site: site.key });
+  const prods = await restSelect(`products?select=sku,base:${site.priceField}`);
+  const links = await restSelect(`wix_links?select=sku,wix_product_id&site=eq.${site.key}`);
+
+  const promoField = site.market === "us" ? "promo_price_usd" : "promo_price_cad";
   const promoBySku = new Map<string, number>();
-  for (const promo of activePromos as { promotion_prices: { sku: string; promo_price_cad: number | null }[] }[]) {
-    for (const row of promo.promotion_prices ?? []) {
-      if (row.promo_price_cad != null) promoBySku.set(row.sku, row.promo_price_cad);
+  if (site.promoAware) {
+    const activePromos = await restSelect(
+      `promotions?select=period,promotion_prices(sku,${promoField})&status=eq.active&order=period.asc`,
+    );
+    for (const promo of activePromos as { promotion_prices: Record<string, unknown>[] }[]) {
+      for (const row of promo.promotion_prices ?? []) {
+        const v = row[promoField] as number | null;
+        if (v != null) promoBySku.set(row.sku as string, v);
+      }
     }
   }
 
   type WixItem = { id: string; sku: string | null; name: string; visible: boolean; price: number | null; discountedPrice: number | null };
   const wixById = new Map((wixProducts as WixItem[]).map((w) => [w.id, w]));
-  const linked = prods.filter((p: { wix_product_id: string | null }) => p.wix_product_id);
+  const baseBySku = new Map(prods.map((p: { sku: string; base: number | null }) => [p.sku, p.base]));
 
   const results: Record<string, unknown>[] = [];
   let inSync = 0;
   let priceDiffs = 0;
   let broken = 0;
-  for (const p of linked) {
+  for (const p of links as { sku: string; wix_product_id: string }[]) {
     const w = wixById.get(p.wix_product_id);
     if (!w) {
       broken += 1;
       results.push({ sku: p.sku, wix_id: p.wix_product_id, state: "missing" });
       continue;
     }
-    const livePrice = w.discountedPrice ?? w.price;
+    const base = (baseBySku.get(p.sku) ?? null) as number | null;
+    const livePrice = site.promoAware ? (w.discountedPrice ?? w.price) : w.price;
     const promoPrice = promoBySku.get(p.sku);
-    const expected = promoPrice ?? p.map_cad;
+    const expected = promoPrice ?? base;
     const priceDiff = expected != null && livePrice != null && Math.abs(livePrice - expected) > 0.01;
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
@@ -180,7 +189,7 @@ async function refreshWix() {
       sku: p.sku, wix_id: p.wix_product_id, state: w.visible ? "live" : "hidden",
       name: w.name, price: livePrice, expected: expected ?? null,
       expected_source: promoPrice != null ? "promo" : "map",
-      map: p.map_cad ?? null, price_diff: priceDiff,
+      map: base, price_diff: priceDiff,
     });
   }
   const pimSkus = new Set(prods.map((p: { sku: string }) => p.sku));
@@ -189,8 +198,8 @@ async function refreshWix() {
     .map((w) => ({ sku: w.sku, wix_id: w.id, state: "not_in_pim", name: w.name }));
 
   await restInsert("channel_health", [{
-    channel: "wix",
-    target: "wixapis.com",
+    channel: site.channel,
+    target: site.key === "sinksdirect_ca" ? "wixapis.com" : site.key,
     total,
     in_sync: inSync,
     with_diffs: priceDiffs,
@@ -199,7 +208,7 @@ async function refreshWix() {
     top_offenders: results.filter((r) => r.state === "missing" || r.price_diff).slice(0, 10),
     results: [...results, ...orphans],
   }]);
-  return { total, linked: linked.length, inSync, priceDiffs, broken, orphans: orphans.length };
+  return { total, linked: links.length, inSync, priceDiffs, broken, orphans: orphans.length };
 }
 
 // ---- The full refresh ----
@@ -212,20 +221,25 @@ async function runRefresh() {
   } = { ok: true, steps: {}, errors: [] };
 
   // Channel pulls in parallel; one channel being down must not stop the rest.
-  const [bb, wmUs, wmCa, wix] = await Promise.allSettled([
+  const wixSites = Object.values(WIX_SITES);
+  const settled = await Promise.allSettled([
     refreshBestBuy(),
     refreshWalmart("us"),
     refreshWalmart("ca"),
-    refreshWix(),
+    ...wixSites.map((site) => refreshWix(site)),
   ]);
+  const [bb, wmUs, wmCa, ...wixResults] = settled;
   if (bb.status === "fulfilled") report.steps.bestbuy = bb.value;
-  else report.errors.push(`bestbuy: ${bb.reason?.message ?? bb.reason}`);
+  else report.errors.push(`bestbuy: ${(bb.reason as Error)?.message ?? bb.reason}`);
   if (wmUs.status === "fulfilled") report.steps.walmart_us = wmUs.value;
-  else report.errors.push(`walmart_us: ${wmUs.reason?.message ?? wmUs.reason}`);
+  else report.errors.push(`walmart_us: ${(wmUs.reason as Error)?.message ?? wmUs.reason}`);
   if (wmCa.status === "fulfilled") report.steps.walmart_ca = wmCa.value;
-  else report.errors.push(`walmart_ca: ${wmCa.reason?.message ?? wmCa.reason}`);
-  if (wix.status === "fulfilled") report.steps.wix = wix.value;
-  else report.errors.push(`wix: ${wix.reason?.message ?? wix.reason}`);
+  else report.errors.push(`walmart_ca: ${(wmCa.reason as Error)?.message ?? wmCa.reason}`);
+  wixSites.forEach((site, i) => {
+    const r = wixResults[i];
+    if (r.status === "fulfilled") report.steps[site.channel] = r.value;
+    else report.errors.push(`${site.channel}: ${(r.reason as Error)?.message ?? r.reason}`);
+  });
 
   // Re-score the catalog against the (now fresh) snapshots.
   try {

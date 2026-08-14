@@ -1,26 +1,30 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
+import { WIX_SITES, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 
 /**
- * Price Alignment Analyzer — Wix (SinksDirect) phase.
+ * Price Alignment Analyzer — all four Wix sites.
  *
- * Expected price rule: a SKU in an ACTIVE promotion is expected at its CAD
- * promo price; everything else at its regular MAP (the store's selling
- * price). Only PIM products count — Wix-only orphans are out of scope by
- * the source-of-truth rule.
+ * Expected price per site: SinksDirect sites follow the monthly promo (a SKU
+ * in an ACTIVE promotion is expected at its market's promo price, everything
+ * else at MAP, and the discounted price counts as the live price). Stylish
+ * brand sites run their own storefront sales, so only the BASE price is
+ * compared against MSRP — a percent-off sale there is not drift. Only PIM
+ * products count — Wix-only orphans are out of scope by the source-of-truth
+ * rule.
  *
- * Reports are PERSISTED: the analysis reads the latest channel_health 'wix'
- * snapshot — written by the twice-daily cron AND by "Run analysis" (which
- * is just a fresh pull + snapshot). Opening the tab shows the last report
+ * Reports are PERSISTED: the analysis reads each site's latest channel_health
+ * snapshot — written by the twice-daily cron AND by "Run analysis" (which is
+ * just a fresh pull + snapshot). Opening the tab shows the last report
  * without running anything.
  *
  * Classifications:
- *   promo_ok      — live price = active promo price ✓
- *   map_ok        — live price = regular MAP ✓ (not in a promo)
- *   promo_missing — promo member still at the regular MAP ⚠
- *   misaligned    — neither promo nor MAP 🔴
- *   no_map        — nothing to compare against (no MAP in the PIM) ⚪
+ *   promo_ok      — live price = active promo price ✓ (SinksDirect sites)
+ *   map_ok        — live price = the site's regular price ✓
+ *   promo_missing — promo member still at the regular price ⚠
+ *   misaligned    — neither promo nor the regular price 🔴
+ *   no_map        — nothing to compare against (no price in the PIM) ⚪
  *   missing       — linked but the Wix product no longer exists 🔴
  */
 
@@ -61,12 +65,13 @@ function classifySnapshot(snapshot) {
   return { ranAt: snapshot.run_at, total, counts, problems, legacy };
 }
 
-/** Latest saved report (cron or manual) — instant, no live pull. */
-export async function loadLatestAlignment() {
+/** Latest saved report for a site (cron or manual) — instant, no live pull. */
+export async function loadLatestAlignment(site = DEFAULT_WIX_SITE) {
+  const cfg = WIX_SITES[site];
   const { data, error } = await supabase
     .from('channel_health')
     .select('run_at, results')
-    .eq('channel', 'wix')
+    .eq('channel', cfg.channel)
     .order('run_at', { ascending: false })
     .limit(1);
   if (error) throw error;
@@ -74,31 +79,34 @@ export async function loadLatestAlignment() {
   return classifySnapshot(data[0]);
 }
 
-/** Fresh live analysis — pulls Wix now and PERSISTS the snapshot. */
-export async function runPriceAlignment() {
-  await refreshWixCatalog();
-  return loadLatestAlignment();
+/** Fresh live analysis — pulls the site now and PERSISTS the snapshot. */
+export async function runPriceAlignment(site = DEFAULT_WIX_SITE) {
+  await refreshWixCatalog(site);
+  return loadLatestAlignment(site);
 }
 
 /**
- * Push ONE product's expected price to Wix — priceData only, so a fix can
- * never touch visibility or content. `expected` comes from the analysis
- * (promo price or regular MAP).
+ * Push ONE product's expected price to a Wix site — priceData only, so a fix
+ * can never touch visibility or content. `expected` comes from the analysis
+ * (promo price or the site's regular price) and lands on the site's own
+ * price column.
  */
-export async function pushExpectedPrice(sku, expected) {
-  await pushProductToWix(sku, { map_cad: expected }, ['priceData']);
+export async function pushExpectedPrice(sku, expected, site = DEFAULT_WIX_SITE) {
+  const cfg = WIX_SITES[site];
+  await pushProductToWix(sku, { [cfg.priceField]: expected }, ['priceData'], site);
 }
 
 /**
  * Fix a batch of analysis problems (the fixable ones), one by one.
  */
-export async function fixAlignment(problems, onProgress) {
+export async function fixAlignment(problems, onProgress, site = DEFAULT_WIX_SITE) {
+  const cfg = WIX_SITES[site];
   const fixable = problems.filter((p) => p.expected != null);
   let done = 0;
   const failures = [];
   for (const p of fixable) {
     try {
-      await pushExpectedPrice(p.sku, p.expected);
+      await pushExpectedPrice(p.sku, p.expected, site);
     } catch (err) {
       failures.push(`${p.sku}: ${err.message}`);
     }
@@ -109,8 +117,8 @@ export async function fixAlignment(problems, onProgress) {
     action: 'push',
     entityType: 'product',
     target: 'wix',
-    summary: `Price alignment: pushed ${fixable.length - failures.length} corrected price${fixable.length - failures.length === 1 ? '' : 's'} to Wix`,
-    metadata: { fixed: fixable.length - failures.length, failures: failures.length },
+    summary: `Price alignment: pushed ${fixable.length - failures.length} corrected price${fixable.length - failures.length === 1 ? '' : 's'} to ${cfg.label}`,
+    metadata: { site, fixed: fixable.length - failures.length, failures: failures.length },
   });
   return { fixed: fixable.length - failures.length, failures };
 }

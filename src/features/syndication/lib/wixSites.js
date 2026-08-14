@@ -8,6 +8,8 @@
 export const WIX_SITES = {
   sinksdirect_ca: {
     key: 'sinksdirect_ca',
+    channel: 'wix',
+    promoAware: true,
     label: 'Sinks Direct Canada',
     short: 'SinksDirect CA',
     url: 'https://www.sinksdirect.ca',
@@ -23,6 +25,8 @@ export const WIX_SITES = {
   },
   sinksdirect_us: {
     key: 'sinksdirect_us',
+    channel: 'wix_sinksdirect_us',
+    promoAware: true,
     label: 'Sinks Direct USA',
     short: 'SinksDirect USA',
     url: 'https://www.sinksdirectusa.com',
@@ -38,6 +42,8 @@ export const WIX_SITES = {
   },
   stylish_ca: {
     key: 'stylish_ca',
+    channel: 'wix_stylish_ca',
+    promoAware: false,
     label: 'Stylish Canada',
     short: 'Stylish CA',
     url: 'https://www.stylishkb.com',
@@ -53,6 +59,8 @@ export const WIX_SITES = {
   },
   stylish_us: {
     key: 'stylish_us',
+    channel: 'wix_stylish_us',
+    promoAware: false,
     label: 'Stylish USA',
     short: 'Stylish USA',
     url: 'https://www.stylishkbusa.com',

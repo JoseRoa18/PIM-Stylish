@@ -252,52 +252,66 @@ export async function pushMediaToWix(sku, site = DEFAULT_WIX_SITE) {
  * PIM↔Wix drift without touching the live API on every page view.
  *
  * in_sync    = linked products present and visible on Wix
- * with_diffs = live price differs from the EXPECTED price: the active promo
- *              price for promo members, else the regular MAP (CAD) — the
- *              SinksDirect selling price is the Canadian MAP, not MSRP
+ * with_diffs = price differs from the EXPECTED price. Per-site rule:
+ *              SinksDirect sites follow the monthly promo — expected is the
+ *              market's promo price for members (else MAP) and the DISCOUNTED
+ *              price counts as the live price. Stylish brand sites run their
+ *              own storefront sales, so only the BASE price is compared
+ *              against MSRP — their percent-off sales are not drift.
  * errors     = broken links (PIM points at a Wix id that no longer exists)
  */
-export async function refreshWixCatalog() {
-  const { data, error: fnError } = await supabase.functions.invoke('wix-pull-catalog', { body: {} });
+export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
+  const cfg = WIX_SITES[site];
+  if (!cfg) throw new Error(`Unknown Wix site "${site}"`);
+  const { data, error: fnError } = await supabase.functions.invoke('wix-pull-catalog', { body: { site } });
   if (fnError) throw new Error(fnError.message ?? 'wix-pull-catalog failed');
   if (data?.error) throw new Error(data.error);
   const { total, products: wixProducts } = data;
 
   const { data: prods, error } = await supabase
     .from('products')
-    .select('sku, map_cad, wix_product_id');
+    .select(`sku, base:${cfg.priceField}`);
   if (error) throw error;
+  const { data: linkRows, error: linkErr } = await supabase
+    .from('wix_links')
+    .select('sku, wix_product_id')
+    .eq('site', site);
+  if (linkErr) throw linkErr;
+  const baseBySku = new Map((prods ?? []).map((p) => [p.sku, p.base]));
 
-  const { data: activePromos, error: promoErr } = await supabase
-    .from('promotions')
-    .select('period, promotion_prices(sku, promo_price_cad)')
-    .eq('status', 'active')
-    .order('period', { ascending: true });
-  if (promoErr) throw promoErr;
+  const promoField = cfg.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const promoBySku = new Map();
-  for (const promo of activePromos ?? []) {
-    for (const row of promo.promotion_prices ?? []) {
-      if (row.promo_price_cad != null) promoBySku.set(row.sku, row.promo_price_cad);
+  if (cfg.promoAware) {
+    const { data: activePromos, error: promoErr } = await supabase
+      .from('promotions')
+      .select(`period, promotion_prices(sku, ${promoField})`)
+      .eq('status', 'active')
+      .order('period', { ascending: true });
+    if (promoErr) throw promoErr;
+    for (const promo of activePromos ?? []) {
+      for (const row of promo.promotion_prices ?? []) {
+        if (row[promoField] != null) promoBySku.set(row.sku, row[promoField]);
+      }
     }
   }
 
   const wixById = new Map(wixProducts.map((w) => [w.id, w]));
-  const linked = (prods ?? []).filter((p) => p.wix_product_id);
 
   const results = [];
   let inSync = 0;
   let priceDiffs = 0;
   let broken = 0;
-  for (const p of linked) {
+  for (const p of linkRows ?? []) {
     const w = wixById.get(p.wix_product_id);
     if (!w) {
       broken += 1;
       results.push({ sku: p.sku, wix_id: p.wix_product_id, state: 'missing' });
       continue;
     }
-    const livePrice = w.discountedPrice ?? w.price;
+    const base = baseBySku.get(p.sku) ?? null;
+    const livePrice = cfg.promoAware ? (w.discountedPrice ?? w.price) : w.price;
     const promoPrice = promoBySku.get(p.sku);
-    const expected = promoPrice ?? p.map_cad;
+    const expected = promoPrice ?? base;
     const priceDiff = expected != null && livePrice != null && Math.abs(livePrice - expected) > 0.01;
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
@@ -309,7 +323,7 @@ export async function refreshWixCatalog() {
       price: livePrice,
       expected: expected ?? null,
       expected_source: promoPrice != null ? 'promo' : 'map',
-      map: p.map_cad ?? null,
+      map: base,
       price_diff: priceDiff,
     });
   }
@@ -321,8 +335,8 @@ export async function refreshWixCatalog() {
     .map((w) => ({ sku: w.sku, wix_id: w.id, state: 'not_in_pim', name: w.name }));
 
   await supabase.from('channel_health').insert({
-    channel: 'wix',
-    target: 'wixapis.com',
+    channel: cfg.channel,
+    target: cfg.url.replace('https://www.', ''),
     total,
     in_sync: inSync,
     with_diffs: priceDiffs,
@@ -332,5 +346,5 @@ export async function refreshWixCatalog() {
     results: [...results, ...orphans],
   });
 
-  return { total, linked: linked.length, inSync, priceDiffs, broken, orphans: orphans.length };
+  return { total, linked: (linkRows ?? []).length, inSync, priceDiffs, broken, orphans: orphans.length };
 }
