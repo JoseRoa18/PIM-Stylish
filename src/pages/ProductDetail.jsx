@@ -22,7 +22,9 @@ import {
   History,
   Sparkles,
   Copy as CopyIcon,
+  Info,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { ThinkingOrb } from 'thinking-orbs';
 import { useProduct } from '@/features/products/hooks/useProduct';
 import { useProductMedia } from '@/features/media/hooks/useProductMedia';
@@ -120,6 +122,7 @@ const NUMBER_ATTRS = new Set([
   'number_of_pieces', 'number_of_installation_holes', 'number_of_handles',
   'faucet_height_in', 'spout_reach_in', 'spout_height_in',
   'install_hole_diameter_mm', 'install_hole_diameter_in', 'number_of_faucet_holes',
+  'spout_rotation_degrees',
 ]);
 
 
@@ -395,6 +398,29 @@ export default function ProductDetail() {
   const [showClone, setShowClone] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({});
+
+  // Data-driven dropdown suggestions: the distinct values the catalog already
+  // uses for enumerable fields. New values stay possible via "Other…".
+  const [suggestions, setSuggestions] = useState({});
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from('products')
+      .select('material, finish, spout_type:attributes->>spout_type, mounting_type:attributes->>mounting_type, lock_type:attributes->>lock_type')
+      .then(({ data }) => {
+        if (!active || !data) return;
+        const collect = (key) =>
+          [...new Set(data.map((r) => r[key]).filter((v) => v && String(v).trim()))].sort();
+        setSuggestions({
+          material: collect('material'),
+          finish: collect('finish'),
+          spout_type: collect('spout_type'),
+          mounting_type: collect('mounting_type'),
+          lock_type: collect('lock_type'),
+        });
+      });
+    return () => { active = false; };
+  }, []);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [propagation, setPropagation] = useState(null);
@@ -476,7 +502,7 @@ export default function ProductDetail() {
     product.series && `${product.series} Series`,
   ].filter(Boolean);
 
-  const editCtx = { isEditing, form, setField };
+  const editCtx = { isEditing, form, setField, suggestions };
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -1076,8 +1102,8 @@ function SpecsTab({ product, edit }) {
     <div className="space-y-6">
       <Section title="Physical Properties">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-          <EditableField label="Material" fieldKey="material" product={product} edit={edit} />
-          <EditableField label="Finish" fieldKey="finish" product={product} edit={edit} />
+          <EditableField label="Material" fieldKey="material" suggest product={product} edit={edit} />
+          <EditableField label="Finish" fieldKey="finish" suggest product={product} edit={edit} />
           <AttrField label="Craftsmanship" attrKey="craftsmanship" product={product} edit={edit} />
           {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" product={product} edit={edit} />}
           {isSink && <AttrField label="Installation Type" attrKey="installation_type" type="select" options={INSTALLATION_TYPE_OPTIONS} product={product} edit={edit} />}
@@ -1138,9 +1164,10 @@ function SpecsTab({ product, edit }) {
             <AttrField label="ISO 14021 Recycled" attrKey="iso_14021_certified" product={product} edit={edit} />
             <AttrField label="EPA WaterSense" attrKey="epa_watersense_certified" product={product} edit={edit} />
             <AttrField label="Type III EPD" attrKey="epd_type_iii" product={product} edit={edit} />
-            <AttrField label="UPLR Compliant" attrKey="uplr_compliant" product={product} edit={edit} />
+            <AttrField label="UPLR Compliant" attrKey="uplr_compliant" help="Uniform Packaging and Labeling Regulation." product={product} edit={edit} />
+            <AttrField label="DOE Compliant" attrKey="doe_compliant" help="Meets the U.S. Department of Energy water-conservation standards." product={product} edit={edit} />
             <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" product={product} edit={edit} />
-            <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
+            <AttrField label="California AB-100" attrKey="ab_100_compliant" help="California low-lead law for plumbing fixtures." product={product} edit={edit} />
             <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
             <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
           </div>
@@ -1225,13 +1252,15 @@ function SpecsTab({ product, edit }) {
         <>
           <Section title="Faucet Configuration">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="Spout Type" attrKey="spout_type" product={product} edit={edit} />
+              <AttrField label="Spout Type" attrKey="spout_type" suggest product={product} edit={edit} />
               <AttrField label="Swivel Spout" attrKey="swivel_spout" product={product} edit={edit} />
-              <AttrField label="Max Flow Rate" attrKey="max_flow_rate" product={product} edit={edit} />
+              <AttrField label="Spout Rotation (Degrees)" attrKey="spout_rotation_degrees" type="number" help="How far the spout swivels, in degrees (e.g. 360)." product={product} edit={edit} />
+              <AttrField label="Max Flow Rate (GPM)" attrKey="max_flow_rate" help="Maximum water flow in gallons per minute, typically measured at 60 psi." product={product} edit={edit} />
               <AttrField label="Installation Holes" attrKey="number_of_installation_holes" type="number" product={product} edit={edit} />
-              <AttrField label="Mounting / Installation Type" attrKey="mounting_type" product={product} edit={edit} />
-              <AttrField label="Connection Size" attrKey="connection_size" product={product} edit={edit} />
-              <AttrField label="Lock Type" attrKey="lock_type" product={product} edit={edit} />
+              <AttrField label="Mounting / Installation Type" attrKey="mounting_type" suggest product={product} edit={edit} />
+              <AttrField label="Connection Size" attrKey="connection_size" help='Water supply connection diameter in inches — enter the decimal (0.375 = 3/8").' product={product} edit={edit} />
+              <FractionField label="Connection Size" attrKey="connection_size" product={product} edit={edit} />
+              <AttrField label="Lock Type" attrKey="lock_type" suggest product={product} edit={edit} />
               <AttrField label="Hot & Cold Dispenser" attrKey="hot_cold_dispenser" type="boolean" product={product} edit={edit} />
             </div>
           </Section>
@@ -1292,19 +1321,20 @@ function SpecsTab({ product, edit }) {
 
           <Section title="Certifications & Compliance" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="ADA Compliant" attrKey="ada_compliant" product={product} edit={edit} />
-              <AttrField label="cUPC Certified" attrKey="cupc_certified" product={product} edit={edit} />
-              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" product={product} edit={edit} />
+              <AttrField label="ADA Compliant" attrKey="ada_compliant" help="Meets Americans with Disabilities Act accessibility requirements (one-hand operation, limited force)." product={product} edit={edit} />
+              <AttrField label="cUPC Certified" attrKey="cupc_certified" help="Certified by IAPMO to the Uniform Plumbing Code for the US and Canada." product={product} edit={edit} />
+              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" help="Backflow-prevention (anti-siphon) performance standard." product={product} edit={edit} />
               <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" product={product} edit={edit} />
-              <AttrField label="ASME/CSA B125.1" attrKey="asme_csa_certified" product={product} edit={edit} />
-              <AttrField label="ISTA 1A" attrKey="ista_1a_certified" product={product} edit={edit} />
-              <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" product={product} edit={edit} />
-              <AttrField label="CALGreen" attrKey="calgreen_compliant" product={product} edit={edit} />
-              <AttrField label="Title 20" attrKey="title_20_compliant" product={product} edit={edit} />
-              <AttrField label="Title 24" attrKey="title_24_compliant" product={product} edit={edit} />
-              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" product={product} edit={edit} />
+              <AttrField label="ASME/CSA B125.1" attrKey="asme_csa_certified" help="North American standard for plumbing supply fittings." product={product} edit={edit} />
+              <AttrField label="ISTA 1A" attrKey="ista_1a_certified" help="Packaging transit-test certification (non-simulation)." product={product} edit={edit} />
+              <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" help="Packaging transit-test certification for parcel delivery." product={product} edit={edit} />
+              <AttrField label="CALGreen" attrKey="calgreen_compliant" help="California Green Building Standards Code (water-efficient fixtures)." product={product} edit={edit} />
+              <AttrField label="Title 20" attrKey="title_20_compliant" help="California appliance efficiency regulation — maximum flow limits." product={product} edit={edit} />
+              <AttrField label="Title 24" attrKey="title_24_compliant" help="California building energy/water efficiency standard." product={product} edit={edit} />
+              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" help="Uniform Packaging and Labeling Regulation." product={product} edit={edit} />
+              <AttrField label="DOE Compliant" attrKey="doe_compliant" help="Meets the U.S. Department of Energy water-conservation standards for faucets." product={product} edit={edit} />
               <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" product={product} edit={edit} />
-              <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
+              <AttrField label="California AB-100" attrKey="ab_100_compliant" help="California low-lead law for plumbing fixtures." product={product} edit={edit} />
               <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
               {isBathFaucet && <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" product={product} edit={edit} />}
               {isBathFaucet && <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" product={product} edit={edit} />}
@@ -1700,11 +1730,12 @@ function FractionField({ label, attrKey, product, edit }) {
   return <Field label={`${label} (Fractions)`} value={fraction ? `${fraction}"` : null} />;
 }
 
-function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit }) {
+function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit, suggest, help }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;
   const shownUnit = unit ? (isEditing ? 'in' : unit) : null;
   if (shownUnit) label = withUnit(label, shownUnit);
+  if (help) label = <>{label}<HelpTip text={help} /></>;
 
   if (!isEditing) {
     const val = attr(product, attrKey);
@@ -1734,6 +1765,20 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
   const value = form[formKey];
   const inputBase = 'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
+  if (suggest) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-label-md text-on-surface-variant">{label}</span>
+        <SuggestInput
+          value={value ?? ''}
+          onChange={(v) => setField(formKey, v)}
+          suggestions={edit.suggestions?.[attrKey] ?? []}
+          inputBase={inputBase}
+        />
+      </div>
+    );
+  }
+
   if (type === 'select' && options) {
     return (
       <div className="flex flex-col gap-1">
@@ -1755,7 +1800,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
           onChange={(e) => setField(formKey, e.target.value)}
           rows={6}
           className={inputBase + ' resize-y'}
-          placeholder={`Enter ${label.toLowerCase()}…`}
+          placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`}
         />
       </div>
     );
@@ -1786,7 +1831,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     <div className="flex flex-col gap-1">
       <span className="text-label-md text-on-surface-variant">{label}</span>
       <input type="text" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)}
-        placeholder={`Enter ${label.toLowerCase()}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
+        placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
     </div>
   );
 }
@@ -1862,7 +1907,7 @@ function AttrListField({ label, attrKey, product, edit, hint }) {
         type="text"
         value={typeof value === 'string' ? value : joinList(value)}
         onChange={(e) => setField(formKey, e.target.value)}
-        placeholder={`Enter ${label.toLowerCase()}…`}
+        placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`}
         className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
       />
       {hint && <span className="text-label-md text-on-surface-variant/70 mt-0.5">{hint}</span>}
@@ -1929,8 +1974,9 @@ function BulletPointsEditor({ product, edit, attrKey = 'bullet_points' }) {
 
 // ===================== EditableField — for direct columns =====================
 
-function EditableField({ label, fieldKey, type = 'text', product, edit, mono, options }) {
+function EditableField({ label, fieldKey, type = 'text', product, edit, mono, options, suggest, help }) {
   const { isEditing, form, setField } = edit;
+  if (help) label = <>{label}<HelpTip text={help} /></>;
 
   if (!isEditing) {
     let displayValue = product[fieldKey];
@@ -1972,11 +2018,25 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
   const value = form[fieldKey];
   const inputBase = 'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
+  if (suggest) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-label-md text-on-surface-variant">{label}</span>
+        <SuggestInput
+          value={value ?? ''}
+          onChange={(v) => setField(fieldKey, v)}
+          suggestions={edit.suggestions?.[fieldKey] ?? []}
+          inputBase={inputBase}
+        />
+      </div>
+    );
+  }
+
   if (type === 'richtext') {
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <RichTextEditor value={value} onChange={(html) => setField(fieldKey, html)} placeholder={`Enter ${label.toLowerCase()}…`} minRows={4} />
+        <RichTextEditor value={value} onChange={(html) => setField(fieldKey, html)} placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} minRows={4} />
       </div>
     );
   }
@@ -1984,7 +2044,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <textarea value={value} onChange={(e) => setField(fieldKey, e.target.value)} rows={3} className={inputBase + ' resize-y'} placeholder={`Enter ${label.toLowerCase()}…`} />
+        <textarea value={value} onChange={(e) => setField(fieldKey, e.target.value)} rows={3} className={inputBase + ' resize-y'} placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} />
       </div>
     );
   }
@@ -2030,7 +2090,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     <div className="flex flex-col gap-1">
       <span className="text-label-md text-on-surface-variant">{label}</span>
       <input type="text" value={value} onChange={(e) => setField(fieldKey, e.target.value)}
-        placeholder={`Enter ${label.toLowerCase()}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
+        placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
     </div>
   );
 }
@@ -2074,6 +2134,62 @@ function EditableDocFlag({ label, fieldKey, product, edit, hasFile = true }) {
 }
 
 // ===================== Read-only field =====================
+
+// Small ⓘ next to a field label explaining what the field is about.
+function HelpTip({ text }) {
+  return (
+    <span
+      className="inline-flex align-text-bottom ml-1 text-on-surface-variant/60 hover:text-on-surface cursor-help"
+      title={text}
+      aria-label={text}
+    >
+      <Info className="w-3.5 h-3.5" />
+    </span>
+  );
+}
+
+// Dropdown fed by the values the catalog already uses, with an "Other…"
+// escape hatch that switches to free text so new values stay possible.
+function SuggestInput({ value, onChange, suggestions, inputBase }) {
+  const isKnown = !value || suggestions.includes(value);
+  const [custom, setCustom] = useState(false);
+  if (custom || (!isKnown && suggestions.length === 0)) {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          autoFocus
+          className={inputBase}
+        />
+        <button
+          type="button"
+          onClick={() => setCustom(false)}
+          title="Back to the list"
+          className="p-2 rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container-low flex-shrink-0"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+  return (
+    <select
+      value={isKnown ? (value ?? '') : value}
+      onChange={(e) => {
+        if (e.target.value === '__other__') setCustom(true);
+        else onChange(e.target.value);
+      }}
+      className={inputBase}
+    >
+      <option value="">—</option>
+      {suggestions.map((s) => (<option key={s} value={s}>{s}</option>))}
+      {!isKnown && <option value={value}>{value}</option>}
+      <option value="__other__">Other…</option>
+    </select>
+  );
+}
 
 function Field({ label, value, mono = false }) {
   const display = value && value !== '—' ? value : <span className="text-on-surface-variant">—</span>;
