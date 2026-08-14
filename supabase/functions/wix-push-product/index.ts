@@ -13,16 +13,20 @@
 //   - visible_pos (POS visibility is managed by separate Wix settings)
 //   - pre_order   (no v1 product PATCH support)
 //
-// Request body: { sku: string, fields?: Partial<PimRow> }
+// Request body: { sku: string, site?: string, fields?: Partial<PimRow> }
+// `site` picks the Wix site (see _shared/wixSites.ts); defaults to
+// SinksDirect Canada. The link comes from wix_links (site, sku) — the legacy
+// products.wix_product_id column backs only the CA site.
 // If `fields` is provided, those values are pushed directly to Wix instead
 // of reading from the PIM row. This lets the UI push edits without writing
 // them to the PIM first (PIM = source of truth, not overwritten by channels).
 //
 // Required secrets:
-//   WIX_API_KEY   — Wix API key with Stores write scope
-//   WIX_SITE_ID   — site UUID
+//   WIX_API_KEY   — account-level Wix API key (all sites)
+//   WIX_SITE_ID   — SinksDirect Canada site UUID
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { resolveWixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -42,6 +46,9 @@ interface PimRow {
   description: string | null;
   ribbon: string | null;
   map_cad: number | null;
+  map_usd: number | null;
+  msrp_cad: number | null;
+  msrp_usd: number | null;
   sale_price_cad: number | null;
   on_sale: boolean | null;
   shipping_weight_lb: number | null;
@@ -131,7 +138,10 @@ async function syncCollections(
   return { added: toAdd, removed: toRemove };
 }
 
-function buildProductPatch(pim: PimRow): Record<string, unknown> {
+function buildProductPatch(
+  pim: PimRow,
+  site: { priceField: keyof PimRow; currency: string; hasSale: boolean },
+): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
 
   if (pim.model_name != null) patch.name = pim.model_name;
@@ -140,19 +150,24 @@ function buildProductPatch(pim: PimRow): Record<string, unknown> {
   if (pim.ribbon != null) patch.ribbon = pim.ribbon;
   if (pim.shipping_weight_lb != null) patch.weight = Number(pim.shipping_weight_lb);
 
-  // SinksDirect sells at the Canadian MAP, not MSRP (user rule 2026-08-12).
-  // Wix v1 updates take the price under priceData (same shape the create
-  // endpoint uses) — a top-level `price` field is silently ignored.
-  if (pim.map_cad != null) {
-    patch.priceData = { price: Number(pim.map_cad), currency: "CAD" };
+  // Per-site selling price: SinksDirect sites sell at MAP, Stylish sites at
+  // MSRP, in the market's currency (see _shared/wixSites.ts). Wix v1 updates
+  // take the price under priceData (same shape the create endpoint uses) — a
+  // top-level `price` field is silently ignored.
+  const price = pim[site.priceField] as number | null;
+  if (price != null) {
+    patch.priceData = { price: Number(price), currency: site.currency };
   }
-  // Discount: if on_sale, compute discount as AMOUNT off the selling price.
-  // If off-sale, zero it out so Wix removes the sale.
-  if (pim.on_sale && pim.sale_price_cad != null && pim.map_cad != null) {
-    const amount = Math.max(0, Number(pim.map_cad) - Number(pim.sale_price_cad));
-    patch.discount = { type: "AMOUNT", value: amount };
-  } else {
-    patch.discount = { type: "AMOUNT", value: 0 };
+  // Discount: the PIM's sale fields are CAD promo prices for SinksDirect CA.
+  // On other sites they'd be the wrong currency/base, so never touch their
+  // discounts — those stay managed on the site until per-site promos land.
+  if (site.hasSale) {
+    if (pim.on_sale && pim.sale_price_cad != null && price != null) {
+      const amount = Math.max(0, Number(price) - Number(pim.sale_price_cad));
+      patch.discount = { type: "AMOUNT", value: amount };
+    } else {
+      patch.discount = { type: "AMOUNT", value: 0 };
+    }
   }
 
   if (pim.visible_online != null) patch.visible = pim.visible_online;
@@ -194,15 +209,15 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    console.log(`[wix-push] sku=${sku}`);
+    const site = resolveWixSite(body.site);
+    console.log(`[wix-push] sku=${sku} site=${site.key}`);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // We always need the wix_product_id from the PIM row.
     const { data: pimRow, error: loadErr } = await supabase
       .from("products")
       .select(
-        "sku, model_name, brand, description, ribbon, map_cad, sale_price_cad, on_sale, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id",
+        "sku, model_name, brand, description, ribbon, map_cad, map_usd, msrp_cad, msrp_usd, sale_price_cad, on_sale, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id",
       )
       .eq("sku", sku)
       .maybeSingle<PimRow>();
@@ -216,21 +231,34 @@ Deno.serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    if (!pimRow.wix_product_id) {
+
+    // The per-site link lives in wix_links; the legacy products column backs
+    // only SinksDirect CA rows that predate the table.
+    const { data: linkRow, error: linkReadErr } = await supabase
+      .from("wix_links")
+      .select("wix_product_id")
+      .eq("site", site.key)
+      .eq("sku", sku)
+      .maybeSingle();
+    if (linkReadErr) throw new Error(`Link read failed: ${linkReadErr.message}`);
+    const wixProductId = linkRow?.wix_product_id ??
+      (site.legacyColumns ? pimRow.wix_product_id : null);
+    if (!wixProductId) {
       return new Response(
         JSON.stringify({
-          error: `Product ${sku} is not linked to Wix. Run "Preview Link with Wix" first.`,
+          error: `Product ${sku} is not linked to ${site.label}. Link or create it there first.`,
         }),
         { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+    pimRow.wix_product_id = wixProductId;
 
     // If the caller sent `fields`, use those instead of the PIM columns.
     const source: PimRow = body.fields
-      ? { ...pimRow, ...body.fields, wix_product_id: pimRow.wix_product_id }
+      ? { ...pimRow, ...body.fields, wix_product_id: wixProductId }
       : pimRow;
 
-    const productPatch = buildProductPatch(source);
+    const productPatch = buildProductPatch(source, site);
     // `only` restricts the patch to the named Wix keys (e.g. ["priceData"])
     // — used by the price-alignment fixes so a correction can never touch
     // visibility, content, or anything else.
@@ -246,8 +274,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`[wix-push] PATCH Wix product ${pimRow.wix_product_id}, fields:`, Object.keys(productPatch).join(","));
-    const wixResp = await wixFetch(WIX_API_KEY, WIX_SITE_ID, `/stores/v1/products/${pimRow.wix_product_id}`, {
+    console.log(`[wix-push] PATCH Wix product ${wixProductId} on ${site.key}, fields:`, Object.keys(productPatch).join(","));
+    const wixResp = await wixFetch(WIX_API_KEY, site.siteId, `/stores/v1/products/${wixProductId}`, {
       method: "PATCH",
       body: JSON.stringify({ product: productPatch }),
     });
@@ -258,30 +286,43 @@ Deno.serve(async (req) => {
     }
     const wixData = await wixResp.json();
 
-    // Sync collections (categories) as a separate step. Failures here are
-    // surfaced but the product PATCH already succeeded.
+    // Sync collections (categories) as a separate step. The PIM stores
+    // SinksDirect CA collection GUIDs only — never push them to other sites.
+    // Failures here are surfaced but the product PATCH already succeeded.
     let collectionsResult: { added: string[]; removed: string[] } | null = null;
     let collectionsError: string | null = null;
-    try {
-      collectionsResult = await syncCollections(
-        WIX_API_KEY,
-        WIX_SITE_ID,
-        pimRow.wix_product_id,
-        source.wix_collection_ids ?? [],
-      );
-    } catch (e) {
-      collectionsError = e instanceof Error ? e.message : String(e);
-      console.error(`[wix-push] collections sync failed:`, collectionsError);
+    if (site.hasCollections) {
+      try {
+        collectionsResult = await syncCollections(
+          WIX_API_KEY,
+          site.siteId,
+          wixProductId,
+          source.wix_collection_ids ?? [],
+        );
+      } catch (e) {
+        collectionsError = e instanceof Error ? e.message : String(e);
+        console.error(`[wix-push] collections sync failed:`, collectionsError);
+      }
     }
 
-    // Stamp wix_synced_at so the PIM badge updates.
+    // Stamp the link's synced_at so the per-site badge updates; the legacy
+    // products.wix_synced_at column follows only for SinksDirect CA.
     const nowIso = new Date().toISOString();
-    const { error: touchErr } = await supabase
-      .from("products")
-      .update({ wix_synced_at: nowIso })
-      .eq("sku", sku);
-    if (touchErr) {
-      console.error(`[wix-push] failed to bump wix_synced_at:`, JSON.stringify(touchErr));
+    const { error: stampErr } = await supabase
+      .from("wix_links")
+      .upsert(
+        { site: site.key, sku, wix_product_id: wixProductId, synced_at: nowIso },
+        { onConflict: "site,sku" },
+      );
+    if (stampErr) console.error(`[wix-push] failed to stamp wix_links:`, JSON.stringify(stampErr));
+    if (site.legacyColumns) {
+      const { error: touchErr } = await supabase
+        .from("products")
+        .update({ wix_synced_at: nowIso })
+        .eq("sku", sku);
+      if (touchErr) {
+        console.error(`[wix-push] failed to bump wix_synced_at:`, JSON.stringify(touchErr));
+      }
     }
 
     console.log(`[wix-push] OK sku=${sku}`);
@@ -289,7 +330,8 @@ Deno.serve(async (req) => {
       JSON.stringify({
         ok: true,
         sku,
-        wix_product_id: pimRow.wix_product_id,
+        site: site.key,
+        wix_product_id: wixProductId,
         synced_fields: Object.keys(productPatch),
         collections: collectionsResult,
         collections_error: collectionsError,

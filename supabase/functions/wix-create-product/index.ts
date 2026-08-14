@@ -15,10 +15,13 @@
 // followed by a push never fights itself. Images are NOT part of phase 1 —
 // they're managed on Wix until the media endpoint is wired.
 //
-// Body: { sku: string }
+// Body: { sku: string, site?: string } — site defaults to SinksDirect
+// Canada; the link is written to wix_links (plus the legacy products columns
+// for the CA site).
 // Caller must be an authenticated admin or editor.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { resolveWixSite, type WixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -42,6 +45,9 @@ interface PimRow {
   description: string | null;
   ribbon: string | null;
   map_cad: number | null;
+  map_usd: number | null;
+  msrp_cad: number | null;
+  msrp_usd: number | null;
   sale_price_cad: number | null;
   on_sale: boolean | null;
   shipping_weight_lb: number | null;
@@ -51,21 +57,22 @@ interface PimRow {
 
 // Same shapes as wix-push-product's buildProductPatch, minus visibility
 // (forced hidden on create) — keep the two in sync.
-function buildCreateBody(pim: PimRow): Record<string, unknown> {
+function buildCreateBody(pim: PimRow, site: WixSite): Record<string, unknown> {
+  const price = pim[site.priceField as keyof PimRow] as number | null;
   const product: Record<string, unknown> = {
     name: pim.model_name?.trim() || pim.sku,
     productType: "physical",
     sku: pim.sku,
     visible: false,
-    // SinksDirect sells at the Canadian MAP, not MSRP (user rule 2026-08-12).
-    priceData: { price: pim.map_cad != null ? Number(pim.map_cad) : 0, currency: "CAD" },
+    // Per-site selling price: SinksDirect sites sell at MAP, Stylish at MSRP.
+    priceData: { price: price != null ? Number(price) : 0, currency: site.currency },
   };
   if (pim.description != null) product.description = pim.description;
   if (pim.brand != null) product.brand = pim.brand;
   if (pim.ribbon != null) product.ribbon = pim.ribbon;
   if (pim.shipping_weight_lb != null) product.weight = Number(pim.shipping_weight_lb);
-  if (pim.on_sale && pim.sale_price_cad != null && pim.map_cad != null) {
-    const amount = Math.max(0, Number(pim.map_cad) - Number(pim.sale_price_cad));
+  if (site.hasSale && pim.on_sale && pim.sale_price_cad != null && price != null) {
+    const amount = Math.max(0, Number(price) - Number(pim.sale_price_cad));
     product.discount = { type: "AMOUNT", value: amount };
   }
   if (Array.isArray(pim.additional_info_sections)) {
@@ -103,21 +110,29 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const sku = typeof body.sku === "string" ? body.sku.trim() : "";
     if (!sku) return json({ error: "sku is required." }, 400);
+    const site = resolveWixSite(body.site);
 
     const { data: pim, error: pimErr } = await admin
       .from("products")
-      .select("sku, model_name, brand, description, ribbon, map_cad, sale_price_cad, on_sale, shipping_weight_lb, additional_info_sections, wix_product_id")
+      .select("sku, model_name, brand, description, ribbon, map_cad, map_usd, msrp_cad, msrp_usd, sale_price_cad, on_sale, shipping_weight_lb, additional_info_sections, wix_product_id")
       .eq("sku", sku)
       .maybeSingle();
     if (pimErr) throw new Error(`PIM read failed: ${pimErr.message}`);
     if (!pim) return json({ error: `${sku} not found in the PIM.` }, 404);
-    if (pim.wix_product_id) {
-      return json({ error: `${sku} is already linked to Wix — use Push to update it.` }, 409);
+    const { data: linkRow, error: linkReadErr } = await admin
+      .from("wix_links")
+      .select("wix_product_id")
+      .eq("site", site.key)
+      .eq("sku", sku)
+      .maybeSingle();
+    if (linkReadErr) throw new Error(`Link read failed: ${linkReadErr.message}`);
+    if (linkRow || (site.legacyColumns && pim.wix_product_id)) {
+      return json({ error: `${sku} is already linked to ${site.label} — use Push to update it.` }, 409);
     }
     // No price, no listing: a hidden $0 product is one careless visibility
     // push away from being sold for nothing. Complete the PIM first.
-    if (pim.map_cad == null) {
-      return json({ error: `${sku} has no MAP (CAD) in the PIM — the SinksDirect selling price. Set its pricing first, then create it on Wix.` }, 400);
+    if (pim[site.priceField] == null) {
+      return json({ error: `${sku} has no ${site.priceField.replace("_", " ").toUpperCase()} in the PIM — the ${site.label} selling price. Set its pricing first, then create it on Wix.` }, 400);
     }
 
     const wix = (path: string, init: RequestInit = {}) =>
@@ -125,11 +140,31 @@ Deno.serve(async (req) => {
         ...init,
         headers: {
           "Authorization": WIX_API_KEY,
-          "wix-site-id": WIX_SITE_ID,
+          "wix-site-id": site.siteId,
           "Content-Type": "application/json",
           ...(init.headers ?? {}),
         },
       });
+
+    // Writes the per-site link; the legacy products columns follow for CA.
+    async function writeLink(wixProductId: string): Promise<string | null> {
+      const now = new Date().toISOString();
+      const { error: linkErr } = await admin
+        .from("wix_links")
+        .upsert(
+          { site: site.key, sku, wix_product_id: wixProductId, synced_at: now },
+          { onConflict: "site,sku" },
+        );
+      if (linkErr) return linkErr.message;
+      if (site.legacyColumns) {
+        const { error: legacyErr } = await admin
+          .from("products")
+          .update({ wix_product_id: wixProductId, wix_synced_at: now })
+          .eq("sku", sku);
+        if (legacyErr) return legacyErr.message;
+      }
+      return null;
+    }
 
     // --- does Wix already have this SKU? Then LINK, don't duplicate ---------
     // Full paged scan (hidden products included) — the query index can lag a
@@ -153,18 +188,15 @@ Deno.serve(async (req) => {
     }
 
     if (existing) {
-      const { error: linkErr } = await admin
-        .from("products")
-        .update({ wix_product_id: existing.id, wix_synced_at: new Date().toISOString() })
-        .eq("sku", sku);
-      if (linkErr) throw new Error(`Link write failed: ${linkErr.message}`);
-      return json({ linked_existing: true, id: existing.id, name: existing.name });
+      const linkErrMsg = await writeLink(existing.id);
+      if (linkErrMsg) throw new Error(`Link write failed: ${linkErrMsg}`);
+      return json({ linked_existing: true, site: site.key, id: existing.id, name: existing.name });
     }
 
     // --- create it, hidden --------------------------------------------------
     const createRes = await wix("/stores/v1/products", {
       method: "POST",
-      body: JSON.stringify(buildCreateBody(pim as PimRow)),
+      body: JSON.stringify(buildCreateBody(pim as PimRow, site)),
     });
     const created = await createRes.json();
     const id = created?.product?.id;
@@ -172,18 +204,16 @@ Deno.serve(async (req) => {
       return json({ error: `Wix create failed (${createRes.status}): ${JSON.stringify(created).slice(0, 300)}` }, 502);
     }
 
-    const { error: linkErr } = await admin
-      .from("products")
-      .update({ wix_product_id: id, wix_synced_at: new Date().toISOString() })
-      .eq("sku", sku);
-    if (linkErr) {
+    const linkErrMsg = await writeLink(id);
+    if (linkErrMsg) {
       // The product exists on Wix but the PIM link failed — surface loudly so
       // it can be re-linked instead of silently duplicated later.
-      return json({ error: `Created on Wix (${id}) but linking failed: ${linkErr.message}. Re-run to link.` }, 500);
+      return json({ error: `Created on ${site.label} (${id}) but linking failed: ${linkErrMsg}. Re-run to link.` }, 500);
     }
 
     return json({
       created: true,
+      site: site.key,
       id,
       name: created.product.name,
       visible: created.product.visible,

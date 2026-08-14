@@ -21,6 +21,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
+import { supabase } from '@/lib/supabase';
 import { pushProductToWix, readWixProduct, createProductOnWix, pushMediaToWix } from '../api/wixSync';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useWixCollections } from '../hooks/useWixCollections';
@@ -28,85 +29,98 @@ import RichTextEditor from '@/components/ui/RichTextEditor';
 import ProductHealthBadge from '@/features/dashboard/components/ProductHealthBadge';
 import { useAuth } from '@/features/auth/AuthContext';
 import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
+import { WIX_SITES, DEFAULT_WIX_SITE } from '../lib/wixSites';
 
 // Each group has an icon and a short summary string. Colors stay on the
 // brand palette — accents come from interaction state, not per-section hues.
-const FIELD_GROUPS = [
-  {
-    key: 'basic',
-    title: 'Basic info',
-    icon: Info,
-    summary: 'Name, brand, ribbon, description',
-    fields: [
-      { key: 'model_name', label: 'Name (in Wix)', type: 'text' },
-      { key: 'brand', label: 'Brand', type: 'text' },
-      { key: 'ribbon', label: 'Ribbon', type: 'text', hint: 'Small label like "New Arrival" shown over the product card.' },
-      { key: 'description', label: 'Description', type: 'richtext', rows: 8 },
-    ],
-  },
-  {
-    key: 'pricing',
-    title: 'Pricing',
-    icon: DollarSign,
-    summary: 'Price, sale, cost of goods',
-    fields: [
-      { key: 'map_cad', label: 'Price (CAD) — MAP', type: 'currency', hint: 'SinksDirect sells at the Canadian MAP.' },
-      { key: 'on_sale', label: 'On sale', type: 'boolean', hint: 'Show a discounted price on the Wix store.' },
-      { key: 'sale_price_cad', label: 'Sale price (CAD)', type: 'currency', dependsOn: 'on_sale' },
-    ],
-  },
-  {
-    key: 'visibility',
-    title: 'Visibility',
-    icon: Eye,
-    summary: 'Online store, Point of Sale',
-    fields: [
-      { key: 'visible_online', label: 'Show in online store', type: 'boolean' },
-      { key: 'visible_pos', label: 'Show in Point of Sale', type: 'boolean', notPushed: true },
-    ],
-  },
-  {
-    key: 'shipping',
-    title: 'Shipping & fulfillment',
-    icon: Truck,
-    summary: 'Weight, pre-order',
-    fields: [
-      { key: 'shipping_weight_lb', label: 'Shipping weight (lb)', type: 'number' },
-      { key: 'pre_order', label: 'Available for pre-order', type: 'boolean', notPushed: true },
-    ],
-  },
-  {
-    key: 'categories',
-    title: 'Categories',
-    icon: Tag,
-    summary: 'Wix collections this product belongs to',
-    fields: [
-      { key: 'wix_collection_ids', label: 'Wix categories', type: 'collections' },
-    ],
-  },
-  {
-    key: 'sections',
-    title: 'Additional info sections',
-    icon: FileText,
-    summary: 'Dimensions, features, documents',
-    fields: [
-      {
-        key: 'additional_info_sections',
-        label: 'Sections',
-        type: 'sections',
-        hint: 'Dimensions and Features are rebuilt from the PIM (measurements and bullets); document links are repointed to PIM files when a matching one exists — unmatched links keep their old URL.',
-      },
-    ],
-  },
-];
+// Built per site: the pricing group carries the site's own selling-price
+// column (SinksDirect → MAP, Stylish → MSRP, market currency), sale fields
+// only where the PIM's CAD sale columns apply, and the categories picker
+// only where the PIM stores that site's collection ids (SinksDirect CA).
+function makeFieldGroups(cfg) {
+  return [
+    {
+      key: 'basic',
+      title: 'Basic info',
+      icon: Info,
+      summary: 'Name, brand, ribbon, description',
+      fields: [
+        { key: 'model_name', label: 'Name (in Wix)', type: 'text' },
+        { key: 'brand', label: 'Brand', type: 'text' },
+        { key: 'ribbon', label: 'Ribbon', type: 'text', hint: 'Small label like "New Arrival" shown over the product card.' },
+        { key: 'description', label: 'Description', type: 'richtext', rows: 8 },
+      ],
+    },
+    {
+      key: 'pricing',
+      title: 'Pricing',
+      icon: DollarSign,
+      summary: cfg.hasSale ? 'Price, sale' : 'Price',
+      fields: [
+        { key: cfg.priceField, label: cfg.priceLabel, type: 'currency', symbol: cfg.symbol, hint: cfg.priceHint },
+        ...(cfg.hasSale
+          ? [
+              { key: 'on_sale', label: 'On sale', type: 'boolean', hint: 'Show a discounted price on the Wix store.' },
+              { key: 'sale_price_cad', label: 'Sale price (CAD)', type: 'currency', symbol: cfg.symbol, dependsOn: 'on_sale' },
+            ]
+          : []),
+      ],
+    },
+    {
+      key: 'visibility',
+      title: 'Visibility',
+      icon: Eye,
+      summary: 'Online store, Point of Sale',
+      fields: [
+        { key: 'visible_online', label: 'Show in online store', type: 'boolean' },
+        { key: 'visible_pos', label: 'Show in Point of Sale', type: 'boolean', notPushed: true },
+      ],
+    },
+    {
+      key: 'shipping',
+      title: 'Shipping & fulfillment',
+      icon: Truck,
+      summary: 'Weight, pre-order',
+      fields: [
+        { key: 'shipping_weight_lb', label: 'Shipping weight (lb)', type: 'number' },
+        { key: 'pre_order', label: 'Available for pre-order', type: 'boolean', notPushed: true },
+      ],
+    },
+    ...(cfg.hasCollections
+      ? [{
+          key: 'categories',
+          title: 'Categories',
+          icon: Tag,
+          summary: 'Wix collections this product belongs to',
+          fields: [
+            { key: 'wix_collection_ids', label: 'Wix categories', type: 'collections' },
+          ],
+        }]
+      : []),
+    {
+      key: 'sections',
+      title: 'Additional info sections',
+      icon: FileText,
+      summary: 'Dimensions, features, documents',
+      fields: [
+        {
+          key: 'additional_info_sections',
+          label: 'Sections',
+          type: 'sections',
+          hint: 'Dimensions and Features are rebuilt from the PIM (measurements and bullets); document links are repointed to PIM files when a matching one exists — unmatched links keep their old URL.',
+        },
+      ],
+    },
+  ];
+}
 
-const ALL_FIELD_KEYS = FIELD_GROUPS.flatMap((g) => g.fields.map((f) => f.key));
-
-export default function WixSyndicationCard({ product, media, onUpdate }) {
+export default function WixSyndicationCard({ product, media, onUpdate, site = DEFAULT_WIX_SITE }) {
+  const cfg = WIX_SITES[site] ?? WIX_SITES[DEFAULT_WIX_SITE];
+  const fieldGroups = useMemo(() => makeFieldGroups(cfg), [cfg]);
   // Viewers see the link status and health, never the edit-&-push surface.
   const { canEdit } = useAuth();
   const confirm = useConfirm();
-  const [form, setForm] = useState(() => buildForm(product));
+  const [form, setForm] = useState(() => buildForm(product, fieldGroups));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -115,6 +129,29 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
   const [openGroups, setOpenGroups] = useState(() => new Set());
   // Card expansion — collapsed by default; user expands to see/edit fields.
   const [cardExpanded, setCardExpanded] = useState(false);
+
+  // Per-site link (wix_links table). The legacy products.wix_product_id
+  // column doubles as the SinksDirect CA link, so that site renders linked
+  // instantly; other sites resolve after the fetch. undefined = loading.
+  const legacyLink = cfg.key === DEFAULT_WIX_SITE && product?.wix_product_id
+    ? { wix_product_id: product.wix_product_id, synced_at: product.wix_synced_at }
+    : null;
+  const [link, setLink] = useState(undefined);
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from('wix_links')
+      .select('wix_product_id, synced_at')
+      .eq('site', cfg.key)
+      .eq('sku', product.sku)
+      .maybeSingle()
+      .then(({ data, error: linkErr }) => {
+        if (!active) return;
+        if (linkErr) { setLink(null); return; }
+        setLink(data ?? null);
+      });
+    return () => { active = false; };
+  }, [product.sku, cfg.key]);
 
   // Live Wix data — the form shows what's in Wix right now.
   // wixBaseline = the unedited Wix values (for detecting user edits).
@@ -126,14 +163,16 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
   // link); 'error' = couldn't reach Wix (transient). null = OK / not read yet.
   const [wixStatus, setWixStatus] = useState(null);
 
-  const linked = Boolean(product?.wix_product_id);
+  const effectiveLink = link === undefined ? legacyLink : (link ?? legacyLink);
+  const linked = Boolean(effectiveLink);
+  const linkLoading = link === undefined && !legacyLink;
 
   useEffect(() => {
     if (!linked) return;
     let active = true;
     setWixLoading(true);
     setWixStatus(null);
-    readWixProduct(product.sku)
+    readWixProduct(product.sku, cfg.key)
       .then((res) => {
         if (!active) return;
         if (!res || res.exists === false) {
@@ -152,12 +191,12 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
       .catch(() => { if (active) setWixStatus('error'); })
       .finally(() => { if (active) setWixLoading(false); });
     return () => { active = false; };
-  }, [product.sku, linked]);
+  }, [product.sku, linked, cfg.key]);
 
   const wixMissing = wixStatus === 'missing';
 
   // "Edited" = user changed something vs what Wix currently has
-  const baseline = wixBaseline ?? buildForm(product);
+  const baseline = wixBaseline ?? buildForm(product, fieldGroups);
 
   // What the listing's sections SHOULD say per the PIM: Dimensions from the
   // measurement attributes, Features from bullet_points, document links
@@ -167,9 +206,9 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
       deriveWixSectionsFromPim(
         product,
         media,
-        (wixBaseline ?? buildForm(product)).additional_info_sections,
+        (wixBaseline ?? buildForm(product, fieldGroups)).additional_info_sections,
       ),
-    [product, media, wixBaseline],
+    [product, media, wixBaseline, fieldGroups],
   );
   // The sections field's "differs from PIM" comparison runs against the
   // derived value — the raw PIM column just mirrors the last push.
@@ -198,26 +237,26 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
   }
   const dirtyByGroup = useMemo(() => {
     const out = {};
-    for (const g of FIELD_GROUPS) {
+    for (const g of fieldGroups) {
       out[g.key] = g.fields.filter(
         (f) => !valuesEqual(form[f.key], baseline[f.key]),
       ).length;
     }
     return out;
-  }, [form, baseline]);
+  }, [form, baseline, fieldGroups]);
   const totalDirty = Object.values(dirtyByGroup).reduce((a, b) => a + b, 0);
   const dirty = totalDirty > 0;
 
   // "Differs from PIM" = Wix value ≠ PIM value (informational)
   const pimDiffsByGroup = useMemo(() => {
     const out = {};
-    for (const g of FIELD_GROUPS) {
+    for (const g of fieldGroups) {
       out[g.key] = g.fields.filter(
         (f) => !valuesEqual(form[f.key], pimView?.[f.key]),
       ).length;
     }
     return out;
-  }, [form, pimView]);
+  }, [form, pimView, fieldGroups]);
   const totalPimDiffs = Object.values(pimDiffsByGroup).reduce((a, b) => a + b, 0);
 
   function setField(key, value) {
@@ -234,7 +273,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
   }
 
   function expandAll() {
-    setOpenGroups(new Set(FIELD_GROUPS.map((g) => g.key)));
+    setOpenGroups(new Set(fieldGroups.map((g) => g.key)));
   }
 
   function collapseAll() {
@@ -247,15 +286,17 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
     setSuccess(false);
     try {
       // Send form values directly to Wix — do NOT write to PIM.
-      const result = await pushProductToWix(product.sku, form);
+      const result = await pushProductToWix(product.sku, form, undefined, cfg.key);
 
       // Update the baseline so the form no longer shows as "edited"
       setWixBaseline({ ...form });
 
-      // Only update the sync timestamp on the PIM side
-      onUpdate({
-        wix_synced_at: result?.wix_synced_at ?? new Date().toISOString(),
-      });
+      const syncedAt = result?.wix_synced_at ?? new Date().toISOString();
+      setLink((prev) => (prev ? { ...prev, synced_at: syncedAt } : prev));
+      // The legacy PIM timestamp only mirrors the SinksDirect CA site.
+      if (cfg.key === DEFAULT_WIX_SITE) {
+        onUpdate({ wix_synced_at: syncedAt });
+      }
 
       if (result?.collections_error) {
         setError(`Pushed, but categories sync failed: ${result.collections_error}`);
@@ -271,7 +312,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
   }
 
   function handleReset() {
-    setForm(buildForm(product));
+    setForm(wixBaseline ?? buildForm(product, fieldGroups));
     setError(null);
     setSuccess(false);
   }
@@ -283,9 +324,9 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
         <div className="flex items-center gap-4 min-w-0">
           <WixLogo />
           <div className="min-w-0">
-            <h3 className="text-title-lg text-on-surface leading-tight">Sinks Direct Canada</h3>
+            <h3 className="text-title-lg text-on-surface leading-tight">{cfg.label}</h3>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Wix Stores · edit the fields below, then push to update.
+              Wix Stores · sells at {cfg.priceLabel.replace('Price ', '')} · edit the fields below, then push to update.
             </p>
             {wixUrl && !wixMissing && (
               <a
@@ -300,7 +341,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
             )}
           </div>
         </div>
-        <StatusBadge linked={linked} missing={wixMissing} syncedAt={product?.wix_synced_at} />
+        <StatusBadge linked={linked} loading={linkLoading} missing={wixMissing} syncedAt={effectiveLink?.synced_at} />
       </header>
 
       {linked && wixMissing ? (
@@ -351,9 +392,19 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
         </button>
       )}
 
-      {!linked ? (
+      {linkLoading ? (
+        <div className="px-8 pb-8 text-body-sm text-on-surface-variant">Checking link…</div>
+      ) : !linked ? (
         <div className="px-8 pb-8">
-          <NotLinkedNotice product={product} canEdit={canEdit} onLinked={onUpdate} />
+          <NotLinkedNotice
+            product={product}
+            site={cfg}
+            canEdit={canEdit}
+            onLinked={(patch, wixId) => {
+              setLink({ wix_product_id: wixId, synced_at: new Date().toISOString() });
+              if (cfg.key === DEFAULT_WIX_SITE) onUpdate?.(patch);
+            }}
+          />
         </div>
       ) : cardExpanded ? (
         <>
@@ -418,7 +469,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
                     setMediaBusy(true);
                     setMediaMsg(null);
                     try {
-                      const res = await pushMediaToWix(product.sku);
+                      const res = await pushMediaToWix(product.sku, cfg.key);
                       const setLabel = { en_fr: 'EN/FR', en: 'EN', en_es_universal: 'EN/ES + universal' }[res.language_set] ?? '';
                       const parts = [`Sent ${res.added} ${setLabel} image${res.added === 1 ? '' : 's'}`];
                       if (res.skipped_other_language) parts.push(`${res.skipped_other_language} other-language skipped`);
@@ -451,7 +502,7 @@ export default function WixSyndicationCard({ product, media, onUpdate }) {
 
           {/* Groups */}
           <div className="px-6 py-5 space-y-2 bg-surface-container-low/30">
-            {FIELD_GROUPS.map((group) => (
+            {fieldGroups.map((group) => (
               <FieldGroup
                 key={group.key}
                 group={group}
@@ -638,7 +689,7 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
             disabled={disabled}
           />
         </div>
-        {pimDiffers && <PimHint value={pimValue} type="boolean" />}
+        {pimDiffers && <PimHint value={pimValue} type="boolean" symbol={field.symbol} />}
       </div>
     );
   }
@@ -690,7 +741,7 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
       {field.type === 'currency' && (
         <div className="relative">
           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-body-md text-on-surface-variant pointer-events-none">
-            C$
+            {field.symbol ?? 'C$'}
           </span>
           <input
             type="number"
@@ -742,17 +793,17 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
           {field.hint}
         </p>
       )}
-      {pimDiffers && <PimHint value={pimValue} type={field.type} />}
+      {pimDiffers && <PimHint value={pimValue} type={field.type} symbol={field.symbol} />}
     </div>
   );
 }
 
-function PimHint({ value, type }) {
+function PimHint({ value, type, symbol }) {
   let display;
   if (type === 'boolean') {
     display = value ? 'Yes' : 'No';
   } else if (type === 'currency') {
-    display = value != null ? `C$ ${Number(value).toFixed(2)}` : '—';
+    display = value != null ? `${symbol ?? 'C$'} ${Number(value).toFixed(2)}` : '—';
   } else if (type === 'richtext' || type === 'sections' || type === 'collections') {
     return null;
   } else if (value == null || value === '') {
@@ -1109,7 +1160,15 @@ function SectionPimHint({ html, actionLabel, onApply }) {
 
 // ============================== Status / notices ==============================
 
-function StatusBadge({ linked, missing, syncedAt }) {
+function StatusBadge({ linked, loading, missing, syncedAt }) {
+  if (loading) {
+    return (
+      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container text-body-sm text-on-surface-variant">
+        <RefreshCw className="w-3 h-3 animate-spin" />
+        Checking…
+      </span>
+    );
+  }
   if (!linked) {
     return (
       <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container text-body-sm text-on-surface-variant">
@@ -1225,7 +1284,7 @@ function BrokenLinkNotice() {
  * Wix already has the SKU (never linked), the function links instead of
  * duplicating, and this card flips straight into the update/diff view.
  */
-function NotLinkedNotice({ product, canEdit, onLinked }) {
+function NotLinkedNotice({ product, site, canEdit, onLinked }) {
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -1233,17 +1292,16 @@ function NotLinkedNotice({ product, canEdit, onLinked }) {
   async function handleCreate() {
     setError(null);
     const ok = await confirm({
-      title: `Create ${product.sku} on Wix?`,
-      message: 'The product is created HIDDEN on the site with the PIM\'s name, description, price, weight and brand — customers won\'t see it until you push it visible. If Wix already has this SKU, it links to it instead of creating a duplicate. Images are managed on Wix for now.',
+      title: `Create ${product.sku} on ${site.label}?`,
+      message: `The product is created HIDDEN on the site with the PIM's name, description, price (${site.priceLabel}), weight and brand — customers won't see it until you push it visible. If the site already has this SKU, it links to it instead of creating a duplicate.`,
       confirmLabel: 'Create on Wix',
     });
     if (!ok) return;
     setBusy(true);
     try {
-      const res = await createProductOnWix(product.sku);
-      // onLinked is ProductDetail's mergeProduct — patching the link in flips
-      // this card straight into the linked update/diff view.
-      onLinked?.({ wix_product_id: res.id, wix_synced_at: new Date().toISOString() });
+      const res = await createProductOnWix(product.sku, site.key);
+      // The parent flips this card straight into the linked update/diff view.
+      onLinked?.({ wix_product_id: res.id, wix_synced_at: new Date().toISOString() }, res.id);
     } catch (err) {
       setError(err.message ?? 'Create failed');
       setBusy(false);
@@ -1256,7 +1314,7 @@ function NotLinkedNotice({ product, canEdit, onLinked }) {
         <AlertCircle className="w-5 h-5 text-secondary flex-shrink-0 mt-0.5" />
         <div className="flex-1">
           <p className="text-body-md text-on-secondary-container font-semibold">
-            Not on Wix yet
+            Not on {site.label} yet
           </p>
           <p className="text-body-sm text-on-secondary-container mt-1">
             Create it from here (it starts hidden), or go to{' '}
@@ -1316,22 +1374,21 @@ function WixLogo() {
 
 // ============================== Helpers ==============================
 
-function buildForm(product) {
+function buildForm(product, fieldGroups) {
   const out = {};
-  for (const key of ALL_FIELD_KEYS) {
-    const v = product?.[key];
-    if (key === 'wix_collection_ids') {
-      out[key] = Array.isArray(v) ? [...v] : [];
-    } else if (key === 'additional_info_sections') {
-      out[key] = Array.isArray(v) ? v.map((s) => ({ ...s })) : [];
-    } else {
-      out[key] = v ?? (typeof v === 'boolean' ? v : null);
-    }
-  }
-  for (const group of FIELD_GROUPS) {
+  for (const group of fieldGroups) {
     for (const field of group.fields) {
-      if (field.type === 'boolean' && out[field.key] == null) {
-        out[field.key] = false;
+      const key = field.key;
+      const v = product?.[key];
+      if (key === 'wix_collection_ids') {
+        out[key] = Array.isArray(v) ? [...v] : [];
+      } else if (key === 'additional_info_sections') {
+        out[key] = Array.isArray(v) ? v.map((s) => ({ ...s })) : [];
+      } else {
+        out[key] = v ?? (typeof v === 'boolean' ? v : null);
+      }
+      if (field.type === 'boolean' && out[key] == null) {
+        out[key] = false;
       }
     }
   }

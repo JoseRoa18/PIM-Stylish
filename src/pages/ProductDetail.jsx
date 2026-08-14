@@ -41,6 +41,7 @@ import StatusBadge from '@/features/products/components/StatusBadge';
 import MediaSection from '@/features/media/components/MediaSection';
 import DocumentsSection from '@/features/media/components/DocumentsSection';
 import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
+import { WIX_SITES, WIX_SITE_KEYS, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
@@ -1579,10 +1580,32 @@ function MediaTab({ sku, category, familyNumber, installationType }) {
 }
 
 function MarketplacesTab({ product, media, onUpdate }) {
+  // One Wix card at a time — each site is its own store (own catalog, own
+  // price rule); keying by site remounts the card so it reads that site live.
+  const [wixSite, setWixSite] = useState(DEFAULT_WIX_SITE);
   return (
     <div className="space-y-6">
       <p className="text-body-md text-on-surface-variant">Manage per-channel fields below, then push the changes to each marketplace.</p>
-      <WixSyndicationCard product={product} media={media} onUpdate={onUpdate} />
+      <div>
+        <div className="flex items-center gap-1.5 flex-wrap mb-3">
+          <span className="text-label-md text-on-surface-variant mr-1.5">Wix site:</span>
+          {WIX_SITE_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setWixSite(key)}
+              className={`px-3 py-1.5 rounded-full text-label-md font-medium transition-colors ${
+                wixSite === key
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              {WIX_SITES[key].short}
+            </button>
+          ))}
+        </div>
+        <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
+      </div>
       <WayfairProductCard product={product} onUpdate={onUpdate} />
       <ExportTemplatesCard product={product} media={media} />
     </div>

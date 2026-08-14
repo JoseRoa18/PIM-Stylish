@@ -1,16 +1,20 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { WIX_SITES, DEFAULT_WIX_SITE } from '../lib/wixSites';
+
+const siteLabel = (site) => WIX_SITES[site]?.label ?? 'Wix';
 
 /**
  * Calls the wix-import-products Edge Function (link-only mode).
- * Links PIM rows to Wix products by SKU match — sets wix_product_id + wix_synced_at.
+ * Links PIM rows to the site's Wix products by SKU match (wix_links table).
  *
  * @param {Object} opts
  * @param {boolean} opts.dryRun - true → preview only, false → apply
+ * @param {string} opts.site - which Wix site (defaults to SinksDirect Canada)
  */
-export async function runWixImport({ dryRun = true } = {}) {
+export async function runWixImport({ dryRun = true, site = DEFAULT_WIX_SITE } = {}) {
   const { data, error } = await supabase.functions.invoke('wix-import-products', {
-    body: { dryRun },
+    body: { dryRun, site },
   });
 
   if (error) {
@@ -34,15 +38,15 @@ export async function runWixImport({ dryRun = true } = {}) {
 
   // Only the apply run is a real change to the Wix site; skip dry-run previews.
   if (!dryRun) {
-    const matched = data?.linked ?? data?.matched;
+    const matched = data?.applied ?? data?.linked ?? data?.matched;
     logActivity({
       action: 'import',
       entityType: 'product',
       target: 'wix',
       summary: matched != null
-        ? `Linked PIM products to Wix (${matched} matched)`
-        : 'Linked PIM products to Wix',
-      metadata: { result: data ?? null },
+        ? `Linked PIM products to ${siteLabel(site)} (${matched} matched)`
+        : `Linked PIM products to ${siteLabel(site)}`,
+      metadata: { site, result: data ?? null },
     });
   }
   return data;
@@ -87,9 +91,9 @@ export async function listWixCollections() {
  *   - snapshot: the mapped Wix fields, or null when it doesn't exist
  * Throws only on real failures (network, auth, unexpected API errors).
  */
-export async function readWixProduct(sku) {
+export async function readWixProduct(sku, site = DEFAULT_WIX_SITE) {
   const { data, error } = await supabase.functions.invoke('wix-read-product', {
-    body: { sku },
+    body: { sku, site },
   });
 
   if (error) {
@@ -118,8 +122,8 @@ export async function readWixProduct(sku) {
  * sent directly to Wix WITHOUT writing to the PIM (PIM stays untouched).
  * If omitted, the Edge Function reads from PIM columns as before.
  */
-export async function pushProductToWix(sku, fields = undefined, only = undefined) {
-  const body = { sku };
+export async function pushProductToWix(sku, fields = undefined, only = undefined, site = DEFAULT_WIX_SITE) {
+  const body = { sku, site };
   if (fields) body.fields = fields;
   if (only) body.only = only;
   const { data, error } = await supabase.functions.invoke('wix-push-product', {
@@ -150,8 +154,8 @@ export async function pushProductToWix(sku, fields = undefined, only = undefined
     entityType: 'product',
     entityId: sku,
     target: 'wix',
-    summary: `Pushed ${sku} to Wix`,
-    metadata: { ...(fields ? { fields: Object.keys(fields) } : { source: 'pim' }), ...(only ? { only } : {}) },
+    summary: `Pushed ${sku} to ${siteLabel(site)}`,
+    metadata: { site, ...(fields ? { fields: Object.keys(fields) } : { source: 'pim' }), ...(only ? { only } : {}) },
   });
   return data;
 }
@@ -161,8 +165,8 @@ export async function pushProductToWix(sku, fields = undefined, only = undefined
  * push). If Wix already has the SKU unlinked, the function links it instead
  * of duplicating. Returns { created?, linked_existing?, id, name }.
  */
-export async function createProductOnWix(sku) {
-  const { data, error } = await supabase.functions.invoke('wix-create-product', { body: { sku } });
+export async function createProductOnWix(sku, site = DEFAULT_WIX_SITE) {
+  const { data, error } = await supabase.functions.invoke('wix-create-product', { body: { sku, site } });
   if (error) {
     let detail = error.message;
     try {
@@ -187,9 +191,9 @@ export async function createProductOnWix(sku) {
     entityId: sku,
     target: 'wix',
     summary: data.linked_existing
-      ? `Linked ${sku} to its existing Wix product`
-      : `Created ${sku} on Wix (hidden)`,
-    metadata: { wix_product_id: data.id },
+      ? `Linked ${sku} to its existing ${siteLabel(site)} product`
+      : `Created ${sku} on ${siteLabel(site)} (hidden)`,
+    metadata: { site, wix_product_id: data.id },
   });
   return data;
 }
@@ -201,9 +205,9 @@ export async function createProductOnWix(sku) {
  * The full selected set is sent; Wix silently keeps at most ~16 (reported as
  * over_wix_cap). Ingestion is asynchronous on Wix's side (~15-30s to appear).
  */
-export async function pushMediaToWix(sku) {
+export async function pushMediaToWix(sku, site = DEFAULT_WIX_SITE) {
   const { data, error } = await supabase.functions.invoke('wix-push-media', {
-    body: { sku, action: 'replace' },
+    body: { sku, action: 'replace', site },
   });
   if (error) {
     let detail = error.message;
@@ -228,8 +232,9 @@ export async function pushMediaToWix(sku) {
     entityType: 'product',
     entityId: sku,
     target: 'wix',
-    summary: `Pushed ${data.added ?? 0} image${(data.added ?? 0) === 1 ? '' : 's'} to Wix for ${sku}`,
+    summary: `Pushed ${data.added ?? 0} image${(data.added ?? 0) === 1 ? '' : 's'} to ${siteLabel(site)} for ${sku}`,
     metadata: {
+      site,
       added: data.added,
       removed: data.removed ?? 0,
       language_set: data.language_set ?? null,

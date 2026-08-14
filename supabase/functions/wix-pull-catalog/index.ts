@@ -2,7 +2,9 @@
 // the fleet-level read that channel monitoring needs. Read-only: nothing is
 // written to Wix. Callers (wixSync.refreshWixCatalog in the browser, the
 // health-refresh cron) join the result against the PIM and persist the
-// channel_health snapshot.
+// channel_health snapshot. Body: { site? } — defaults to SinksDirect Canada.
+
+import { resolveWixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -40,10 +42,12 @@ Deno.serve(async (req) => {
 
   try {
     const WIX_API_KEY = Deno.env.get("WIX_API_KEY");
-    const WIX_SITE_ID = Deno.env.get("WIX_SITE_ID");
-    if (!WIX_API_KEY || !WIX_SITE_ID) {
-      return json({ error: "Missing WIX_API_KEY or WIX_SITE_ID secret." }, 500);
+    if (!WIX_API_KEY) {
+      return json({ error: "Missing WIX_API_KEY secret." }, 500);
     }
+    const body = await req.json().catch(() => ({}));
+    const site = resolveWixSite(body.site);
+    const WIX_SITE_ID = site.siteId;
 
     const products: {
       id: string; sku: string | null; name: string; visible: boolean;
@@ -87,7 +91,7 @@ Deno.serve(async (req) => {
       if (batch.length === 0 || offset >= total) break;
     }
 
-    return json({ total: products.length, products });
+    return json({ site: site.key, total: products.length, products });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[wix-pull-catalog] FAILED:", message);

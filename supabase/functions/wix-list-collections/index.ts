@@ -2,10 +2,13 @@
 //
 // The UI uses these to render the multi-select picker on the Wix
 // syndication card. They change rarely, so the client can cache the result.
+// Body: { site? } — defaults to SinksDirect Canada.
 //
 // Required secrets:
 //   WIX_API_KEY
 //   WIX_SITE_ID
+
+import { resolveWixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -31,14 +34,15 @@ Deno.serve(async (req) => {
 
   try {
     const WIX_API_KEY = Deno.env.get("WIX_API_KEY");
-    const WIX_SITE_ID = Deno.env.get("WIX_SITE_ID");
-
-    if (!WIX_API_KEY || !WIX_SITE_ID) {
+    if (!WIX_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "Missing WIX_API_KEY or WIX_SITE_ID secret." }),
+        JSON.stringify({ error: "Missing WIX_API_KEY secret." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const site = resolveWixSite(body.site);
+    const WIX_SITE_ID = site.siteId;
 
     const all: WixCollection[] = [];
     let offset = 0;

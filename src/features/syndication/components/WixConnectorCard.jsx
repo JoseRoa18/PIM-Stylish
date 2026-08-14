@@ -7,9 +7,11 @@ import {
   Link as LinkIcon,
 } from 'lucide-react';
 import { runWixImport } from '../api/wixSync';
+import { WIX_SITES, WIX_SITE_KEYS, DEFAULT_WIX_SITE } from '../lib/wixSites';
 
 export default function WixConnectorCard() {
   const [phase, setPhase] = useState('idle'); // idle | previewing | preview-ready | applying | done | error
+  const [site, setSite] = useState(DEFAULT_WIX_SITE);
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -19,7 +21,7 @@ export default function WixConnectorCard() {
     setError(null);
     setResult(null);
     try {
-      const data = await runWixImport({ dryRun: true });
+      const data = await runWixImport({ dryRun: true, site });
       setPreview(data);
       setPhase('preview-ready');
     } catch (err) {
@@ -32,7 +34,7 @@ export default function WixConnectorCard() {
     setPhase('applying');
     setError(null);
     try {
-      const data = await runWixImport({ dryRun: false });
+      const data = await runWixImport({ dryRun: false, site });
       setResult(data);
       setPhase('done');
     } catch (err) {
@@ -62,9 +64,26 @@ export default function WixConnectorCard() {
 
       {phase === 'idle' && (
         <div className="space-y-4">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-label-md text-on-surface-variant mr-1.5">Site:</span>
+            {WIX_SITE_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSite(key)}
+                className={`px-3 py-1.5 rounded-full text-label-md font-medium transition-colors ${
+                  site === key
+                    ? 'bg-primary text-on-primary'
+                    : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                }`}
+              >
+                {WIX_SITES[key].short}
+              </button>
+            ))}
+          </div>
           <p className="text-body-md text-on-surface-variant">
-            This finds Wix products with the same SKU as PIM products and stores the
-            Wix product id on each row. It does <strong>not</strong> insert new products
+            This finds {WIX_SITES[site].label} products with the same SKU as PIM products
+            and stores each link. It does <strong>not</strong> insert new products
             or modify any other field.
           </p>
           <button

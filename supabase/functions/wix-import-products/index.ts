@@ -1,22 +1,24 @@
 // Wix Stores → Stylish PIM linker (link-only mode).
 //
 // What this does:
-//   - Fetch every product from the Wix Stores catalog.
+//   - Fetch every product from the chosen Wix site's Stores catalog.
 //   - For each Wix product with a SKU, find the matching PIM row (by sku).
-//   - Set wix_product_id and wix_synced_at on that PIM row.
+//   - Upsert the (site, sku) row in wix_links; for SinksDirect CA the legacy
+//     products.wix_product_id / wix_synced_at columns are kept in sync too.
 //   - Does NOT insert new rows. Does NOT modify name/brand/description/price/category.
 //
 // Modes:
-//   { dryRun: true }   → no DB writes, returns a preview of what would link.
-//   { dryRun: false }  → applies the updates.
+//   { dryRun: true, site? }   → no DB writes, returns a preview of what would link.
+//   { dryRun: false, site? }  → applies the updates. site defaults to SinksDirect CA.
 //
 // Required secrets (Supabase Dashboard → Edge Functions → Secrets):
-//   WIX_API_KEY   — Wix API key with Stores read scope
-//   WIX_SITE_ID   — site UUID
+//   WIX_API_KEY   — account-level Wix API key
+//   WIX_SITE_ID   — SinksDirect Canada site UUID
 //
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { resolveWixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -95,25 +97,35 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dryRun !== false;
-    console.log(`[wix-link] dryRun=${dryRun}`);
+    const site = resolveWixSite(body.site);
+    console.log(`[wix-link] dryRun=${dryRun} site=${site.key}`);
 
     console.log(`[wix-link] fetching Wix products…`);
-    const wixProducts = await fetchAllWixProducts(WIX_API_KEY, WIX_SITE_ID);
+    const wixProducts = await fetchAllWixProducts(WIX_API_KEY, site.siteId);
     console.log(`[wix-link] got ${wixProducts.length} Wix products`);
 
     console.log(`[wix-link] loading PIM rows…`);
     const { data: existing, error: loadErr } = await supabase
       .from("products")
-      .select("sku, wix_product_id");
+      .select("sku");
     if (loadErr) {
       throw new Error(`Database select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
     }
-    console.log(`[wix-link] loaded ${existing?.length ?? 0} PIM rows`);
+    const { data: links, error: linksErr } = await supabase
+      .from("wix_links")
+      .select("sku, wix_product_id")
+      .eq("site", site.key);
+    if (linksErr) throw new Error(`Link select failed: ${linksErr.message}`);
+    console.log(`[wix-link] loaded ${existing?.length ?? 0} PIM rows, ${links?.length ?? 0} existing links`);
 
     type ExistingRow = { sku: string; wix_product_id: string | null };
     const bySku = new Map<string, ExistingRow>();
-    for (const row of (existing ?? []) as ExistingRow[]) {
-      bySku.set(row.sku, row);
+    for (const row of (existing ?? []) as { sku: string }[]) {
+      bySku.set(row.sku, { sku: row.sku, wix_product_id: null });
+    }
+    for (const link of (links ?? []) as { sku: string; wix_product_id: string }[]) {
+      const row = bySku.get(link.sku);
+      if (row) row.wix_product_id = link.wix_product_id;
     }
 
     // Classify each Wix product against the PIM.
@@ -160,22 +172,50 @@ Deno.serve(async (req) => {
 
     console.log(`[wix-link] classified: newLinks=${summary.newLinks} alreadyLinked=${summary.alreadyLinked} wixOnly=${summary.wixOnly} skippedNoSku=${summary.skippedNoSku}`);
 
+    // A site can carry two Wix products with the SAME SKU (e.g. a duplicate
+    // listing). Keep the first match per SKU — a repeated (site, sku) key in
+    // one upsert batch is a Postgres error ("cannot affect row a second time").
+    const seenSkus = new Set<string>();
+    const dupSkus: string[] = [];
+    const dedupedOps = linkOps.filter((op) => {
+      if (seenSkus.has(op.sku)) { dupSkus.push(op.sku); return false; }
+      seenSkus.add(op.sku);
+      return true;
+    });
+    if (dupSkus.length) console.log(`[wix-link] duplicate SKUs on site (kept first):`, dupSkus.join(","));
+
     let applied = 0;
-    if (!dryRun && linkOps.length > 0) {
-      // We can't bulk-update with different values per row, so issue one UPDATE per sku.
-      // For <1000 ops this is fine; revisit with an RPC if it grows.
+    if (!dryRun && dedupedOps.length > 0) {
       const now = new Date().toISOString();
-      console.log(`[wix-link] applying ${linkOps.length} link updates…`);
-      for (const op of linkOps) {
+      console.log(`[wix-link] applying ${dedupedOps.length} link upserts…`);
+      // Batch upserts into wix_links (chunked to keep payloads sane).
+      for (let i = 0; i < dedupedOps.length; i += 200) {
+        const chunk = dedupedOps.slice(i, i + 200).map((op) => ({
+          site: site.key,
+          sku: op.sku,
+          wix_product_id: op.wix_product_id,
+          synced_at: now,
+        }));
         const { error } = await supabase
-          .from("products")
-          .update({ wix_product_id: op.wix_product_id, wix_synced_at: now })
-          .eq("sku", op.sku);
+          .from("wix_links")
+          .upsert(chunk, { onConflict: "site,sku" });
         if (error) {
-          console.error(`[wix-link] update failed for sku=${op.sku}:`, JSON.stringify(error));
-          throw new Error(`Update failed for sku=${op.sku}: ${error.message ?? JSON.stringify(error)}`);
+          throw new Error(`Link upsert failed: ${error.message ?? JSON.stringify(error)}`);
         }
-        applied++;
+        applied += chunk.length;
+      }
+      // Legacy columns stay in sync for SinksDirect CA readers.
+      if (site.legacyColumns) {
+        for (const op of dedupedOps) {
+          const { error } = await supabase
+            .from("products")
+            .update({ wix_product_id: op.wix_product_id, wix_synced_at: now })
+            .eq("sku", op.sku);
+          if (error) {
+            console.error(`[wix-link] legacy update failed for sku=${op.sku}:`, JSON.stringify(error));
+            throw new Error(`Update failed for sku=${op.sku}: ${error.message ?? JSON.stringify(error)}`);
+          }
+        }
       }
       console.log(`[wix-link] apply OK, applied=${applied}`);
     }
@@ -183,8 +223,10 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         dryRun,
+        site: site.key,
         summary,
         applied,
+        duplicate_skus: dupSkus,
         samples: { newLinks: sampleNewLinks, wixOnly: wixOnly.slice(0, 10) },
         skippedNoSku,
       }),

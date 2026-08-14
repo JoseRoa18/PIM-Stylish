@@ -1,10 +1,15 @@
 // Read-only: fetch the current state of a product from Wix Stores
 // WITHOUT writing anything to the PIM.
 //
-// Request body: { sku: string }
+// Request body: { sku: string, site?: string } — site defaults to
+// SinksDirect Canada (see _shared/wixSites.ts).
 // Returns: the mapped Wix fields so the UI can show what's live in the store.
+// The snapshot's price lands on the site's own priceField (map_cad for
+// SinksDirect CA, msrp_usd for Stylish USA, …) so the card's diff hints
+// compare against the right PIM column.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { resolveWixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -64,6 +69,7 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+    const site = resolveWixSite(body.site);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -80,20 +86,29 @@ Deno.serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    if (!pim.wix_product_id) {
+    const { data: linkRow, error: linkErr } = await supabase
+      .from("wix_links")
+      .select("wix_product_id")
+      .eq("site", site.key)
+      .eq("sku", sku)
+      .maybeSingle();
+    if (linkErr) throw new Error(`Link read failed: ${linkErr.message}`);
+    const wixProductId = linkRow?.wix_product_id ??
+      (site.legacyColumns ? pim.wix_product_id : null);
+    if (!wixProductId) {
       return new Response(
-        JSON.stringify({ error: `Product ${sku} is not linked to Wix.` }),
+        JSON.stringify({ error: `Product ${sku} is not linked to ${site.label}.` }),
         { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     const wixResp = await fetch(
-      `https://www.wixapis.com/stores/v1/products/${pim.wix_product_id}`,
+      `https://www.wixapis.com/stores/v1/products/${wixProductId}`,
       {
         method: "GET",
         headers: {
           "Authorization": WIX_API_KEY,
-          "wix-site-id": WIX_SITE_ID,
+          "wix-site-id": site.siteId,
         },
       },
     );
@@ -102,17 +117,20 @@ Deno.serve(async (req) => {
       // 404 = the product no longer exists in Wix (stale link). Report it as a
       // clean "not found" state (HTTP 200) so the UI can flag a broken link,
       // instead of a generic API error that looks transient. Also clear the
-      // cached Wix payload so the dashboard stops scoring against stale data.
+      // cached Wix payload (SinksDirect CA only — it's the site the dashboard
+      // scores against) so it stops scoring stale data.
       if (wixResp.status === 404) {
-        const { error: clearErr } = await supabase
-          .from("products")
-          .update({ wix_raw: null })
-          .eq("sku", sku);
-        if (clearErr) {
-          console.error(`[wix-read] cache clear failed (non-fatal):`, clearErr.message);
+        if (site.legacyColumns) {
+          const { error: clearErr } = await supabase
+            .from("products")
+            .update({ wix_raw: null })
+            .eq("sku", sku);
+          if (clearErr) {
+            console.error(`[wix-read] cache clear failed (non-fatal):`, clearErr.message);
+          }
         }
         return new Response(
-          JSON.stringify({ ok: true, sku, wix_product_id: pim.wix_product_id, exists: false }),
+          JSON.stringify({ ok: true, sku, site: site.key, wix_product_id: wixProductId, exists: false }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
@@ -167,8 +185,9 @@ Deno.serve(async (req) => {
       brand: w.brand ?? null,
       ribbon: w.ribbon ?? null,
       shipping_weight_lb: typeof w.weight === "number" ? w.weight : null,
-      // The SinksDirect selling price is the Canadian MAP (user rule).
-      map_cad: price,
+      // The live price maps onto the site's own selling-price column
+      // (SinksDirect → MAP, Stylish → MSRP, in the market's currency).
+      [site.priceField]: price,
       on_sale,
       sale_price_cad,
       visible_online: w.visible ?? null,
@@ -187,18 +206,21 @@ Deno.serve(async (req) => {
 
     // Cache the raw Wix payload so the Listing Health dashboard can score
     // against actual Wix data without making one API call per product.
-    // This only updates `wix_raw` (a cache column) — never PIM-owned fields.
-    const cachePayload = { ...w, _fetched_at: new Date().toISOString() };
-    const { error: cacheErr } = await supabase
-      .from("products")
-      .update({ wix_raw: cachePayload })
-      .eq("sku", sku);
-    if (cacheErr) {
-      console.error(`[wix-read] cache update failed (non-fatal):`, cacheErr.message);
+    // SinksDirect CA only — wix_raw is that site's cache; other sites would
+    // overwrite it with the wrong store's data.
+    if (site.legacyColumns) {
+      const cachePayload = { ...w, _fetched_at: new Date().toISOString() };
+      const { error: cacheErr } = await supabase
+        .from("products")
+        .update({ wix_raw: cachePayload })
+        .eq("sku", sku);
+      if (cacheErr) {
+        console.error(`[wix-read] cache update failed (non-fatal):`, cacheErr.message);
+      }
     }
 
     return new Response(
-      JSON.stringify({ ok: true, sku, wix_product_id: pim.wix_product_id, snapshot }),
+      JSON.stringify({ ok: true, sku, site: site.key, wix_product_id: wixProductId, snapshot }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
