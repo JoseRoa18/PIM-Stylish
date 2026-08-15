@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Lenis from 'lenis';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import PromoNudge from './PromoNudge';
 
 export default function AppShell({ children }) {
   // On <lg screens the sidebar becomes an overlay drawer toggled from the Topbar.
@@ -37,6 +38,7 @@ export default function AppShell({ children }) {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <PromoNudge />
       <div className="lg:ml-64 h-screen flex flex-col">
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
         <main ref={mainRef} className="flex-1 overflow-y-auto">

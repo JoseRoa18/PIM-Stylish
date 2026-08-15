@@ -163,7 +163,12 @@ async function refreshWix(site: WixSite) {
     }
   }
 
-  type WixItem = { id: string; sku: string | null; name: string; visible: boolean; price: number | null; discountedPrice: number | null };
+  type WixItem = {
+    id: string; sku: string | null; name: string; visible: boolean;
+    price: number | null; discountedPrice: number | null;
+    descriptionLength?: number; imageCount?: number; hasMainImage?: boolean;
+    sectionTitles?: string[];
+  };
   const wixById = new Map((wixProducts as WixItem[]).map((w) => [w.id, w]));
   const baseBySku = new Map(prods.map((p: { sku: string; base: number | null }) => [p.sku, p.base]));
 
@@ -190,6 +195,11 @@ async function refreshWix(site: WixSite) {
       name: w.name, price: livePrice, expected: expected ?? null,
       expected_source: promoPrice != null ? "promo" : "map",
       map: base, price_diff: priceDiff,
+      // Content fingerprint for listing-health scoring (see wix-pull-catalog).
+      description_length: w.descriptionLength ?? null,
+      image_count: w.imageCount ?? null,
+      has_main_image: w.hasMainImage ?? null,
+      section_titles: w.sectionTitles ?? null,
     });
   }
   const pimSkus = new Set(prods.map((p: { sku: string }) => p.sku));
@@ -252,6 +262,11 @@ async function runRefresh() {
       walmartMaps: {
         walmart_us: await latestSnapshotMap("walmart_us"),
         walmart_ca: await latestSnapshotMap("walmart_ca"),
+      },
+      wixSiteMaps: {
+        wix_sinksdirect_us: await latestSnapshotMap("wix_sinksdirect_us"),
+        wix_stylish_ca: await latestSnapshotMap("wix_stylish_ca"),
+        wix_stylish_us: await latestSnapshotMap("wix_stylish_us"),
       },
     });
     await restInsert("channel_health", buildSummaryRows(perMarketplaceData));

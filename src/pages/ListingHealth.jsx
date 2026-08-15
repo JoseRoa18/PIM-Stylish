@@ -28,6 +28,7 @@ const SOURCE_STYLES = {
   not_linked: { label: 'Not linked', class: 'bg-surface-container text-on-surface-variant' },
   pim: { label: 'PIM', class: 'bg-surface-container text-on-surface-variant' },
   offer: { label: 'Live offer', class: 'bg-success-container text-on-success-container' },
+  site: { label: 'Live site', class: 'bg-success-container text-on-success-container' },
 };
 
 const SEVERITY_META = {
@@ -216,6 +217,7 @@ export default function ListingHealth() {
   const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   // Read-only channel pulls: fetch the channel's live state into a snapshot.
+  // Keyed by marketplace key first, then by shared dataSource.
   const CHANNEL_REFRESH = {
     bestbuy: { run: refreshBestBuyOffers, label: 'Best Buy' },
     walmart_us: { run: () => refreshWalmartItems('us'), label: 'Walmart' },
@@ -223,16 +225,20 @@ export default function ListingHealth() {
     // Fleet snapshot (whole store in one pull) — the per-product cache
     // refresh below remains its own, slower button.
     wix_cache: { run: refreshWixCatalog, label: 'Wix' },
+    wix_sinksdirect_us: { run: () => refreshWixCatalog('sinksdirect_us'), label: 'the site' },
+    wix_stylish_ca: { run: () => refreshWixCatalog('stylish_ca'), label: 'the site' },
+    wix_stylish_us: { run: () => refreshWixCatalog('stylish_us'), label: 'the site' },
   };
+  const refreshDef = CHANNEL_REFRESH[mktDef.key] ?? CHANNEL_REFRESH[mktDef.dataSource];
 
-  async function refreshChannel(key) {
+  async function refreshChannel() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await CHANNEL_REFRESH[key].run();
+      await refreshDef.run();
       window.location.reload();
     } catch (err) {
-      alert(`${CHANNEL_REFRESH[key].label} refresh failed: ${err.message}`);
+      alert(`${refreshDef.label} refresh failed: ${err.message}`);
       setRefreshing(false);
     }
   }
@@ -373,16 +379,19 @@ export default function ListingHealth() {
               {mktDef.dataSource === 'walmart_ca' && (
                 <> · Walmart CA exposes no item API — read-only</>
               )}
+              {mktDef.dataSource === 'wix_site' && (
+                <> · scoring against the store's latest catalog snapshot (refreshed twice a day)</>
+              )}
             </p>
-            {CHANNEL_REFRESH[mktDef.dataSource] && (
+            {refreshDef && (
               <button
                 type="button"
-                onClick={() => refreshChannel(mktDef.dataSource)}
+                onClick={refreshChannel}
                 disabled={refreshing}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Pulling…' : `Refresh from ${CHANNEL_REFRESH[mktDef.dataSource].label}`}
+                {refreshing ? 'Pulling…' : `Refresh from ${refreshDef.label}`}
               </button>
             )}
             {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && (

@@ -19,12 +19,21 @@ function json(body: unknown, status = 200) {
   });
 }
 
+interface WixMediaItem {
+  mediaType?: string;
+  image?: { url?: string };
+  thumbnail?: { url?: string };
+}
+
 interface WixProduct {
   id?: string;
   sku?: string;
   name?: string;
   visible?: boolean;
+  description?: string;
   priceData?: { price?: number; discountedPrice?: number };
+  additionalInfoSections?: Array<{ title?: string; description?: string }>;
+  media?: { mainMedia?: WixMediaItem; items?: WixMediaItem[] };
   variants?: Array<{ variant?: { sku?: string } }>;
 }
 
@@ -52,6 +61,8 @@ Deno.serve(async (req) => {
     const products: {
       id: string; sku: string | null; name: string; visible: boolean;
       price: number | null; discountedPrice: number | null;
+      descriptionLength: number; imageCount: number; hasMainImage: boolean;
+      sectionTitles: string[];
     }[] = [];
     let offset = 0;
     const limit = 100;
@@ -77,6 +88,12 @@ Deno.serve(async (req) => {
       const data = await resp.json();
       const batch: WixProduct[] = data.products ?? [];
       for (const p of batch) {
+        // Compact content fingerprint per listing so listing-health can score
+        // the store WITHOUT a per-product cache: strip the description down to
+        // its text length, media down to counts, sections down to titles.
+        const isImage = (m?: WixMediaItem) =>
+          (m?.mediaType ?? "image").toLowerCase().includes("image");
+        const images = (p.media?.items ?? []).filter(isImage);
         products.push({
           id: p.id ?? "",
           sku: pickSku(p),
@@ -84,6 +101,13 @@ Deno.serve(async (req) => {
           visible: p.visible !== false,
           price: p.priceData?.price ?? null,
           discountedPrice: p.priceData?.discountedPrice ?? null,
+          descriptionLength: (p.description ?? "").replace(/<[^>]*>/g, "").trim().length,
+          imageCount: images.length,
+          hasMainImage: isImage(p.media?.mainMedia) &&
+            Boolean(p.media?.mainMedia?.image?.url ?? p.media?.mainMedia?.thumbnail?.url),
+          sectionTitles: (p.additionalInfoSections ?? [])
+            .map((s) => (s.title ?? "").trim())
+            .filter(Boolean),
         });
       }
       const total = data.totalResults ?? data.metadata?.count ?? products.length;

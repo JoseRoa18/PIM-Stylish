@@ -49,6 +49,13 @@ export async function computeListingHealth() {
       walmart_us: await latestSnapshotMap('walmart_us'),
       walmart_ca: await latestSnapshotMap('walmart_ca'),
     },
+    // The other three Wix sites score from their own catalog snapshots
+    // (the SinksDirect CA card keeps its richer wix_raw cache).
+    wixSiteMaps: {
+      wix_sinksdirect_us: await latestSnapshotMap('wix_sinksdirect_us'),
+      wix_stylish_ca: await latestSnapshotMap('wix_stylish_ca'),
+      wix_stylish_us: await latestSnapshotMap('wix_stylish_us'),
+    },
   });
 }
 

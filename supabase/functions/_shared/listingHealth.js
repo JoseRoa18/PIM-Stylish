@@ -41,6 +41,14 @@ function hasPrimaryImage(media) {
   return media.some((m) => m.is_primary && m.media_type === 'image');
 }
 
+// Wix-site section check against the snapshot's section-title fingerprint.
+// Unknown (no snapshot / pre-fingerprint snapshot / unlinked) ≠ fail.
+function wsSection(product, pattern) {
+  const s = product._wixSite;
+  if (!s || !Array.isArray(s.section_titles)) return true;
+  return s.section_titles.some((t) => pattern.test(t));
+}
+
 function hasInfoSection(product, pattern) {
   const sections = product.additional_info_sections;
   if (!Array.isArray(sections) || sections.length === 0) return false;
@@ -159,6 +167,55 @@ const FIELDS = {
     check: (p) => !p._wmItem || !p._wmItem.lifecycle || p._wmItem.lifecycle === 'ACTIVE',
   },
   visible_online: { label: 'Visible Online', check: (p) => p.visible_online === true },
+  // Wix-site checks — fed by each site's channel_health snapshot (compact
+  // content fingerprint written by wix-pull-catalog). Same semantics as
+  // _bbOffer: undefined → no snapshot yet (unknown ≠ fail); null → the site
+  // snapshot exists but this SKU isn't linked there; object → live listing.
+  ws_listed: {
+    label: 'Listed on the site',
+    check: (p) => p._wixSite === undefined || p._wixSite != null,
+  },
+  ws_live: {
+    label: 'Visible in the store',
+    check: (p) => !p._wixSite || p._wixSite.state === 'live',
+  },
+  ws_name: {
+    label: 'Product Name',
+    check: (p) => !p._wixSite || (hasText(p._wixSite.name) && p._wixSite.name.trim().length >= 10),
+  },
+  ws_price: {
+    label: 'Price Set',
+    check: (p) => !p._wixSite || (hasNumber(p._wixSite.price) && p._wixSite.price > 0),
+  },
+  ws_price_aligned: {
+    label: 'Price at Expected',
+    check: (p) => !p._wixSite || p._wixSite.price_diff !== true,
+  },
+  ws_description: {
+    label: 'Description',
+    // Older snapshots predate the content fingerprint — unknown ≠ fail.
+    check: (p) => !p._wixSite || p._wixSite.description_length == null || p._wixSite.description_length > 100,
+  },
+  ws_main_image: {
+    label: 'Main Image',
+    check: (p) => !p._wixSite || p._wixSite.has_main_image !== false,
+  },
+  ws_images: {
+    label: '5+ Images',
+    check: (p) => !p._wixSite || p._wixSite.image_count == null || p._wixSite.image_count >= 5,
+  },
+  ws_section_dimensions: {
+    label: 'Dimensions Tab',
+    check: (p) => wsSection(p, /dimension|size|measurement/i),
+  },
+  ws_section_documents: {
+    label: 'Documents to Download Tab',
+    check: (p) => wsSection(p, /document|download|spec sheet|manual|installation/i),
+  },
+  ws_section_features: {
+    label: 'Features Tab',
+    check: (p) => wsSection(p, /feature|highlight|benefit/i),
+  },
   section_dimensions: { label: 'Dimensions Tab', check: (p) => hasInfoSection(p, /dimension|size|measurement/i) },
   section_documents: { label: 'Documents to Download Tab', check: (p) => hasInfoSection(p, /document|download|spec sheet|manual|installation/i) },
   section_features: { label: 'Features Tab', check: (p) => hasInfoSection(p, /feature|highlight|benefit/i) },
@@ -186,6 +243,74 @@ export const MARKETPLACES = {
       { field: 'section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
       { field: 'section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
       { field: 'section_accessories', category: 'Info Tabs', weight: 6, severity: 'minor' },
+    ],
+  },
+  // The three other Wix sites are scored from their channel_health snapshots
+  // (compact content fingerprint per listing — no per-product cache needed).
+  // Wording/weights mirror the SinksDirect CA card, minus the accessories tab
+  // (only the CA store curates one) and plus price alignment, which the
+  // snapshot already knows.
+  wix_sinksdirect_us: {
+    key: 'wix_sinksdirect_us',
+    label: 'Sinks Direct USA',
+    subtitle: 'Wix Stores',
+    dataSource: 'wix_site',
+    connectionType: 'api',
+    requiresLink: true,
+    checks: [
+      { field: 'ws_listed', category: 'Identity', weight: 15, severity: 'critical' },
+      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major' },
+      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical' },
+      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major' },
+      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical' },
+      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor' },
+      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
+    ],
+  },
+  wix_stylish_ca: {
+    key: 'wix_stylish_ca',
+    label: 'Stylish Canada',
+    subtitle: 'Wix Stores',
+    dataSource: 'wix_site',
+    connectionType: 'api',
+    requiresLink: true,
+    checks: [
+      { field: 'ws_listed', category: 'Identity', weight: 15, severity: 'critical' },
+      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major' },
+      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical' },
+      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major' },
+      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical' },
+      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor' },
+      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
+    ],
+  },
+  wix_stylish_us: {
+    key: 'wix_stylish_us',
+    label: 'Stylish USA',
+    subtitle: 'Wix Stores',
+    dataSource: 'wix_site',
+    connectionType: 'api',
+    requiresLink: true,
+    checks: [
+      { field: 'ws_listed', category: 'Identity', weight: 15, severity: 'critical' },
+      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major' },
+      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical' },
+      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major' },
+      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical' },
+      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor' },
+      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
     ],
   },
   wayfair: {
@@ -465,7 +590,7 @@ export function extractWixData(wixRaw) {
  *                  { wayfairMap, bestbuyMap, walmartMaps: { walmart_us, walmart_ca } }
  *                  A null map = no snapshot yet (checks treat unknown as pass).
  */
-export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = null, walmartMaps = { walmart_us: null, walmart_ca: null } } = {}) {
+export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = null, walmartMaps = { walmart_us: null, walmart_ca: null }, wixSiteMaps = {} } = {}) {
   // Enrich each product once with parsed Wix data + base fields
   const enriched = list.map((p) => {
     const wixData = extractWixData(p.wix_raw);
@@ -512,6 +637,13 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
           _wmItem: wm ? (wm.get(e.sku) ?? null) : undefined,
         };
         media = e.pimMedia;
+      } else if (def.dataSource === 'wix_site') {
+        const siteMap = wixSiteMaps[mkt] ?? null;
+        product = {
+          ...e.raw,
+          _wixSite: siteMap ? (siteMap.get(e.sku) ?? null) : undefined,
+        };
+        media = e.pimMedia;
       } else {
         product = e.raw;
         media = e.pimMedia;
@@ -534,7 +666,15 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
                 ? (bestbuyMap && bestbuyMap.get(e.sku) ? 'offer' : 'not_linked')
                 : def.dataSource in walmartMaps
                   ? (walmartMaps[def.dataSource]?.get(e.sku) ? 'offer' : 'not_linked')
-                  : 'pim',
+                  : def.dataSource === 'wix_site'
+                    ? (wixSiteMaps[mkt]?.get(e.sku) ? 'site' : 'not_linked')
+                    : 'pim',
+        // The live site listing row (price/state/content fingerprint), for
+        // the breakdown drawer.
+        wix_site:
+          def.dataSource === 'wix_site' && wixSiteMaps[mkt]
+            ? wixSiteMaps[mkt].get(e.sku) ?? null
+            : undefined,
         // Which spec attributes differ at Wayfair (from the audit),
         // so the breakdown can name them.
         wayfair_audit:
@@ -556,7 +696,9 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
     const linkedCount =
       def.dataSource === 'wayfair'
         ? enriched.filter((e) => e.raw.wayfair_item_group_id).length
-        : scores.filter((s) => s.wix_product_id).length;
+        : def.dataSource === 'wix_site'
+          ? scores.filter((s) => s.source === 'site').length
+          : scores.filter((s) => s.wix_product_id).length;
     perMarketplaceData[mkt] = { products: scores, stats, cachedCount, linkedCount };
   }
 

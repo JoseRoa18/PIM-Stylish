@@ -325,6 +325,11 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
       expected_source: promoPrice != null ? 'promo' : 'map',
       map: base,
       price_diff: priceDiff,
+      // Content fingerprint for listing-health scoring (see wix-pull-catalog).
+      description_length: w.descriptionLength ?? null,
+      image_count: w.imageCount ?? null,
+      has_main_image: w.hasMainImage ?? null,
+      section_titles: w.sectionTitles ?? null,
     });
   }
 
