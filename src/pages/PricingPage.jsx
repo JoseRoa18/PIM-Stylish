@@ -188,6 +188,84 @@ const STATUS_TEXT = {
   missing: 'product missing on Wix',
 };
 
+// ---- Alignment overview (the % chart) ----
+// Status segments in a fixed order; every segment is also named in the
+// legend and in the row tooltip, so identity never rides on color alone.
+// Colors alternate lightness (dark-light-dark-light in BOTH themes) so
+// adjacent segments stay separable under color-vision deficiency —
+// validated with the palette checker, worst adjacent ΔE ≈ 38.
+const OVERVIEW_SEGMENTS = [
+  { key: 'aligned', label: 'Aligned', cls: 'bg-success', of: (c) => (c.promo_ok ?? 0) + (c.map_ok ?? 0) },
+  { key: 'promo_missing', label: 'Promo missing', cls: 'bg-warning-container', of: (c) => c.promo_missing ?? 0 },
+  { key: 'misaligned', label: 'Misaligned / broken', cls: 'bg-error', of: (c) => (c.misaligned ?? 0) + (c.missing ?? 0) },
+  { key: 'no_map', label: 'No price in PIM', cls: 'bg-outline-variant', of: (c) => c.no_map ?? 0 },
+];
+
+function AlignmentOverview({ overview, site, onSelect }) {
+  return (
+    <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-4 py-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+        <h3 className="text-label-lg font-medium text-on-surface">Alignment by channel</h3>
+        <div className="flex items-center gap-3 flex-wrap">
+          {OVERVIEW_SEGMENTS.map((s) => (
+            <span key={s.key} className="inline-flex items-center gap-1.5 text-label-md text-on-surface-variant">
+              <span className={`w-2 h-2 rounded-full border border-outline-variant/60 ${s.cls}`} />
+              {s.label}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1">
+        {ALIGN_TARGET_KEYS.map((key) => {
+          const t = ALIGN_TARGETS[key];
+          const report = overview?.[key];
+          const counts = report && !report.legacy ? report.counts : null;
+          const parts = counts ? OVERVIEW_SEGMENTS.map((s) => ({ ...s, n: s.of(counts) })) : [];
+          const total = parts.reduce((a, p) => a + p.n, 0);
+          // % over what's comparable — a SKU with no price in the PIM says
+          // nothing about the channel being right or wrong.
+          const comparable = total - (counts?.no_map ?? 0);
+          const aligned = parts.find((p) => p.key === 'aligned')?.n ?? 0;
+          const pct = comparable > 0 ? Math.round((aligned / comparable) * 100) : null;
+          const tooltip = counts
+            ? `${t.label} — ${parts.filter((p) => p.n > 0).map((p) => `${p.label}: ${p.n}`).join(' · ')}`
+            : `${t.label} — no saved report yet`;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onSelect(key)}
+              aria-pressed={site === key}
+              title={tooltip}
+              className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left transition-colors ${
+                site === key ? 'bg-primary-container/25' : 'hover:bg-surface-container-low'
+              }`}
+            >
+              <span className={`w-40 flex-shrink-0 truncate text-label-lg ${site === key ? 'text-on-surface font-semibold' : 'text-on-surface'}`}>
+                {t.short}
+                <span className="block text-label-md text-on-surface-variant font-normal">{t.priceShort}</span>
+              </span>
+              <span className="flex-1 flex h-2.5 rounded-full overflow-hidden bg-surface-container gap-[2px]" aria-hidden>
+                {total > 0
+                  ? parts.filter((p) => p.n > 0).map((p) => (
+                      <span key={p.key} className={`${p.cls} h-full`} style={{ width: `${(p.n / total) * 100}%` }} />
+                    ))
+                  : <span className="h-full w-full bg-surface-container" />}
+              </span>
+              <span className="w-24 flex-shrink-0 text-right tabular-nums text-label-lg text-on-surface">
+                {pct != null ? `${pct}%` : '—'}
+                <span className="block text-label-md text-on-surface-variant font-normal">
+                  {counts ? `${aligned}/${comparable}` : 'no report'}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PriceAlignmentCard({ canEdit, confirm }) {
   const [site, setSite] = useState(DEFAULT_WIX_SITE);
   const cfg = ALIGN_TARGETS[site];
@@ -198,6 +276,18 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   const [fixing, setFixing] = useState(null); // sku | 'all'
   const [progress, setProgress] = useState(null);
   const [msg, setMsg] = useState(null);
+  // Latest report of EVERY channel, for the alignment overview bars.
+  const [overview, setOverview] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all(ALIGN_TARGET_KEYS.map((k) => loadLatestAlignment(k).catch(() => null)))
+      .then((reports) => {
+        if (!active) return;
+        setOverview(Object.fromEntries(ALIGN_TARGET_KEYS.map((k, i) => [k, reports[i]])));
+      });
+    return () => { active = false; };
+  }, []);
 
   // The last saved report for the site (cron or manual run) shows instantly.
   useEffect(() => {
@@ -216,7 +306,9 @@ function PriceAlignmentCard({ canEdit, confirm }) {
     setRunning(true);
     setMsg(null);
     try {
-      setResult(await runPriceAlignment(site));
+      const fresh = await runPriceAlignment(site);
+      setResult(fresh);
+      setOverview((prev) => (prev ? { ...prev, [site]: fresh } : prev));
     } catch (err) {
       setMsg({ tone: 'error', text: err.message });
     } finally {
@@ -286,38 +378,9 @@ function PriceAlignmentCard({ canEdit, confirm }) {
 
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4">
-      {/* One tile per channel — mirrors the Marketplaces strip. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
-        {ALIGN_TARGET_KEYS.map((key) => {
-          const t = ALIGN_TARGETS[key];
-          const avatar = t.kind === 'bestbuy'
-            ? { text: 'BB', cls: 'bg-brand-bestbuy/15 text-brand-bestbuy' }
-            : t.kind === 'walmart'
-              ? { text: 'WM', cls: 'bg-brand-walmart/15 text-brand-walmart' }
-              : { text: 'W', cls: 'bg-brand-wix/15 text-brand-wix' };
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setSite(key)}
-              aria-pressed={site === key}
-              className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors ${
-                site === key
-                  ? 'border-primary bg-primary-container/25'
-                  : 'border-outline-variant bg-surface hover:bg-surface-container-low'
-              }`}
-            >
-              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-label-lg font-bold flex-shrink-0 ${avatar.cls}`}>
-                {avatar.text}
-              </span>
-              <span className="min-w-0">
-                <span className="block text-label-lg font-medium text-on-surface truncate">{t.short}</span>
-                <span className="block text-label-md text-on-surface-variant">{t.priceShort}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Alignment overview — one 100%-stacked status bar per channel; the
+          rows double as the channel selector. */}
+      <AlignmentOverview overview={overview} site={site} onSelect={setSite} />
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
