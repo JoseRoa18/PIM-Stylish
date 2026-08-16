@@ -59,7 +59,10 @@ export async function sheetPathByName(zip, name) {
         sheets[i].getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') ||
         sheets[i].getAttribute('r:id');
       const target = relMap[rid] || '';
-      return 'xl/' + target.replace(/^\//, '');
+      // Rel targets are usually relative to xl/ ("worksheets/sheet1.xml"),
+      // but some writers (openpyxl among them) emit absolute targets
+      // ("/xl/worksheets/sheet1.xml") — those already carry the full path.
+      return target.startsWith('/') ? target.slice(1) : 'xl/' + target;
     }
   }
   return null;

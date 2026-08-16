@@ -35,6 +35,7 @@ import Dialog from '@/components/ui/Dialog';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
+import { fillBBBPromoFile } from '@/features/pricing/lib/bbbPromoFill';
 import { Link } from 'react-router-dom';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
@@ -749,6 +750,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
   const [msg, setMsg] = useState(null);
   const [progress, setProgress] = useState(null);
   const [importModal, setImportModal] = useState(false);
+  const [fillModal, setFillModal] = useState(false);
 
   const meta = STATUS_META[promo.status] ?? STATUS_META.draft;
 
@@ -902,33 +904,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                   })}
                 />
               )}
-              <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy === 'wayfair' ? 'opacity-40 pointer-events-none' : ''}`}>
-                {busy === 'wayfair' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" strokeWidth={2} />}
-                Fill Wayfair file
-                <input
-                  type="file"
-                  accept=".xlsx,.xlsm"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = '';
-                    if (!file) return;
-                    setBusy('wayfair');
-                    setMsg(null);
-                    try {
-                      const r = await fillWayfairPromoFile(file, promo);
-                      const parts = [`Wayfair file ready — ${r.filled} existing rows filled`];
-                      if (r.appended.length) parts.push(`${r.appended.length} rows added (${r.appended.slice(0, 8).join(', ')}${r.appended.length > 8 ? '…' : ''})`);
-                      if (r.notOnWayfair.length) parts.push(`skipped, not listed on Wayfair: ${r.notOnWayfair.join(', ')}`);
-                      setMsg({ tone: 'success', text: parts.join(' · ') });
-                    } catch (err) {
-                      setMsg({ tone: 'error', text: err.message });
-                    } finally {
-                      setBusy(null);
-                    }
-                  }}
-                />
-              </label>
+              <ActionButton
+                icon={Send}
+                label="Fill marketplace file"
+                busy={busy === 'fill'}
+                onClick={() => setFillModal(true)}
+              />
               {promo.status !== 'ended' && (
                 <ActionButton
                   icon={Plus}
@@ -954,6 +935,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                 />
               )}
             </div>
+          )}
+
+          {fillModal && (
+            <FillMarketplaceFileDialog
+              promo={promo}
+              onClose={() => setFillModal(false)}
+              onDone={(m) => { setFillModal(false); setMsg(m); }}
+            />
           )}
 
           {importModal && (
@@ -1110,6 +1099,114 @@ function CopySkusButton({ skus }) {
       {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
       {copied ? `Copied ${skus.length} SKUs` : `Copy SKUs (${skus.length})`}
     </button>
+  );
+}
+
+// ============================== Fill marketplace file ==============================
+
+// Every marketplace whose promo submission is a FILE downloaded from its own
+// portal and filled by the PIM. One entry per marketplace: the filler does
+// the matching, the summary turns its report into the card message.
+const FILE_FILLERS = {
+  wayfair: {
+    label: 'Wayfair',
+    monogram: 'WA',
+    monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
+    hint: 'Partner Home promotions file — existing rows are filled, missing promo members are appended (only those Wayfair actually lists).',
+    fill: fillWayfairPromoFile,
+    summarize: (r) => {
+      const parts = [`Wayfair file ready — ${r.filled} existing rows filled`];
+      if (r.appended.length) parts.push(`${r.appended.length} rows added (${r.appended.slice(0, 8).join(', ')}${r.appended.length > 8 ? '…' : ''})`);
+      if (r.notOnWayfair.length) parts.push(`skipped, not listed on Wayfair: ${r.notOnWayfair.join(', ')}`);
+      return parts.join(' · ');
+    },
+  },
+  bbb: {
+    label: 'BB&B / Overstock',
+    monogram: 'BO',
+    monogramCls: 'bg-surface-container-high text-on-surface-variant',
+    hint: 'Portal promo template (use Copy SKUs first to request it) — PROMO_MAP and PROMO_COST are filled on matching part numbers; rows are never added.',
+    fill: fillBBBPromoFile,
+    summarize: (r) => {
+      const parts = [`BB&B / Overstock file ready — ${r.filled} of ${r.fileRows} rows filled`];
+      if (r.notInFile.length) parts.push(`promo members not in the file: ${r.notInFile.slice(0, 8).join(', ')}${r.notInFile.length > 8 ? '…' : ''}`);
+      if (r.notInPromo.length) parts.push(`file rows not in this promo: ${r.notInPromo.slice(0, 8).join(', ')}${r.notInPromo.length > 8 ? '…' : ''}`);
+      if (r.missingData.length) parts.push(`skipped, incomplete promo data: ${r.missingData.join(', ')}`);
+      if (r.mapViolations.length) parts.push(`⚠ promo MAP not 1% below site price: ${r.mapViolations.join(', ')}`);
+      return parts.join(' · ');
+    },
+  },
+};
+
+function FillMarketplaceFileDialog({ promo, onClose, onDone }) {
+  const [marketplace, setMarketplace] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const def = marketplace ? FILE_FILLERS[marketplace] : null;
+
+  async function handleUpload(file) {
+    if (!file || !def) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await def.fill(file, promo);
+      onDone({ tone: 'success', text: def.summarize(r) });
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      onClose={onClose}
+      title="Fill marketplace file"
+      subtitle="Upload the file downloaded from the marketplace's portal — the PIM fills the promo columns and hands it back."
+      maxWidth="max-w-lg"
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {Object.entries(FILE_FILLERS).map(([key, f]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { setMarketplace(key); setError(null); }}
+              aria-pressed={marketplace === key}
+              className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                marketplace === key
+                  ? 'border-primary bg-primary-container/25'
+                  : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+              }`}
+            >
+              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-label-lg font-bold flex-shrink-0 ${f.monogramCls}`}>
+                {f.monogram}
+              </span>
+              <span className="text-label-lg font-medium text-on-surface">{f.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {def && (
+          <>
+            <p className="text-body-sm text-on-surface-variant">{def.hint}</p>
+            <label className={`flex items-center justify-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy ? 'opacity-40 pointer-events-none' : ''}`}>
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {busy ? 'Filling…' : `Upload the ${def.label} file`}
+              <input
+                type="file"
+                accept=".xlsx,.xlsm"
+                className="hidden"
+                onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; handleUpload(file); }}
+              />
+            </label>
+          </>
+        )}
+
+        {error && (
+          <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
+        )}
+      </div>
+    </Dialog>
   );
 }
 
