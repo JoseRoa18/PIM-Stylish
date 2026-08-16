@@ -11,6 +11,8 @@ import {
   Loader2,
   CheckCircle2,
   X,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -999,19 +1001,27 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             const marketRows = rows.filter((r) => r[priceKey] != null || costKeys.some((k) => r.promo_costs?.[k] != null));
             return (
               <div className="space-y-3">
-                <div className="inline-flex rounded-full bg-surface-container p-1">
-                  {[['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setMarket(key)}
-                      className={`px-4 py-1.5 rounded-full text-label-lg font-medium transition-colors ${
-                        market === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="inline-flex rounded-full bg-surface-container p-1">
+                    {[['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setMarket(key)}
+                        className={`px-4 py-1.5 rounded-full text-label-lg font-medium transition-colors ${
+                          market === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Marketplace portals (BB&B/Overstock…) ask for the promo's
+                      part numbers to hand back their promo file — one click
+                      instead of picking SKUs out of the table by hand. */}
+                  {marketRows.length > 0 && (
+                    <CopySkusButton skus={marketRows.map((r) => r.sku)} />
+                  )}
                 </div>
 
                 {marketRows.length === 0 ? (
@@ -1072,6 +1082,34 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
         </div>
       )}
     </div>
+  );
+}
+
+// One-click copy of a market's promo member SKUs (newline-separated — what
+// marketplace portals expect when pasting part numbers into a list box).
+function CopySkusButton({ skus }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(skus.join('\n'));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked outside secure contexts; fall back to a
+      // prompt the user can copy from manually.
+      window.prompt('Copy the SKUs below:', skus.join(' '));
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors"
+      title="Copy this market's promo SKUs, one per line"
+    >
+      {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+      {copied ? `Copied ${skus.length} SKUs` : `Copy SKUs (${skus.length})`}
+    </button>
   );
 }
 
