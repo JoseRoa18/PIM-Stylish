@@ -85,18 +85,25 @@ Deno.serve(async (req) => {
 
         const { data: profiles, error: pErr } = await admin
           .from("profiles")
-          .select("id, full_name, role");
+          .select("id, full_name, role, last_seen_at");
         if (pErr) throw new Error(`profiles select failed: ${pErr.message}`);
         const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
 
         const users = all.map((u) => {
           const p = byId.get(u.id);
+          // "Last active" = the later of the explicit login and the app's
+          // presence heartbeat — last_sign_in_at alone goes stale for users
+          // whose session silently renews for weeks.
+          const signIn = u.last_sign_in_at ?? null;
+          const seen = (p as { last_seen_at?: string | null } | undefined)?.last_seen_at ?? null;
+          const lastActive = [signIn, seen].filter(Boolean).sort().pop() ?? null;
           return {
             id: u.id,
             email: u.email,
             full_name: p?.full_name ?? "",
             role: (p?.role as Role) ?? "viewer",
-            last_sign_in_at: u.last_sign_in_at ?? null,
+            last_sign_in_at: signIn,
+            last_active_at: lastActive,
             created_at: u.created_at,
           };
         });

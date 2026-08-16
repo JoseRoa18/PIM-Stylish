@@ -188,7 +188,7 @@ export default function Users() {
                       />
                     </div>
                     <p className="text-label-sm text-on-surface-variant mt-2">
-                      Last sign-in: {formatDate(u.last_sign_in_at)}
+                      Last active: {formatDate(u.last_active_at ?? u.last_sign_in_at)}
                     </p>
                   </li>
                 );
@@ -200,7 +200,7 @@ export default function Users() {
                 <tr className="border-b border-outline-variant text-label-md text-on-surface-variant">
                   <th className="px-5 py-3 font-medium">User</th>
                   <th className="px-5 py-3 font-medium">Role</th>
-                  <th className="px-5 py-3 font-medium">Last sign-in</th>
+                  <th className="px-5 py-3 font-medium">Last active</th>
                   <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
@@ -216,8 +216,11 @@ export default function Users() {
                       <td className="px-5 py-3">
                         <RoleControl user={u} isMe={isMe} busy={busy} onChange={handleRoleChange} />
                       </td>
-                      <td className="px-5 py-3 text-body-sm text-on-surface-variant">
-                        {formatDate(u.last_sign_in_at)}
+                      <td
+                        className="px-5 py-3 text-body-sm text-on-surface-variant"
+                        title={`Last password sign-in: ${formatDate(u.last_sign_in_at)}`}
+                      >
+                        {formatDate(u.last_active_at ?? u.last_sign_in_at)}
                       </td>
                       <td className="px-5 py-3">
                         <RowActions

@@ -69,6 +69,36 @@ export function AuthProvider({ children }) {
     };
   }, [session?.user?.id]);
 
+  // Presence heartbeat: stamp profiles.last_seen_at while the app is open.
+  // Auth's own last_sign_in_at only moves on an explicit login — sessions
+  // renew silently for weeks — so this is what "last active" really means.
+  // On load, then every 10 minutes, plus when the tab regains focus (skipped
+  // if the last stamp is under 5 minutes old to avoid write spam).
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId) return;
+    let last = 0;
+    const beat = (minGapMs = 0) => {
+      if (Date.now() - last < minGapMs) return;
+      last = Date.now();
+      supabase
+        .from('profiles')
+        .update({ last_seen_at: new Date().toISOString() })
+        .eq('id', userId)
+        .then(() => {}, () => {});
+    };
+    beat();
+    const interval = setInterval(() => beat(), 10 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') beat(5 * 60 * 1000);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [session?.user?.id]);
+
   // Re-fetch the profile on demand (e.g. right after changing the photo) so
   // every consumer of `profile` updates without a full reload.
   const refreshProfile = useCallback(async () => {
