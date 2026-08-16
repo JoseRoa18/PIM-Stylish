@@ -30,8 +30,8 @@ import {
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
 import Dialog from '@/components/ui/Dialog';
-import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment } from '@/features/pricing/api/priceAlignment';
-import { WIX_SITES, WIX_SITE_KEYS, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
+import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
+import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { Link } from 'react-router-dom';
 
@@ -190,7 +190,7 @@ const STATUS_TEXT = {
 
 function PriceAlignmentCard({ canEdit, confirm }) {
   const [site, setSite] = useState(DEFAULT_WIX_SITE);
-  const cfg = WIX_SITES[site];
+  const cfg = ALIGN_TARGETS[site];
   const money = (v) => `${cfg.symbol}${Number(v).toFixed(2)}`;
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -224,7 +224,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
     }
   }
 
-  const fixable = result?.problems.filter((p) => p.expected != null) ?? [];
+  const fixable = cfg.canFix ? (result?.problems.filter((p) => p.expected != null) ?? []) : [];
 
   // Wix's query index (what the analysis reads) lags writes by ~15-30s —
   // re-running immediately would show the just-fixed rows as still broken.
@@ -283,40 +283,50 @@ function PriceAlignmentCard({ canEdit, confirm }) {
 
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4">
-      {/* One tile per Wix site — mirrors the Marketplaces strip. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        {WIX_SITE_KEYS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setSite(key)}
-            aria-pressed={site === key}
-            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors ${
-              site === key
-                ? 'border-primary bg-primary-container/25'
-                : 'border-outline-variant bg-surface hover:bg-surface-container-low'
-            }`}
-          >
-            <span className="w-8 h-8 rounded-lg bg-brand-wix/15 text-brand-wix flex items-center justify-center text-label-lg font-bold flex-shrink-0">
-              W
-            </span>
-            <span className="min-w-0">
-              <span className="block text-label-lg font-medium text-on-surface truncate">{WIX_SITES[key].short}</span>
-              <span className="block text-label-md text-on-surface-variant">{WIX_SITES[key].priceShort}</span>
-            </span>
-          </button>
-        ))}
+      {/* One tile per channel — mirrors the Marketplaces strip. */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+        {ALIGN_TARGET_KEYS.map((key) => {
+          const t = ALIGN_TARGETS[key];
+          const avatar = t.kind === 'bestbuy'
+            ? { text: 'BB', cls: 'bg-brand-bestbuy/15 text-brand-bestbuy' }
+            : { text: 'W', cls: 'bg-brand-wix/15 text-brand-wix' };
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSite(key)}
+              aria-pressed={site === key}
+              className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                site === key
+                  ? 'border-primary bg-primary-container/25'
+                  : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+              }`}
+            >
+              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-label-lg font-bold flex-shrink-0 ${avatar.cls}`}>
+                {avatar.text}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-label-lg font-medium text-on-surface truncate">{t.short}</span>
+                <span className="block text-label-md text-on-surface-variant">{t.priceShort}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-title-md text-on-surface font-semibold">Price Alignment — {cfg.label}</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5">
-            {cfg.promoAware
-              ? `Compares every linked product's live store price against its expected price —
-                 the active promo price for promo members, the regular ${cfg.priceShort} for everyone else.`
-              : `Compares every linked product's base price against its ${cfg.priceShort} — this store
-                 runs its own storefront sales, so percent-off discounts are not counted as drift.`}
+            {cfg.kind === 'bestbuy'
+              ? `Compares every Best Buy offer against its expected price — the active promo price
+                 for promo members, the regular ${cfg.priceShort} for everyone else. Analysis only for
+                 now: corrections are applied by hand in the seller portal until the price push is built.`
+              : cfg.promoAware
+                ? `Compares every linked product's live store price against its expected price —
+                   the active promo price for promo members, the regular ${cfg.priceShort} for everyone else.`
+                : `Compares every linked product's base price against its ${cfg.priceShort} — this store
+                   runs its own storefront sales, so percent-off discounts are not counted as drift.`}
             {' '}Reports save automatically twice a day; run a fresh one anytime.
           </p>
         </div>
@@ -400,7 +410,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                   <thead>
                     <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
                       <th className="text-left px-4 py-2.5 font-medium">SKU</th>
-                      <th className="text-right px-4 py-2.5 font-medium">On Wix</th>
+                      <th className="text-right px-4 py-2.5 font-medium">On {cfg.short}</th>
                       <th className="text-right px-4 py-2.5 font-medium">Expected</th>
                       <th className="text-left px-4 py-2.5 font-medium">Source</th>
                       <th className="text-right px-4 py-2.5 font-medium">Δ</th>
@@ -429,7 +439,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                         </td>
                         {canEdit && (
                           <td className="px-4 py-2 text-right">
-                            {p.expected != null && (
+                            {cfg.canFix && p.expected != null && (
                               <button
                                 type="button"
                                 onClick={() => fixOne(p)}
