@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { Lock, Mail, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
+import { MorphIcon } from 'morphicons/react';
+import { Eye, EyeOff } from 'lucide';
 import { useAuth } from '@/features/auth/AuthContext';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import TurnstileWidget from '@/features/auth/components/TurnstileWidget';
@@ -123,7 +125,7 @@ export default function Login() {
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <MorphIcon icon={showPassword ? EyeOff : Eye} size={16} reducedMotion="user" />
                 </button>
               </div>
             </div>

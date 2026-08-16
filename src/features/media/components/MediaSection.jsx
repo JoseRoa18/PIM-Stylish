@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Copy, Check, Upload, Video, Pencil, Download, Loader2, ChevronDown, Image as ImageIcon, Store } from 'lucide-react';
+import { Star, Trash2, Film, ImagePlus, ExternalLink, X, GripVertical, Link2, Check, Upload, Video, Pencil, Download, Loader2, ChevronDown, Image as ImageIcon, Store } from 'lucide-react';
+import { MorphIcon } from 'morphicons/react';
+import { Link2 as Link2Glyph, Copy as CopyGlyph, Check as CheckGlyph } from 'lucide';
 import { draggable, dropTargetForElements, monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { attachClosestEdge, extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
@@ -1119,7 +1121,7 @@ function MediaCard({
             }`}
             title={copied ? 'Link copied!' : 'Copy image link'}
           >
-            {copied ? <Check className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
+            <MorphIcon icon={copied ? CheckGlyph : Link2Glyph} size={16} reducedMotion="user" />
           </button>
           {canEdit && isImage && (
             <button
@@ -1671,7 +1673,7 @@ function LinksDialog({ title, subtitle, items, onClose }) {
                       }`}
                       title={isCopied ? 'Copied!' : 'Copy link'}
                     >
-                      {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      <MorphIcon icon={isCopied ? CheckGlyph : CopyGlyph} size={16} reducedMotion="user" />
                     </button>
                   </li>
                 );
@@ -1693,7 +1695,7 @@ function LinksDialog({ title, subtitle, items, onClose }) {
                 copiedAll ? 'bg-primary text-on-primary' : 'bg-primary text-on-primary hover:opacity-90'
               }`}
             >
-              {copiedAll ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <MorphIcon icon={copiedAll ? CheckGlyph : CopyGlyph} size={16} reducedMotion="user" />
               {copiedAll ? 'Copied all!' : `Copy all (${items.length})`}
             </button>
           </div>

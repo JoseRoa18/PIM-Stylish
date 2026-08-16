@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Loader2, RefreshCw, Copy, Check, AlertCircle } from 'lucide-react';
+import { Loader2, RefreshCw, AlertCircle } from 'lucide-react';
+import { MorphIcon } from 'morphicons/react';
+import { Copy, Check } from 'lucide';
 import Dialog from '@/components/ui/Dialog';
 import { createUser } from '../api/users';
 import { generatePassword } from '../password';
@@ -132,7 +134,7 @@ export default function AddUserDialog({ onClose, onCreated }) {
               title="Copy password"
               className="p-2.5 rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors"
             >
-              {copied ? <Check className="w-4 h-4 text-primary" /> : <Copy className="w-4 h-4" />}
+              <MorphIcon icon={copied ? Check : Copy} size={16} reducedMotion="user" className={copied ? 'text-primary' : ''} />
             </button>
           </div>
         </Field>

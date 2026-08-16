@@ -6,11 +6,12 @@ import {
   KeyRound,
   Trash2,
   AlertCircle,
-  Copy,
   Check,
   X,
   Pencil,
 } from 'lucide-react';
+import { MorphIcon } from 'morphicons/react';
+import { Copy as CopyGlyph, Check as CheckGlyph } from 'lucide';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import Avatar from '@/components/ui/Avatar';
@@ -420,7 +421,7 @@ function CredentialsBanner({ email, password, onDismiss }) {
             title="Copy"
             className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
           >
-            {copied ? <Check className="w-4 h-4 text-primary" /> : <Copy className="w-4 h-4" />}
+            <MorphIcon icon={copied ? CheckGlyph : CopyGlyph} size={16} reducedMotion="user" className={copied ? 'text-primary' : ''} />
           </button>
           <button
             onClick={onDismiss}

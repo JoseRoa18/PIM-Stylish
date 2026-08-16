@@ -1,5 +1,7 @@
 import { useState, useRef, lazy, Suspense } from 'react';
-import { FileText, ExternalLink, Eye, Trash2, Link as LinkIcon, Check, Loader2, Upload, ChevronDown } from 'lucide-react';
+import { FileText, ExternalLink, Eye, Trash2, Loader2, Upload, ChevronDown } from 'lucide-react';
+import { MorphIcon } from 'morphicons/react';
+import { Link as LinkGlyph, Check as CheckGlyph } from 'lucide';
 import { useProductMedia } from '../hooks/useProductMedia';
 import { uploadDocumentFile, removeMedia, getMediaUrl, isSupabaseStored } from '../api/media';
 import { formatFileSize } from '@/lib/format';
@@ -468,7 +470,7 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
             className={copied ? 'p-2 rounded-full bg-primary text-on-primary' : iconBtn}
             title={copied ? 'Link copied!' : 'Copy link'}
           >
-            {copied ? <Check className="w-4 h-4" /> : <LinkIcon className="w-4 h-4" />}
+            <MorphIcon icon={copied ? CheckGlyph : LinkGlyph} size={16} reducedMotion="user" />
           </button>
           {canEdit && (
             <>
