@@ -236,16 +236,19 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   }
 
   async function fixOne(problem) {
+    const isBBPromo = cfg.kind === 'bestbuy' && problem.source === 'promo';
     const ok = await confirm({
       title: `Push ${money(problem.expected)} to ${cfg.label} for ${problem.sku}?`,
-      message: `Updates ONLY the price on the live store (currently ${money(problem.live)}). Nothing else on the listing is touched.`,
+      message: isBBPromo
+        ? `Keeps the offer's regular price at MAP and schedules the promo discount of ${money(problem.expected)} for the promo month (currently selling at ${money(problem.live)}). Nothing else on the offer is touched.`
+        : `Updates ONLY the price on the live store (currently ${money(problem.live)}). Nothing else on the listing is touched.`,
       confirmLabel: 'Push price',
     });
     if (!ok) return;
     setFixing(problem.sku);
     setMsg(null);
     try {
-      await pushExpectedPrice(problem.sku, problem.expected, site);
+      await pushExpectedPrice(problem.sku, problem.expected, site, problem);
       await reanalyzeAfterIndexLag(`${problem.sku} → ${money(problem.expected)} pushed.`);
     } catch (err) {
       setMsg({ tone: 'error', text: err.message });
@@ -255,10 +258,10 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   }
 
   async function fixAll() {
-    const list = fixable.map((p) => `${p.sku}: ${money(p.live)} → ${money(p.expected)}`).join('\n');
+    const list = fixable.map((p) => `${p.sku}: ${money(p.live)} → ${money(p.expected)}${cfg.kind === 'bestbuy' && p.source === 'promo' ? ' (scheduled promo discount)' : ''}`).join('\n');
     const ok = await confirm({
       title: `Push ${fixable.length} corrected price${fixable.length === 1 ? '' : 's'} to ${cfg.label}?`,
-      message: `Only prices are updated — nothing else on the listings.\n\n${list}`,
+      message: `Only prices are updated — nothing else on the listings.${cfg.kind === 'bestbuy' ? ' Promo members are pushed as a scheduled discount for the promo month (the regular price stays at MAP), so the promo ends on its own.' : ''}\n\n${list}`,
       confirmLabel: `Push ${fixable.length}`,
     });
     if (!ok) return;
@@ -320,8 +323,9 @@ function PriceAlignmentCard({ canEdit, confirm }) {
           <p className="text-body-sm text-on-surface-variant mt-0.5">
             {cfg.kind === 'bestbuy'
               ? `Compares every Best Buy offer against its expected price — the active promo price
-                 for promo members, the regular ${cfg.priceShort} for everyone else. Analysis only for
-                 now: corrections are applied by hand in the seller portal until the price push is built.`
+                 for promo members, the regular ${cfg.priceShort} for everyone else. Fixes update ONLY
+                 prices: stale MAPs correct the offer price, missing promos become a scheduled
+                 discount for the promo month.`
               : cfg.promoAware
                 ? `Compares every linked product's live store price against its expected price —
                    the active promo price for promo members, the regular ${cfg.priceShort} for everyone else.`

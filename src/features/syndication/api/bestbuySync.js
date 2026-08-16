@@ -1,10 +1,11 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 
-// Best Buy Canada (Mirakl). Reads pull the seller's offers; the ONLY write is
-// product CONTENT via the bestbuy-push-content edge function (P41 import) —
-// PRICES are never pushed (explicit user rule, 2026-07-31), and the edge
-// function rejects any row that carries a price column.
+// Best Buy Canada (Mirakl). Reads pull the seller's offers; writes are
+// product CONTENT via bestbuy-push-content (P41 import) and — since the
+// no-price-push rule was lifted 2026-08-16 — offer PRICES via
+// bestbuy-push-price (OF24 import, price/discount fields only). Every push
+// is manual and confirmed by the user; nothing runs from crons.
 
 async function invokeFn(name, body = {}) {
   const { data, error } = await supabase.functions.invoke(name, { body });
@@ -30,6 +31,32 @@ async function invokeFn(name, body = {}) {
 
 async function invokeBestBuy(body = {}) {
   return invokeFn('bestbuy-pull-offers', body);
+}
+
+/**
+ * Push offer prices to Best Buy (OF24 — async Mirakl import). Each update
+ * carries only price and/or a scheduled discount; content, stock and state
+ * are never touched. `dryRun: true` returns the exact Mirakl payload without
+ * submitting anything — the preview the alignment tab shows before a push.
+ */
+export async function pushBestBuyPrices(updates, { dryRun = false } = {}) {
+  const data = await invokeFn('bestbuy-push-price', { updates, dryRun });
+  if (!dryRun) {
+    logActivity({
+      action: 'push',
+      entityType: 'product',
+      entityId: updates.length === 1 ? updates[0].sku : `${updates.length} products`,
+      target: 'bestbuy',
+      summary: `Pushed ${updates.length} price${updates.length === 1 ? '' : 's'} to Best Buy (import ${data.import_id ?? '?'})`,
+      metadata: {
+        count: updates.length,
+        import_id: data.import_id ?? null,
+        lines_in_error: data.lines_in_error ?? 0,
+        skus: updates.map((u) => u.sku).slice(0, 50),
+      },
+    });
+  }
+  return data;
 }
 
 /**
