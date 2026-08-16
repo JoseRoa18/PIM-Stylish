@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { Sun, Moon } from 'lucide-react';
+// Icon DATA (vanilla lucide), not components — MorphIcon animates the actual
+// strokes between the two shapes instead of swapping elements.
+import { MorphIcon } from 'morphicons/react';
+import { Sun, Moon } from 'lucide';
 
 function prefersDark() {
   return typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
@@ -64,7 +67,7 @@ export default function ThemeToggle() {
       title={dark ? 'Light mode' : 'Dark mode'}
       className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
     >
-      {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+      <MorphIcon icon={dark ? Sun : Moon} size={20} reducedMotion="user" />
     </button>
   );
 }

@@ -11,9 +11,11 @@ import {
   Loader2,
   CheckCircle2,
   X,
-  Copy,
-  Check,
 } from 'lucide-react';
+// Icon DATA (vanilla lucide) for MorphIcon — it animates the strokes between
+// the two shapes instead of swapping elements.
+import { MorphIcon } from 'morphicons/react';
+import { Copy, Check } from 'lucide';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -1097,7 +1099,12 @@ function CopySkusButton({ skus }) {
       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors"
       title="Copy this market's promo SKUs, one per line"
     >
-      {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+      <MorphIcon
+        icon={copied ? Check : Copy}
+        size={14}
+        reducedMotion="user"
+        className={copied ? 'text-success' : ''}
+      />
       {copied ? `Copied ${skus.length} SKUs` : `Copy SKUs (${skus.length})`}
     </button>
   );
