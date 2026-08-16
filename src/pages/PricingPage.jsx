@@ -1114,6 +1114,7 @@ const FILE_FILLERS = {
     monogram: 'WA',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: 'Partner Home promotions file — existing rows are filled, missing promo members are appended (only those Wayfair actually lists).',
+    accept: '.xlsx,.xlsm',
     fill: fillWayfairPromoFile,
     summarize: (r) => {
       const parts = [`Wayfair file ready — ${r.filled} existing rows filled`];
@@ -1126,7 +1127,8 @@ const FILE_FILLERS = {
     label: 'BB&B / Overstock',
     monogram: 'BO',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
-    hint: 'Portal promo template (use Copy SKUs first to request it) — PROMO_MAP and PROMO_COST are filled on matching part numbers; rows are never added.',
+    hint: 'Portal promo file, CSV (use Copy SKUs first to request it) — PROMO_MAP and PROMO_COST are filled on matching part numbers; rows are never added.',
+    accept: '.csv,.xlsx,.xlsm',
     fill: fillBBBPromoFile,
     summarize: (r) => {
       const parts = [`BB&B / Overstock file ready — ${r.filled} of ${r.fileRows} rows filled`];
@@ -1192,7 +1194,7 @@ function FillMarketplaceFileDialog({ promo, onClose, onDone }) {
             <p className="text-body-sm text-on-surface-variant">{def.hint}</p>
             <FileDropzone
               onFile={handleUpload}
-              accept=".xlsx,.xlsm"
+              accept={def.accept}
               disabled={busy}
               className="flex items-center justify-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
             >

@@ -121,7 +121,9 @@ async function parseXlsx(file) {
   return { headers: headers.filter(Boolean), rows };
 }
 
-function parseCsvText(text) {
+// Exported: promo file fillers need the raw grid (their header row isn't
+// row 1 — portal files carry instruction rows above it).
+export function parseCsvText(text) {
   const rows = [];
   let row = [];
   let field = '';
