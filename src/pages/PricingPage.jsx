@@ -478,16 +478,19 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                   </button>
                 )}
               </div>
-              <div className="overflow-x-auto rounded-xl border border-outline-variant">
+              {/* Inner scroll + sticky header (bg on each th — that's the
+                  element that sticks). data-lenis-prevent per the AppShell
+                  Lenis gotcha. */}
+              <div className="overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
                 <table className="w-full text-body-sm">
                   <thead>
-                    <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
-                      <th className="text-left px-4 py-2.5 font-medium">SKU</th>
-                      <th className="text-right px-4 py-2.5 font-medium">On {cfg.short}</th>
-                      <th className="text-right px-4 py-2.5 font-medium">Expected</th>
-                      <th className="text-left px-4 py-2.5 font-medium">Source</th>
-                      <th className="text-right px-4 py-2.5 font-medium">Δ</th>
-                      {canEdit && <th className="px-4 py-2.5" />}
+                    <tr className="text-on-surface-variant text-label-md">
+                      <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">SKU</th>
+                      <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">On {cfg.short}</th>
+                      <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Expected</th>
+                      <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">Source</th>
+                      <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Δ</th>
+                      {canEdit && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-4 py-2.5" />}
                     </tr>
                   </thead>
                   <tbody>
@@ -1019,17 +1022,21 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                     </p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto rounded-xl border border-outline-variant">
+                  <div className="overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
+                    {/* The list scrolls INSIDE the card (data-lenis-prevent —
+                        see the AppShell Lenis gotcha) so the header can stay
+                        sticky; the background lives on each th because that's
+                        the element that actually sticks. */}
                     <table className="w-full text-body-sm">
                       <thead>
-                        <tr className="bg-surface-container-low text-on-surface-variant text-label-md">
-                          <th className="text-left px-4 py-2.5 font-medium">SKU</th>
-                          <th className="text-right px-4 py-2.5 font-medium whitespace-nowrap">Promo MAP</th>
-                          <th className="text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
+                        <tr className="text-on-surface-variant text-label-md">
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">SKU</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Promo MAP</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
                           {costKeys.map((k) => {
                             const m = costMeta(k);
                             return (
-                              <th key={k} className="text-right px-4 py-2.5 font-medium whitespace-nowrap">
+                              <th key={k} className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">
                                 Cost · {m.label}
                                 {m.unit !== (market === 'ca' ? 'CAD' : 'USD') && (
                                   <span className="ml-1 text-on-surface-variant/70">({m.unit})</span>
