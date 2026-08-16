@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers, pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
+import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
 import { WIX_SITES, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 
 /**
@@ -22,6 +23,11 @@ import { WIX_SITES, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites
  * a stale MAP updates the offer price; a missing promo becomes a SCHEDULED
  * discount for the promo month (price stays at MAP, discount_price = promo
  * with the month's start/end dates), so it expires on its own.
+ *
+ * Walmart US sells at the US MAP (verified 2026-08-16: 158/205 items exactly
+ * at map_usd) and follows the monthly promo. ANALYSIS ONLY: the Walmart
+ * connection is read-only by design, so fixes go through Seller Center until
+ * a price push is built.
  *
  * Reports are PERSISTED: the analysis reads each site's latest channel_health
  * snapshot — written by the twice-daily cron AND by "Run analysis" (which is
@@ -55,6 +61,19 @@ export const ALIGN_TARGETS = {
     priceShort: 'MAP (CAD)',
     promoAware: true,
     market: 'ca',
+  },
+  walmart_us: {
+    key: 'walmart_us',
+    kind: 'walmart',
+    canFix: false,
+    channel: 'walmart_us',
+    label: 'Walmart US',
+    short: 'Walmart US',
+    symbol: '$',
+    priceField: 'map_usd',
+    priceShort: 'MAP (USD)',
+    promoAware: true,
+    market: 'us',
   },
 };
 export const ALIGN_TARGET_KEYS = Object.keys(ALIGN_TARGETS);
@@ -97,16 +116,17 @@ function classifySnapshot(snapshot) {
 }
 
 /**
- * The Best Buy offers snapshot is raw Mirakl data (sku, price, active…), so
- * the expected price is joined in here: active promo CAD price for members,
- * the regular MAP for everyone else. Offers whose SKU isn't in the PIM are
- * out of scope (source-of-truth rule), mirroring the Wix orphan handling.
+ * Best Buy / Walmart snapshots are raw channel data (sku, price, …), so the
+ * expected price is joined in here: the market's active promo price for
+ * members, the site's regular MAP for everyone else. Rows whose SKU isn't in
+ * the PIM are out of scope (source-of-truth rule), mirroring the Wix orphan
+ * handling.
  */
-async function loadBestBuyAlignment() {
+async function loadOfferAlignment(cfg) {
   const { data, error } = await supabase
     .from('channel_health')
     .select('run_at, results')
-    .eq('channel', 'bestbuy')
+    .eq('channel', cfg.channel)
     .order('run_at', { ascending: false })
     .limit(1);
   if (error) throw error;
@@ -115,13 +135,14 @@ async function loadBestBuyAlignment() {
 
   const { data: prods, error: prodErr } = await supabase
     .from('products')
-    .select('sku, map_cad');
+    .select(`sku, base:${cfg.priceField}`);
   if (prodErr) throw prodErr;
-  const mapBySku = new Map((prods ?? []).map((p) => [p.sku, p.map_cad]));
+  const baseBySku = new Map((prods ?? []).map((p) => [p.sku, p.base]));
 
+  const promoField = cfg.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const { data: activePromos, error: promoErr } = await supabase
     .from('promotions')
-    .select('period, promotion_prices(sku, promo_price_cad)')
+    .select(`period, promotion_prices(sku, ${promoField})`)
     .eq('status', 'active')
     .order('period', { ascending: true });
   if (promoErr) throw promoErr;
@@ -129,24 +150,24 @@ async function loadBestBuyAlignment() {
   for (const promo of activePromos ?? []) {
     for (const row of promo.promotion_prices ?? []) {
       // The period rides along so a promo fix can be pushed as a SCHEDULED
-      // discount covering exactly that month.
-      if (row.promo_price_cad != null) promoBySku.set(row.sku, { price: row.promo_price_cad, period: promo.period });
+      // discount covering exactly that month (Best Buy).
+      if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period });
     }
   }
 
   const results = [];
   for (const o of snapshot.results ?? []) {
-    if (!mapBySku.has(o.sku)) continue; // Best Buy shop SKU not in the PIM
-    const map = mapBySku.get(o.sku) ?? null;
+    if (!baseBySku.has(o.sku)) continue; // channel SKU not in the PIM
+    const base = baseBySku.get(o.sku) ?? null;
     const promo = promoBySku.get(o.sku);
-    const expected = promo?.price ?? map;
+    const expected = promo?.price ?? base;
     results.push({
       sku: o.sku,
       state: 'live',
       price: o.price ?? null,
       expected: expected ?? null,
       expected_source: promo != null ? 'promo' : 'map',
-      map,
+      map: base,
       promo_period: promo?.period ?? null,
       price_diff: expected != null && o.price != null && Math.abs(o.price - expected) > 0.01,
     });
@@ -157,7 +178,7 @@ async function loadBestBuyAlignment() {
 /** Latest saved report for a target (cron or manual) — instant, no live pull. */
 export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
   const cfg = ALIGN_TARGETS[target];
-  if (cfg.kind === 'bestbuy') return loadBestBuyAlignment();
+  if (cfg.kind === 'bestbuy' || cfg.kind === 'walmart') return loadOfferAlignment(cfg);
   const { data, error } = await supabase
     .from('channel_health')
     .select('run_at, results')
@@ -173,6 +194,7 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
 export async function runPriceAlignment(target = DEFAULT_WIX_SITE) {
   const cfg = ALIGN_TARGETS[target];
   if (cfg.kind === 'bestbuy') await refreshBestBuyOffers();
+  else if (cfg.kind === 'walmart') await refreshWalmartItems('us');
   else await refreshWixCatalog(target);
   return loadLatestAlignment(target);
 }

@@ -287,12 +287,14 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4">
       {/* One tile per channel — mirrors the Marketplaces strip. */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
         {ALIGN_TARGET_KEYS.map((key) => {
           const t = ALIGN_TARGETS[key];
           const avatar = t.kind === 'bestbuy'
             ? { text: 'BB', cls: 'bg-brand-bestbuy/15 text-brand-bestbuy' }
-            : { text: 'W', cls: 'bg-brand-wix/15 text-brand-wix' };
+            : t.kind === 'walmart'
+              ? { text: 'WM', cls: 'bg-brand-walmart/15 text-brand-walmart' }
+              : { text: 'W', cls: 'bg-brand-wix/15 text-brand-wix' };
           return (
             <button
               key={key}
@@ -326,7 +328,11 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                  for promo members, the regular ${cfg.priceShort} for everyone else. Fixes update ONLY
                  prices: stale MAPs correct the offer price, missing promos become a scheduled
                  discount for the promo month.`
-              : cfg.promoAware
+              : cfg.kind === 'walmart'
+                ? `Compares every Walmart item against its expected price — the active promo price
+                   for promo members, the regular ${cfg.priceShort} for everyone else. Analysis only:
+                   the Walmart connection is read-only, so corrections go through Seller Center.`
+                : cfg.promoAware
                 ? `Compares every linked product's live store price against its expected price —
                    the active promo price for promo members, the regular ${cfg.priceShort} for everyone else.`
                 : `Compares every linked product's base price against its ${cfg.priceShort} — this store
