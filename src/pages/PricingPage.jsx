@@ -32,6 +32,7 @@ import {
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
 import Dialog from '@/components/ui/Dialog';
+import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
@@ -1189,16 +1190,15 @@ function FillMarketplaceFileDialog({ promo, onClose, onDone }) {
         {def && (
           <>
             <p className="text-body-sm text-on-surface-variant">{def.hint}</p>
-            <label className={`flex items-center justify-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy ? 'opacity-40 pointer-events-none' : ''}`}>
+            <FileDropzone
+              onFile={handleUpload}
+              accept=".xlsx,.xlsm"
+              disabled={busy}
+              className="flex items-center justify-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+            >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              {busy ? 'Filling…' : `Upload the ${def.label} file`}
-              <input
-                type="file"
-                accept=".xlsx,.xlsm"
-                className="hidden"
-                onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; handleUpload(file); }}
-              />
-            </label>
+              {busy ? 'Filling…' : `Drop the ${def.label} file here — or click to browse`}
+            </FileDropzone>
           </>
         )}
 
@@ -1305,16 +1305,15 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
               >
                 {loaded ? 'Download current data' : 'Download blank template'}
               </button>
-              <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity cursor-pointer ${busy ? 'opacity-40 pointer-events-none' : ''}`}>
+              <FileDropzone
+                onFile={handleUpload}
+                accept=".xlsx,.csv"
+                disabled={busy}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
+              >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 {loaded ? 'Upload updated file' : 'Upload filled file'}
-                <input
-                  type="file"
-                  accept=".xlsx,.csv"
-                  className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; handleUpload(f); }}
-                />
-              </label>
+              </FileDropzone>
             </div>
           </div>
         )}
