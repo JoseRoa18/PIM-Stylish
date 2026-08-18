@@ -35,6 +35,7 @@ interface WixProduct {
   additionalInfoSections?: Array<{ title?: string; description?: string }>;
   media?: { mainMedia?: WixMediaItem; items?: WixMediaItem[] };
   variants?: Array<{ variant?: { sku?: string } }>;
+  productPageUrl?: { base?: string; path?: string };
 }
 
 function pickSku(p: WixProduct): string | null {
@@ -62,7 +63,7 @@ Deno.serve(async (req) => {
       id: string; sku: string | null; name: string; visible: boolean;
       price: number | null; discountedPrice: number | null;
       descriptionLength: number; imageCount: number; hasMainImage: boolean;
-      sectionTitles: string[];
+      sectionTitles: string[]; url: string | null;
     }[] = [];
     let offset = 0;
     const limit = 100;
@@ -108,6 +109,10 @@ Deno.serve(async (req) => {
           sectionTitles: (p.additionalInfoSections ?? [])
             .map((s) => (s.title ?? "").trim())
             .filter(Boolean),
+          // Public storefront URL, same shape wix-read-product exposes.
+          url: p.productPageUrl?.base
+            ? `${p.productPageUrl.base}${p.productPageUrl.path ?? ""}`
+            : null,
         });
       }
       const total = data.totalResults ?? data.metadata?.count ?? products.length;
