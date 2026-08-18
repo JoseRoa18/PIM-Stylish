@@ -1,18 +1,27 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix } from '@/features/syndication/api/wixSync';
+import { pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
+import { getAppSetting } from '@/features/settings/api/appSettings';
 
 /**
  * Monthly promotions. Promo prices come from the user's official lists (one
  * price per SKU — never computed), one promotion per month, applying to all
  * marketplaces. "Apply" copies the CAD promo price into the products'
- * on_sale/sale_price_cad (what the Wix push reads); pushes stay manual.
+ * on_sale/sale_price_cad (what the Wix push reads).
+ *
+ * Application is AUTOMATED where an API can write prices (rule of 2026-08-18,
+ * switches in /settings): the promo-apply cron applies the month's promo at
+ * 00:00 on the 1st (VET) and pushes the SinksDirect Wix sites; Best Buy gets
+ * its discounts SCHEDULED in Mirakl when the list is loaded (see
+ * autoScheduleBestBuyPromo) and Mirakl flips them at the start date itself.
+ * Everything else (content pushes, channels without a price API) stays manual.
  */
 
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, created_at, activated_at, ended_at, promotion_prices(count)')
+    .select('id, name, period, status, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
     .order('period', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((p) => ({
@@ -286,6 +295,105 @@ export async function endPromotion(promotion) {
     metadata: { skus: prices.length },
   });
   return { cleared: prices.length };
+}
+
+/** Last day of the promo month ('YYYY-MM-01' → 'YYYY-MM-DD'). */
+function promoMonthEnd(period) {
+  const [y, m] = String(period).split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+}
+
+/**
+ * Schedule the promotion's CAD prices on Best Buy as Mirakl SCHEDULED
+ * discounts for exactly the promo month — Mirakl turns them on at 00:00 of
+ * the start date and off after the end date on its own, so nothing needs to
+ * run at midnight. Called automatically after a promo list is loaded or
+ * updated (honors the 'promo_automation' switches; re-running overwrites the
+ * previous schedule, so updates are safe). Only SKUs with a live Best Buy
+ * offer in the latest snapshot are sent; the regular price rides along as the
+ * PIM MAP so stale MAPs get corrected in the same import.
+ */
+export async function autoScheduleBestBuyPromo(promotion) {
+  const settings = await getAppSetting('promo_automation', {});
+  if (settings.enabled === false || settings.bestbuy === false) return { skipped: 'automation off' };
+
+  const now = new Date();
+  const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  if (String(promotion.period) < currentPeriod) return { skipped: 'past promotion' };
+
+  const prices = await getPromotionPrices(promotion.id);
+  const members = prices.filter((r) => r.promo_price_cad != null);
+  if (!members.length) return { skipped: 'no CAD prices yet' };
+
+  const { data: snap, error: snapErr } = await supabase
+    .from('channel_health')
+    .select('results')
+    .eq('channel', 'bestbuy')
+    .order('run_at', { ascending: false })
+    .limit(1);
+  if (snapErr) throw snapErr;
+  const listed = new Set((snap?.[0]?.results ?? []).map((o) => o.sku));
+
+  const mapBySku = new Map();
+  const skus = members.map((r) => r.sku);
+  for (let i = 0; i < skus.length; i += 100) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('sku, map_cad')
+      .in('sku', skus.slice(i, i + 100));
+    if (error) throw error;
+    for (const p of data ?? []) mapBySku.set(p.sku, p.map_cad);
+  }
+
+  const start = promotion.period;
+  const end = promoMonthEnd(start);
+  const updates = [];
+  const skippedAtOrAboveMap = [];
+  for (const m of members) {
+    if (!listed.has(m.sku)) continue;
+    const map = mapBySku.get(m.sku);
+    if (map != null && m.promo_price_cad >= map) { skippedAtOrAboveMap.push(m.sku); continue; }
+    updates.push({
+      sku: m.sku,
+      ...(map != null ? { price: map } : {}),
+      discount_price: m.promo_price_cad,
+      discount_start_date: start,
+      discount_end_date: end,
+    });
+  }
+  const notListed = members.length - updates.length - skippedAtOrAboveMap.length;
+
+  let res = null;
+  if (updates.length) res = await pushBestBuyPrices(updates);
+
+  const report = {
+    at: new Date().toISOString(),
+    period: start,
+    end,
+    scheduled: Math.max(0, updates.length - (res?.lines_in_error ?? 0)),
+    attempted: updates.length,
+    not_listed: notListed,
+    skipped_at_or_above_map: skippedAtOrAboveMap,
+    import_id: res?.import_id ?? null,
+    lines_in_error: res?.lines_in_error ?? 0,
+  };
+  const { error: upErr } = await supabase
+    .from('promotions')
+    .update({ bb_scheduled_at: report.at, bb_schedule: report })
+    .eq('id', promotion.id);
+  if (upErr) throw upErr;
+
+  logActivity({
+    action: 'push',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    target: 'bestbuy',
+    summary: `Scheduled "${promotion.name}" on Best Buy — ${report.scheduled} discounts for ${start} → ${end}` +
+      (notListed ? ` · ${notListed} not listed there` : ''),
+    metadata: report,
+  });
+  return report;
 }
 
 /**

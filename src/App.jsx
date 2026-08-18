@@ -23,6 +23,7 @@ const PricingPage = lazy(ROUTE_IMPORTS.pricing);
 const ImportProducts = lazy(ROUTE_IMPORTS.importProducts);
 const Users = lazy(ROUTE_IMPORTS.users);
 const Activity = lazy(ROUTE_IMPORTS.activity);
+const SettingsPage = lazy(ROUTE_IMPORTS.settings);
 const ComingSoon = lazy(ROUTE_IMPORTS.comingSoon);
 
 function PageFallback() {
@@ -92,10 +93,18 @@ export default function App() {
             }
           />
 
+          <Route
+            path="/settings"
+            element={
+              <RequireRole allowed={['admin']}>
+                <SettingsPage />
+              </RequireRole>
+            }
+          />
+
           {/* Not built yet — show a friendly "Coming soon" instead of a dead redirect */}
           <Route path="/assets" element={<ComingSoon />} />
           <Route path="/analytics" element={<ComingSoon />} />
-          <Route path="/settings" element={<ComingSoon />} />
         </Route>
 
         {/* Catch-all → redirect to home */}

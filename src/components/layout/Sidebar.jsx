@@ -30,7 +30,7 @@ const NAV_ITEMS = [
   { to: '/analytics', icon: BarChart3, label: 'Analytics', soon: true, prefetch: 'comingSoon' },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true, prefetch: 'users' },
   { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true, prefetch: 'activity' },
-  { to: '/settings', icon: Settings, label: 'Settings', soon: true, prefetch: 'comingSoon' },
+  { to: '/settings', icon: Settings, label: 'Settings', adminOnly: true, prefetch: 'settings' },
 ];
 
 export default function Sidebar({ open = false, onClose }) {

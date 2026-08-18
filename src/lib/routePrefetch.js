@@ -17,6 +17,7 @@ export const ROUTE_IMPORTS = {
   importProducts: () => import('@/pages/ImportProducts'),
   users: () => import('@/features/users/pages/Users'),
   activity: () => import('@/pages/Activity'),
+  settings: () => import('@/pages/SettingsPage'),
   comingSoon: () => import('@/pages/ComingSoon'),
 };
 

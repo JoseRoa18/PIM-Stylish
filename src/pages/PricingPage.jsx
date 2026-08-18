@@ -26,6 +26,7 @@ import {
   createPromotion,
   createPromotionFromFile,
   addFileToPromotion,
+  autoScheduleBestBuyPromo,
   markPromotionActive,
   deletePromotion,
   applyPromotion,
@@ -135,7 +136,14 @@ export default function PricingPage() {
       {tab === 'promotions' && showNew && (
         <NewPromotionForm
           onClose={() => setShowNew(false)}
-          onCreated={() => { setShowNew(false); reload(); }}
+          onCreated={(promo) => {
+            setShowNew(false);
+            reload();
+            // Fire-and-forget: schedule the month's discounts on Best Buy
+            // (honors the /settings switches). The card's chip appears on the
+            // reload that follows.
+            if (promo) autoScheduleBestBuyPromo(promo).then(reload).catch(() => {});
+          }}
         />
       )}
 
@@ -609,7 +617,7 @@ function NewPromotionForm({ onClose, onCreated }) {
       if (res.notInPim.length) {
         setError(`Created — ${res.added} SKUs added. Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
       }
-      onCreated();
+      onCreated(res.promotion);
     } catch (err) {
       setError(err.message);
       setBusy(false);
@@ -831,6 +839,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-body-md text-on-surface font-medium">{promo.name}</span>
               <span className={`px-2 py-0.5 rounded-full text-label-md font-semibold ${meta.class}`}>{meta.label}</span>
+              {promo.bb_schedule && (
+                <span
+                  className="px-2 py-0.5 rounded-full text-label-md font-medium bg-surface-container text-on-surface-variant"
+                  title={`Best Buy scheduled discounts: ${promo.bb_schedule.scheduled} SKUs for ${promo.bb_schedule.period} → ${promo.bb_schedule.end}${promo.bb_schedule.not_listed ? ` · ${promo.bb_schedule.not_listed} not listed on Best Buy` : ''}`}
+                >
+                  Best Buy · {promo.bb_schedule.scheduled} scheduled
+                </span>
+              )}
             </div>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
               {monthLabel(promo.period)} · {promo.sku_count} SKU{promo.sku_count === 1 ? '' : 's'}
@@ -959,6 +975,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                 setRows(null);
                 setMapBySku(null);
                 onChanged();
+                // An updated list re-schedules the Best Buy discounts (the
+                // OF24 import overwrites the previous ones).
+                autoScheduleBestBuyPromo(promo).then(onChanged).catch(() => {});
               }}
             />
           )}
