@@ -12,6 +12,13 @@ export const VARIANT_DISTINGUISHING = new Set([
   'compatible_deck_plate',
 ]);
 
+// Fields whose value is UNIQUE to each product (identity/barcodes and
+// finish-specific part codes) — never even OFFERED for propagation to
+// siblings: copying them would create duplicates of something that must be
+// distinct per variant. (VARIANT_DISTINGUISHING fields merely default to
+// unchecked; these are excluded outright.)
+export const NEVER_PROPAGATE = new Set(['sku', 'upc', 'factory_code']);
+
 // Columns (not attributes) worth keeping consistent across a family.
 const SHARED_COLUMNS = ['material', 'product_type'];
 

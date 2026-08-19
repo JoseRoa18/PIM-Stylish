@@ -34,7 +34,7 @@ import { updateProduct, getProduct, deleteProducts } from '@/features/products/a
 import { generateKeywords } from '@/features/products/api/keywords';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useVariants } from '@/features/products/hooks/useVariants';
-import { VARIANT_DISTINGUISHING, prettifyKey, readField } from '@/features/products/lib/variantFields';
+import { VARIANT_DISTINGUISHING, NEVER_PROPAGATE, prettifyKey, readField } from '@/features/products/lib/variantFields';
 import Dialog from '@/components/ui/Dialog';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
@@ -462,7 +462,9 @@ export default function ProductDetail() {
         setIsEditing(false);
         return;
       }
-      const changes = computeChanges(form, product);
+      // Unique-per-product fields (UPC, factory code) never reach the
+      // propagation offer — copying them to siblings would corrupt data.
+      const changes = computeChanges(form, product).filter((c) => !NEVER_PROPAGATE.has(c.key));
       const hadFamily = product.family_number != null;
       const updated = await updateProduct(product.sku, patch);
       mergeProduct(updated);
