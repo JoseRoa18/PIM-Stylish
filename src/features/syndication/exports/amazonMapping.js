@@ -218,10 +218,11 @@ export const AMAZON_RULES = {
 
   // ---- Offer ----
   'Item Condition': () => 'New',
-  // The PIM only carries CAD prices; US templates get a blank List Price
-  // until USD pricing lands in the PIM.
-  'List Price Currency': (p, ctx) => (p.msrp_cad && ctx?.lang !== 'en_US' ? 'CAD' : ''),
-  'List Price': (p, ctx) => (ctx?.lang === 'en_US' ? '' : num(p.msrp_cad)),
+  // List Price = MSRP in the template's market currency (USD pricing lives
+  // in the PIM since 2026-08).
+  'List Price Currency': (p, ctx) =>
+    ctx?.lang === 'en_US' ? (p.msrp_usd ? 'USD' : '') : (p.msrp_cad ? 'CAD' : ''),
+  'List Price': (p, ctx) => (ctx?.lang === 'en_US' ? num(p.msrp_usd) : num(p.msrp_cad)),
 
   // ---- Shipping ----
   'Item Package Length': (p) => num(attr(p).shipping_dimensions_in?.length),

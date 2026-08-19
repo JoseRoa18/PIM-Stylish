@@ -171,7 +171,9 @@ const BASIC_DATA_RULES = {
   AC: (p) => num(attr(p).shipping_dimensions_in?.width),
   AD: (p) => num(attr(p).shipping_dimensions_in?.length),
   BQ: () => 'Hard',
-  // BR National Cost: commercial terms — business fills.
+  // BR National Cost = the Rona/Home Depot CAD dealer cost (in the PIM
+  // since 2026-08).
+  BR: (p) => num(p.cost_cad_rona_hd),
   BU: (p) => num(p.msrp_cad),
   CA: () => 'No',
   CB: () => 'No',
