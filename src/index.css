@@ -371,3 +371,24 @@ input[type="checkbox"], input[type="radio"] { color-scheme: light; }
   height: 0;
   pointer-events: none;
 }
+/* Slim, token-colored scrollbar for scroll containers inside cards (the OS
+   default bar looks glued to the card edge on Windows). The standard
+   properties win on modern browsers; the -webkit rules cover older ones. */
+.scrollbar-slim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-outline-variant) transparent;
+}
+.scrollbar-slim::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-slim::-webkit-scrollbar-thumb {
+  background: var(--color-outline-variant);
+  border-radius: 9999px;
+}
+.scrollbar-slim::-webkit-scrollbar-thumb:hover {
+  background: var(--color-outline);
+}
+.scrollbar-slim::-webkit-scrollbar-track {
+  background: transparent;
+}

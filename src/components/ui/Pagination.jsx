@@ -12,22 +12,75 @@ const PAGE_SIZES = [10, 25, 50, 100];
  *   total      — total item count (after filtering)
  *   onPageChange(page)
  *   onPageSizeChange(size)
+ *   compact    — range + page buttons only (no size selector); renders
+ *                nothing on a single page. For a second bar ABOVE a table.
  */
-export default function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange }) {
+export default function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange, compact = false }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(page, totalPages);
   const from = total === 0 ? 0 : (current - 1) * pageSize + 1;
   const to = Math.min(current * pageSize, total);
 
   if (total === 0) return null;
+  if (compact && totalPages <= 1) return null;
+
+  const rangeLabel = (
+    <span className="text-body-sm text-on-surface-variant">
+      Showing <span className="text-on-surface font-medium">{from}–{to}</span> of{' '}
+      <span className="text-on-surface font-medium">{total}</span>
+    </span>
+  );
+
+  const nav = totalPages > 1 && (
+    <nav className="flex items-center gap-1" aria-label="Pagination">
+      <PageButton
+        disabled={current === 1}
+        onClick={() => onPageChange(current - 1)}
+        ariaLabel="Previous page"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </PageButton>
+
+      {buildPageItems(current, totalPages).map((item, i) =>
+        item === '…' ? (
+          <span key={`gap-${i}`} className="px-1.5 text-body-sm text-on-surface-variant select-none">
+            …
+          </span>
+        ) : (
+          <PageButton
+            key={item}
+            active={item === current}
+            onClick={() => onPageChange(item)}
+            ariaLabel={`Page ${item}`}
+          >
+            {item}
+          </PageButton>
+        ),
+      )}
+
+      <PageButton
+        disabled={current === totalPages}
+        onClick={() => onPageChange(current + 1)}
+        ariaLabel="Next page"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </PageButton>
+    </nav>
+  );
+
+  if (compact) {
+    return (
+      <div className="flex items-center justify-between gap-4 flex-wrap px-1">
+        {rangeLabel}
+        {nav}
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center justify-between gap-4 flex-wrap px-1">
-      <div className="flex items-center gap-3 text-body-sm text-on-surface-variant">
-        <span>
-          Showing <span className="text-on-surface font-medium">{from}–{to}</span> of{' '}
-          <span className="text-on-surface font-medium">{total}</span>
-        </span>
+      <div className="flex items-center gap-3">
+        {rangeLabel}
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
@@ -40,42 +93,7 @@ export default function Pagination({ page, pageSize, total, onPageChange, onPage
         </select>
       </div>
 
-      {totalPages > 1 && (
-        <nav className="flex items-center gap-1" aria-label="Pagination">
-          <PageButton
-            disabled={current === 1}
-            onClick={() => onPageChange(current - 1)}
-            ariaLabel="Previous page"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </PageButton>
-
-          {buildPageItems(current, totalPages).map((item, i) =>
-            item === '…' ? (
-              <span key={`gap-${i}`} className="px-1.5 text-body-sm text-on-surface-variant select-none">
-                …
-              </span>
-            ) : (
-              <PageButton
-                key={item}
-                active={item === current}
-                onClick={() => onPageChange(item)}
-                ariaLabel={`Page ${item}`}
-              >
-                {item}
-              </PageButton>
-            ),
-          )}
-
-          <PageButton
-            disabled={current === totalPages}
-            onClick={() => onPageChange(current + 1)}
-            ariaLabel="Next page"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </PageButton>
-        </nav>
-      )}
+      {nav}
     </div>
   );
 }

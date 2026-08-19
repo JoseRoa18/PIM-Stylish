@@ -111,6 +111,13 @@ export default function Catalog() {
       status: null, page: null,
     });
 
+  // Remember the current view (search/filters/sort/page) so the product
+  // page's "Back to Catalog" returns HERE, not to a blank catalog.
+  useEffect(() => {
+    const qs = searchParams.toString();
+    sessionStorage.setItem('catalog:lastSearch', qs ? `?${qs}` : '');
+  }, [searchParams]);
+
   const baseFiltered = useFilteredProducts(products, { searchTerm, filters });
   const filteredProducts = useMemo(
     () =>
@@ -300,6 +307,17 @@ export default function Catalog() {
         <EmptyFilterState onClearFilters={clearFilters} />
       ) : (
         <>
+          {/* Compact twin of the bottom bar so long catalogs can be paged
+              without scrolling down first. */}
+          {!loading && !error && (
+            <Pagination
+              compact
+              page={currentPage}
+              pageSize={pageSize}
+              total={sortedProducts.length}
+              onPageChange={setPage}
+            />
+          )}
           <ProductsTable
             products={pagedProducts}
             loading={loading}
@@ -360,7 +378,9 @@ function CatalogStats({ total, counts, active, onSelect }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    // On lg the cards flex to fill the row whatever their number — a fixed
+    // 5-column grid left a hole whenever fewer statuses were present.
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 lg:flex">
       {cards.map((card) => {
         const count = card.count;
         const isActive = (card.key || '') === (active || '');
@@ -370,7 +390,7 @@ function CatalogStats({ total, counts, active, onSelect }) {
             type="button"
             onClick={() => onSelect(card.key)}
             aria-pressed={isActive}
-            className={`text-left rounded-xl border px-4 py-3 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+            className={`text-left rounded-xl border px-4 py-3 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:flex-1 lg:min-w-0 ${
               isActive
                 ? 'border-primary bg-primary-container/20 ring-1 ring-primary/30'
                 : 'border-outline-variant bg-surface-container-lowest hover:border-outline hover:bg-surface-container-low'
