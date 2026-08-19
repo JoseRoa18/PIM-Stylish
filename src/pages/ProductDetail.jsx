@@ -490,7 +490,7 @@ export default function ProductDetail() {
     setDeleting(true);
     try {
       await deleteProducts([product.sku]);
-      navigate('/catalog', { replace: true });
+      navigate(`/catalog${sessionStorage.getItem('catalog:lastSearch') ?? ''}`, { replace: true });
     } catch (err) {
       setSaveError(err.message ?? 'Delete failed');
       setDeleting(false);
@@ -511,8 +511,10 @@ export default function ProductDetail() {
 
   return (
     <div className="max-w-6xl mx-auto">
+      {/* Restore the catalog view the user left (filters/sort/page) — a
+          bare /catalog would wipe it. Falls back to bare in a fresh tab. */}
       <Link
-        to="/catalog"
+        to={`/catalog${sessionStorage.getItem('catalog:lastSearch') ?? ''}`}
         className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />

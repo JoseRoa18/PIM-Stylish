@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Camera, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { formatCAD, formatCategory } from '@/lib/format';
 import { getThumbnailUrl, preloadImage } from '@/features/media/api/media';
@@ -101,7 +101,7 @@ export default function ProductsTable({
           header only works when its own ancestor scrolls, and <main>'s
           page scroll never activates it. data-lenis-prevent keeps the
           Lenis instance on <main> from swallowing wheel events here. */}
-      <div className="max-h-[max(24rem,calc(100vh-16rem))] overflow-auto" data-lenis-prevent>
+      <div className="max-h-[max(24rem,calc(100vh-16rem))] overflow-auto scrollbar-slim" data-lenis-prevent>
         <table className="w-full min-w-[64rem] table-fixed">
           <thead>
             <tr className="text-on-surface-variant">
@@ -130,7 +130,8 @@ export default function ProductsTable({
           <tbody>
             {products.map((product, index) => {
               const isSelected = selectionEnabled && selectedSkus?.has(product.sku);
-              const open = () => navigate(`/catalog/${product.sku}`);
+              const url = `/catalog/${product.sku}`;
+              const open = () => navigate(url);
               return (
                 <tr
                   key={product.sku}
@@ -148,9 +149,20 @@ export default function ProductsTable({
                       preloadImage(getThumbnailUrl(product.primary_image.storage_path, 400));
                     }
                   }}
+                  // The row is a button, not an anchor — recreate the two
+                  // browser gestures for "open in a new tab" (the SKU cell
+                  // is a real link for the right-click menu).
                   onClick={(e) => {
-                    if (e.target.tagName === 'INPUT') return;
+                    if (e.target.tagName === 'INPUT' || e.target.closest('a')) return;
+                    if (e.ctrlKey || e.metaKey) {
+                      window.open(url, '_blank', 'noopener');
+                      return;
+                    }
                     open();
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button !== 1 || e.target.closest('a')) return;
+                    window.open(url, '_blank', 'noopener');
                   }}
                   onKeyDown={(e) => {
                     if (e.target.tagName === 'INPUT') return;
@@ -159,12 +171,14 @@ export default function ProductsTable({
                       open();
                     }
                   }}
-                  className={`group border-b border-outline-variant last:border-0 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+                  className={`group relative border-b border-outline-variant last:border-0 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
                     isSelected ? 'bg-primary-container/30' : 'hover:bg-surface-container'
                   }`}
                 >
                   {selectionEnabled && (
-                    <td className="py-2 pl-4 pr-2" onClick={(e) => e.stopPropagation()}>
+                    // Raised above the row-covering link so the checkbox
+                    // stays clickable.
+                    <td className="py-2 pl-4 pr-2 relative z-[2]" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={!!isSelected}
                         onChange={() => onToggleSelect(product.sku)}
@@ -174,6 +188,17 @@ export default function ProductsTable({
                     </td>
                   )}
                   <td className="py-2 px-4">
+                    {/* Invisible link stretched over the WHOLE row (the tr is
+                        the positioned ancestor): right-click / Ctrl+click /
+                        middle-click work anywhere on the line, natively. It
+                        must live inside a td to be valid table markup. */}
+                    <Link
+                      to={url}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute inset-0 z-0"
+                    />
                     <ProductThumbnail
                       primaryImage={product.primary_image}
                       alt={product.model_name}
@@ -187,7 +212,13 @@ export default function ProductsTable({
                         : 'bg-surface-container-lowest group-hover:bg-surface-container'
                     }`}
                   >
-                    {product.sku}
+                    <Link
+                      to={url}
+                      onClick={(e) => e.stopPropagation()}
+                      className="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded"
+                    >
+                      {product.sku}
+                    </Link>
                   </td>
                   <td className="py-2 px-4">
                     <div className="text-body-md font-semibold text-on-surface">
