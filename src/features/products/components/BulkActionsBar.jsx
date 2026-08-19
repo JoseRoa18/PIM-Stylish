@@ -241,7 +241,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const res = await generateLowesSet(templates, productList);
       setResult({
         type: 'success',
-        message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — pricing (USD), lead times and competitive URLs stay blank for the business.`,
+        message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — USD cost/MSRP/MAP included; lead times, forecast and competitive URLs stay blank for the business.`,
       });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? "Lowe's export failed" });
