@@ -84,7 +84,8 @@ export const WALMART_RULES = {
   productId: (p) => attr(p).upc || '',
   productName_en: (p) => attr(p).general_title_en || p.model_name || p.sku,
   brand_en: (p) => brandMap(p.brand),
-  manufacturer_en: () => 'Stylish International Inc.',
+  // Manufacturer = legal entity per brand (Stylish → the Inc., Azuni → Azuni).
+  manufacturer_en: (p) => (/azuni/i.test(p.brand || '') ? 'Azuni' : 'Stylish International Inc.'),
   manufacturerPartNumber: (p) => p.sku,
   modelNumber: (p) => p.sku,
 

@@ -131,7 +131,8 @@ function buildRowData(product, media) {
   r['UPC'] = a.upc ?? '';
   r['Model/Style#'] = product.sku;
   r['Manufacturer Part #'] = product.sku;
-  r['Manufacturer Name'] = a.manufacturer ?? 'Stylish International Inc.';
+  r['Manufacturer Name'] = a.manufacturer ??
+    (/azuni/i.test(product.brand || '') ? 'Azuni' : 'Stylish International Inc.');
   r['Show Prop 65 Disclaimer'] = 'No';
   // Width = left-right (length), Depth = front-to-back (width), Height = vertical (depth)
   r['Assembled Width'] = ext.length ?? '';

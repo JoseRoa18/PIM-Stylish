@@ -28,6 +28,9 @@ const stripHtml = (h) =>
     .trim();
 // Valid Values for Brand Name are exactly "Stylish" / "AZUNI".
 const brandMap = (b) => (/azuni/i.test(b || '') ? 'AZUNI' : 'Stylish');
+// Manufacturer is the legal entity, not the brand (rule 2026-08-19):
+// Stylish products → "Stylish International Inc.", Azuni products → "Azuni".
+const manufacturerOf = (b) => (/azuni/i.test(b || '') ? 'Azuni' : 'Stylish International Inc.');
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 const dropDNA = (v) => (/does\s*no\w*\s*appl/i.test(String(v ?? '')) ? '' : String(v ?? ''));
 
@@ -82,7 +85,7 @@ export const AMAZON_RULES = {
   'Product Id': (p) => attr(p).upc || '',
   'Model Number': (p) => p.sku,
   'Model Name': (p) => p.model_name || '',
-  'Manufacturer': (p) => brandMap(p.brand),
+  'Manufacturer': (p) => manufacturerOf(p.brand),
   'Manufacturer Contact Information': (p, ctx) =>
     MANUFACTURER_CONTACT[ctx?.lang === 'en_US' ? 'en_US' : 'en_CA'],
   // Sinks are listed as a single unit; faucets ship as a case of one (business
