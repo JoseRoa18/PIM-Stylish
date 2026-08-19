@@ -28,7 +28,11 @@ export async function listProducts() {
     // server-side — without this, every media row (all photos + the
     // family-shared videos/docs on each variant) rides along in the payload.
     .eq('product_media.is_primary', true)
-    .order('created_at', { ascending: false });
+    // Bulk-imported products share a created_at; without a tie-breaker
+    // Postgres returns ties in whatever order it likes, so the catalog
+    // appeared to shuffle between visits.
+    .order('created_at', { ascending: false })
+    .order('sku', { ascending: true });
 
   if (error) throw error;
 
