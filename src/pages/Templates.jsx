@@ -27,7 +27,7 @@ const MARKETPLACE_OPTIONS = [
   'Wayfair US',
   'Amazon CA',
   'Amazon US',
-  'BB&B / Overstock CA',
+  // Beyond/Overstock has no Canadian platform — US only.
   'BB&B / Overstock US',
   'Home Depot CA',
   'Home Depot US',

@@ -91,11 +91,30 @@ function mapDrain(loc) {
 function mapFinish(f) {
   if (!f) return '';
   const l = f.toLowerCase();
+  // Metal names beat textures: "Brushed Gold" is a Gold Finish.
   if (l.includes('stainless')) return 'Stainless Steel Finish';
+  if (l.includes('chrome')) return 'Chrome Finish';
+  if (l.includes('gold')) return 'Gold Finish';
+  if (l.includes('nickel')) return 'Nickel Finish';
+  if (l.includes('bronze')) return 'Bronze Finish';
+  if (l.includes('brass')) return 'Brass Finish';
+  if (l.includes('copper')) return 'Copper Finish';
   if (l.includes('matte')) return 'Matte';
   if (l.includes('brushed')) return 'Brushed';
   if (l.includes('polished')) return 'Polished';
   return 'N/A';
+}
+
+// "Exact Color" is a closed list (Black/Blue/…/Silver/White — no Gold, no
+// Grey): anything unmappable stays blank rather than invalid.
+function mapExactColor(product) {
+  const t = `${product.finish ?? ''} ${product.material ?? ''}`.toLowerCase();
+  if (t.includes('black')) return 'Black';
+  if (t.includes('white')) return 'White';
+  if (t.includes('chrome')) return 'Chrome';
+  if (t.includes('stainless') || t.includes('silver') || t.includes('nickel')) return 'Silver';
+  if (t.includes('brown') || t.includes('bamboo') || t.includes('acacia')) return 'Brown';
+  return '';
 }
 
 function buildRowData(product, media) {
@@ -181,19 +200,13 @@ function buildRowData(product, media) {
   r['Attribute: Bowl Depth Value 1'] = bowlDepthBucket(intl.depth ?? ext.depth);
   r['Attribute: Commercial Value 1'] = 'Yes';
   if (a.craftsmanship === 'Handmade') r['Attribute: Customization Value 1'] = 'Handmade';
-  // "Exact Color" dropdown only allows specific values; map stainless → Silver
-  r['Attribute: Exact Color Value 1'] = product.material?.toLowerCase().includes('stainless') ? 'Silver' : (product.finish ?? '');
+  r['Attribute: Exact Color Value 1'] = mapExactColor(product);
   if (ext.length && ext.width && ext.depth) {
     r['Attribute: Exact Size Value 1'] = `${ext.length}"x${ext.width}"x${ext.depth}"`;
   }
   r['Attribute: Finish Value 1'] = mapFinish(product.finish);
   r['Attribute: Material Value 1'] = product.material ?? '';
   r['Attribute: Number of Basin Value 1'] = mapBasins(a.number_of_bowls);
-  const dur = a.durability_tags ?? [];
-  if (dur.some((d) => d.toLowerCase().includes('rust') || d.toLowerCase().includes('stain'))) {
-    r['Attribute: Product Features Value 1'] = 'Rust Resistant';
-  }
-  r['Attribute: Product Features Value 2'] = 'Sound Dampening';
   r['Attribute: Shape Value 1'] = mapShape(a.sink_shape);
   r['Attribute: Sink Drain location Value 1'] = mapDrain(a.drain_hole_location);
   r['Attribute: Sink Gauge Value 1'] = a.gauge ?? '';
@@ -208,7 +221,125 @@ function buildRowData(product, media) {
   if (mappedInstalls[1]) r['Attribute: Sink Style Value 2'] = mappedInstalls[1];
 
   r['Attribute: Sink Width Value 1'] = sinkWidthBucket(ext.length);
+
+  // ---- Category-specific attributes ----------------------------------------
+  // Each First Cost file carries only its own category's attribute columns, so
+  // keys for other categories are no-ops — the guards below exist for the
+  // fields whose NAME repeats across categories with a DIFFERENT closed list
+  // (Product Features, Height…), where a wrong-category value would be invalid.
+  const cat = product.category ?? '';
+  const isSink = /sink/.test(cat);
+  const isFaucet = /faucet|pot_filler/.test(cat);
+
+  if (isSink) {
+    const dur = a.durability_tags ?? [];
+    if (dur.some((d) => d.toLowerCase().includes('rust') || d.toLowerCase().includes('stain'))) {
+      r['Attribute: Product Features Value 1'] = 'Rust Resistant';
+    }
+    r['Attribute: Product Features Value 2'] = 'Sound Dampening';
+  }
+  if (cat === 'bathroom_sink') {
+    const holes = Number(a.number_of_faucet_holes);
+    if (Number.isFinite(holes) && holes > 0) {
+      r['Attribute: Number of Faucet Installation Hole Value 1'] = faucetHoleText(holes);
+    }
+  }
+
+  if (isFaucet) {
+    const t = `${product.product_type ?? ''} ${installs.join(' ')} ${a.mounting_type ?? ''} ${a.spout_type ?? ''}`.toLowerCase();
+    r['Attribute: Configuration Value 1'] =
+      /widespread/.test(t) ? 'Widespread'
+        : /centerset|4.?inch/.test(t) ? 'Centerset'
+        : /wall/.test(t) ? 'Wall Mount'
+        : /single.?hole|one.?hole/.test(t) ? 'Single Hole'
+        : 'Deck Mount';
+    r['Attribute: Faucet Mount Style Value 1'] = /wall/.test(t) ? 'Wall Mount' : 'Deck Mount';
+    r['Attribute: Faucet Set Value 1'] = 'Sink Faucet';
+
+    const styles = [];
+    if (/touchless|motion|sensor/.test(t) || /touchless/i.test(a.general_title_en ?? '')) styles.push('Touch-Touchless');
+    if (/pull.?down|pull.?out|sprayer/.test(t)) styles.push('Hand Sprayer');
+    if (/swivel/.test(t)) styles.push('Swivel Spout');
+    if (/vessel/.test(t)) styles.push('Vessel');
+    if (/waterfall/.test(t)) styles.push('Waterfall');
+    if (styles[0]) r['Attribute: Faucet Style Value 1'] = styles[0];
+    if (styles[1]) r['Attribute: Faucet Style Value 2'] = styles[1];
+
+    const gpm = Number(a.max_flow_rate);
+    if (Number.isFinite(gpm) && gpm > 0) {
+      r['Attribute: Flow Rate Value 1'] =
+        gpm <= 1 ? 'Up to 1 GPM' : gpm <= 2 ? '1-2 GPM' : gpm <= 3 ? '2-3 GPM' : 'Over 3 GPM';
+    }
+
+    const hstyle = String(a.handle_style ?? '').toLowerCase();
+    const handleStyle =
+      /lever/.test(hstyle) ? 'Lever'
+        : /knob/.test(hstyle) ? 'Knob'
+        : /cross/.test(hstyle) ? 'Cross'
+        : /touchless|motion|sensor/.test(t) ? 'Touch-Touchless'
+        : Number(a.number_of_handles) === 1 ? 'Single' : '';
+    if (handleStyle) r['Attribute: Handle Style Value 1'] = handleStyle;
+
+    const nh = Number(a.number_of_handles);
+    if (Number.isFinite(nh)) {
+      r['Attribute: Number of Faucet Handle Value 1'] =
+        nh === 0 ? 'No Handle' : nh === 1 ? 'Single Handle' : nh === 2 ? 'Double Handle'
+          : nh === 3 ? 'Triple Handle' : 'More than 3 Handles';
+    }
+    const holes = Number(a.number_of_installation_holes);
+    if (Number.isFinite(holes) && holes > 0) {
+      r['Attribute: Number of Faucet Installation Hole Value 1'] = faucetHoleText(holes);
+    }
+
+    // Buckets straight from the template's closed lists.
+    const fh = Number(a.faucet_height_in ?? a.spout_height_in);
+    if (Number.isFinite(fh) && fh > 0) {
+      r['Attribute: Height Value 1'] =
+        fh < 5 ? 'Less than 5 Inches' : fh <= 6 ? '5-6 Inches' : fh <= 7 ? '6-7 Inches'
+          : fh <= 8 ? '7-8 Inches' : fh <= 10 ? '9-10 Inches' : 'Over 11 Inches';
+    }
+    const sh = Number(a.spout_height_in);
+    if (Number.isFinite(sh) && sh > 0) {
+      r['Attribute: Spout Height Value 1'] =
+        sh > 15 ? 'Over 15 Inches' : `${Math.max(0, Math.ceil(sh) - 1)} to ${Math.ceil(sh)} Inches`;
+    }
+    // Spout Reach list runs in 0.5" steps up to 10 Inches.
+    const sr = Number(a.spout_reach_in);
+    if (Number.isFinite(sr) && sr >= 1 && sr <= 10) {
+      const half = Math.round(sr * 2) / 2;
+      r['Attribute: Spout Reach Value 1'] =
+        half === 1 ? '1 Inch' : `${Number.isInteger(half) ? half : half.toFixed(1)} Inches`;
+    }
+    r['Attribute: Style Value 1'] = 'Modern & Contemporary';
+
+    const feats = [];
+    if (a.ada_compliant) feats.push('ADA Compliant');
+    if (a.cupc_certified) feats.push('IAPMO Certified'); // cUPC is IAPMO's
+    if (a.asse_1001_certified) feats.push('ASSE Certified');
+    if (a.handles_included) feats.push('Handles Included');
+    if (feats[0]) r['Attribute: Product Features Value 1'] = feats[0];
+    if (feats[1]) r['Attribute: Product Features Value 2'] = feats[1];
+  }
+
+  // Soap dispensers: capacity bucket from the ml in title/attributes.
+  if (cat === 'accessory' && /soap|dispenser/i.test(`${product.product_type ?? ''} ${a.general_title_en ?? ''}`)) {
+    const ml = Number(a.capacity_ml) ||
+      Number((String(a.general_title_en ?? '').match(/(\d+)\s*ml/i) ?? [])[1]);
+    if (ml > 0) {
+      const oz = ml / 29.5735;
+      r['Attribute: Capacity Value 1'] =
+        oz < 5 ? 'Up to 5 Ounces' : oz >= 12 ? '12 Ounces and Over' : `${Math.round(oz)} Ounces`;
+    }
+  }
+
   return r;
+}
+
+// Shared "Number of Faucet Installation Hole" wording (same list on the
+// faucet and bathroom-sink templates).
+function faucetHoleText(n) {
+  return n === 1 ? 'Single hole' : n === 2 ? 'Two holes' : n === 3 ? 'Three holes'
+    : n === 4 ? 'Four holes' : n === 5 ? 'Five holes' : n === 6 ? 'Six holes' : '';
 }
 
 // ===================== XML helpers =====================
@@ -350,9 +481,9 @@ function buildSimpleRow(rowNum, cellData, style = '7') {
   return `<row r="${rowNum}" spans="1:268">${cells.join('')}</row>`;
 }
 
-export async function generateBBBFromTemplateBulk(templateStoragePath, productList) {
-  if (!productList?.length) throw new Error('No products selected.');
-
+// Core fill: template + products → { blob, fillReport }. Shared by the
+// single-file export and the per-category set below.
+async function fillBBBWorkbook(templateStoragePath, productList) {
   const { data: blob, error } = await supabase.storage
     .from('templates')
     .download(templateStoragePath);
@@ -405,14 +536,33 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
     compression: 'DEFLATE',
   });
 
-  const url = URL.createObjectURL(output);
+  // Readiness report: how many of the template's headed columns each export
+  // actually filled (rowData is header-keyed, so count per header).
+  const columns = Object.keys(sheet.headers).map((label) => ({
+    label,
+    filled: rowDatas.reduce(
+      (n, rd) => (rd[label] !== '' && rd[label] != null ? n + 1 : n),
+      0,
+    ),
+  }));
+  return { blob: output, fillReport: { rows: productList.length, columns } };
+}
+
+function triggerDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `BBB_${productList.length}_products_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+export async function generateBBBFromTemplateBulk(templateStoragePath, productList) {
+  if (!productList?.length) throw new Error('No products selected.');
+  const { blob, fillReport } = await fillBBBWorkbook(templateStoragePath, productList);
+  triggerDownload(blob, `BBB_${productList.length}_products_${new Date().toISOString().slice(0, 10)}.xlsx`);
 
   logActivity({
     action: 'export',
@@ -422,18 +572,50 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
     summary: `Exported ${productList.length} product(s) to a BB&B template`,
     metadata: { count: productList.length, skus: productList.map((p) => p.product?.sku).filter(Boolean) },
   });
+  return { count: productList.length, fillReport };
+}
 
-  // Readiness report: how many of the template's headed columns each export
-  // actually filled (rowData is header-keyed, so count per header).
-  const headerNames = Object.keys(sheet.headers);
-  const columns = headerNames.map((label) => ({
-    label,
-    filled: rowDatas.reduce(
-      (n, rd) => (rd[label] !== '' && rd[label] != null ? n + 1 : n),
-      0,
-    ),
-  }));
-  return { count: productList.length, fillReport: { rows: productList.length, columns } };
+/**
+ * Per-category set: BB&B's First Cost files are one per Beyond category, so a
+ * mixed selection fills each matching template and downloads ONE ZIP with the
+ * files kept under their original names (same delivery style as Menards and
+ * Lowe's).
+ *
+ * @param {Array<{ template: { storage_path: string, file_name: string }, productList: Array }>} groups
+ */
+export async function generateBBBSet(groups) {
+  const filled = [];
+  for (const g of groups) {
+    if (!g.productList?.length) continue;
+    const { blob, fillReport } = await fillBBBWorkbook(g.template.storage_path, g.productList);
+    filled.push({ name: g.template.file_name, blob, fillReport });
+  }
+  if (!filled.length) throw new Error('No products matched a BB&B template.');
+
+  if (filled.length === 1) {
+    triggerDownload(filled[0].blob, filled[0].name);
+  } else {
+    const JSZip = await loadJSZip();
+    const bundle = new JSZip();
+    for (const f of filled) bundle.file(f.name, f.blob);
+    const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    triggerDownload(out, `BBB_${new Date().toISOString().slice(0, 10)}.zip`);
+  }
+
+  const total = groups.reduce((n, g) => n + (g.productList?.length ?? 0), 0);
+  logActivity({
+    action: 'export',
+    entityType: 'product',
+    entityId: `${total} products`,
+    target: 'bbb',
+    summary: `Exported ${total} product(s) to ${filled.length} BB&B template file(s)`,
+    metadata: { count: total, files: filled.map((f) => f.name) },
+  });
+  return {
+    count: total,
+    files: filled.length,
+    reports: filled.map((f) => ({ file: f.name, ...f.fillReport })),
+  };
 }
 
 // ===================== Main export (single product) =====================

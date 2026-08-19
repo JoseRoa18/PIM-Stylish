@@ -18,7 +18,7 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { bulkUpdateProducts, getProduct, deleteProducts } from '../api/products';
 import { generateKeywords } from '../api/keywords';
 import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
-import { generateBBBFromTemplateBulk } from '@/features/syndication/exports/bbbExport';
+import { generateBBBSet } from '@/features/syndication/exports/bbbExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
@@ -313,52 +313,46 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     }
   }
 
+  // BB&B's First Cost files are one per Beyond category (Kitchen Sinks, Bar
+  // Sinks, Bathroom Faucets, Soap Dispensers…) — resolve each product to ITS
+  // template, fill each, one ZIP. Products without a template are reported,
+  // never block the rest.
   async function handleExportBBB(templates) {
     setBusy('export');
     setResult(null);
     setProgress({ done: 0, total: count + 1 });
     try {
-      // 1. Pick the BB&B template covering the MOST selected categories (one
-      // template can span several, e.g. kitchen + bathroom sinks). Products
-      // in categories it doesn't cover are skipped and reported — a mixed
-      // selection never blocks the covered ones.
-      const cats = [...new Set(selectedProducts.map((p) => p.category))];
-      const bbb = templates
-        .map((t) => ({ t, covered: cats.filter((c) => templateAppliesTo(t, c)) }))
-        .sort((a, b) => b.covered.length - a.covered.length)[0];
-      if (!bbb || !bbb.covered.length) {
+      const groups = new Map(); // template id → { template, productList }
+      const skippedSkus = [];
+      let done = 0;
+      for (const p of selectedProducts) {
+        const tpl = templateForProduct(templates, p);
+        if (!tpl) {
+          skippedSkus.push(p.sku);
+          setProgress({ done: ++done, total: count + 1 });
+          continue;
+        }
+        const [product, media] = await Promise.all([getProduct(p.sku), listMedia(p.sku)]);
+        if (product) {
+          const g = groups.get(tpl.id) ?? { template: tpl, productList: [] };
+          g.productList.push({ product, media });
+          groups.set(tpl.id, g);
+        }
+        setProgress({ done: ++done, total: count + 1 });
+      }
+      if (groups.size === 0) {
         throw new Error(
-          `No BB&B / Overstock template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload one in /templates.`
+          `No BB&B / Overstock template matches the selected products (${skippedSkus.slice(0, 6).join(', ')}${skippedSkus.length > 6 ? '…' : ''}). Upload the category's First Cost file in /templates.`
         );
       }
-      const wanted = new Set(bbb.covered);
-      const skippedCats = cats.filter((c) => !wanted.has(c));
-      setProgress({ done: 1, total: count + 1 });
 
-      // 2. Fetch full product + media for each covered SKU
-      const skus = selectedProducts.filter((p) => wanted.has(p.category)).map((p) => p.sku);
-      const productList = [];
-      for (let i = 0; i < skus.length; i++) {
-        const [product, media] = await Promise.all([
-          getProduct(skus[i]),
-          listMedia(skus[i]),
-        ]);
-        if (product) productList.push({ product, media });
-        setProgress({ done: i + 2, total: count + 1 });
-      }
-
-      if (productList.length === 0) {
-        throw new Error('Could not load product data.');
-      }
-
-      // 3. Generate the combined XLSX and trigger download
-      const res = await generateBBBFromTemplateBulk(bbb.t.storage_path, productList);
-      if (res?.fillReport) setReadiness([{ file: 'BB&B template', ...res.fillReport }]);
+      const res = await generateBBBSet([...groups.values()]);
+      if (res?.reports) setReadiness(res.reports);
 
       setResult({
-        type: skippedCats.length ? 'error' : 'success',
-        message: `Exported ${productList.length} product${productList.length === 1 ? '' : 's'} to BB&B template.` +
-          (skippedCats.length ? ` ⚠ Skipped (no template): ${skippedCats.join(', ')}.` : ''),
+        type: skippedSkus.length ? 'error' : 'success',
+        message: `Exported ${res.count} product${res.count === 1 ? '' : 's'} to ${res.files} BB&B file${res.files === 1 ? '' : 's'}${res.files > 1 ? ' (one ZIP)' : ''}.` +
+          (skippedSkus.length ? ` ⚠ No template for: ${skippedSkus.slice(0, 8).join(', ')}${skippedSkus.length > 8 ? '…' : ''}.` : ''),
       });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Export failed' });
