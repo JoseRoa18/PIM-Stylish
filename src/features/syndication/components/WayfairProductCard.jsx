@@ -55,7 +55,7 @@ export default function WayfairProductCard({ product, onUpdate }) {
             WF
           </div>
           <div>
-            <h2 className="text-title-lg text-on-surface leading-tight">Wayfair</h2>
+            <h2 className="text-title-lg text-on-surface leading-tight">Wayfair Canada</h2>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
               Wayfair API · {product.wayfair_synced_at
                 ? `last pushed ${formatTimeAgo(product.wayfair_synced_at)}`

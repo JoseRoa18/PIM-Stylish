@@ -1629,7 +1629,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
           />
         ))}
         <ChannelTile
-          label="Wayfair"
+          label="Wayfair Canada"
           avatar="WF"
           avatarClass="bg-brand-wayfair/15 text-brand-wayfair"
           linked={Boolean(product.wayfair_item_group_id)}

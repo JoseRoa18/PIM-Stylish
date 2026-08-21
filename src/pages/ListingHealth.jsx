@@ -19,7 +19,7 @@ import {
 import { readWixProduct, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers } from '@/features/syndication/api/bestbuySync';
 import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
-import ChannelSyncCard from '@/features/dashboard/components/ChannelSyncCard';
+import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import SCORE_BADGE_STYLES from '@/lib/scoreBadgeStyles';
 
 const SOURCE_STYLES = {
@@ -271,8 +271,6 @@ export default function ListingHealth() {
         </p>
       </header>
 
-      <ChannelSyncCard />
-
       {/* Marketplace tabs — only API-connected channels */}
       {API_MARKETPLACE_KEYS.length > 1 && (
       <div className="relative mb-6">
@@ -355,6 +353,16 @@ export default function ListingHealth() {
 
       {!loading && !error && mktData && (
         <>
+          {/* Wayfair-only: the FULL spec-attributes audit lives right here —
+              last run, per-SKU diffs and the mass push — so sync issues are
+              worked without bouncing to the Syndication page. The cron runs
+              it 20 minutes before each health refresh (6:40 & 1:40 VET). */}
+          {mktDef.dataSource === 'wayfair' && (
+            <div className="mb-6">
+              <WayfairAuditCard />
+            </div>
+          )}
+
           {/* Marketplace subtitle + actions */}
           <div className="flex items-center justify-between gap-4 flex-wrap mb-4">
             <p className="text-body-sm text-on-surface-variant">
