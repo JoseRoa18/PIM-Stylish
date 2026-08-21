@@ -1010,6 +1010,13 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             const priceKey = market === 'ca' ? 'promo_price_cad' : 'promo_price_usd';
             const mapKey = market === 'ca' ? 'map_cad' : 'map_usd';
             const marketRows = rows.filter((r) => r[priceKey] != null || costKeys.some((k) => r.promo_costs?.[k] != null));
+            // Membership per market for the tab labels — same rule as the
+            // table: a promo price OR any cost of that market counts.
+            const countFor = (m) => rows.filter((r) =>
+              r[m === 'ca' ? 'promo_price_cad' : 'promo_price_usd'] != null ||
+              Object.keys(r.promo_costs ?? {}).some((k) => costMeta(k).market === m && r.promo_costs?.[k] != null),
+            ).length;
+            const marketCounts = { ca: countFor('ca'), us: countFor('us') };
             return (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1024,6 +1031,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                         }`}
                       >
                         {label}
+                        <span className={`ml-1.5 tabular-nums ${market === key ? 'text-on-surface-variant' : 'opacity-70'}`}>
+                          {marketCounts[key]}
+                        </span>
                       </button>
                     ))}
                   </div>
