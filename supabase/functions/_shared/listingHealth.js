@@ -84,7 +84,16 @@ const FIELDS = {
   // accessory shouldn't lose points for having no gauge or bowls.
   gauge: {
     label: 'Gauge',
-    check: (p) => !/sink/.test(p.category ?? '') || hasText(attr(p, 'gauge')) || hasNumber(attr(p, 'gauge')),
+    // Gauge is sheet-metal thickness — only metal sinks carry it. Granite
+    // composite, fireclay and porcelain sinks legitimately have none, so the
+    // check applies only when the material says stainless/steel/copper.
+    // (A metal sink with no material set is caught by the Material check.)
+    check: (p) => {
+      if (!/sink/.test(p.category ?? '')) return true;
+      const material = `${p.material ?? ''} ${attr(p, 'material') ?? ''}`;
+      if (!/stainless|steel|copper|metal/i.test(material)) return true;
+      return hasText(attr(p, 'gauge')) || hasNumber(attr(p, 'gauge'));
+    },
   },
   number_of_bowls: {
     label: 'Number of Bowls',
@@ -257,18 +266,19 @@ export const MARKETPLACES = {
     dataSource: 'wix_site',
     connectionType: 'api',
     requiresLink: true,
+    linkField: 'ws_listed',
     checks: [
       { field: 'ws_listed', category: 'Identity', weight: 15, severity: 'critical' },
-      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major' },
-      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical' },
-      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical' },
-      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major' },
-      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical' },
-      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical' },
-      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor' },
-      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major' },
-      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
-      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical', needsLink: true },
+      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical', needsLink: true },
+      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor', needsLink: true },
+      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
     ],
   },
   wix_stylish_ca: {
@@ -278,18 +288,19 @@ export const MARKETPLACES = {
     dataSource: 'wix_site',
     connectionType: 'api',
     requiresLink: true,
+    linkField: 'ws_listed',
     checks: [
       { field: 'ws_listed', category: 'Identity', weight: 15, severity: 'critical' },
-      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major' },
-      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical' },
-      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical' },
-      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major' },
-      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical' },
-      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical' },
-      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor' },
-      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major' },
-      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
-      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical', needsLink: true },
+      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical', needsLink: true },
+      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor', needsLink: true },
+      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
     ],
   },
   wix_stylish_us: {
@@ -299,27 +310,31 @@ export const MARKETPLACES = {
     dataSource: 'wix_site',
     connectionType: 'api',
     requiresLink: true,
+    linkField: 'ws_listed',
     checks: [
       { field: 'ws_listed', category: 'Identity', weight: 15, severity: 'critical' },
-      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major' },
-      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical' },
-      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical' },
-      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major' },
-      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical' },
-      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical' },
-      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor' },
-      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major' },
-      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major' },
-      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major' },
+      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical', needsLink: true },
+      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical', needsLink: true },
+      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor', needsLink: true },
+      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
     ],
   },
   wayfair: {
     key: 'wayfair',
-    label: 'Wayfair',
+    // The audit targets the CAN/default supplier — this is the Canadian
+    // storefront (the US supplier has no audit yet).
+    label: 'Wayfair Canada',
     subtitle: 'Product Catalog API',
     dataSource: 'wayfair',
     connectionType: 'api',
     requiresLink: true,
+    linkField: 'linked_to_wayfair',
     checks: [
       { field: 'linked_to_wayfair', category: 'Identity', weight: 14, severity: 'critical' },
       { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
@@ -335,7 +350,7 @@ export const MARKETPLACES = {
       { field: 'gauge', category: 'Specs', weight: 3, severity: 'minor' },
       { field: 'number_of_bowls', category: 'Specs', weight: 3, severity: 'minor' },
       { field: 'shipping_weight', category: 'Shipping', weight: 5, severity: 'major' },
-      { field: 'wayfair_specs_synced', category: 'Channel Sync', weight: 12, severity: 'major' },
+      { field: 'wayfair_specs_synced', category: 'Channel Sync', weight: 12, severity: 'major', needsLink: true },
     ],
   },
   bestbuy: {
@@ -345,11 +360,12 @@ export const MARKETPLACES = {
     dataSource: 'bestbuy',
     connectionType: 'api',
     requiresLink: true,
+    linkField: 'listed_on_bestbuy',
     checks: [
       { field: 'listed_on_bestbuy', category: 'Offer', weight: 15, severity: 'critical' },
-      { field: 'bb_offer_active', category: 'Offer', weight: 8, severity: 'critical' },
-      { field: 'bb_in_stock', category: 'Offer', weight: 8, severity: 'major' },
-      { field: 'bb_price_matches', category: 'Offer', weight: 10, severity: 'major' },
+      { field: 'bb_offer_active', category: 'Offer', weight: 8, severity: 'critical', needsLink: true },
+      { field: 'bb_in_stock', category: 'Offer', weight: 8, severity: 'major', needsLink: true },
+      { field: 'bb_price_matches', category: 'Offer', weight: 10, severity: 'major', needsLink: true },
       { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
       { field: 'upc', category: 'Identity', weight: 6, severity: 'major' },
       { field: 'description', category: 'Content', weight: 10, severity: 'critical' },
@@ -368,10 +384,11 @@ export const MARKETPLACES = {
     dataSource: 'walmart_us',
     connectionType: 'api',
     requiresLink: true,
+    linkField: 'listed_on_walmart',
     checks: [
       { field: 'listed_on_walmart', category: 'Listing', weight: 15, severity: 'critical' },
-      { field: 'wm_published', category: 'Listing', weight: 12, severity: 'critical' },
-      { field: 'wm_lifecycle_active', category: 'Listing', weight: 6, severity: 'major' },
+      { field: 'wm_published', category: 'Listing', weight: 12, severity: 'critical', needsLink: true },
+      { field: 'wm_lifecycle_active', category: 'Listing', weight: 6, severity: 'major', needsLink: true },
       { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
       { field: 'upc', category: 'Identity', weight: 6, severity: 'major' },
       { field: 'description', category: 'Content', weight: 10, severity: 'critical' },
@@ -459,9 +476,17 @@ export function scoreProduct(product, media, marketplace = 'wix') {
   const issues = [];
   const passed = [];
 
+  // Channel-STATE checks (in sync, active, published, price aligned…) are
+  // meaningless for a product that isn't linked/listed on the channel yet —
+  // there is nothing to compare against. They're excluded from the score so
+  // an unlisted product shows ONE actionable issue (the link) plus its PIM
+  // readiness gaps, instead of a cascade of phantom channel failures.
+  const linked = def.linkField ? Boolean(FIELDS[def.linkField]?.check(enriched)) : true;
+
   for (const c of def.checks) {
     const f = FIELDS[c.field];
     if (!f) continue;
+    if (c.needsLink && !linked) continue;
     total += c.weight;
     const entry = {
       key: c.field,
