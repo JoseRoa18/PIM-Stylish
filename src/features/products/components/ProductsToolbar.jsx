@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Search, X } from 'lucide-react';
 import FilterDropdown from './FilterDropdown';
 import { formatCategory } from '@/lib/format';
@@ -25,10 +25,7 @@ export default function ProductsToolbar({
   onSearchChange,
   filters,
   onFiltersChange,
-  onClearAll,
   options,
-  resultCount,
-  totalCount,
 }) {
   // The URL is the source of truth for the search, but a controlled input fed
   // straight from it drops keystrokes when navigation lags behind fast typing.
@@ -44,28 +41,6 @@ export default function ProductsToolbar({
     onFiltersChange({ ...filters, [field]: values });
   };
 
-  const removePill = (field, value) => {
-    updateFilter(
-      field,
-      filters[field].filter((v) => v !== value),
-    );
-  };
-
-  // Single atomic clear — the parent resets search + all filters in one URL
-  // update (two sequential setSearchParams calls would clobber each other).
-  const clearAll = () => onClearAll();
-
-  const activePills = useMemo(() => {
-    const pills = [];
-    FILTER_FIELDS.forEach(({ id, label }) => {
-      (filters[id] || []).forEach((value) => {
-        pills.push({ field: id, label, value });
-      });
-    });
-    return pills;
-  }, [filters]);
-
-  const hasActiveFilters = Boolean(searchTerm.trim()) || activePills.length > 0;
   const wide = useSyncExternalStore(subscribeWide, getWide);
 
   return (
@@ -115,51 +90,51 @@ export default function ProductsToolbar({
             onChange={(values) => updateFilter(id, values)}
           />
         ))}
-
-        {hasActiveFilters && (
-          <button
-            type="button"
-            onClick={clearAll}
-            className="ml-auto text-body-sm text-primary hover:underline font-semibold"
-          >
-            Clear all
-          </button>
-        )}
       </div>
+      {/* No pills, count, or Clear all here: they live on the table's own
+          header row (Catalog composes ActiveFilters + pagination there), so
+          this row NEVER changes width when filters come and go. */}
+    </div>
+  );
+}
 
-      {/* Active filter pills + result count */}
-      {(activePills.length > 0 || hasActiveFilters) && (
-        <div className="flex flex-wrap items-center gap-2">
-          {activePills.length > 0 && (
-            <>
-              <span className="text-body-sm text-on-surface-variant">
-                Active:
-              </span>
-              {activePills.map(({ field, label, value }) => (
-                <button
-                  key={`${field}-${value}`}
-                  type="button"
-                  onClick={() => removePill(field, value)}
-                  className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-primary-container text-on-primary-container text-body-sm hover:bg-primary hover:text-on-primary transition-colors group"
-                >
-                  <span className="font-semibold">{label}:</span>
-                  <span>{formatCategory(value)}</span>
-                  <X className="w-3 h-3" strokeWidth={2.5} />
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-      )}
+/**
+ * Active-filter pills + Clear all, rendered by the page on the same row as
+ * the pagination — everything about "what you're seeing" sits on ONE line.
+ * Renders nothing when no filter is active.
+ */
+export function ActiveFilters({ filters, onFiltersChange, onClearAll }) {
+  const pills = [];
+  FILTER_FIELDS.forEach(({ id, label }) => {
+    (filters[id] || []).forEach((value) => pills.push({ field: id, label, value }));
+  });
+  if (!pills.length) return null;
 
-      {/* Result count — only when filtering actually narrowed the list; the
-          header and pagination already show the full total. */}
-      {resultCount !== totalCount && (
-        <div className="text-body-sm text-on-surface-variant">
-          Showing <span className="font-semibold text-on-surface">{resultCount}</span>{' '}
-          of {totalCount} {totalCount === 1 ? 'product' : 'products'}
-        </div>
-      )}
+  const removePill = (field, value) =>
+    onFiltersChange({ ...filters, [field]: filters[field].filter((v) => v !== value) });
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-body-sm text-on-surface-variant">Active:</span>
+      {pills.map(({ field, label, value }) => (
+        <button
+          key={`${field}-${value}`}
+          type="button"
+          onClick={() => removePill(field, value)}
+          className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-primary-container text-on-primary-container text-body-sm hover:bg-primary hover:text-on-primary transition-colors"
+        >
+          <span className="font-semibold">{label}:</span>
+          <span>{formatCategory(value)}</span>
+          <X className="w-3 h-3" strokeWidth={2.5} />
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onClearAll}
+        className="text-body-sm text-primary hover:underline font-semibold ml-1"
+      >
+        Clear all
+      </button>
     </div>
   );
 }

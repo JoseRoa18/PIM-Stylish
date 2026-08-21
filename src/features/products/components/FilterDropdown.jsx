@@ -49,15 +49,18 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
         onClick={() => setOpen(!open)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-body-sm border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+        className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-body-sm border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
           count > 0
             ? 'bg-primary-container text-on-primary-container border-primary-container'
             : 'bg-surface-container-lowest text-on-surface border-outline-variant hover:bg-surface-container-low'
         }`}
       >
         <span className="font-semibold">{label}</span>
+        {/* Count floats on the chip's corner (notification style) so the chip
+            — and the flex-1 search input beside it — never changes width when
+            a filter is applied. */}
         {count > 0 && (
-          <span className="px-1.5 min-w-[20px] text-center rounded-full bg-primary text-on-primary text-label-md font-semibold">
+          <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-on-primary text-label-sm font-semibold flex items-center justify-center pointer-events-none">
             {count}
           </span>
         )}

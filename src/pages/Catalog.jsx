@@ -6,7 +6,7 @@ import {
   useFilteredProducts,
   getFilterOptions,
 } from '@/features/products/hooks/useFilteredProducts';
-import ProductsToolbar from '@/features/products/components/ProductsToolbar';
+import ProductsToolbar, { ActiveFilters } from '@/features/products/components/ProductsToolbar';
 import ProductsTable from '@/features/products/components/ProductsTable';
 import BulkActionsBar from '@/features/products/components/BulkActionsBar';
 import CreateProductDialog from '@/features/products/components/CreateProductDialog';
@@ -296,19 +296,19 @@ export default function Catalog() {
           onSearchChange={setSearchTerm}
           filters={filters}
           onFiltersChange={onFiltersChange}
-          onClearAll={clearFilters}
           options={options}
-          resultCount={filteredProducts.length}
-          totalCount={totalCount}
         />
       )}
 
       {!loading && !error && totalCount > 0 && filteredProducts.length === 0 ? (
         <EmptyFilterState onClearFilters={clearFilters} />
       ) : (
-        <>
-          {/* Compact twin of the bottom bar so long catalogs can be paged
-              without scrolling down first. */}
+        // The pagination bars belong to the table — tighter 12px gaps inside
+        // this group, while the page keeps its 24px rhythm between blocks.
+        <div className="space-y-3">
+          {/* ONE header row for the table: "Showing …" pinned at the left
+              edge (it never moves), the active-filter pills right after it,
+              and the page buttons pinned right. */}
           {!loading && !error && (
             <Pagination
               compact
@@ -316,7 +316,13 @@ export default function Catalog() {
               pageSize={pageSize}
               total={sortedProducts.length}
               onPageChange={setPage}
-            />
+            >
+              <ActiveFilters
+                filters={filters}
+                onFiltersChange={onFiltersChange}
+                onClearAll={clearFilters}
+              />
+            </Pagination>
           )}
           <ProductsTable
             products={pagedProducts}
@@ -339,7 +345,7 @@ export default function Catalog() {
               onPageSizeChange={setPageSize}
             />
           )}
-        </>
+        </div>
       )}
 
       <BulkActionsBar

@@ -12,17 +12,17 @@ const PAGE_SIZES = [10, 25, 50, 100];
  *   total      — total item count (after filtering)
  *   onPageChange(page)
  *   onPageSizeChange(size)
- *   compact    — range + page buttons only (no size selector); renders
- *                nothing on a single page. For a second bar ABOVE a table.
+ *   compact    — full-width row with the range pinned LEFT (never moves) and
+ *                the page buttons pinned right; `children` render between
+ *                them (e.g. the active-filter pills). No size selector.
  */
-export default function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange, compact = false }) {
+export default function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange, compact = false, children }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(page, totalPages);
   const from = total === 0 ? 0 : (current - 1) * pageSize + 1;
   const to = Math.min(current * pageSize, total);
 
   if (total === 0) return null;
-  if (compact && totalPages <= 1) return null;
 
   const rangeLabel = (
     <span className="text-body-sm text-on-surface-variant">
@@ -70,15 +70,18 @@ export default function Pagination({ page, pageSize, total, onPageChange, onPage
 
   if (compact) {
     return (
-      <div className="flex items-center justify-between gap-4 flex-wrap px-1">
-        {rangeLabel}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          {rangeLabel}
+          {children}
+        </div>
         {nav}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center justify-between gap-4 flex-wrap px-1">
+    <div className="flex items-center justify-between gap-4 flex-wrap">
       <div className="flex items-center gap-3">
         {rangeLabel}
         <select
