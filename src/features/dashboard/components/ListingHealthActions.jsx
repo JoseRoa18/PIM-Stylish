@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, ChevronDown, Package } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, ChevronDown, Copy, Package } from 'lucide-react';
 import { SCORE_BADGE_STYLES } from '@/lib/scoreBadgeStyles';
 import { categorizeScore } from '../lib/listingHealth';
+import Dialog from '@/components/ui/Dialog';
 
 const SEVERITY_STYLES = {
   critical: { dot: 'bg-error', text: 'text-error', label: 'Critical' },
@@ -10,8 +11,85 @@ const SEVERITY_STYLES = {
   minor: { dot: 'bg-on-surface-variant', text: 'text-on-surface-variant', label: 'Minor' },
 };
 
+// Deep-link each issue to the product tab where it gets FIXED: a missing
+// gauge is edited in Specifications, a sync gap in Marketplaces, etc.
+const CATEGORY_TAB = {
+  'Channel Sync': 'marketplaces',
+  Specs: 'specs',
+  Content: 'content',
+  'Info Tabs': 'content',
+  Media: 'media',
+  Pricing: 'pricing',
+};
+const issueTab = (issue) =>
+  /linked/.test(issue.key ?? '') ? 'marketplaces' : (CATEGORY_TAB[issue.category] ?? 'overview');
+
+// Every product affected by ONE issue, each row jumping straight to the tab
+// where it can be fixed. "View" used to open just the first SKU — useless for
+// working through a 70-product gap.
+function IssueProductsDialog({ issue, products, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const sev = SEVERITY_STYLES[issue.severity];
+  const tab = issueTab(issue);
+
+  // The issue's own skus list is capped at 20 in the scoring lib (persisted
+  // snapshots stay small) — derive the FULL affected list from the scored
+  // products instead.
+  const affected = products.filter((p) => p.result?.issues?.some((i) => i.key === issue.key));
+
+  const copySkus = async () => {
+    try {
+      await navigator.clipboard.writeText(affected.map((p) => p.sku).join('\n'));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch { /* clipboard unavailable — nothing to do */ }
+  };
+
+  return (
+    <Dialog
+      onClose={onClose}
+      title={issue.label}
+      subtitle={`${issue.category} · ${sev.label} · ${issue.count} ${issue.count === 1 ? 'product' : 'products'} affected`}
+      maxWidth="max-w-lg"
+    >
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={copySkus}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? 'Copied' : `Copy SKUs (${affected.length})`}
+          </button>
+        </div>
+        <ul className="max-h-[55vh] overflow-y-auto rounded-xl border border-outline-variant divide-y divide-outline-variant scrollbar-slim" data-lenis-prevent>
+          {affected.map((p) => (
+            <li key={p.sku}>
+              <Link
+                to={`/catalog/${p.sku}?tab=${tab}`}
+                onClick={onClose}
+                className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-surface-container-low/60 transition-colors"
+              >
+                <span className="min-w-0">
+                  <span className="font-mono text-body-sm text-on-surface">{p.sku}</span>
+                  {p.model_name && (
+                    <span className="text-body-sm text-on-surface-variant"> · {p.model_name}</span>
+                  )}
+                </span>
+                <ArrowRight className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Dialog>
+  );
+}
+
 export default function ListingHealthActions({ stats, products, marketplaceLabel = 'marketplace' }) {
   const [showAllIssues, setShowAllIssues] = useState(false);
+  const [openIssue, setOpenIssue] = useState(null);
   if (!stats) return null;
 
   // The two cards sit side by side — keep them the same height: both show
@@ -68,13 +146,13 @@ export default function ListingHealthActions({ stats, products, marketplaceLabel
                         {issue.count} {issue.count === 1 ? 'product' : 'products'} affected · {sev.label}
                       </p>
                     </div>
-                    <Link
-                      to={`/catalog/${issue.skus[0]}?tab=marketplaces`}
+                    <button
+                      type="button"
+                      onClick={() => setOpenIssue(issue)}
                       className="text-label-md text-primary font-medium hover:underline whitespace-nowrap"
-                      title={`First: ${issue.skus[0]}`}
                     >
-                      View →
-                    </Link>
+                      View {issue.count} →
+                    </button>
                   </div>
                 </li>
               );
@@ -144,6 +222,14 @@ export default function ListingHealthActions({ stats, products, marketplaceLabel
           )}
         </ul>
       </section>
+
+      {openIssue && (
+        <IssueProductsDialog
+          issue={openIssue}
+          products={products}
+          onClose={() => setOpenIssue(null)}
+        />
+      )}
     </div>
   );
 }
