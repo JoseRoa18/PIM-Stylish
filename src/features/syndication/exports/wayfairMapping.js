@@ -55,8 +55,18 @@ const FINISH_ALIAS = {
   black: 'Matte Black',
   'graphite black': 'Gunmetal Black',
   'nano graphite black dura-tek': 'Gunmetal Black',
+  // Bare "Dura-Tek" (outdoor/utility sinks) = protective coating on STAINLESS
+  // sinks; the visible finish is Stainless Steel.
+  'dura-tek': 'Stainless Steel',
+  // Validated against the templates' Valid Values sheets 2026-08-19: these
+  // PIM spellings aren't Wayfair options — snap to the canonical ones.
+  'glossy black': 'Gloss Black',
+  'gunmetal': 'Gun Metal',
+  'matte black with brushed gold': 'Matte Black; Brushed Gold',
+  'dark grey': 'Matte Grey',
+  'dark gray': 'Matte Grey',
 };
-const MOUNT_ALIAS = { 'one hole': 'Single-Hole', 'two holes': 'Centerset' };
+const MOUNT_ALIAS = { 'one hole': 'Single-Hole', 'two holes': 'Centerset', 'wall-mounted': 'Wall Mounted' };
 // Accessory "Color" columns want a plain color, not the finish name.
 const COLOR_ALIAS = {
   'brushed stainless steel': 'Silver',
@@ -65,8 +75,12 @@ const COLOR_ALIAS = {
   'matte black': 'Black',
   'matte black with gold': 'Black',
   'graphite black': 'Black',
-  grey: 'Grey',
-  gray: 'Grey',
+  // BOTH accessory classes (cutting boards 187, strainers 831) spell it
+  // "Gray" — 'Grey' is not in either list.
+  grey: 'Gray',
+  gray: 'Gray',
+  'dark grey': 'Gray',
+  'dark gray': 'Gray',
   white: 'White',
   // Bamboo boards
   'honey-toned brown': 'Brown',
@@ -362,6 +376,7 @@ const DRAIN_ALIAS = {
   'center drain / reversible': 'Reversible',
   'center drain/reversible': 'Reversible',
   'side drain': 'Reversible',
+  'reversible side drain': 'Reversible',
 };
 // Extract the part code (e.g. "G-05") from an accessory entry matching a keyword.
 const partCode = (p, re) => {
@@ -488,6 +503,12 @@ export const WAYFAIR_CATEGORY_RULES = {
     'Compatible Faucet Type': (p) => attr(p).compatible_faucet_type ?? '',
     'Number of Faucet Holes': (p) => String(attr(p).number_of_faucet_holes ?? 0),
     'Compatible Pedestal Part Number': (p) => attr(p).compatible_pedestal ?? '',
+    // The Bathroom Sinks class lists METAL finishes only (no Matte White /
+    // Matte Black options) — porcelain colors resolve to Does Not Apply.
+    Finish: (p) => {
+      const f = alias(FINISH_ALIAS, p.finish);
+      return /stainless|chrome|nickel|brass|bronze|gold|copper|gun ?metal|silver/i.test(f) ? f : 'Does Not Apply';
+    },
     // "D" SKUs include a pop-up drain; the rest ship bare.
     'Pieces Included': (p) => (/D$/i.test(p.sku) ? 'Drain Assembly' : 'Does Not Apply'),
     'Drain Finish': () => 'Does Not Apply',

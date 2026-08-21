@@ -102,6 +102,16 @@ const FINISH_ALIAS: Record<string, string> = {
   "white": "Matte White",
   "graphite black": "Gunmetal Black",
   "nano graphite black dura-tek": "Gunmetal Black",
+  // Bare "Dura-Tek" (outdoor/utility sinks) is a protective coating on
+  // STAINLESS sinks — the visible finish Wayfair's list can express is
+  // Stainless Steel (their current value was right; the raw push wasn't).
+  "dura-tek": "Stainless Steel",
+  // Validated against the templates' Valid Values sheets 2026-08-19.
+  "glossy black": "Gloss Black",
+  "gunmetal": "Gun Metal",
+  "matte black with brushed gold": "Matte Black; Brushed Gold",
+  "dark grey": "Matte Grey",
+  "dark gray": "Matte Grey",
 };
 // Raw PIM finish; the alias to Wayfair's canonical option is applied later,
 // only when the literal PIM value doesn't already match Wayfair's current one
@@ -124,6 +134,10 @@ const EXACT_RULES: Record<string, (p: Product) => string> = {
   "Stainless Steel Gauge": (p) => num(p.gauge ?? attr(p).gauge),
   "Number of Basins": (p) => num(p.number_of_bowls ?? attr(p).number_of_bowls),
   "Basin Split": (p) => String(p.basin_split ?? attr(p).basin_split ?? ""),
+  // NOTE: the API's "Sink Shape" vocabulary is ADJECTIVAL ("Rectangular") —
+  // distinct from the template's "Overall Shape" nouns ("Rectangle").
+  // Verified on live items 2026-08-19: S-636W carries Sink Shape=Rectangular
+  // AND Overall Shape=Rectangle. Push the raw PIM value; never noun-alias it.
   "Sink Shape": (p) => String(p.shape ?? attr(p).sink_shape ?? ""),
   "Material": (p) => String(p.material ?? ""),
   "Finish": (p) => finish(p.finish),
@@ -298,6 +312,18 @@ Deno.serve(async (req) => {
       // (case-insensitive); otherwise snap to Wayfair's canonical option.
       if (title === "Finish" && !(wf.current.length === 1 && eq(wf.current[0], value))) {
         value = FINISH_ALIAS[value.toLowerCase().trim()] ?? value;
+        // Bathroom Sinks + non-metal finish: the template's list is
+        // metal-only, but live items show plain colors accepted ("White" on
+        // P-206) — the class vocabulary can't be confirmed (sandbox's
+        // attributesByFilter is down). Don't guess against a closed list:
+        // leave Wayfair's Finish untouched for these.
+        if (
+          /bathroom sink/i.test(item.class?.className ?? "") &&
+          !/stainless|chrome|nickel|brass|bronze|gold|copper|gun ?metal|silver|does not apply/i.test(value)
+        ) {
+          skipped[title] = "non-metal finish on Bathroom Sinks — class vocabulary unconfirmed, left as-is";
+          continue;
+        }
       }
       // Never downgrade a more specific Wayfair value with our generic one
       // (e.g. Material "Stainless Steel (18/0)" vs PIM "Stainless Steel").
