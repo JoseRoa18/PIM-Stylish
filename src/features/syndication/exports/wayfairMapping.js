@@ -496,9 +496,6 @@ export const WAYFAIR_CATEGORY_RULES = {
   },
 
   bathroom_sink: {
-    // Porcelain color is not a "finish" for Wayfair's 588 list (its Finish VV
-    // has no White) — metals pass through, anything else is Does Not Apply.
-    Finish: (p) => (/black/i.test(p.finish ?? '') ? 'Matte Black' : 'Does Not Apply'),
     'Product Type': () => '', // 588's Product Type VV is unrelated taxonomy junk
     'Compatible Faucet Type': (p) => attr(p).compatible_faucet_type ?? '',
     'Number of Faucet Holes': (p) => String(attr(p).number_of_faucet_holes ?? 0),

@@ -15,7 +15,7 @@ const EDITABLE_FIELDS = [
     label: 'Status',
     options: Object.entries(WORKFLOW_STATUS).map(([value, m]) => ({ value, label: m.label })),
     noClear: true,
-    note: 'Ready to Sell triggers the Wix auto-publish (see Settings).',
+    note: 'Ready to Sell refreshes channel links. Publishing stays manual.',
   },
   {
     key: 'category',
