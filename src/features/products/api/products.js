@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { deleteStorageObjectsIfUnreferenced } from '@/features/media/api/media';
 import { formatFieldList } from '@/lib/humanize';
+import { autoPublishToWix } from '@/features/syndication/api/autoLink';
 
 /**
  * List all products from the catalog with their primary image (if any).
@@ -264,6 +265,12 @@ export async function updateProduct(sku, patch) {
     summary: `Edited product ${sku}${changedKeys.length ? ` (${formatFieldList(changedKeys)})` : ''}`,
     metadata: { fields: changedKeys },
   });
+  // Ready to Sell is the publish gate: link or create the product on the
+  // enabled Wix stores (switches in /settings). Fire-and-forget — results
+  // land in the Activity Log.
+  if (patch?.workflow_status === 'ready_to_sell') {
+    autoPublishToWix(sku).catch((err) => console.error('Wix auto-publish failed:', err));
+  }
   return data;
 }
 
@@ -320,6 +327,10 @@ export async function bulkUpdateProducts(skus, patch) {
     summary: `Bulk-edited ${skus.length} ${skus.length === 1 ? 'product' : 'products'}${changedKeys.length ? ` (${formatFieldList(changedKeys)})` : ''}`,
     metadata: { count: skus.length, fields: changedKeys, skus },
   });
+  // Same Ready-to-Sell publish gate as updateProduct, for the whole batch.
+  if (patch?.workflow_status === 'ready_to_sell') {
+    autoPublishToWix(skus).catch((err) => console.error('Wix auto-publish failed:', err));
+  }
   return data ?? [];
 }
 

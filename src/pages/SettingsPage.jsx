@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap } from 'lucide-react';
+import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Store, Zap } from 'lucide-react';
+import { WIX_SITES } from '@/features/syndication/lib/wixSites';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
 import { listPromotions } from '@/features/pricing/api/promotions';
@@ -53,6 +54,7 @@ function SettingRow({ title, description, checked, disabled, onChange }) {
 export default function SettingsPage() {
   const confirm = useConfirm();
   const [settings, setSettings] = useState(null);
+  const [wixCreate, setWixCreate] = useState(null); // { enabled, sites: [] }
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
   const [running, setRunning] = useState(false);
@@ -61,10 +63,12 @@ export default function SettingsPage() {
   useEffect(() => {
     Promise.all([
       getAppSetting('promo_automation', { enabled: true, wix: true, bestbuy: true }),
+      getAppSetting('wix_auto_create', { enabled: true, sites: Object.keys(WIX_SITES) }),
       listPromotions(),
     ])
-      .then(([s, promos]) => {
+      .then(([s, wc, promos]) => {
         setSettings({ enabled: true, wix: true, bestbuy: true, ...s });
+        setWixCreate({ enabled: true, sites: Object.keys(WIX_SITES), ...wc });
         setPromotions(promos);
       })
       .catch((err) => setError(err.message));
@@ -89,6 +93,33 @@ export default function SettingsPage() {
       setError(err.message);
     }
   }
+
+  async function updateWixCreate(patch) {
+    const prev = wixCreate;
+    const next = { ...wixCreate, ...patch };
+    setWixCreate(next);
+    setError(null);
+    try {
+      await saveAppSetting('wix_auto_create', next);
+      logActivity({
+        action: 'update',
+        entityType: 'setting',
+        entityId: 'wix_auto_create',
+        summary: 'Wix auto-create settings changed',
+        metadata: next,
+      });
+    } catch (err) {
+      setWixCreate(prev);
+      setError(err.message);
+    }
+  }
+
+  const toggleWixSite = (siteKey) => {
+    const cur = new Set(wixCreate?.sites ?? []);
+    if (cur.has(siteKey)) cur.delete(siteKey);
+    else cur.add(siteKey);
+    updateWixCreate({ sites: [...cur] });
+  };
 
   // The two months automation cares about: this one (what the cron applied /
   // would apply) and the next one (what needs loading before its 1st).
@@ -241,6 +272,42 @@ export default function SettingsPage() {
             {summarizeRun(runReport)}
           </p>
         )}
+      </section>
+
+      <section className="rounded-2xl bg-surface p-6 border border-outline-variant space-y-1">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
+              <Store className="w-5 h-5" strokeWidth={2} />
+            </div>
+            <div>
+              <h2 className="text-title-md text-on-surface font-semibold">Wix auto-create</h2>
+              <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
+                When a product reaches Ready to Sell, it links or creates itself on
+                the selected stores.
+              </p>
+            </div>
+          </div>
+          <Switch
+            checked={wixCreate?.enabled !== false}
+            disabled={!wixCreate}
+            onChange={(v) => updateWixCreate({ enabled: v })}
+            label="Wix auto-create"
+          />
+        </div>
+
+        <div className="divide-y divide-outline-variant/50 mt-3 sm:ml-13">
+          {Object.entries(WIX_SITES).map(([key, site]) => (
+            <SettingRow
+              key={key}
+              title={site.label}
+              description={`Sells at ${site.priceField.startsWith('map') ? 'MAP' : 'MSRP'} (${site.currency}).`}
+              checked={Boolean(wixCreate?.sites?.includes(key))}
+              disabled={!wixCreate || wixCreate?.enabled === false}
+              onChange={() => toggleWixSite(key)}
+            />
+          ))}
+        </div>
       </section>
     </div>
   );
