@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Loader2, AlertCircle, Copy, X, Search } from 'lucide-react';
 import { createProduct, cloneProduct, searchProducts } from '../api/products';
 import { syncVariantFamilies } from '../api/variantFamilies';
+import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import Dialog from '@/components/ui/Dialog';
 
 const CATEGORY_OPTIONS = [
@@ -75,6 +76,12 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
       } catch (syncErr) {
         console.error('Variant family sync failed (non-fatal):', syncErr);
       }
+      // Fire-and-forget: link the new product to every API-connected channel
+      // where it already exists (Wix by SKU, Wayfair group id). Results land
+      // in the Activity Log and on the product's Marketplaces tab.
+      autoLinkChannels(created.sku).catch((err) =>
+        console.error('Channel auto-link failed (non-fatal):', err),
+      );
       // Land on the new product's detail page so the user can fill the rest.
       navigate(`/catalog/${encodeURIComponent(created.sku)}`);
     } catch (err) {

@@ -15,6 +15,7 @@ import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
 import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
+import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 
 const BLANK_TEMPLATE_GROUPS = [
   {
@@ -172,6 +173,11 @@ export default function ImportProducts() {
     try {
       const summary = await importProducts(validRows, existingMap, (done, total) =>
         setProgress({ done, total }),
+      );
+      // Fire-and-forget: link the whole batch to every API-connected channel
+      // where the products already exist (Wix by SKU, Wayfair group ids).
+      autoLinkChannels(validRows.map((r) => r.sku)).catch((err) =>
+        console.error('Channel auto-link failed (non-fatal):', err),
       );
       setResult({ ok: true, ...summary });
       setPhase('done');
@@ -379,6 +385,8 @@ export default function ImportProducts() {
                 {result.familiesSynced > 0 && (
                   <> · {result.familiesSynced} variant {result.familiesSynced === 1 ? 'family link' : 'family links'} re-synced</>
                 )}
+                <br />
+                Channel auto-link is running in the background — results land in the Activity Log.
               </p>
             </>
           ) : (

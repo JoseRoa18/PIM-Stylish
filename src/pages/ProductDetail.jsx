@@ -16,6 +16,7 @@ import {
   Save,
   X,
   Loader2,
+  Link2,
   Plus,
   Trash2,
   FileText,
@@ -50,6 +51,7 @@ import VariantsSection from '@/features/products/components/VariantsSection';
 import ProductHistoryDialog from '@/features/products/components/ProductHistoryDialog';
 import CreateProductDialog from '@/features/products/components/CreateProductDialog';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
+import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
@@ -1589,6 +1591,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
   // price rule); keying by site remounts the card so it reads that site live.
   const [wixSite, setWixSite] = useState(DEFAULT_WIX_SITE);
   const wayfairRef = useRef(null);
+  const [autoLink, setAutoLink] = useState(null); // null | 'busy' | summary | Error
 
   // One query answers "where is this product?" for every Wix site at once —
   // the strip below doubles as the overview and the site selector.
@@ -1604,6 +1607,24 @@ function MarketplacesTab({ product, media, onUpdate }) {
       });
     return () => { active = false; };
   }, [product.sku]);
+
+  // Same run that fires automatically on create/import — re-run it whenever
+  // the product has since appeared on a channel.
+  async function runAutoLink() {
+    setAutoLink('busy');
+    try {
+      const s = await autoLinkChannels(product.sku);
+      setAutoLink(s);
+      onUpdate?.();
+      const { data } = await supabase
+        .from('wix_links')
+        .select('site, wix_product_id, synced_at')
+        .eq('sku', product.sku);
+      setWixLinks(new Map((data ?? []).map((r) => [r.site, r])));
+    } catch (err) {
+      setAutoLink(err);
+    }
+  }
 
   function wixStatus(key) {
     if (!wixLinks) {
@@ -1637,6 +1658,32 @@ function MarketplacesTab({ product, media, onUpdate }) {
           notLinkedText="No group id"
           onClick={() => wayfairRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         />
+      </div>
+
+      {/* The create/import flows run this automatically; the button re-runs it
+          when the product has since appeared on a channel. */}
+      <div className="flex items-center gap-3 flex-wrap -mt-2">
+        <button
+          type="button"
+          onClick={runAutoLink}
+          disabled={autoLink === 'busy'}
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+        >
+          {autoLink === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+          Auto-link channels
+        </button>
+        {autoLink && autoLink !== 'busy' && (
+          autoLink instanceof Error ? (
+            <span className="text-body-sm text-error">{autoLink.message}</span>
+          ) : (
+            <span className="text-body-sm text-on-surface-variant">
+              Wix links: {Object.values(autoLink.wix ?? {}).reduce((a, b) => a + b, 0)}/4 sites
+              {' '}· Wayfair: {autoLink.wayfair ? 'linked' : 'not found'}
+              {autoLink.bestbuy ? ' · on Best Buy' : ''}
+              {autoLink.walmart_us ? ' · on Walmart US' : ''}
+            </span>
+          )
+        )}
       </div>
 
       <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
