@@ -64,7 +64,7 @@ export default function WayfairProductCard({ product, onUpdate }) {
           </div>
         </div>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm">
-          <ShieldCheck className="w-3.5 h-3.5" /> Sandbox
+          <ShieldCheck className="w-3.5 h-3.5" /> Production
         </span>
       </div>
 

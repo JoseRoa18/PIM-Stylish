@@ -100,7 +100,7 @@ Deno.serve(async (req) => {
     // Page through the supplier's Wayfair catalog.
     type WfItem = { supplierPartNumber: string; catalogItemStatus: string | null; listings: { listingId: string }[] };
     const items: WfItem[] = [];
-    let supplier: { supplierId: string; supplierName: string } | null = null;
+    let wfSupplier: { supplierId: string; supplierName: string } | null = null;
     let page = 1;
     const pageSize = 30; // Wayfair caps page size at 30
     for (;;) {
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
       if (out?.__typename !== "SupplierCatalogItems") {
         return json({ error: `Wayfair returned ${out?.__typename ?? "no data"}` }, 502);
       }
-      supplier = out.supplier;
+      wfSupplier = out.supplier;
       items.push(...(out.catalogItems ?? []));
       if (!out.paginationInfo?.hasNextPage || page >= (out.paginationInfo?.totalPages ?? page)) break;
       page++;
@@ -171,7 +171,7 @@ Deno.serve(async (req) => {
     return json({
       ok: true,
       env: ENV,
-      supplier,
+      supplier: wfSupplier,
       totalWayfairItems: items.length,
       withListingId: wfMap.size,
       withoutListingId: noListing.length,

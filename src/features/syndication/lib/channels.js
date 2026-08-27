@@ -32,8 +32,8 @@ export const LIVE_CHANNELS = [
     tagline: 'Content, images & spec attributes — CA and US suppliers',
     letter: 'WF', // no logo asset in the repo — two-letter monogram keeps it apart from Wix's W
     avatarClass: 'bg-brand-wayfair/15 text-brand-wayfair',
-    env: 'Sandbox',
-    envClass: 'bg-warning-container text-on-warning-container',
+    env: 'Production',
+    envClass: 'bg-success-container text-on-success-container',
     stat: async (totals) => {
       const { count } = await supabase
         .from('products')

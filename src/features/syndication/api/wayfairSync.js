@@ -75,6 +75,11 @@ export async function pushToWayfair(sku, opts = {}) {
 export async function pushWayfairAttributes(sku, opts = {}) {
   const { validateOnly = true, dryRun = false, market, supplier = 'CAN' } = opts;
   const data = await invokeWayfair('wayfair-push-attributes', { sku, validateOnly, dryRun, market, supplier });
+  // A rejected mutation comes back nested inside a 200 response — surface it
+  // as a real failure so the UI never reports a denied push as "ok".
+  if (!dryRun && data?.mutation?.error) {
+    throw new Error(`Wayfair rejected the update: ${data.mutation.error}`);
+  }
   if (!validateOnly && !dryRun) {
     logActivity({
       action: 'push',
@@ -82,7 +87,7 @@ export async function pushWayfairAttributes(sku, opts = {}) {
       entityId: sku,
       target: 'wayfair',
       summary: `Pushed ${sku} spec attributes to Wayfair`,
-      metadata: { updates: data?.updates, changed: data?.changedCount },
+      metadata: { updates: data?.updates, changed: data?.changedCount, requestId: data?.mutation?.requestId },
     });
   }
   return data;
