@@ -6,18 +6,7 @@ import { syncVariantFamilies } from '../api/variantFamilies';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import Dialog from '@/components/ui/Dialog';
 
-const CATEGORY_OPTIONS = [
-  { value: 'kitchen_sink', label: 'Kitchen Sink' },
-  { value: 'bathroom_sink', label: 'Bathroom Sink' },
-  { value: 'kitchen_faucet', label: 'Kitchen Faucet' },
-  { value: 'bathroom_faucet', label: 'Bathroom Faucet' },
-  { value: 'pot_filler', label: 'Pot Filler' },
-  { value: 'bar_prep_sink', label: 'Bar/Prep Sink' },
-  { value: 'laundry_sink', label: 'Laundry Sink' },
-  { value: 'outdoor_sink', label: 'Outdoor Sink & Ice Chest' },
-  { value: 'colander_drying_rack', label: 'Colanders & Drying Racks' },
-  { value: 'accessory', label: 'Accessory' },
-];
+import { CATEGORY_OPTIONS } from '../lib/categories';
 
 const inputClass =
   'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';

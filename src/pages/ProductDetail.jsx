@@ -83,18 +83,7 @@ const WORKFLOW_OPTIONS = [
   { value: 'archived', label: 'Archived' },
 ];
 
-const CATEGORY_OPTIONS = [
-  { value: 'kitchen_sink', label: 'Kitchen Sink' },
-  { value: 'bathroom_sink', label: 'Bathroom Sink' },
-  { value: 'kitchen_faucet', label: 'Kitchen Faucet' },
-  { value: 'bathroom_faucet', label: 'Bathroom Faucet' },
-  { value: 'pot_filler', label: 'Pot Filler' },
-  { value: 'bar_prep_sink', label: 'Bar/Prep Sink' },
-  { value: 'laundry_sink', label: 'Laundry Sink' },
-  { value: 'outdoor_sink', label: 'Outdoor Sink & Ice Chest' },
-  { value: 'colander_drying_rack', label: 'Colanders & Drying Racks' },
-  { value: 'accessory', label: 'Accessory' },
-];
+import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 
 // Matches Wayfair's "Warranty Length" valid values (used in exports).
 const WARRANTY_LENGTH_OPTIONS = [

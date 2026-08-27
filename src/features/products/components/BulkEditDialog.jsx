@@ -3,11 +3,27 @@ import { Plus, Trash2, Loader2 } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { bulkUpdateProducts } from '../api/products';
+import { WORKFLOW_STATUS } from '../lib/workflowStatus';
+import { CATEGORY_OPTIONS } from '../lib/categories';
 
-// Curated set of attributes that are safe to mass-edit. Category and the
-// identity fields (sku, model, family) stay out on purpose: they drive
-// template matching and variant grouping.
+// Fields safe to mass-edit. Closed-list fields (status, category) render as
+// selects and can't be cleared; the identity fields (sku, model, family)
+// stay out — they drive variant grouping.
 const EDITABLE_FIELDS = [
+  {
+    key: 'workflow_status',
+    label: 'Status',
+    options: Object.entries(WORKFLOW_STATUS).map(([value, m]) => ({ value, label: m.label })),
+    noClear: true,
+    note: 'Ready to Sell triggers the Wix auto-publish (see Settings).',
+  },
+  {
+    key: 'category',
+    label: 'Category',
+    options: CATEGORY_OPTIONS,
+    noClear: true,
+    note: 'Category drives template matching and Listing Health checks.',
+  },
   { key: 'brand', label: 'Brand' },
   { key: 'series', label: 'Series' },
   { key: 'material', label: 'Material' },
@@ -30,16 +46,17 @@ let rowSeq = 0;
  */
 export default function BulkEditDialog({ selectedSkus, products, onClose, onChanged }) {
   const confirm = useConfirm();
-  const [rows, setRows] = useState(() => [{ id: ++rowSeq, field: 'brand', value: '', clear: false }]);
+  const [rows, setRows] = useState(() => [{ id: ++rowSeq, field: 'workflow_status', value: '', clear: false }]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   const count = selectedSkus.size;
 
-  // Distinct existing values per field → datalist suggestions.
+  // Distinct existing values per free-text field → datalist suggestions.
   const suggestions = useMemo(() => {
     const map = {};
-    for (const { key } of EDITABLE_FIELDS) {
+    for (const { key, options } of EDITABLE_FIELDS) {
+      if (options) continue; // closed lists render their own <select>
       map[key] = [...new Set(products.map((p) => p[key]).filter(Boolean))].sort();
     }
     return map;
@@ -64,13 +81,19 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
 
     const lines = patchRows
       .map((r) => {
-        const label = EDITABLE_FIELDS.find((f) => f.key === r.field)?.label ?? r.field;
-        return r.clear ? `${label} → (cleared)` : `${label} → "${r.value.trim()}"`;
+        const def = EDITABLE_FIELDS.find((f) => f.key === r.field);
+        const label = def?.label ?? r.field;
+        const valueLabel = def?.options?.find((o) => o.value === r.value)?.label ?? r.value.trim();
+        return r.clear ? `${label} → (cleared)` : `${label} → "${valueLabel}"`;
       })
       .join(', ');
+    const notes = patchRows
+      .map((r) => EDITABLE_FIELDS.find((f) => f.key === r.field)?.note)
+      .filter(Boolean)
+      .join(' ');
     const ok = await confirm({
       title: `Edit ${count} product${count === 1 ? '' : 's'}?`,
-      message: `${lines}. This overwrites the current value on every selected product.`,
+      message: `${lines}. This overwrites the current value on every selected product.${notes ? ` ${notes}` : ''}`,
       confirmLabel: `Apply to ${count}`,
     });
     if (!ok) return;
@@ -116,11 +139,13 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
       }
     >
       <div className="space-y-3">
-        {rows.map((row) => (
+        {rows.map((row) => {
+          const def = EDITABLE_FIELDS.find((f) => f.key === row.field);
+          return (
           <div key={row.id} className="flex items-center gap-2">
             <select
               value={row.field}
-              onChange={(e) => updateRow(row.id, { field: e.target.value, value: '' })}
+              onChange={(e) => updateRow(row.id, { field: e.target.value, value: '', clear: false })}
               disabled={busy}
               className="w-44 flex-shrink-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
@@ -130,30 +155,48 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
                 </option>
               ))}
             </select>
-            <input
-              type="text"
-              value={row.clear ? '' : row.value}
-              onChange={(e) => updateRow(row.id, { value: e.target.value })}
-              disabled={busy || row.clear}
-              list={`bulk-edit-${row.field}`}
-              placeholder={row.clear ? 'Will be cleared' : 'New value…'}
-              className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-surface-container-low disabled:text-on-surface-variant"
-            />
-            <datalist id={`bulk-edit-${row.field}`}>
-              {(suggestions[row.field] ?? []).map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
-            <label className="flex items-center gap-1.5 text-label-md text-on-surface-variant whitespace-nowrap select-none">
-              <input
-                type="checkbox"
-                checked={row.clear}
-                onChange={(e) => updateRow(row.id, { clear: e.target.checked })}
+            {def?.options ? (
+              <select
+                value={row.value}
+                onChange={(e) => updateRow(row.id, { value: e.target.value })}
                 disabled={busy}
-                className="accent-primary"
+                className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">Choose…</option>
+                {def.options.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={row.clear ? '' : row.value}
+                onChange={(e) => updateRow(row.id, { value: e.target.value })}
+                disabled={busy || row.clear}
+                list={`bulk-edit-${row.field}`}
+                placeholder={row.clear ? 'Will be cleared' : 'New value…'}
+                className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-surface-container-low disabled:text-on-surface-variant"
               />
-              Clear
-            </label>
+            )}
+            {!def?.options && (
+              <datalist id={`bulk-edit-${row.field}`}>
+                {(suggestions[row.field] ?? []).map((v) => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
+            )}
+            {!def?.noClear && (
+              <label className="flex items-center gap-1.5 text-label-md text-on-surface-variant whitespace-nowrap select-none">
+                <input
+                  type="checkbox"
+                  checked={row.clear}
+                  onChange={(e) => updateRow(row.id, { clear: e.target.checked })}
+                  disabled={busy}
+                  className="accent-primary"
+                />
+                Clear
+              </label>
+            )}
             {rows.length > 1 && (
               <button
                 type="button"
@@ -166,7 +209,8 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
               </button>
             )}
           </div>
-        ))}
+          );
+        })}
 
         {rows.length < EDITABLE_FIELDS.length && (
           <button
