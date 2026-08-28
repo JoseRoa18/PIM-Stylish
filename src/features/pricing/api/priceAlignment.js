@@ -155,21 +155,38 @@ async function loadOfferAlignment(cfg) {
     }
   }
 
+  // Mirakl keeps the promo as a discount next to the regular price: the live
+  // selling price is the discount while its window is open, and a discount
+  // scheduled for the promo month already counts as the promo being in place.
+  const today = new Date().toISOString().slice(0, 10);
+  const day = (v) => (typeof v === 'string' ? v.slice(0, 10) : null);
+  const livePrice = (o, promo) => {
+    if (o.discount_price == null) return o.price ?? null;
+    const start = day(o.discount_start);
+    const end = day(o.discount_end);
+    const active = (!start || start <= today) && (!end || end >= today);
+    if (active) return o.discount_price;
+    const scheduledForPromo = promo && (!start || start <= promo.period) && (!end || end >= promo.period)
+      && Math.abs(o.discount_price - promo.price) < 0.01;
+    return scheduledForPromo ? o.discount_price : (o.price ?? null);
+  };
+
   const results = [];
   for (const o of snapshot.results ?? []) {
     if (!baseBySku.has(o.sku)) continue; // channel SKU not in the PIM
     const base = baseBySku.get(o.sku) ?? null;
     const promo = promoBySku.get(o.sku);
     const expected = promo?.price ?? base;
+    const price = livePrice(o, promo);
     results.push({
       sku: o.sku,
       state: 'live',
-      price: o.price ?? null,
+      price,
       expected: expected ?? null,
       expected_source: promo != null ? 'promo' : 'map',
       map: base,
       promo_period: promo?.period ?? null,
-      price_diff: expected != null && o.price != null && Math.abs(o.price - expected) > 0.01,
+      price_diff: expected != null && price != null && Math.abs(price - expected) > 0.01,
     });
   }
   return classifySnapshot({ run_at: snapshot.run_at, results });
@@ -213,11 +230,16 @@ function promoMonthEnd(period) {
  */
 function buildBestBuyUpdate(p) {
   if (p.source === 'promo' && p.promo_period) {
+    // Mirakl drops a discount whose start date is not in the future (a
+    // same-day start already counts as past in the marketplace's timezone) —
+    // a promo month that has begun is scheduled from tomorrow.
+    const today = new Date().toISOString().slice(0, 10);
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     return {
       sku: p.sku,
       ...(p.map != null ? { price: p.map } : {}),
       discount_price: p.expected,
-      discount_start_date: p.promo_period,
+      discount_start_date: p.promo_period > today ? p.promo_period : tomorrow,
       discount_end_date: promoMonthEnd(p.promo_period),
     };
   }

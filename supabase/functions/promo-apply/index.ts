@@ -259,17 +259,41 @@ async function run(dryRun: boolean) {
         prods.forEach((p) => mapCad.set(p.sku, p.map_cad));
       }
       const end = monthEnd(period);
+      // Mirakl runs OF24 in NORMAL mode: any field missing from a line is
+      // BLANKED on the offer (2026-08-28: a price-only import zeroed the stock
+      // of 127 live offers). Read the live offers first and carry quantity
+      // (and price when the PIM has no MAP) on every line.
+      const liveOffers = new Map<string, { price: number | null; quantity: number }>();
+      let offset = 0;
+      for (;;) {
+        const res = await fetch(`https://marketplace.bestbuy.ca/api/offers?max=100&offset=${offset}`, {
+          headers: { Authorization: BB_KEY, Accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`Best Buy live offers read failed (${res.status}) — promo NOT sent to Best Buy`);
+        const data = await res.json();
+        for (const o of data.offers ?? []) liveOffers.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0 });
+        offset += 100;
+        if (!data.offers?.length || offset >= (data.total_count ?? 0)) break;
+      }
+
       const offers: Record<string, unknown>[] = [];
       let skipped = 0;
       for (const r of cadRows) {
         if (!listed.has(r.sku)) continue;
         const map = mapCad.get(r.sku);
         if (map != null && (r.promo_price_cad as number) >= map) { skipped += 1; continue; }
+        const cur = liveOffers.get(r.sku);
+        if (!cur) continue; // not on Best Buy any more
+        const price = map ?? cur.price;
+        if (price == null) continue;
         offers.push({
           shop_sku: r.sku,
           update_delete: "update",
-          ...(map != null ? { price: map } : {}),
+          price,
+          quantity: cur.quantity,
           discount_price: r.promo_price_cad,
+          // volume-pricing instance: the discount value lives in ranges
+          discount_ranges: [{ price: r.promo_price_cad, quantity_threshold: 1 }],
           discount_start_date: period,
           discount_end_date: end,
         });

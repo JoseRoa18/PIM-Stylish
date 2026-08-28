@@ -14,6 +14,11 @@
 //   dryRun?: boolean, // true → return the exact Mirakl payload, POST nothing
 // }
 //
+// Mirakl runs OF24 in NORMAL mode (import_mode in the JSON body is ignored on
+// this instance): fields missing from a line are BLANKED. On 2026-08-28 a
+// price-only push zeroed the stock of 127 live offers. Every line is therefore
+// merged with the live offer (quantity, price, discount) before submission.
+//
 // Mirakl's OF24 import is asynchronous: the POST returns an import id and the
 // lines process server-side. This function polls the import status for up to
 // ~40s and reports lines_in_error plus the error report when something is
@@ -44,6 +49,7 @@ interface PriceUpdate {
   discount_price?: number;
   discount_start_date?: string;
   discount_end_date?: string;
+  quantity?: number; // only for stock RESTORES — never sent by the price flows
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -57,20 +63,26 @@ function buildOfferLine(u: PriceUpdate): Record<string, unknown> | string {
   const hasPrice = typeof u.price === "number" && Number.isFinite(u.price) && u.price > 0;
   const hasDiscount = typeof u.discount_price === "number" &&
     Number.isFinite(u.discount_price) && u.discount_price > 0;
-  if (!hasPrice && !hasDiscount) return `${u.sku}: nothing to update (no price, no discount)`;
+  const hasQty = typeof u.quantity === "number" && Number.isInteger(u.quantity) && u.quantity >= 0;
+  if (!hasPrice && !hasDiscount && !hasQty) return `${u.sku}: nothing to update (no price, no discount, no quantity)`;
   if (hasPrice) line.price = u.price;
+  if (hasQty) line.quantity = u.quantity;
   if (hasDiscount) {
-    if (!ISO_DATE.test(u.discount_start_date ?? "") || !ISO_DATE.test(u.discount_end_date ?? "")) {
-      return `${u.sku}: a discount needs discount_start_date and discount_end_date (YYYY-MM-DD)`;
+    for (const dte of [u.discount_start_date, u.discount_end_date]) {
+      if (dte != null && !ISO_DATE.test(dte)) return `${u.sku}: discount dates must be YYYY-MM-DD`;
     }
     // A discount above the selling price would be ignored or rejected — catch
     // the modeling mistake here instead of in Mirakl's error report.
     if (hasPrice && (u.discount_price as number) >= (u.price as number)) {
       return `${u.sku}: discount_price (${u.discount_price}) must be below price (${u.price})`;
     }
+    // Best Buy's Mirakl runs volume pricing: a discount is stored as ranges
+    // ({price, quantity_threshold}) and a bare discount_price is silently
+    // ignored (verified 2026-08-28). Send both — ranges carry the value.
     line.discount_price = u.discount_price;
-    line.discount_start_date = u.discount_start_date;
-    line.discount_end_date = u.discount_end_date;
+    line.discount_ranges = [{ price: u.discount_price, quantity_threshold: 1 }];
+    if (u.discount_start_date) line.discount_start_date = u.discount_start_date;
+    if (u.discount_end_date) line.discount_end_date = u.discount_end_date;
   }
   return line;
 }
@@ -105,9 +117,48 @@ Deno.serve(async (req) => {
     if (!updates.length) return json({ error: "updates[] is required." }, 400);
     if (updates.length > 500) return json({ error: "Too many updates in one push (max 500)." }, 400);
 
+    // --- merge the LIVE offer into each line -------------------------------
+    // Mirakl processes OF24 in NORMAL mode (it ignores import_mode in the JSON
+    // body): every field missing from a line is BLANKED on the offer. On
+    // 2026-08-28 a price-only push zeroed the stock of 127 live offers. So each
+    // line carries the offer's current quantity, price and discount unless the
+    // caller sets them explicitly.
+    const live = new Map<string, { price: number | null; quantity: number; discount: Record<string, unknown> | null }>();
+    const wanted = new Set(updates.map((u) => String(u.sku).trim()));
+    let offset = 0;
+    for (;;) {
+      const res = await fetch(`${MIRAKL_BASE}/api/offers?max=100&offset=${offset}`, {
+        headers: { Authorization: API_KEY, Accept: "application/json" },
+      });
+      if (!res.ok) return json({ error: `Could not read live offers before pushing (Mirakl ${res.status}) — nothing was sent.` }, 502);
+      const data = await res.json();
+      for (const o of data.offers ?? []) {
+        if (wanted.has(o.shop_sku)) {
+          live.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0, discount: o.discount ?? null });
+        }
+      }
+      offset += 100;
+      if (!data.offers?.length || offset >= (data.total_count ?? 0)) break;
+    }
+    const isoDate = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : undefined);
+    const merged: PriceUpdate[] = updates.map((u) => {
+      const cur = live.get(String(u.sku).trim());
+      if (!cur) return u; // unknown at Best Buy — Mirakl will report the line
+      const out: PriceUpdate = { ...u };
+      if (typeof out.quantity !== "number") out.quantity = cur.quantity;
+      if (typeof out.price !== "number" && cur.price != null) out.price = cur.price;
+      const d = cur.discount;
+      if (typeof out.discount_price !== "number" && d && typeof d.discount_price === "number") {
+        out.discount_price = d.discount_price as number;
+        out.discount_start_date = isoDate(d.start_date);
+        out.discount_end_date = isoDate(d.end_date);
+      }
+      return out;
+    });
+
     const offers: Record<string, unknown>[] = [];
     const invalid: string[] = [];
-    for (const u of updates) {
+    for (const u of merged) {
       const line = buildOfferLine(u);
       if (typeof line === "string") invalid.push(line);
       else offers.push(line);
@@ -117,14 +168,14 @@ Deno.serve(async (req) => {
     }
 
     if (dryRun) {
-      return json({ ok: true, dryRun: true, count: offers.length, payload: { offers } });
+      return json({ ok: true, dryRun: true, count: offers.length, payload: { import_mode: "PARTIAL_UPDATE", offers } });
     }
 
     // --- submit the OF24 import --------------------------------------------
     const submit = await fetch(`${MIRAKL_BASE}/api/offers`, {
       method: "POST",
       headers: { Authorization: API_KEY, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ offers }),
+      body: JSON.stringify({ import_mode: "PARTIAL_UPDATE", offers }),
     });
     const submitBody = await submit.json().catch(() => ({}));
     if (!submit.ok) {

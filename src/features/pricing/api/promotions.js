@@ -346,8 +346,12 @@ export async function autoScheduleBestBuyPromo(promotion) {
     for (const p of data ?? []) mapBySku.set(p.sku, p.map_cad);
   }
 
-  const start = promotion.period;
-  const end = promoMonthEnd(start);
+  // A month that already began is scheduled from tomorrow (Mirakl drops a
+  // discount whose start date is not strictly in the future).
+  const today = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const start = String(promotion.period) > today ? promotion.period : tomorrow;
+  const end = promoMonthEnd(promotion.period);
   const updates = [];
   const skippedAtOrAboveMap = [];
   for (const m of members) {
@@ -369,7 +373,8 @@ export async function autoScheduleBestBuyPromo(promotion) {
 
   const report = {
     at: new Date().toISOString(),
-    period: start,
+    period: promotion.period,
+    start,
     end,
     scheduled: Math.max(0, updates.length - (res?.lines_in_error ?? 0)),
     attempted: updates.length,
