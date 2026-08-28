@@ -332,10 +332,17 @@ function PriceAlignmentCard({ canEdit, confirm }) {
 
   const fixable = cfg.canFix ? (result?.problems.filter((p) => p.expected != null) ?? []) : [];
 
-  // Wix's query index (what the analysis reads) lags writes by ~15-30s —
-  // re-running immediately would show the just-fixed rows as still broken.
+  // After a push the channel needs time before the analysis can see it:
+  //  - Wix: the query index lags writes by ~15-30s → wait, then re-check.
+  //  - Best Buy (Mirakl): offer imports are processed in the background over
+  //    a few minutes → re-checking now would show the old prices, so leave
+  //    the report as-is and tell the user when to re-run.
   async function reanalyzeAfterIndexLag(prefix) {
-    setMsg({ tone: 'success', text: `${prefix} Waiting ~20s for Wix's index before re-checking…` });
+    if (cfg.kind === 'bestbuy') {
+      setMsg({ tone: 'success', text: `${prefix} Best Buy applies offer updates in the background (a few minutes) — run a fresh analysis later to confirm.` });
+      return;
+    }
+    setMsg({ tone: 'success', text: `${prefix} Waiting ~20s for the store index before re-checking…` });
     await new Promise((resolve) => setTimeout(resolve, 20000));
     await analyze();
     setMsg({ tone: 'success', text: `${prefix} Analysis refreshed.` });
