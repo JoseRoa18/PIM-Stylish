@@ -169,16 +169,13 @@ Deno.serve(async (req) => {
       const valid = ((media ?? []) as PimImage[]).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
       if (!valid.length) return json({ error: `${sku} has no images in the PIM.` }, 400);
 
-      // Dual main pictures: the gray-background hero (image_role =
-      // sinksdirect_main) belongs to the SinksDirect sites ONLY. There it
-      // always leads the gallery and the white marketplace main (is_primary)
-      // stays OUT of the push — same shot, duplicate here. On the Stylish
-      // brand sites the hero is excluded entirely and the white is_primary
-      // leads (it's already first in the PIM ordering).
-      const isSinksDirect = site.key.startsWith("sinksdirect");
-      const sdMain = isSinksDirect
-        ? valid.find((m) => m.image_role === "sinksdirect_main")
-        : undefined;
+      // Dual main pictures (rule 2026-08-31): EVERY Wix site — SinksDirect
+      // AND Stylish — leads with the gray-background hero (image_role =
+      // sinksdirect_main); the white marketplace main (is_primary) stays OUT
+      // of the Wix push (same shot, duplicate here) and remains the main for
+      // non-Wix channels. Products without a tagged hero fall back to the
+      // white main leading.
+      const sdMain = valid.find((m) => m.image_role === "sinksdirect_main");
       const all = valid.filter((m) =>
         m.image_role !== "sinksdirect_main" && !(sdMain && m.is_primary));
 
