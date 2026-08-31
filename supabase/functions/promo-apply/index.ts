@@ -1,33 +1,47 @@
-// promo-apply — automatic monthly promotion rollover.
+// promo-apply — automatic promotion rollover, market by market.
 //
-// Called by pg_cron on the 1st of every month at 04:00 UTC (= 00:00
-// America/Caracas; see 20260818_promo_apply_cron.sql). Honors the
-// 'promo_automation' app_setting — the switches live in /settings.
+// Calendar (rule 2026-08-28, all boundaries at 00:00 America/Toronto):
+//   USA    — promo prices flip on the 1st of the month.
+//   Canada — promo prices flip on the FIRST THURSDAY of the month and run
+//            until the day before the next month's first Thursday
+//            (Thursday-to-Thursday, no gaps).
+//   Everything schedulable is loaded ONE DAY AHEAD: the evening before
+//   Canada's start, the month's Best Buy discounts are (re)submitted to
+//   Mirakl as scheduled discounts; Mirakl flips them on its own.
 //
-// What one run does (all idempotent, safe to re-run):
-//   1. Ends every ACTIVE promotion of a previous month: clears
-//      on_sale/sale_price_cad on its member SKUs, status → ended.
-//   2. Applies the promotion whose period is the CURRENT month (draft or
-//      active): sets on_sale + sale_price_cad from the CAD promo list,
-//      status → active. If no promotion is loaded for the month, nothing is
-//      invented — prices simply return to regular and the audit log says so.
-//   3. Pushes the resulting prices to the promo-aware Wix sites:
-//        - SinksDirect CA: priceData + discount from the PIM row (MAP base,
-//          promo as the sale) — via wix-push-product, price fields only.
-//        - SinksDirect US: priceData = promo USD ?? MAP USD (field override —
-//          the PIM sale columns are CAD-only).
-//      Stylish brand sites sell at MSRP and are never touched.
-//   4. Best Buy safety net: re-submits the month's scheduled discounts to
-//      Mirakl (they are normally scheduled when the promo is loaded, and
-//      Mirakl flips them at the start date on its own — this catches promos
-//      loaded while the toggle was off).
+// Called by pg_cron DAILY at 04:05 and 05:05 UTC (the pair covers EDT/EST so
+// one of the two runs lands just after midnight Eastern; see
+// 20260828_promo_calendar_cron.sql). Each run is idempotent — boundary
+// passes stamp promotions.us_applied_at / ca_applied_at so the second firing
+// skips.
+//
+// What a run does (only on the matching dates, everything idempotent):
+//   - Day 1 (US pass): pushes SinksDirect US to promo USD ?? MAP USD for the
+//     month's promo members; members of the previous promo that dropped out
+//     go back to regular MAP USD.
+//   - First Thursday (CA pass): applies the CAD list to store pricing
+//     (on_sale + sale_price_cad), pushes SinksDirect CA (priceData +
+//     discount), clears the previous promo's members, ends the previous
+//     promotion. Stylish brand sites sell at MSRP and are never touched.
+//   - Day before the first Thursday (prep pass): submits the Best Buy
+//     scheduled discounts for the Canada window (start date is in the
+//     future, which Mirakl requires).
+//   Manual "Run now" (body {sync:true}) RECONCILES: re-applies whatever
+//   should be live today on both markets, dates aside.
 //
 // Auth: `x-cron-secret` header, the service-role key as Bearer, or an
 // authenticated ADMIN user (the Settings page's "Run now").
 // Body: { sync?: boolean, dryRun?: boolean } — dryRun computes the full plan
-// and writes/pushes nothing (implies sync).
+// and writes/pushes nothing (implies sync + reconcile).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  activePeriodFor,
+  etToday,
+  marketWindow,
+  periodOfDay,
+  prevPeriod,
+} from "../_shared/promoCalendar.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -104,28 +118,151 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
-// ---------- date helpers (Venezuela = UTC-4, no DST) ------------------------
+// ---------- data types ------------------------------------------------------
 
-function vetPeriodToday(): string {
-  const vet = new Date(Date.now() - 4 * 3600_000);
-  return `${vet.getUTCFullYear()}-${String(vet.getUTCMonth() + 1).padStart(2, "0")}-01`;
+interface PromoRow {
+  id: number;
+  name: string;
+  period: string;
+  status: string;
+  us_applied_at: string | null;
+  ca_applied_at: string | null;
+  bb_scheduled_at: string | null;
+}
+interface PriceRow { sku: string; promo_price_cad: number | null; promo_price_usd: number | null }
+
+async function promoPrices(promoId: number): Promise<PriceRow[]> {
+  return await restGet<PriceRow[]>(
+    `promotion_prices?promotion_id=eq.${promoId}&select=sku,promo_price_cad,promo_price_usd`,
+  );
 }
 
-function monthEnd(period: string): string {
-  const [y, m] = period.split("-").map(Number);
-  const last = new Date(Date.UTC(y, m, 0)); // day 0 of next month
-  return `${last.getUTCFullYear()}-${String(last.getUTCMonth() + 1).padStart(2, "0")}-${String(last.getUTCDate()).padStart(2, "0")}`;
+// ---------- Wix push helper -------------------------------------------------
+
+interface WixJob { sku: string; site: string; only: string[]; fields?: Record<string, unknown> }
+
+async function pushWixJobs(jobs: WixJob[], dryRun: boolean, errors: string[]) {
+  const out: Record<string, { pushed: number; failed: number }> = {};
+  for (const j of jobs) out[j.site] = out[j.site] ?? { pushed: 0, failed: 0 };
+  if (dryRun || !jobs.length) return out;
+  const results = await mapLimit(jobs, 5, async (job) => {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/wix-push-product`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify(job),
+    });
+    if (!resp.ok) throw new Error(`${job.sku} (${job.site}): ${((await resp.json().catch(() => ({}))) as { error?: string }).error ?? resp.status}`);
+    return job;
+  });
+  results.forEach((res, i) => {
+    if (res.status === "fulfilled") out[jobs[i].site].pushed += 1;
+    else {
+      out[jobs[i].site].failed += 1;
+      if (errors.length < 25) errors.push(`wix ${(res.reason as Error).message}`);
+    }
+  });
+  return out;
+}
+
+// ---------- Best Buy scheduled discounts ------------------------------------
+
+// Mirakl runs OF24 in NORMAL mode: any field missing from a line is BLANKED
+// on the offer (2026-08-28: a price-only import zeroed the stock of 127 live
+// offers). Read the live offers first and carry quantity (and price when the
+// PIM has no MAP) on every line.
+async function readLiveOffers(bbKey: string): Promise<Map<string, { price: number | null; quantity: number }>> {
+  const live = new Map<string, { price: number | null; quantity: number }>();
+  let offset = 0;
+  for (;;) {
+    const res = await fetch(`${MIRAKL_BASE}/api/offers?max=100&offset=${offset}`, {
+      headers: { Authorization: bbKey, Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`Best Buy live offers read failed (${res.status}) — promo NOT sent to Best Buy`);
+    const data = await res.json();
+    for (const o of data.offers ?? []) live.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0 });
+    offset += 100;
+    if (!data.offers?.length || offset >= (data.total_count ?? 0)) break;
+  }
+  return live;
+}
+
+async function scheduleBestBuy(
+  cadRows: PriceRow[],
+  start: string,
+  end: string,
+  dryRun: boolean,
+): Promise<Record<string, unknown>> {
+  const BB_KEY = Deno.env.get("BESTBUY_API_KEY");
+  if (!BB_KEY) return { skipped: "no BESTBUY_API_KEY" };
+
+  const mapCad = new Map<string, number | null>();
+  for (const part of chunk(cadRows.map((r) => r.sku), 100)) {
+    const prods = await restGet<{ sku: string; map_cad: number | null }[]>(
+      `products?select=sku,map_cad&sku=${inList(part)}`,
+    );
+    prods.forEach((p) => mapCad.set(p.sku, p.map_cad));
+  }
+  const liveOffers = await readLiveOffers(BB_KEY);
+
+  const offers: Record<string, unknown>[] = [];
+  let skipped = 0;
+  let notListed = 0;
+  for (const r of cadRows) {
+    const cur = liveOffers.get(r.sku);
+    if (!cur) { notListed += 1; continue; }
+    const map = mapCad.get(r.sku);
+    if (map != null && (r.promo_price_cad as number) >= map) { skipped += 1; continue; }
+    const price = map ?? cur.price;
+    if (price == null) continue;
+    offers.push({
+      shop_sku: r.sku,
+      update_delete: "update",
+      price,
+      quantity: cur.quantity,
+      discount_price: r.promo_price_cad,
+      // volume-pricing instance: the discount value lives in ranges
+      discount_ranges: [{ price: r.promo_price_cad, quantity_threshold: 1 }],
+      discount_start_date: start,
+      discount_end_date: end,
+    });
+  }
+  const report: Record<string, unknown> = {
+    window: { start, end },
+    listed: offers.length,
+    not_listed: notListed,
+    skipped_at_or_above_map: skipped,
+  };
+  if (!dryRun && offers.length) {
+    const submit = await fetch(`${MIRAKL_BASE}/api/offers`, {
+      method: "POST",
+      headers: { Authorization: BB_KEY, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ offers }),
+    });
+    const body = await submit.json().catch(() => ({}));
+    if (!submit.ok) throw new Error(`Mirakl OF24 ${submit.status}: ${JSON.stringify(body).slice(0, 200)}`);
+    report.import_id = body.import_id ?? null;
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const chk = await fetch(`${MIRAKL_BASE}/api/offers/imports/${body.import_id}`, {
+        headers: { Authorization: BB_KEY, Accept: "application/json" },
+      });
+      if (!chk.ok) continue;
+      const st = await chk.json();
+      report.import_status = st.status;
+      report.lines_in_error = st.lines_in_error ?? 0;
+      if (st.status === "COMPLETE" || st.status === "FAILED") break;
+    }
+  }
+  return report;
 }
 
 // ---------- the run ---------------------------------------------------------
 
-interface PromoRow { id: number; name: string; period: string; status: string }
-interface PriceRow { sku: string; promo_price_cad: number | null; promo_price_usd: number | null }
-
-async function run(dryRun: boolean) {
-  const period = vetPeriodToday();
+async function run(dryRun: boolean, reconcile: boolean) {
+  const today = etToday();
+  const tomorrow = etToday(1);
   const nowIso = new Date().toISOString();
-  const report: Record<string, unknown> = { period, dryRun };
+  const report: Record<string, unknown> = { today, dryRun, mode: reconcile ? "reconcile" : "cron" };
   const errors: string[] = [];
 
   // -- 0. settings gate ------------------------------------------------------
@@ -137,223 +274,183 @@ async function run(dryRun: boolean) {
     return { ...report, skipped: "promo automation is disabled in Settings" };
   }
 
-  // -- 1. find this month's promo + previous active ones ---------------------
+  // -- 1. promos on the board ------------------------------------------------
   const promos = await restGet<PromoRow[]>(
-    "promotions?select=id,name,period,status&status=in.(draft,active)&order=id.desc",
+    "promotions?select=id,name,period,status,us_applied_at,ca_applied_at,bb_scheduled_at&status=in.(draft,active)&order=id.desc",
   );
-  const candidates = promos.filter((p) => p.period === period);
-  const target = candidates.find((p) => p.status === "active") ?? candidates[0] ?? null;
-  const toEnd = promos.filter((p) => p.status === "active" && p.period < period);
-  report.target = target ? { id: target.id, name: target.name } : null;
-  report.ending = toEnd.map((p) => ({ id: p.id, name: p.name }));
+  const pick = (period: string | null): PromoRow | null => {
+    if (!period) return null;
+    const c = promos.filter((p) => p.period === period);
+    return c.find((p) => p.status === "active") ?? c[0] ?? null;
+  };
 
-  const targetRows = target
-    ? await restGet<PriceRow[]>(
-      `promotion_prices?promotion_id=eq.${target.id}&select=sku,promo_price_cad,promo_price_usd`,
-    )
-    : [];
-  const endSkus = new Set<string>();
-  for (const p of toEnd) {
-    const rows = await restGet<{ sku: string }[]>(`promotion_prices?promotion_id=eq.${p.id}&select=sku`);
-    for (const r of rows) endSkus.add(r.sku);
+  const usPeriod = activePeriodFor("us", today); // always the current month
+  const caPeriod = activePeriodFor("ca", today); // current month, or previous before its 1st Thursday
+  const usTarget = pick(usPeriod);
+  const caTarget = pick(caPeriod);
+  report.periods = { us: usPeriod, ca: caPeriod };
+  report.target = { us: usTarget?.name ?? null, ca: caTarget?.name ?? null };
+
+  // -- 2. which passes fire today -------------------------------------------
+  const usStartsToday = today === periodOfDay(today); // the 1st
+  const caStartsToday = caPeriod != null && today === marketWindow(caPeriod, "ca").start;
+  const prepPeriod = marketWindow(periodOfDay(tomorrow), "ca").start === tomorrow
+    ? periodOfDay(tomorrow)
+    : null;
+
+  const doUS = reconcile || (usStartsToday && !usTarget?.us_applied_at);
+  const doCA = reconcile || (caStartsToday && !caTarget?.ca_applied_at);
+  // The prep pass always (re)schedules — it overwrites idempotently, and an
+  // earlier schedule may carry an outdated window (e.g. pre-calendar-change).
+  const prepTarget = pick(prepPeriod);
+  const doPrep = prepTarget != null;
+
+  if (!doUS && !doCA && !doPrep) {
+    return { ...report, skipped: "no promo boundary today" };
   }
 
-  // -- 2. store pricing ------------------------------------------------------
-  const cadRows = targetRows.filter((r) => r.promo_price_cad != null);
-  const targetCadSkus = new Set(cadRows.map((r) => r.sku));
-  const clearSkus = [...endSkus].filter((s) => !targetCadSkus.has(s));
-  report.store = { cleared: clearSkus.length, on_sale: cadRows.length };
+  // -- 3. US pass: SinksDirect US to this month's promo USD ------------------
+  if (doUS && settings.wix !== false) {
+    const targetRows = usTarget ? await promoPrices(usTarget.id) : [];
+    const prevPromo = pick(prevPeriod(usPeriod ?? periodOfDay(today)));
+    const prevRows = prevPromo ? await promoPrices(prevPromo.id) : [];
+    const promoUsd = new Map(targetRows.filter((r) => r.promo_price_usd != null).map((r) => [r.sku, r.promo_price_usd]));
+    const affected = [...new Set([...promoUsd.keys(), ...prevRows.map((r) => r.sku)])];
 
-  if (!dryRun) {
-    for (const part of chunk(clearSkus, 100)) {
-      await restPatch(`products?sku=${inList(part)}`, { on_sale: false, sale_price_cad: null });
-    }
-    const applied = await mapLimit(cadRows, 10, (r) =>
-      restPatch(`products?sku=eq.${encodeURIComponent(r.sku)}`, {
-        on_sale: true,
-        sale_price_cad: r.promo_price_cad,
-      }));
-    applied.forEach((res, i) => {
-      if (res.status === "rejected") errors.push(`store ${cadRows[i].sku}: ${(res.reason as Error).message}`);
-    });
-    for (const p of toEnd) {
-      await restPatch(`promotions?id=eq.${p.id}`, { status: "ended", ended_at: nowIso });
-    }
-    if (target && target.status === "draft") {
-      await restPatch(`promotions?id=eq.${target.id}`, { status: "active", activated_at: nowIso });
-    }
-  }
-
-  // -- 3. Wix (promo-aware sites only) ---------------------------------------
-  const affected = [...new Set([...endSkus, ...targetRows.map((r) => r.sku)])];
-  if (settings.wix !== false && affected.length) {
-    // Which of the affected SKUs are linked, per site.
-    const linkedCa = new Set<string>();
     const linkedUs = new Set<string>();
-    const usdBySku = new Map<string, number | null>(); // PIM map_usd fallback
+    const usdBySku = new Map<string, number | null>();
     for (const part of chunk(affected, 100)) {
       const list = inList(part);
-      const [ca, us, legacy, prods] = await Promise.all([
-        restGet<{ sku: string }[]>(`wix_links?site=eq.sinksdirect_ca&sku=${list}&select=sku`),
+      const [us, prods] = await Promise.all([
         restGet<{ sku: string }[]>(`wix_links?site=eq.sinksdirect_us&sku=${list}&select=sku`),
-        restGet<{ sku: string }[]>(`products?select=sku&wix_product_id=not.is.null&sku=${list}`),
         restGet<{ sku: string; map_usd: number | null }[]>(`products?select=sku,map_usd&sku=${list}`),
       ]);
-      ca.forEach((r) => linkedCa.add(r.sku));
-      legacy.forEach((r) => linkedCa.add(r.sku));
       us.forEach((r) => linkedUs.add(r.sku));
       prods.forEach((r) => usdBySku.set(r.sku, r.map_usd));
     }
-
-    const promoUsd = new Map(targetRows.filter((r) => r.promo_price_usd != null).map((r) => [r.sku, r.promo_price_usd]));
-    const jobs: { sku: string; site: string; only: string[]; fields?: Record<string, unknown> }[] = [];
-    for (const sku of linkedCa) {
-      // PIM row already holds the truth (post-apply): MAP base + sale fields.
-      jobs.push({ sku, site: "sinksdirect_ca", only: ["priceData", "discount"] });
-    }
+    const jobs: WixJob[] = [];
     for (const sku of linkedUs) {
       const expected = promoUsd.get(sku) ?? usdBySku.get(sku) ?? null;
-      if (expected == null) continue; // nothing to price it at
+      if (expected == null) continue;
       jobs.push({ sku, site: "sinksdirect_us", only: ["priceData"], fields: { map_usd: expected } });
     }
+    const wixUs = await pushWixJobs(jobs, dryRun, errors);
+    report.us = { members: promoUsd.size, linked: linkedUs.size, ...wixUs.sinksdirect_us };
 
-    const wixReport = {
-      sinksdirect_ca: { linked: linkedCa.size, pushed: 0, failed: 0 },
-      sinksdirect_us: { linked: linkedUs.size, pushed: 0, failed: 0 },
-    };
-    if (!dryRun) {
-      const results = await mapLimit(jobs, 5, async (job) => {
-        const resp = await fetch(`${SUPABASE_URL}/functions/v1/wix-push-product`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify(job),
-        });
-        if (!resp.ok) throw new Error(`${job.sku} (${job.site}): ${((await resp.json().catch(() => ({}))) as { error?: string }).error ?? resp.status}`);
-        return job;
-      });
-      results.forEach((res, i) => {
-        const site = jobs[i].site as keyof typeof wixReport;
-        if (res.status === "fulfilled") wixReport[site].pushed += 1;
-        else {
-          wixReport[site].failed += 1;
-          if (errors.length < 25) errors.push(`wix ${(res.reason as Error).message}`);
-        }
+    if (!dryRun && usTarget) {
+      await restPatch(`promotions?id=eq.${usTarget.id}`, {
+        us_applied_at: nowIso,
+        ...(usTarget.status === "draft" ? { status: "active", activated_at: nowIso } : {}),
       });
     }
-    report.wix = wixReport;
   }
 
-  // -- 4. Best Buy safety net (scheduled discounts for the month) ------------
-  const BB_KEY = Deno.env.get("BESTBUY_API_KEY");
-  if (settings.bestbuy !== false && target && cadRows.length && BB_KEY) {
-    try {
-      const snap = await restGet<{ results: { sku: string }[] }[]>(
-        "channel_health?channel=eq.bestbuy&select=results&order=run_at.desc&limit=1",
-      );
-      const listed = new Set((snap[0]?.results ?? []).map((o) => o.sku));
-      const mapCad = new Map<string, number | null>();
-      for (const part of chunk(cadRows.map((r) => r.sku), 100)) {
-        const prods = await restGet<{ sku: string; map_cad: number | null }[]>(
-          `products?select=sku,map_cad&sku=${inList(part)}`,
-        );
-        prods.forEach((p) => mapCad.set(p.sku, p.map_cad));
-      }
-      const end = monthEnd(period);
-      // Mirakl runs OF24 in NORMAL mode: any field missing from a line is
-      // BLANKED on the offer (2026-08-28: a price-only import zeroed the stock
-      // of 127 live offers). Read the live offers first and carry quantity
-      // (and price when the PIM has no MAP) on every line.
-      const liveOffers = new Map<string, { price: number | null; quantity: number }>();
-      let offset = 0;
-      for (;;) {
-        const res = await fetch(`https://marketplace.bestbuy.ca/api/offers?max=100&offset=${offset}`, {
-          headers: { Authorization: BB_KEY, Accept: "application/json" },
-        });
-        if (!res.ok) throw new Error(`Best Buy live offers read failed (${res.status}) — promo NOT sent to Best Buy`);
-        const data = await res.json();
-        for (const o of data.offers ?? []) liveOffers.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0 });
-        offset += 100;
-        if (!data.offers?.length || offset >= (data.total_count ?? 0)) break;
-      }
+  // -- 4. CA pass: store pricing + SinksDirect CA on the first Thursday ------
+  if (doCA) {
+    const targetRows = caTarget ? await promoPrices(caTarget.id) : [];
+    const cadRows = targetRows.filter((r) => r.promo_price_cad != null);
+    const targetCadSkus = new Set(cadRows.map((r) => r.sku));
 
-      const offers: Record<string, unknown>[] = [];
-      let skipped = 0;
-      for (const r of cadRows) {
-        if (!listed.has(r.sku)) continue;
-        const map = mapCad.get(r.sku);
-        if (map != null && (r.promo_price_cad as number) >= map) { skipped += 1; continue; }
-        const cur = liveOffers.get(r.sku);
-        if (!cur) continue; // not on Best Buy any more
-        const price = map ?? cur.price;
-        if (price == null) continue;
-        offers.push({
-          shop_sku: r.sku,
-          update_delete: "update",
-          price,
-          quantity: cur.quantity,
-          discount_price: r.promo_price_cad,
-          // volume-pricing instance: the discount value lives in ranges
-          discount_ranges: [{ price: r.promo_price_cad, quantity_threshold: 1 }],
-          discount_start_date: period,
-          discount_end_date: end,
-        });
+    // Previous promos whose Canada window is over: their members leave the
+    // sale (unless carried into the new list), and the promo ends.
+    const toEnd = promos.filter((p) =>
+      p.status === "active" && p.id !== caTarget?.id && marketWindow(p.period, "ca").end < today
+    );
+    const endSkus = new Set<string>();
+    for (const p of toEnd) {
+      for (const r of await promoPrices(p.id)) endSkus.add(r.sku);
+    }
+    const clearSkus = [...endSkus].filter((s) => !targetCadSkus.has(s));
+    report.store = { cleared: clearSkus.length, on_sale: cadRows.length };
+    report.ending = toEnd.map((p) => ({ id: p.id, name: p.name }));
+
+    if (!dryRun) {
+      for (const part of chunk(clearSkus, 100)) {
+        await restPatch(`products?sku=${inList(part)}`, { on_sale: false, sale_price_cad: null });
       }
-      const bbReport: Record<string, unknown> = {
-        listed: offers.length,
-        not_listed: cadRows.length - offers.length - skipped,
-        skipped_at_or_above_map: skipped,
-      };
-      if (!dryRun && offers.length) {
-        const submit = await fetch(`${MIRAKL_BASE}/api/offers`, {
-          method: "POST",
-          headers: { Authorization: BB_KEY, "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ offers }),
-        });
-        const body = await submit.json().catch(() => ({}));
-        if (!submit.ok) throw new Error(`Mirakl OF24 ${submit.status}: ${JSON.stringify(body).slice(0, 200)}`);
-        bbReport.import_id = body.import_id ?? null;
-        // Brief status poll — the discounts are date-scheduled, so a slow
-        // import is fine; we just want lines_in_error when it's quick.
-        for (let i = 0; i < 8; i++) {
-          await new Promise((r) => setTimeout(r, 2000));
-          const chk = await fetch(`${MIRAKL_BASE}/api/offers/imports/${body.import_id}`, {
-            headers: { Authorization: BB_KEY, Accept: "application/json" },
-          });
-          if (!chk.ok) continue;
-          const st = await chk.json();
-          bbReport.import_status = st.status;
-          bbReport.lines_in_error = st.lines_in_error ?? 0;
-          if (st.status === "COMPLETE" || st.status === "FAILED") break;
-        }
+      const applied = await mapLimit(cadRows, 10, (r) =>
+        restPatch(`products?sku=eq.${encodeURIComponent(r.sku)}`, {
+          on_sale: true,
+          sale_price_cad: r.promo_price_cad,
+        }));
+      applied.forEach((res, i) => {
+        if (res.status === "rejected") errors.push(`store ${cadRows[i].sku}: ${(res.reason as Error).message}`);
+      });
+      for (const p of toEnd) {
+        await restPatch(`promotions?id=eq.${p.id}`, { status: "ended", ended_at: nowIso });
       }
-      report.bestbuy = bbReport;
+    }
+
+    if (settings.wix !== false) {
+      const affected = [...new Set([...targetCadSkus, ...clearSkus])];
+      const linkedCa = new Set<string>();
+      for (const part of chunk(affected, 100)) {
+        const list = inList(part);
+        const [ca, legacy] = await Promise.all([
+          restGet<{ sku: string }[]>(`wix_links?site=eq.sinksdirect_ca&sku=${list}&select=sku`),
+          restGet<{ sku: string }[]>(`products?select=sku&wix_product_id=not.is.null&sku=${list}`),
+        ]);
+        ca.forEach((r) => linkedCa.add(r.sku));
+        legacy.forEach((r) => linkedCa.add(r.sku));
+      }
+      // PIM row already holds the truth (post-apply): MAP base + sale fields.
+      const jobs: WixJob[] = [...linkedCa].map((sku) => ({ sku, site: "sinksdirect_ca", only: ["priceData", "discount"] }));
+      const wixCa = await pushWixJobs(jobs, dryRun, errors);
+      report.ca = { members: cadRows.length, linked: linkedCa.size, ...wixCa.sinksdirect_ca };
+    }
+
+    // Safety net: the day-before prep normally schedules Best Buy. If it
+    // didn't (promo loaded late / toggle off), schedule from tomorrow —
+    // Mirakl drops start dates that are not in the future.
+    if (settings.bestbuy !== false && caTarget && cadRows.length && !caTarget.bb_scheduled_at) {
+      try {
+        const w = marketWindow(caTarget.period, "ca");
+        const start = w.start > today ? w.start : tomorrow;
+        report.bestbuy = await scheduleBestBuy(cadRows, start, w.end, dryRun);
+        if (!dryRun) await restPatch(`promotions?id=eq.${caTarget.id}`, { bb_scheduled_at: nowIso });
+      } catch (err) {
+        errors.push(`bestbuy: ${(err as Error).message}`);
+      }
+    }
+
+    if (!dryRun && caTarget) {
+      await restPatch(`promotions?id=eq.${caTarget.id}`, {
+        ca_applied_at: nowIso,
+        ...(caTarget.status === "draft" ? { status: "active", activated_at: nowIso } : {}),
+      });
+    }
+  }
+
+  // -- 5. prep pass: tomorrow is Canada's first Thursday ---------------------
+  if (doPrep && settings.bestbuy !== false && prepTarget) {
+    try {
+      const rows = (await promoPrices(prepTarget.id)).filter((r) => r.promo_price_cad != null);
+      if (rows.length) {
+        const w = marketWindow(prepTarget.period, "ca");
+        report.prep = await scheduleBestBuy(rows, w.start, w.end, dryRun);
+        if (!dryRun) await restPatch(`promotions?id=eq.${prepTarget.id}`, { bb_scheduled_at: nowIso });
+      }
     } catch (err) {
-      errors.push(`bestbuy: ${(err as Error).message}`);
+      errors.push(`bestbuy prep: ${(err as Error).message}`);
     }
   }
 
   report.errors = errors;
   report.ok = errors.length === 0;
 
-  // -- 5. audit trail --------------------------------------------------------
+  // -- 6. audit trail --------------------------------------------------------
   if (!dryRun) {
-    const monthName = new Date(`${period}T12:00:00Z`).toLocaleDateString("en-CA", {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    });
-    const summary = target
-      ? `Promo automation: applied "${target.name}" for ${monthName} — ${cadRows.length} SKUs on sale` +
-        (toEnd.length ? `, ended ${toEnd.map((p) => `"${p.name}"`).join(", ")}` : "")
-      : `Promo automation: no promotion loaded for ${monthName}` +
-        (toEnd.length ? ` — ended ${toEnd.map((p) => `"${p.name}"`).join(", ")}, prices back to regular` : " — nothing to do");
+    const parts: string[] = [];
+    if (doUS) parts.push(usTarget ? `USA on promo "${usTarget.name}"` : "USA back to regular prices");
+    if (doCA) parts.push(caTarget ? `Canada on promo "${caTarget.name}"` : "Canada back to regular prices");
+    if (doPrep && prepTarget) parts.push(`Best Buy scheduled for "${prepTarget.name}" (starts tomorrow)`);
     try {
       await restPost("audit_log", {
-        action: target ? "push" : "update",
+        action: "push",
         entity_type: "promotion",
-        entity_id: target ? String(target.id) : null,
+        entity_id: String(usTarget?.id ?? caTarget?.id ?? prepTarget?.id ?? ""),
         target: "automation",
-        summary,
+        summary: `Promo automation: ${parts.join(" · ") || "nothing to do"}`,
         metadata: report,
       });
     } catch (err) {
@@ -399,10 +496,12 @@ Deno.serve(async (req) => {
       dryRun = body?.dryRun === true;
     } catch { /* empty body → cron background mode */ }
 
-    if (sync || dryRun) return json(await run(dryRun));
+    // Manual runs reconcile (re-apply today's truth); cron runs are
+    // boundary-triggered and stamped.
+    if (sync || dryRun) return json(await run(dryRun, true));
 
     // @ts-ignore — EdgeRuntime is provided by the Supabase runtime
-    EdgeRuntime.waitUntil(run(false));
+    EdgeRuntime.waitUntil(run(false, false));
     return json({ ok: true, started: true }, 202);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

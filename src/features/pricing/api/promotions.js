@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { etToday, marketWindow } from '../lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix } from '@/features/syndication/api/wixSync';
 import { pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
@@ -297,13 +298,6 @@ export async function endPromotion(promotion) {
   return { cleared: prices.length };
 }
 
-/** Last day of the promo month ('YYYY-MM-01' → 'YYYY-MM-DD'). */
-function promoMonthEnd(period) {
-  const [y, m] = String(period).split('-').map(Number);
-  const last = new Date(y, m, 0).getDate();
-  return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
-}
-
 /**
  * Schedule the promotion's CAD prices on Best Buy as Mirakl SCHEDULED
  * discounts for exactly the promo month — Mirakl turns them on at 00:00 of
@@ -318,9 +312,8 @@ export async function autoScheduleBestBuyPromo(promotion) {
   const settings = await getAppSetting('promo_automation', {});
   if (settings.enabled === false || settings.bestbuy === false) return { skipped: 'automation off' };
 
-  const now = new Date();
-  const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  if (String(promotion.period) < currentPeriod) return { skipped: 'past promotion' };
+  const window = marketWindow(promotion.period, 'ca');
+  if (window.end < etToday()) return { skipped: 'past promotion' };
 
   const prices = await getPromotionPrices(promotion.id);
   const members = prices.filter((r) => r.promo_price_cad != null);
@@ -346,12 +339,11 @@ export async function autoScheduleBestBuyPromo(promotion) {
     for (const p of data ?? []) mapBySku.set(p.sku, p.map_cad);
   }
 
-  // A month that already began is scheduled from tomorrow (Mirakl drops a
-  // discount whose start date is not strictly in the future).
-  const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  const start = String(promotion.period) > today ? promotion.period : tomorrow;
-  const end = promoMonthEnd(promotion.period);
+  // Canada window (first Thursday → day before the next first Thursday). A
+  // window that already began is scheduled from tomorrow — Mirakl drops a
+  // discount whose start date is not strictly in the future.
+  const start = window.start > etToday() ? window.start : etToday(1);
+  const end = window.end;
   const updates = [];
   const skippedAtOrAboveMap = [];
   for (const m of members) {

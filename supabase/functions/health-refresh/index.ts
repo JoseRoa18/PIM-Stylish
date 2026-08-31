@@ -21,6 +21,7 @@
 
 // @ts-ignore — plain JS module shared with the browser app
 import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHealth.js";
+import { etToday, marketWindow, windowContains } from "../_shared/promoCalendar.ts";
 import { WIX_SITES, type WixSite } from "../_shared/wixSites.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -155,7 +156,11 @@ async function refreshWix(site: WixSite) {
     const activePromos = await restSelect(
       `promotions?select=period,promotion_prices(sku,${promoField})&status=eq.active&order=period.asc`,
     );
-    for (const promo of activePromos as { promotion_prices: Record<string, unknown>[] }[]) {
+    // Market calendar: USA runs the 1st → month end; Canada runs first
+    // Thursday → the day before the next first Thursday.
+    const day = etToday();
+    for (const promo of activePromos as { period: string; promotion_prices: Record<string, unknown>[] }[]) {
+      if (!windowContains(marketWindow(promo.period, site.market as "us" | "ca"), day)) continue;
       for (const row of promo.promotion_prices ?? []) {
         const v = row[promoField] as number | null;
         if (v != null) promoBySku.set(row.sku as string, v);

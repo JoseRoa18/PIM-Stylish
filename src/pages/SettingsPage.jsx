@@ -107,7 +107,7 @@ export default function SettingsPage() {
   async function runNow() {
     const ok = await confirm({
       title: 'Run promotion automation now?',
-      message: 'Same as the month-start run: ends past promos, applies this month\'s, pushes Wix and re-schedules Best Buy. Safe to re-run.',
+      message: 'Re-applies what should be live today on both markets (USA + Canada) and re-schedules Best Buy. Safe to re-run.',
       confirmLabel: 'Run now',
     });
     if (!ok) return;
@@ -129,12 +129,13 @@ export default function SettingsPage() {
     if (!r) return '';
     if (r.skipped) return `Skipped: ${r.skipped}`;
     const parts = [];
-    parts.push(r.target ? `Applied "${r.target.name}"` : 'No promotion loaded for this month');
+    if (r.target?.us || r.target?.ca) parts.push(`USA "${r.target.us ?? '—'}" · CAN "${r.target.ca ?? '—'}"`);
     if (r.store) parts.push(`${r.store.on_sale} on sale, ${r.store.cleared} cleared`);
-    if (r.wix) parts.push(`Wix CA ${r.wix.sinksdirect_ca.pushed}/${r.wix.sinksdirect_ca.linked} · Wix US ${r.wix.sinksdirect_us.pushed}/${r.wix.sinksdirect_us.linked}`);
-    if (r.bestbuy) parts.push(`Best Buy ${r.bestbuy.listed} scheduled`);
+    if (r.us) parts.push(`Wix US ${r.us.pushed}/${r.us.linked}`);
+    if (r.ca) parts.push(`Wix CA ${r.ca.pushed}/${r.ca.linked}`);
+    if (r.bestbuy || r.prep) parts.push(`Best Buy ${(r.bestbuy ?? r.prep).listed} scheduled`);
     if (r.errors?.length) parts.push(`⚠ ${r.errors.length} error${r.errors.length === 1 ? '' : 's'}`);
-    return parts.join(' · ');
+    return parts.join(' · ') || 'Nothing to do today';
   };
 
   return (
@@ -161,8 +162,8 @@ export default function SettingsPage() {
             <div>
               <h2 className="text-title-md text-on-surface font-semibold">Promotion automation</h2>
               <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-                The month's promo applies itself on the 1st at 00:00. Channels without a
-                price API keep using the{' '}
+                USA: the 1st · Canada: first Thursday (00:00 ET), scheduled a day
+                ahead. Channels without a price API keep using the{' '}
                 <Link to="/pricing" className="text-primary hover:underline">promo files</Link>.
               </p>
             </div>
@@ -178,14 +179,14 @@ export default function SettingsPage() {
         <div className="divide-y divide-outline-variant/50 mt-3 sm:ml-13">
           <SettingRow
             title="Wix — SinksDirect Canada & USA"
-            description="Promo prices pushed at midnight. Price fields only."
+            description="USA flips the 1st, Canada the first Thursday. Price fields only."
             checked={settings?.wix !== false}
             disabled={!settings || settings?.enabled === false}
             onChange={(v) => update({ wix: v })}
           />
           <SettingRow
             title="Best Buy Canada"
-            description="Discounts scheduled when the list is loaded — turn on and off by themselves."
+            description="Discounts scheduled the day before Canada’s window — flip by themselves."
             checked={settings?.bestbuy !== false}
             disabled={!settings || settings?.enabled === false}
             onChange={(v) => update({ bestbuy: v })}

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { etToday, marketWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WIX_SITES, DEFAULT_WIX_SITE } from '../lib/wixSites';
 
@@ -288,7 +289,11 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
       .eq('status', 'active')
       .order('period', { ascending: true });
     if (promoErr) throw promoErr;
+    // Market calendar: USA runs the 1st → month end; Canada runs first
+    // Thursday → the day before the next first Thursday.
+    const day = etToday();
     for (const promo of activePromos ?? []) {
+      if (!windowContains(marketWindow(promo.period, cfg.market), day)) continue;
       for (const row of promo.promotion_prices ?? []) {
         if (row[promoField] != null) promoBySku.set(row.sku, row[promoField]);
       }

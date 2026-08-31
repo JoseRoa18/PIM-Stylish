@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { etToday, marketWindow, windowContains } from '../lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers, pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
@@ -146,19 +147,25 @@ async function loadOfferAlignment(cfg) {
     .eq('status', 'active')
     .order('period', { ascending: true });
   if (promoErr) throw promoErr;
+  // Market calendar: USA runs the 1st → month end; Canada runs first
+  // Thursday → the day before the next first Thursday. Only the promo whose
+  // window is open today sets the expected price.
   const promoBySku = new Map();
+  const todayET = etToday();
   for (const promo of activePromos ?? []) {
+    const w = marketWindow(promo.period, cfg.market);
+    if (!windowContains(w, todayET)) continue;
     for (const row of promo.promotion_prices ?? []) {
-      // The period rides along so a promo fix can be pushed as a SCHEDULED
-      // discount covering exactly that month (Best Buy).
-      if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period });
+      // The period + window ride along so a promo fix can be pushed as a
+      // SCHEDULED discount covering exactly the market window (Best Buy).
+      if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period, windowStart: w.start });
     }
   }
 
   // Mirakl keeps the promo as a discount next to the regular price: the live
   // selling price is the discount while its window is open, and a discount
   // scheduled for the promo month already counts as the promo being in place.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = etToday();
   const day = (v) => (typeof v === 'string' ? v.slice(0, 10) : null);
   const livePrice = (o, promo) => {
     if (o.discount_price == null) return o.price ?? null;
@@ -166,7 +173,7 @@ async function loadOfferAlignment(cfg) {
     const end = day(o.discount_end);
     const active = (!start || start <= today) && (!end || end >= today);
     if (active) return o.discount_price;
-    const scheduledForPromo = promo && (!start || start <= promo.period) && (!end || end >= promo.period)
+    const scheduledForPromo = promo && (!start || start <= promo.windowStart) && (!end || end >= promo.windowStart)
       && Math.abs(o.discount_price - promo.price) < 0.01;
     return scheduledForPromo ? o.discount_price : (o.price ?? null);
   };
@@ -216,13 +223,6 @@ export async function runPriceAlignment(target = DEFAULT_WIX_SITE) {
   return loadLatestAlignment(target);
 }
 
-/** Last day of a promo month, from its period date ('YYYY-MM-01'). */
-function promoMonthEnd(period) {
-  const d = new Date(`${period}T00:00:00`);
-  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
-}
-
 /**
  * One analysis problem → one OF24 price update. A promo fix keeps the offer
  * at its regular MAP and adds the promo as a scheduled discount for exactly
@@ -230,17 +230,17 @@ function promoMonthEnd(period) {
  */
 function buildBestBuyUpdate(p) {
   if (p.source === 'promo' && p.promo_period) {
-    // Mirakl drops a discount whose start date is not in the future (a
-    // same-day start already counts as past in the marketplace's timezone) —
-    // a promo month that has begun is scheduled from tomorrow.
-    const today = new Date().toISOString().slice(0, 10);
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    // The discount covers the CANADA window (first Thursday → day before the
+    // next first Thursday). Mirakl drops a discount whose start date is not
+    // in the future, so a window that already began is scheduled from
+    // tomorrow.
+    const w = marketWindow(p.promo_period, 'ca');
     return {
       sku: p.sku,
       ...(p.map != null ? { price: p.map } : {}),
       discount_price: p.expected,
-      discount_start_date: p.promo_period > today ? p.promo_period : tomorrow,
-      discount_end_date: promoMonthEnd(p.promo_period),
+      discount_start_date: w.start > etToday() ? w.start : etToday(1),
+      discount_end_date: w.end,
     };
   }
   return { sku: p.sku, price: p.expected };
