@@ -24,7 +24,7 @@ const normalize = (s: string) =>
     .trim();
 
 const PROMPT = `You are a formatter and proofreader. Reformat the product description below as HTML:
-- Split the prose into plain <p> paragraphs at natural topic breaks. Do NOT add empty paragraphs or blank lines between them — the store already spaces paragraphs.
+- Split the prose into plain <p> paragraphs at natural topic breaks, with exactly one empty <p>&nbsp;</p> between paragraphs (that is how the store spaces them).
 - Fix ONLY obvious typographical errors: missing or extra letters, doubled words, stray or misplaced punctuation, wrong capitalization at sentence starts.
 - NO bold, NO lists, NO headings. Allowed tags ONLY: p, br.
 CRITICAL: never reword, rephrase, reorder or summarize. Do not swap a word for a different word — only repair misspelled ones. Every sentence keeps its exact wording. Output ONLY the HTML, no code fences, no commentary.
@@ -138,14 +138,15 @@ export async function formatDescription(
   const source = normalize(text);
   if (!source || source.length > 8000) return null;
   const headlineHtml = headline.trim()
-    ? `<p><strong>${escapeHtml(headline.trim())}</strong></p>
-<p>&nbsp;</p>
-`
+    ? `<p><strong>${escapeHtml(headline.trim())}</strong></p><p>&nbsp;</p>`
     : "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const html = await gemini(apiKey, source, attempt > 0);
     const verdict = onlyTypoFixes(source, normalize(html));
-    if (verdict.ok) return { html: headlineHtml + html, fixes: verdict.fixes };
+    // The store's own descriptions are single-line HTML — whitespace between
+    // tags renders as extra gaps on Wix, so compact it away.
+    const compact = html.replace(/>\s+</g, "><").trim();
+    if (verdict.ok) return { html: headlineHtml + compact, fixes: verdict.fixes };
   }
   return null;
 }
