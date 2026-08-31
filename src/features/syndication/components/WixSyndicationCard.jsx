@@ -829,7 +829,12 @@ function AiFormatButton({ value, onChange, disabled }) {
       const { data, error } = await supabase.functions.invoke('ai-format-html', {
         body: { text: value },
       });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // Surface the function's own message, not the generic non-2xx one.
+        let message = error.message;
+        try { message = (await error.context.json())?.error ?? message; } catch { /* keep generic */ }
+        throw new Error(message);
+      }
       if (data?.error) throw new Error(data.error);
       onChange(data.html);
       setMsg('Formatted — same words, new layout.');

@@ -36,6 +36,9 @@ const normalize = (s: string) =>
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/\s+/g, " ")
+    // Tag-stripping turns "<strong>word</strong>." into "word ." — spacing
+    // around punctuation is layout, not wording, so it never fails the match.
+    .replace(/ ([,.;:!?])/g, "$1")
     .trim();
 
 const PROMPT = `You are a formatter. Reformat the product description below as clean HTML for an e-commerce page:
