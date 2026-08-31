@@ -128,16 +128,19 @@ export async function readWixProduct(sku, site = DEFAULT_WIX_SITE) {
  * truth) to EVERY Wix site the product is linked on. The server auto-formats
  * the description on each push (house style + typo repairs, never rewording).
  */
-export async function pushProductToAllWixSites(sku) {
+export async function pushProductToAllWixSites(sku, brand = null) {
   const { data: links } = await supabase.from('wix_links').select('site').eq('sku', sku);
-  const sites = new Set((links ?? []).map((l) => l.site));
+  let sites = new Set((links ?? []).map((l) => l.site));
   const { data: p } = await supabase
     .from('products')
     .select('wix_product_id')
     .eq('sku', sku)
     .maybeSingle();
   if (p?.wix_product_id) sites.add('sinksdirect_ca');
-  if (!sites.size) throw new Error('Not linked on any Wix store yet.');
+  // Brand split (rule 2026-08-31): pushes run per brand — 'sinksdirect'
+  // covers CA + US, 'stylish' covers CA + US.
+  if (brand) sites = new Set([...sites].filter((k) => k.startsWith(brand)));
+  if (!sites.size) throw new Error(brand ? `Not linked on any ${brand === 'stylish' ? 'Stylish' : 'SinksDirect'} store yet.` : 'Not linked on any Wix store yet.');
 
   const results = {};
   for (const site of sites) {
@@ -154,7 +157,7 @@ export async function pushProductToAllWixSites(sku) {
     entityType: 'product',
     entityId: sku,
     target: 'wix',
-    summary: `Pushed ${sku} to ${okCount}/${sites.size} Wix stores (general push)`,
+    summary: `Pushed ${sku} to ${okCount}/${sites.size} ${brand ? (brand === 'stylish' ? 'Stylish' : 'SinksDirect') : 'Wix'} stores (general push)`,
     metadata: { results },
   });
   return results;

@@ -1603,16 +1603,17 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
   // Same run that fires automatically on create/import — re-run it whenever
   // the product has since appeared on a channel.
-  async function runPushAll() {
+  async function runPushAll(brand) {
+    const label = brand === 'stylish' ? 'Stylish (CA + US)' : 'SinksDirect (CA + US)';
     const ok = await confirm({
-      title: 'Push to every linked Wix store?',
-      message: 'Sends the PIM content (name, description, prices, weight) to all linked stores. The description goes out auto-formatted.',
-      confirmLabel: 'Push all',
+      title: `Push to ${label}?`,
+      message: 'Sends the PIM content (description, prices, weight) to the linked stores of this brand. The description goes out auto-formatted.',
+      confirmLabel: 'Push',
     });
     if (!ok) return;
     setPushAll('busy');
     try {
-      setPushAll(await pushProductToAllWixSites(product.sku));
+      setPushAll(await pushProductToAllWixSites(product.sku, brand));
     } catch (err) {
       setPushAll(err instanceof Error ? err : new Error(String(err)));
     }
@@ -1682,13 +1683,23 @@ function MarketplacesTab({ product, media, onUpdate }) {
         </button>
         <button
           type="button"
-          onClick={runPushAll}
+          onClick={() => runPushAll('sinksdirect')}
           disabled={pushAll === 'busy'}
           className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
-          title="Pushes the PIM content to every linked Wix store. The description goes out auto-formatted."
+          title="Pushes the PIM content to SinksDirect Canada + USA. The description goes out auto-formatted."
         >
           {pushAll === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
-          Push all Wix stores
+          Push SinksDirect
+        </button>
+        <button
+          type="button"
+          onClick={() => runPushAll('stylish')}
+          disabled={pushAll === 'busy'}
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+          title="Pushes the PIM content to Stylish Canada + USA. The description goes out auto-formatted."
+        >
+          {pushAll === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+          Push Stylish
         </button>
         {pushAll && pushAll !== 'busy' && (
           pushAll instanceof Error ? (
