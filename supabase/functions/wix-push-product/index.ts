@@ -174,9 +174,14 @@ function buildProductPatch(
   if (pim.visible_online != null) patch.visible = pim.visible_online;
 
   if (Array.isArray(pim.additional_info_sections)) {
-    patch.additionalInfoSections = pim.additional_info_sections
+    const sections = pim.additional_info_sections
       .filter((s) => s && (s.title || s.description))
       .map((s) => ({ title: s.title ?? "", description: s.description ?? "" }));
+    // An empty list must never wipe the store's accordions on a PIM-sourced
+    // push — many products keep their sections only on Wix. (The edit panel
+    // can still clear them explicitly via `fields`.)
+    if (sections.length) patch.additionalInfoSections = sections;
+    else patch.__emptySections = true;
   }
 
   return patch;
@@ -264,6 +269,10 @@ Deno.serve(async (req) => {
     // design collection ("Ava"), not the commercial title. The name is
     // pushed only when the caller sent it explicitly (the edit panel's form).
     if (!(body.fields && body.fields.model_name != null)) delete productPatch.name;
+    if (productPatch.__emptySections) {
+      delete productPatch.__emptySections;
+      if (body.fields && body.fields.additional_info_sections != null) productPatch.additionalInfoSections = [];
+    }
     // `only` restricts the patch to the named Wix keys (e.g. ["priceData"])
     // — used by the price-alignment fixes so a correction can never touch
     // visibility, content, or anything else.
