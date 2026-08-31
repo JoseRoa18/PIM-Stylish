@@ -1,8 +1,10 @@
 // Format a product description as clean HTML — WITHOUT changing the words.
 //
 // Takes the description's current content (plain text or messy HTML) and
-// returns the same text with tasteful structure: paragraphs and <strong> on
-// the key product terms (no lists — they would eat the commas). The words are
+// returns the same text in the SinksDirect house style (sampled 2026-08-31
+// from 12 live products): a single bold headline paragraph, an empty
+// <p>&nbsp;</p> separator, then plain paragraphs — no other bolds, no lists
+// (lists would eat the commas). The words are
 // GUARANTEED untouched: the tag-stripped output must match the tag-stripped
 // input exactly, or the response is rejected (one retry, then 422) — the
 // model can only add markup, never rewrite.
@@ -41,10 +43,12 @@ const normalize = (s: string) =>
     .replace(/ ([,.;:!?])/g, "$1")
     .trim();
 
-const PROMPT = `You are a formatter. Reformat the product description below as clean HTML for an e-commerce page:
-- Split the prose into <p> paragraphs at natural topic breaks.
-- Bold (<strong>) the genuinely important product terms: model names, materials, dimensions, finishes, standout features. Be tasteful — a handful of bolds, not everywhere.
-- Allowed tags ONLY: p, strong, em, br. Do NOT create lists — keep enumerations as prose, commas included.
+const PROMPT = `You are a formatter. Reformat the product description below as HTML following this EXACT house style (used across the SinksDirect store):
+1. The opening title/name phrase (the first sentence, or the leading product-name line if there is one) becomes the headline: <p><strong>headline text</strong></p>
+2. Then an empty separator paragraph: <p>&nbsp;</p>
+3. Then the rest of the text as plain <p> paragraphs, split at natural topic breaks, with <p>&nbsp;</p> between paragraphs.
+4. NO other bold anywhere — the headline is the only <strong> in the whole description.
+5. NO lists. Allowed tags ONLY: p, strong, br.
 CRITICAL: do NOT add, remove, reorder or reword ANY text. Every word, number and punctuation mark must appear exactly as given, in the same order. Output ONLY the HTML, no code fences, no commentary.
 
 TEXT:

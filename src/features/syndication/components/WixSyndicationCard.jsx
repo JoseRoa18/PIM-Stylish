@@ -851,7 +851,7 @@ function AiFormatButton({ value, onChange, disabled }) {
         type="button"
         onClick={run}
         disabled={disabled || busy}
-        title="Bolds and paragraphs only — never changes the words."
+        title="House style: bold headline + clean paragraphs. Never changes the words."
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
       >
         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />}
