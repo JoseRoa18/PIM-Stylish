@@ -24,7 +24,7 @@ const normalize = (s: string) =>
     .trim();
 
 const PROMPT = `You are a formatter and proofreader. Reformat the product description below as HTML:
-- Split the prose into plain <p> paragraphs at natural topic breaks, with an empty <p>&nbsp;</p> between paragraphs.
+- Split the prose into plain <p> paragraphs at natural topic breaks. Do NOT add empty paragraphs or blank lines between them — the store already spaces paragraphs.
 - Fix ONLY obvious typographical errors: missing or extra letters, doubled words, stray or misplaced punctuation, wrong capitalization at sentence starts.
 - NO bold, NO lists, NO headings. Allowed tags ONLY: p, br.
 CRITICAL: never reword, rephrase, reorder or summarize. Do not swap a word for a different word — only repair misspelled ones. Every sentence keeps its exact wording. Output ONLY the HTML, no code fences, no commentary.
