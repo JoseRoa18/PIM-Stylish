@@ -1607,7 +1607,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
     const label = brand === 'stylish' ? 'Stylish (CA + US)' : 'SinksDirect (CA + US)';
     const ok = await confirm({
       title: `Push to ${label}?`,
-      message: 'Sends the PIM content (description, prices, weight) to the linked stores of this brand. The description goes out auto-formatted.',
+      message: 'Sends the PIM content (description, prices, weight) AND the images to the linked stores of this brand. The description goes out auto-formatted; the product name is never touched.',
       confirmLabel: 'Push',
     });
     if (!ok) return;
@@ -1706,7 +1706,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
             <span className="text-body-sm text-error">{pushAll.message}</span>
           ) : (
             <span className="text-body-sm text-on-surface-variant">
-              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? 'ok' : 'failed'}`).join(' · ')}
+              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? (r.media === 'ok' ? 'ok' : 'content ok, media failed') : 'failed'}`).join(' · ')}
             </span>
           )
         )}

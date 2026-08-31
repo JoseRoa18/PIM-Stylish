@@ -149,6 +149,16 @@ export async function pushProductToAllWixSites(sku, brand = null) {
       results[site] = { ok: true, autoformat: r?.description_autoformat ?? null };
     } catch (err) {
       results[site] = { ok: false, error: err.message };
+      continue;
+    }
+    // Images ride along (rule 2026-08-31): full gallery replace, with the
+    // per-brand main-picture rule applied by wix-push-media (gray hero on
+    // SinksDirect, white main on Stylish). The name is NEVER pushed.
+    try {
+      await pushMediaToWix(sku, site);
+      results[site].media = 'ok';
+    } catch (err) {
+      results[site].media = `failed: ${err.message}`;
     }
   }
   const okCount = Object.values(results).filter((r) => r.ok).length;
