@@ -248,6 +248,20 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     .eq('is_primary', true)
     .maybeSingle();
 
+  // Dual mains: a file named like the gray SinksDirect hero (e.g.
+  // "b_112g_main_picture_gray.jpg", "D-701C_new_gray.jpg") is auto-tagged
+  // sinksdirect_main when the product doesn't have one yet — untagged heroes
+  // leak into every store's gallery (incident 2026-08-31).
+  const { data: existingHero } = await supabase
+    .from('product_media')
+    .select('id')
+    .eq('sku', sku)
+    .eq('image_role', 'sinksdirect_main')
+    .limit(1);
+  let heroAssigned = Boolean(existingHero?.length);
+  const looksGrayHero = (name) =>
+    /gr[ae]y/i.test(name) && (/main/i.test(name) || /new[_-]?gr[ae]y/i.test(name));
+
   const orders = await nextDisplayOrders(famSkus);
   const takeOrder = (s) => {
     const n = orders.get(s) ?? 0;
@@ -269,7 +283,10 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
 
     const { data: pub } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
     const isVideo = file.type.startsWith('video/');
-    const shouldBePrimary = !isVideo && !primaryAssigned;
+    const asHero = !isVideo && !heroAssigned && looksGrayHero(file.name);
+    if (asHero) heroAssigned = true;
+    // The gray hero is never the white marketplace main.
+    const shouldBePrimary = !isVideo && !primaryAssigned && !asHero;
     if (shouldBePrimary) primaryAssigned = true;
 
     const baseRow = {
@@ -281,7 +298,13 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
       mime_type: file.type || inferMimeType(file.name),
       is_primary: false,
     };
-    rows.push({ ...baseRow, sku, is_primary: shouldBePrimary, display_order: takeOrder(sku) });
+    rows.push({
+      ...baseRow,
+      sku,
+      is_primary: shouldBePrimary,
+      ...(asHero ? { image_role: 'sinksdirect_main' } : {}),
+      display_order: takeOrder(sku),
+    });
     if (isVideo) {
       for (const sib of siblings) {
         rows.push({ ...baseRow, sku: sib, display_order: takeOrder(sib) });

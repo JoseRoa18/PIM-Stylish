@@ -665,7 +665,9 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
 
 function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled, sectionsRebuild }) {
   const isEdited = !valuesEqual(value, baselineValue);
-  const pimDiffers = !valuesEqual(value, pimValue);
+  const pimDiffers = field.type === 'richtext'
+    ? textOfHtml(value) !== textOfHtml(pimValue)
+    : !valuesEqual(value, pimValue);
 
   if (field.type === 'boolean') {
     return (
@@ -793,7 +795,16 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
           {field.hint}
         </p>
       )}
-      {pimDiffers && <PimHint value={pimValue} type={field.type} symbol={field.symbol} />}
+      {pimDiffers && field.type === 'richtext' && textOfHtml(pimValue) !== '' && (
+        <div className="mt-2 rounded-xl border border-outline-variant/60 overflow-hidden">
+          <SectionPimHint
+            html={pimValue}
+            actionLabel="Use PIM value"
+            onApply={disabled ? null : () => onChange(pimValue)}
+          />
+        </div>
+      )}
+      {pimDiffers && field.type !== 'richtext' && <PimHint value={pimValue} type={field.type} symbol={field.symbol} />}
     </div>
   );
 }
@@ -1429,6 +1440,11 @@ function htmlSignature(value) {
     .trim();
   return `${text}::${links}`;
 }
+
+// Rich text compares CONTENT, not markup — Wix and the PIM disagree on
+// wrapper tags and whitespace even when the words match.
+const textOfHtml = (html) =>
+  String(html ?? '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
 
 function valuesEqual(a, b) {
   if (a === b) return true;
