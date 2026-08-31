@@ -299,9 +299,29 @@ Deno.serve(async (req) => {
       const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY");
       if (GEMINI_KEY) {
         try {
-          // Headline = the store's commercial title: the explicitly pushed
-          // name, else the product's current name on Wix.
+          // Headline = the commercial title. Canonical source is the
+          // SinksDirect listing's name (Stylish stores use short names like
+          // "AVA B-112G" that just duplicate the page title): explicitly
+          // pushed name → SinksDirect CA/US live name → this store's name.
           let headline = typeof productPatch.name === "string" ? productPatch.name : "";
+          if (!headline && !site.key.startsWith("sinksdirect")) {
+            for (const sdKey of ["sinksdirect_ca", "sinksdirect_us"]) {
+              try {
+                const sd = resolveWixSite(sdKey);
+                let sdId: string | null = null;
+                const { data: link } = await supabase.from("wix_links")
+                  .select("wix_product_id").eq("sku", sku).eq("site", sdKey).maybeSingle();
+                sdId = link?.wix_product_id ?? null;
+                if (!sdId && sdKey === "sinksdirect_ca") sdId = pimRow.wix_product_id ?? null;
+                if (!sdId) continue;
+                const cur = await wixFetch(WIX_API_KEY, sd.siteId, `/stores/v1/products/${sdId}`);
+                if (cur.ok) {
+                  headline = String((await cur.json())?.product?.name ?? "");
+                  if (headline) break;
+                }
+              } catch { /* try the next source */ }
+            }
+          }
           if (!headline) {
             const cur = await wixFetch(WIX_API_KEY, site.siteId, `/stores/v1/products/${wixProductId}`);
             if (cur.ok) headline = String((await cur.json())?.product?.name ?? "");
