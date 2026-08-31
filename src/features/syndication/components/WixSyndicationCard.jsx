@@ -733,7 +733,7 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
             placeholder="Type here…"
             minRows={field.rows ?? 5}
           />
-          <AiFormatButton value={value} headline={aiHeadline} onChange={onChange} disabled={disabled} />
+          <AiFormatButton value={value} pimValue={pimValue} headline={aiHeadline} onChange={onChange} disabled={disabled} />
         </div>
       )}
       {field.type === 'number' && (
@@ -815,12 +815,18 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
   );
 }
 
-// AI formatting: paragraphs + bolds only. The edge function guarantees the
-// wording is untouched (tag-stripped output must equal the input).
-function AiFormatButton({ value, headline, onChange, disabled }) {
+// AI formatting: the SOURCE is always the PIM description (source-of-truth
+// rule) — whatever the channel currently shows is replaced by the PIM text
+// in the house style. The edge function guarantees the wording is untouched
+// (tag-stripped output must equal the input); the bold headline is the
+// product's name, injected by code.
+function AiFormatButton({ value, pimValue, headline, onChange, disabled }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  const hasText = String(value ?? '').replace(/<[^>]*>/g, ' ').trim().length > 0;
+  const source = String(pimValue ?? '').replace(/<[^>]*>/g, ' ').trim()
+    ? pimValue
+    : value;
+  const hasText = String(source ?? '').replace(/<[^>]*>/g, ' ').trim().length > 0;
   if (!hasText) return null;
 
   async function run() {
@@ -828,9 +834,7 @@ function AiFormatButton({ value, headline, onChange, disabled }) {
     setMsg(null);
     try {
       const { data, error } = await supabase.functions.invoke('ai-format-html', {
-        // The bold headline is the product's name (PIM data) — the AI only
-        // lays out the body text, verbatim.
-        body: { text: value, headline },
+        body: { text: source, headline },
       });
       if (error) {
         // Surface the function's own message, not the generic non-2xx one.
@@ -840,7 +844,7 @@ function AiFormatButton({ value, headline, onChange, disabled }) {
       }
       if (data?.error) throw new Error(data.error);
       onChange(data.html);
-      setMsg('Formatted — same words, new layout.');
+      setMsg('PIM description, house-style layout.');
     } catch (err) {
       setMsg(err.message);
     } finally {
@@ -854,7 +858,7 @@ function AiFormatButton({ value, headline, onChange, disabled }) {
         type="button"
         onClick={run}
         disabled={disabled || busy}
-        title="Bold product name on top + clean paragraphs. Never changes the words."
+        title="Takes the PIM description: bold product name on top + clean paragraphs. Never rewords."
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
       >
         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />}
