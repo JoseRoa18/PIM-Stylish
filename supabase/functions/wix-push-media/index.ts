@@ -51,7 +51,11 @@ function pickLanguageSet(all: PimImage[], market: "ca" | "us"): { chosen: PimIma
   const rest = market === "us"
     ? all.filter((m) => m.language !== "en_fr" && m.language !== "fr")
     : all;
-  return { chosen: rest, set: "en_es_universal" };
+  if (rest.length) return { chosen: rest, set: "en_es_universal" };
+  // A product whose entire artwork is bilingual EN/FR (common) must not end
+  // up photo-less on the US sites — bilingual beats blank.
+  const enFr = all.filter((m) => m.language === "en_fr");
+  return enFr.length ? { chosen: enFr, set: "en_fr_fallback" } : { chosen: all, set: "all_fallback" };
 }
 
 function json(body: unknown, status = 200) {
