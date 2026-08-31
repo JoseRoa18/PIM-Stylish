@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { etToday, marketWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WIX_SITES, DEFAULT_WIX_SITE } from '../lib/wixSites';
+import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
 
 const siteLabel = (site) => WIX_SITES[site]?.label ?? 'Wix';
 
@@ -133,9 +134,13 @@ export async function pushProductToAllWixSites(sku, brand = null) {
   let sites = new Set((links ?? []).map((l) => l.site));
   const { data: p } = await supabase
     .from('products')
-    .select('wix_product_id')
+    .select('*')
     .eq('sku', sku)
     .maybeSingle();
+  const { data: mediaRows } = await supabase
+    .from('product_media')
+    .select('media_type, storage_path, file_name, language')
+    .eq('sku', sku);
   if (p?.wix_product_id) sites.add('sinksdirect_ca');
   // Brand split (rule 2026-08-31): pushes run per brand — 'sinksdirect'
   // covers CA + US, 'stylish' covers CA + US.
@@ -144,9 +149,21 @@ export async function pushProductToAllWixSites(sku, brand = null) {
 
   const results = {};
   for (const site of sites) {
+    // Accordion sections travel too (rule 2026-08-31): rebuilt from the PIM
+    // (Dimensions from measurements, Features from bullets, document links
+    // repointed at PIM files) on top of what the store currently shows, so
+    // unmatched sections are kept, never wiped.
+    let fields;
     try {
-      const r = await pushProductToWix(sku, undefined, undefined, site);
-      results[site] = { ok: true, autoformat: r?.description_autoformat ?? null };
+      const { snapshot } = await readWixProduct(sku, site);
+      const derived = deriveWixSectionsFromPim(p ?? {}, mediaRows ?? [], snapshot?.additional_info_sections ?? []);
+      if (derived.sections?.length) fields = { additional_info_sections: derived.sections };
+    } catch {
+      // store unreadable — push content without touching its sections
+    }
+    try {
+      const r = await pushProductToWix(sku, fields, undefined, site);
+      results[site] = { ok: true, autoformat: r?.description_autoformat ?? null, sections: fields ? 'rebuilt' : 'kept' };
     } catch (err) {
       results[site] = { ok: false, error: err.message };
       continue;
