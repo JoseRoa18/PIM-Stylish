@@ -123,6 +123,43 @@ export async function readWixProduct(sku, site = DEFAULT_WIX_SITE) {
  * sent directly to Wix WITHOUT writing to the PIM (PIM stays untouched).
  * If omitted, the Edge Function reads from PIM columns as before.
  */
+/**
+ * The "general push": send the PIM's content (fields = PIM columns, source of
+ * truth) to EVERY Wix site the product is linked on. The server auto-formats
+ * the description on each push (house style + typo repairs, never rewording).
+ */
+export async function pushProductToAllWixSites(sku) {
+  const { data: links } = await supabase.from('wix_links').select('site').eq('sku', sku);
+  const sites = new Set((links ?? []).map((l) => l.site));
+  const { data: p } = await supabase
+    .from('products')
+    .select('wix_product_id')
+    .eq('sku', sku)
+    .maybeSingle();
+  if (p?.wix_product_id) sites.add('sinksdirect_ca');
+  if (!sites.size) throw new Error('Not linked on any Wix store yet.');
+
+  const results = {};
+  for (const site of sites) {
+    try {
+      const r = await pushProductToWix(sku, undefined, undefined, site);
+      results[site] = { ok: true, autoformat: r?.description_autoformat ?? null };
+    } catch (err) {
+      results[site] = { ok: false, error: err.message };
+    }
+  }
+  const okCount = Object.values(results).filter((r) => r.ok).length;
+  logActivity({
+    action: 'push',
+    entityType: 'product',
+    entityId: sku,
+    target: 'wix',
+    summary: `Pushed ${sku} to ${okCount}/${sites.size} Wix stores (general push)`,
+    metadata: { results },
+  });
+  return results;
+}
+
 export async function pushProductToWix(sku, fields = undefined, only = undefined, site = DEFAULT_WIX_SITE) {
   const body = { sku, site };
   if (fields) body.fields = fields;

@@ -25,6 +25,7 @@ import {
   Copy as CopyIcon,
   Info,
   Download,
+  UploadCloud,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
@@ -52,6 +53,7 @@ import ProductHistoryDialog from '@/features/products/components/ProductHistoryD
 import CreateProductDialog from '@/features/products/components/CreateProductDialog';
 import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
+import { pushProductToAllWixSites } from '@/features/syndication/api/wixSync';
 import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
 import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
 import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
@@ -1576,11 +1578,13 @@ function MediaTab({ sku, category, familyNumber, installationType }) {
 }
 
 function MarketplacesTab({ product, media, onUpdate }) {
+  const confirm = useConfirm();
   // One Wix card at a time — each site is its own store (own catalog, own
   // price rule); keying by site remounts the card so it reads that site live.
   const [wixSite, setWixSite] = useState(DEFAULT_WIX_SITE);
   const wayfairRef = useRef(null);
   const [autoLink, setAutoLink] = useState(null); // null | 'busy' | summary | Error
+  const [pushAll, setPushAll] = useState(null); // null | 'busy' | results | Error
 
   // One query answers "where is this product?" for every Wix site at once —
   // the strip below doubles as the overview and the site selector.
@@ -1599,6 +1603,21 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
   // Same run that fires automatically on create/import — re-run it whenever
   // the product has since appeared on a channel.
+  async function runPushAll() {
+    const ok = await confirm({
+      title: 'Push to every linked Wix store?',
+      message: 'Sends the PIM content (name, description, prices, weight) to all linked stores. The description goes out auto-formatted.',
+      confirmLabel: 'Push all',
+    });
+    if (!ok) return;
+    setPushAll('busy');
+    try {
+      setPushAll(await pushProductToAllWixSites(product.sku));
+    } catch (err) {
+      setPushAll(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   async function runAutoLink() {
     setAutoLink('busy');
     try {
@@ -1661,6 +1680,25 @@ function MarketplacesTab({ product, media, onUpdate }) {
           {autoLink === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
           Auto-link channels
         </button>
+        <button
+          type="button"
+          onClick={runPushAll}
+          disabled={pushAll === 'busy'}
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+          title="Pushes the PIM content to every linked Wix store. The description goes out auto-formatted."
+        >
+          {pushAll === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+          Push all Wix stores
+        </button>
+        {pushAll && pushAll !== 'busy' && (
+          pushAll instanceof Error ? (
+            <span className="text-body-sm text-error">{pushAll.message}</span>
+          ) : (
+            <span className="text-body-sm text-on-surface-variant">
+              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? 'ok' : 'failed'}`).join(' · ')}
+            </span>
+          )
+        )}
         {autoLink && autoLink !== 'busy' && (
           autoLink instanceof Error ? (
             <span className="text-body-sm text-error">{autoLink.message}</span>

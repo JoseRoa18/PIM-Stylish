@@ -26,6 +26,7 @@
 //   WIX_SITE_ID   — SinksDirect Canada site UUID
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { formatDescription } from "../_shared/aiFormat.ts";
 import { resolveWixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -259,6 +260,10 @@ Deno.serve(async (req) => {
       : pimRow;
 
     const productPatch = buildProductPatch(source, site);
+    // PIM pushes never rename the store product: products.model_name is the
+    // design collection ("Ava"), not the commercial title. The name is
+    // pushed only when the caller sent it explicitly (the edit panel's form).
+    if (!(body.fields && body.fields.model_name != null)) delete productPatch.name;
     // `only` restricts the patch to the named Wix keys (e.g. ["priceData"])
     // — used by the price-alignment fixes so a correction can never touch
     // visibility, content, or anything else.
@@ -274,7 +279,42 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`[wix-push] PATCH Wix product ${wixProductId} on ${site.key}, fields:`, Object.keys(productPatch).join(","));
+    // Rule 2026-08-31: EVERY push runs the auto-format on the description —
+    // house-style layout (bold product-name headline + clean paragraphs) and
+    // typo repairs only; the word-level validator inside formatDescription
+    // guarantees the wording is untouched. Best-effort: if the AI is down or
+    // keeps rewording, the description goes out unformatted rather than
+    // blocking the push.
+    let autoformat: string | null = null;
+    if (typeof productPatch.description === "string" && productPatch.description.trim()) {
+      const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY");
+      if (GEMINI_KEY) {
+        try {
+          // Headline = the store's commercial title: the explicitly pushed
+          // name, else the product's current name on Wix.
+          let headline = typeof productPatch.name === "string" ? productPatch.name : "";
+          if (!headline) {
+            const cur = await wixFetch(WIX_API_KEY, site.siteId, `/stores/v1/products/${wixProductId}`);
+            if (cur.ok) headline = String((await cur.json())?.product?.name ?? "");
+          }
+          const formatted = await formatDescription(
+            GEMINI_KEY,
+            productPatch.description as string,
+            headline,
+          );
+          if (formatted) {
+            productPatch.description = formatted.html;
+            autoformat = formatted.fixes.length ? `formatted, ${formatted.fixes.length} typo(s) fixed` : "formatted";
+          } else {
+            autoformat = "skipped — the AI kept altering the wording";
+          }
+        } catch (err) {
+          autoformat = `skipped — ${(err as Error).message.slice(0, 120)}`;
+        }
+      }
+    }
+
+    console.log(`[wix-push] PATCH Wix product ${wixProductId} on ${site.key}, fields:`, Object.keys(productPatch).join(","), autoformat ? `(description ${autoformat})` : "");
     const wixResp = await wixFetch(WIX_API_KEY, site.siteId, `/stores/v1/products/${wixProductId}`, {
       method: "PATCH",
       body: JSON.stringify({ product: productPatch }),
@@ -333,6 +373,7 @@ Deno.serve(async (req) => {
         site: site.key,
         wix_product_id: wixProductId,
         synced_fields: Object.keys(productPatch),
+        description_autoformat: autoformat,
         collections: collectionsResult,
         collections_error: collectionsError,
         wix_synced_at: nowIso,
