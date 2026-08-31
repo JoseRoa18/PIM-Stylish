@@ -2,14 +2,17 @@
 //
 // Takes the description's current content (plain text or messy HTML) and
 // returns the same text in the SinksDirect house style (sampled 2026-08-31
-// from 12 live products): a single bold headline paragraph, an empty
-// <p>&nbsp;</p> separator, then plain paragraphs — no other bolds, no lists
-// (lists would eat the commas). The words are
+// from 12 live products): a single bold headline (the PRODUCT NAME, injected
+// by code — never AI-picked), an empty <p>&nbsp;</p> separator, then plain
+// paragraphs — no other bolds, no lists (lists would eat the commas). The
+// body's words are
 // GUARANTEED untouched: the tag-stripped output must match the tag-stripped
 // input exactly, or the response is rejected (one retry, then 422) — the
 // model can only add markup, never rewrite.
 //
-// Body: { text: string }  →  { ok, html }
+// Body: { text: string, headline?: string }  →  { ok, html }
+// `headline` (the product's name, from PIM data) is prepended by CODE as the
+// single bold title paragraph — the AI never chooses or writes the headline.
 // Caller must be an authenticated admin or editor.
 // Required secrets: GEMINI_API_KEY
 
@@ -43,12 +46,9 @@ const normalize = (s: string) =>
     .replace(/ ([,.;:!?])/g, "$1")
     .trim();
 
-const PROMPT = `You are a formatter. Reformat the product description below as HTML following this EXACT house style (used across the SinksDirect store):
-1. The opening title/name phrase (the first sentence, or the leading product-name line if there is one) becomes the headline: <p><strong>headline text</strong></p>
-2. Then an empty separator paragraph: <p>&nbsp;</p>
-3. Then the rest of the text as plain <p> paragraphs, split at natural topic breaks, with <p>&nbsp;</p> between paragraphs.
-4. NO other bold anywhere — the headline is the only <strong> in the whole description.
-5. NO lists. Allowed tags ONLY: p, strong, br.
+const PROMPT = `You are a formatter. Reformat the product description below as HTML:
+- Split the prose into plain <p> paragraphs at natural topic breaks, with an empty <p>&nbsp;</p> between paragraphs.
+- NO bold, NO lists, NO headings. Allowed tags ONLY: p, br.
 CRITICAL: do NOT add, remove, reorder or reword ANY text. Every word, number and punctuation mark must appear exactly as given, in the same order. Output ONLY the HTML, no code fences, no commentary.
 
 TEXT:
@@ -98,13 +98,24 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const text = typeof body.text === "string" ? body.text : "";
+    // The bold headline is NOT the AI's call: it comes from product data
+    // (the product's name), injected here after validation — the AI only
+    // lays out the body, verbatim.
+    const headline = typeof body.headline === "string" ? body.headline.trim() : "";
+    const escapeHtml = (v: string) =>
+      v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const headlineHtml = headline
+      ? `<p><strong>${escapeHtml(headline)}</strong></p>
+<p>&nbsp;</p>
+`
+      : "";
     const source = normalize(text);
     if (!source) return json({ error: "text is required" }, 400);
     if (source.length > 8000) return json({ error: "Text too long (8000 chars max)." }, 400);
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const html = await gemini(GEMINI_KEY, source, attempt > 0);
-      if (normalize(html) === source) return json({ ok: true, html });
+      if (normalize(html) === source) return json({ ok: true, html: headlineHtml + html });
     }
     return json({ error: "The AI kept altering the wording — nothing was changed." }, 422);
   } catch (err) {

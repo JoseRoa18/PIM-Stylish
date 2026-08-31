@@ -651,6 +651,7 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
                 value={form[field.key]}
                 baselineValue={baseline[field.key]}
                 pimValue={product?.[field.key]}
+                aiHeadline={form.model_name ?? product?.model_name ?? ''}
                 onChange={(v) => onChange(field.key, v)}
                 disabled={disabled || Boolean(field.dependsOn && !form[field.dependsOn])}
                 sectionsRebuild={field.type === 'sections' ? sectionsRebuild : null}
@@ -665,7 +666,7 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
 
 // ============================== Field renderers ==============================
 
-function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled, sectionsRebuild }) {
+function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChange, disabled, sectionsRebuild }) {
   const isEdited = !valuesEqual(value, baselineValue);
   const pimDiffers = field.type === 'richtext'
     ? textOfHtml(value) !== textOfHtml(pimValue)
@@ -732,7 +733,7 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
             placeholder="Type here…"
             minRows={field.rows ?? 5}
           />
-          <AiFormatButton value={value} onChange={onChange} disabled={disabled} />
+          <AiFormatButton value={value} headline={aiHeadline} onChange={onChange} disabled={disabled} />
         </div>
       )}
       {field.type === 'number' && (
@@ -816,7 +817,7 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
 
 // AI formatting: paragraphs + bolds only. The edge function guarantees the
 // wording is untouched (tag-stripped output must equal the input).
-function AiFormatButton({ value, onChange, disabled }) {
+function AiFormatButton({ value, headline, onChange, disabled }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const hasText = String(value ?? '').replace(/<[^>]*>/g, ' ').trim().length > 0;
@@ -827,7 +828,9 @@ function AiFormatButton({ value, onChange, disabled }) {
     setMsg(null);
     try {
       const { data, error } = await supabase.functions.invoke('ai-format-html', {
-        body: { text: value },
+        // The bold headline is the product's name (PIM data) — the AI only
+        // lays out the body text, verbatim.
+        body: { text: value, headline },
       });
       if (error) {
         // Surface the function's own message, not the generic non-2xx one.
@@ -851,7 +854,7 @@ function AiFormatButton({ value, onChange, disabled }) {
         type="button"
         onClick={run}
         disabled={disabled || busy}
-        title="House style: bold headline + clean paragraphs. Never changes the words."
+        title="Bold product name on top + clean paragraphs. Never changes the words."
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
       >
         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />}
