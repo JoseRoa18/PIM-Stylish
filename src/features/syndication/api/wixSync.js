@@ -139,7 +139,7 @@ export async function pushProductToAllWixSites(sku, brand = null) {
     .maybeSingle();
   const { data: mediaRows } = await supabase
     .from('product_media')
-    .select('media_type, storage_path, file_name, language')
+    .select('media_type, document_type, storage_path, file_name, language')
     .eq('sku', sku);
   if (p?.wix_product_id) sites.add('sinksdirect_ca');
   // Brand split (rule 2026-08-31): pushes run per brand — 'sinksdirect'
