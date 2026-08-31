@@ -61,6 +61,7 @@ Supabase Auth + a `profiles` table with roles `admin | editor | viewer`. `Protec
 - `admin-users` — user CRUD with service_role (caller must be an authenticated admin).
 - `wayfair-*` — Wayfair API integration (pull-groups, push-content, push-attributes).
 - `wix-*` — Wix catalog sync (import/list/pull/push/read).
+- `ai-format-html` — Gemini-backed description formatter (paragraphs/bolds only; the tag-stripped output must equal the input, so the wording can never change).
 
 ### scripts/
 

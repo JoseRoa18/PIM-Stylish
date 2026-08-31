@@ -19,6 +19,8 @@ import {
   Search,
   ImageIcon,
   ExternalLink,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
@@ -722,13 +724,16 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
         />
       )}
       {field.type === 'richtext' && (
-        <RichTextEditor
-          value={value ?? ''}
-          onChange={onChange}
-          disabled={disabled}
-          placeholder="Type here…"
-          minRows={field.rows ?? 5}
-        />
+        <div className="space-y-2">
+          <RichTextEditor
+            value={value ?? ''}
+            onChange={onChange}
+            disabled={disabled}
+            placeholder="Type here…"
+            minRows={field.rows ?? 5}
+          />
+          <AiFormatButton value={value} onChange={onChange} disabled={disabled} />
+        </div>
       )}
       {field.type === 'number' && (
         <input
@@ -805,6 +810,49 @@ function FieldInput({ field, value, baselineValue, pimValue, onChange, disabled,
         </div>
       )}
       {pimDiffers && field.type !== 'richtext' && <PimHint value={pimValue} type={field.type} symbol={field.symbol} />}
+    </div>
+  );
+}
+
+// AI formatting: paragraphs + bolds only. The edge function guarantees the
+// wording is untouched (tag-stripped output must equal the input).
+function AiFormatButton({ value, onChange, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const hasText = String(value ?? '').replace(/<[^>]*>/g, ' ').trim().length > 0;
+  if (!hasText) return null;
+
+  async function run() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('ai-format-html', {
+        body: { text: value },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      onChange(data.html);
+      setMsg('Formatted — same words, new layout.');
+    } catch (err) {
+      setMsg(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <button
+        type="button"
+        onClick={run}
+        disabled={disabled || busy}
+        title="Bolds and paragraphs only — never changes the words."
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
+      >
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />}
+        Auto-format
+      </button>
+      {msg && <span className="text-body-sm text-on-surface-variant">{msg}</span>}
     </div>
   );
 }
