@@ -844,7 +844,8 @@ function AiFormatButton({ value, pimValue, headline, onChange, disabled }) {
       }
       if (data?.error) throw new Error(data.error);
       onChange(data.html);
-      setMsg('PIM description, house-style layout.');
+      const n = data.fixes?.length ?? 0;
+      setMsg(n ? `PIM description formatted — ${n} typo${n === 1 ? '' : 's'} fixed: ${data.fixes.join(', ')}` : 'PIM description, house-style layout.');
     } catch (err) {
       setMsg(err.message);
     } finally {
@@ -858,7 +859,7 @@ function AiFormatButton({ value, pimValue, headline, onChange, disabled }) {
         type="button"
         onClick={run}
         disabled={disabled || busy}
-        title="Takes the PIM description: bold product name on top + clean paragraphs. Never rewords."
+        title="Takes the PIM description: bold name on top, clean paragraphs, typos fixed. Never rewords."
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
       >
         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />}

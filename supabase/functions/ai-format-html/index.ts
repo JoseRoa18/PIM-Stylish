@@ -10,7 +10,7 @@
 // input exactly, or the response is rejected (one retry, then 422) — the
 // model can only add markup, never rewrite.
 //
-// Body: { text: string, headline?: string }  →  { ok, html }
+// Body: { text: string, headline?: string }  →  { ok, html, fixes: string[] }
 // `headline` (the product's name, from PIM data) is prepended by CODE as the
 // single bold title paragraph — the AI never chooses or writes the headline.
 // Caller must be an authenticated admin or editor.
@@ -46,10 +46,11 @@ const normalize = (s: string) =>
     .replace(/ ([,.;:!?])/g, "$1")
     .trim();
 
-const PROMPT = `You are a formatter. Reformat the product description below as HTML:
+const PROMPT = `You are a formatter and proofreader. Reformat the product description below as HTML:
 - Split the prose into plain <p> paragraphs at natural topic breaks, with an empty <p>&nbsp;</p> between paragraphs.
+- Fix ONLY obvious typographical errors: missing or extra letters, doubled words, stray or misplaced punctuation, wrong capitalization at sentence starts.
 - NO bold, NO lists, NO headings. Allowed tags ONLY: p, br.
-CRITICAL: do NOT add, remove, reorder or reword ANY text. Every word, number and punctuation mark must appear exactly as given, in the same order. Output ONLY the HTML, no code fences, no commentary.
+CRITICAL: never reword, rephrase, reorder or summarize. Do not swap a word for a different word — only repair misspelled ones. Every sentence keeps its exact wording. Output ONLY the HTML, no code fences, no commentary.
 
 TEXT:
 `;
@@ -70,6 +71,80 @@ async function gemini(apiKey: string, text: string, strict: boolean): Promise<st
   // Cosmetic: no space between a closing tag and following punctuation.
   out = out.replace(/<\/(strong|em)>\s+([,.;:!?])/g, "</$1>$2");
   return out;
+}
+
+// ---------- verbatim-except-typos validator ---------------------------------
+// The output may differ from the input ONLY by typographical repairs: each
+// changed word must be a small edit of the original (Levenshtein <= 2, or a
+// join/split like "bath room" -> "bathroom"), doubled words may collapse,
+// and the total number of repaired words is capped. Substituting a word for
+// a DIFFERENT word ("good" -> "great") fails the distance test and rejects
+// the whole response.
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+function onlyTypoFixes(src: string, out: string): { ok: boolean; fixes: string[] } {
+  if (src === out) return { ok: true, fixes: [] };
+  const A = src.split(" ");
+  const B = out.split(" ");
+  // LCS over words (case/punctuation-insensitive key) to align the texts.
+  const key = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const n = A.length, m = B.length;
+  if (n * m > 4_000_000) return { ok: false, fixes: [] };
+  const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = key(A[i]) === key(B[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const fixes: string[] = [];
+  let i = 0, j = 0;
+  let repaired = 0;
+  const fail = { ok: false, fixes: [] as string[] };
+  const repair = (label: string) => { fixes.push(label); repaired++; };
+  while (i < n || j < m) {
+    if (i < n && j < m && key(A[i]) === key(B[j])) {
+      if (A[i] !== B[j]) {
+        // same word, different case/punctuation — typo-level repair
+        if (levenshtein(A[i], B[j]) > 2) return fail;
+        repair(`${A[i]} -> ${B[j]}`);
+      }
+      i++; j++;
+      continue;
+    }
+    const canDelete = i < n && (j >= m || dp[i + 1][j] === dp[i][j]);
+    const canInsert = j < m && (i >= n || dp[i][j + 1] === dp[i][j]);
+    if (canDelete && canInsert && i < n && j < m) {
+      // substitution slot: must be a spelling repair, a join, or a split
+      const a = A[i], b = B[j];
+      if (levenshtein(a, b) <= 2) { repair(`${a} -> ${b}`); i++; j++; continue; }
+      if (i + 1 < n && levenshtein(A[i] + A[i + 1], b) <= 1) { repair(`${a} ${A[i + 1]} -> ${b}`); i += 2; j++; continue; }
+      if (j + 1 < m && levenshtein(a, B[j] + B[j + 1]) <= 1) { repair(`${a} -> ${b} ${B[j + 1]}`); i++; j += 2; continue; }
+      return fail;
+    }
+    if (canDelete) {
+      // deletion allowed only for a doubled word ("the the" -> "the")
+      if (i > 0 && key(A[i]) === key(A[i - 1]) && key(A[i]) !== "") { repair(`${A[i - 1]} ${A[i]} -> ${A[i - 1]}`); i++; continue; }
+      return fail;
+    }
+    return fail; // insertion of a new word = rewording
+  }
+  const cap = Math.max(4, Math.round(A.length * 0.06));
+  return repaired <= cap ? { ok: true, fixes } : fail;
 }
 
 Deno.serve(async (req) => {
@@ -115,7 +190,8 @@ Deno.serve(async (req) => {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const html = await gemini(GEMINI_KEY, source, attempt > 0);
-      if (normalize(html) === source) return json({ ok: true, html: headlineHtml + html });
+      const verdict = onlyTypoFixes(source, normalize(html));
+      if (verdict.ok) return json({ ok: true, html: headlineHtml + html, fixes: verdict.fixes });
     }
     return json({ error: "The AI kept altering the wording — nothing was changed." }, 422);
   } catch (err) {
