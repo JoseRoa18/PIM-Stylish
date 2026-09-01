@@ -1529,8 +1529,8 @@ function PricingTab({ product, edit, onAddPricing }) {
           <Section title="Canada Pricing (CAD)">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <EditableField label="MSRP" fieldKey="msrp_cad" type="currency" product={product} edit={edit} />
+              <DerivedCost label="B&M Cost" baseKey="msrp_cad" factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
               <EditableField label="MAP — all marketplaces" fieldKey="map_cad" type="currency" product={product} edit={edit} />
-              <DerivedCost label="B&B Cost" baseKey="msrp_cad" factor={0.3} product={product} edit={edit} help="MSRP × 0.30 — calculated, updates with MSRP." />
               <EditableField label="Cost — Rona / Home Depot" fieldKey="cost_cad_rona_hd" type="currency" product={product} edit={edit} />
               <EditableField label="Cost — Wayfair / Small Online" fieldKey="cost_cad_wayfair_sod" type="currency" product={product} edit={edit} />
             </div>
@@ -1538,8 +1538,8 @@ function PricingTab({ product, edit, onAddPricing }) {
           <Section title="USA Pricing (USD)">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <EditableField label="MSRP" fieldKey="msrp_usd" type="currency" product={product} edit={edit} />
+              <DerivedCost label="B&M Cost" baseKey="msrp_usd" factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
               <EditableField label="MAP" fieldKey="map_usd" type="currency" product={product} edit={edit} />
-              <DerivedCost label="B&B Cost" baseKey="msrp_usd" factor={0.3} product={product} edit={edit} help="MSRP × 0.30 — calculated, updates with MSRP." />
               <EditableField label="Cost — Lowes / Small Online / BB&B" fieldKey="cost_usd_lowes_sod_bbb" type="currency" product={product} edit={edit} />
               <EditableField label="Cost — Wayfair" fieldKey="cost_usd_wayfair" type="currency" product={product} edit={edit} />
               <EditableField label="Cost — Menards" fieldKey="cost_usd_menards" type="currency" product={product} edit={edit} />
@@ -2179,7 +2179,8 @@ function BulletPointsEditor({ product, edit, attrKey = 'bullet_points' }) {
 
 // ===================== EditableField — for direct columns =====================
 
-// Derived pricing (rule 2026-09-01): B&B Cost = MSRP x 0.30 per market.
+// Derived pricing (rule 2026-09-01): B&M (Brick & Mortar) Cost = MSRP x 0.30
+// per market.
 // Computed on the fly — never stored, so it can't go stale.
 function DerivedCost({ label, baseKey, factor, product, edit, help }) {
   const base = edit.isEditing ? edit.form[baseKey] : product[baseKey];
