@@ -46,6 +46,7 @@ import DocumentsSection from '@/features/media/components/DocumentsSection';
 import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
 import { WIX_SITES, WIX_SITE_KEYS, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
+import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
@@ -1730,6 +1731,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
       <div ref={wayfairRef} className="scroll-mt-24">
         <WayfairProductCard product={product} onUpdate={onUpdate} />
       </div>
+      <WayfairAdditionCard product={product} supplier="USA" />
       <ExportTemplatesCard product={product} media={media} />
     </div>
   );

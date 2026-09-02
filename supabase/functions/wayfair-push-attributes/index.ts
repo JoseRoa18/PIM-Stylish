@@ -23,6 +23,13 @@
 // Required secrets: WAYFAIR_CLIENT_ID, WAYFAIR_CLIENT_SECRET,
 //                   WAYFAIR_SUPPLIER_ID, WAYFAIR_ENV
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  FINISH_ALIAS,
+  type Product,
+  type RuleCtx,
+  ruleContext,
+  ruleForTitle,
+} from "../_shared/wayfairAttributes.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -73,139 +80,8 @@ async function getToken(clientId: string, clientSecret: string): Promise<string>
   return data.access_token;
 }
 
-// ---- value helpers ----
-type Product = Record<string, unknown> & { attributes?: Record<string, unknown> };
-const attr = (p: Product) => (p.attributes ?? {}) as Record<string, unknown>;
-const num = (v: unknown): string => {
-  if (v == null || v === "") return "";
-  const m = String(v).match(/-?\d+(\.\d+)?/);
-  return m ? m[0] : "";
-};
-const yesNo = (v: unknown): string => {
-  if (v == null || v === "") return "";
-  if (typeof v === "boolean") return v ? "Yes" : "No";
-  const s = String(v).toLowerCase();
-  if (s.includes("yes") || s === "true" || s === "1") return "Yes";
-  if (s.includes("no") || s === "false" || s === "0") return "No";
-  return "";
-};
-const dim = (p: Product, group: string, axis: string): string => {
-  const g = attr(p)[group] as Record<string, unknown> | undefined;
-  return num(g?.[axis]);
-};
-// PIM finish → Wayfair "Finish" valid values (mirrors the Excel export aliases)
-const FINISH_ALIAS: Record<string, string> = {
-  "brushed stainless steel": "Stainless Steel",
-  "grey": "Matte Grey",
-  "gray": "Matte Grey",
-  "black": "Matte Black",
-  "white": "Matte White",
-  "graphite black": "Gunmetal Black",
-  "nano graphite black dura-tek": "Gunmetal Black",
-  // Bare "Dura-Tek" (outdoor/utility sinks) is a protective coating on
-  // STAINLESS sinks — the visible finish Wayfair's list can express is
-  // Stainless Steel (their current value was right; the raw push wasn't).
-  "dura-tek": "Stainless Steel",
-  // Validated against the templates' Valid Values sheets 2026-08-19.
-  "glossy black": "Gloss Black",
-  "gunmetal": "Gun Metal",
-  "matte black with brushed gold": "Matte Black; Brushed Gold",
-  "dark grey": "Matte Grey",
-  "dark gray": "Matte Grey",
-};
-// Raw PIM finish; the alias to Wayfair's canonical option is applied later,
-// only when the literal PIM value doesn't already match Wayfair's current one
-// (e.g. Wayfair often already holds "Brushed stainless steel" verbatim).
-const finish = (v: unknown): string => (v ? String(v) : "");
-
-// ---- Exact-title rules: Wayfair attribute title → value from the PIM ----
-// Grown from the Kitchen Sinks class; titles shared by other classes (overall
-// dimensions, weight, material, finish, warranty) resolve here too. A rule
-// returning "" means "no PIM value; skip".
-const EXACT_RULES: Record<string, (p: Product) => string> = {
-  "Overall Length from End to End": (p) => dim(p, "external_dimensions_in", "length"),
-  "Overall Width from Front to Back": (p) => dim(p, "external_dimensions_in", "width"),
-  "Overall Height from Top to Bottom": (p) => dim(p, "external_dimensions_in", "depth"),
-  "Basin Length - Side to Side": (p) => dim(p, "internal_dimensions_in", "length"),
-  "Basin Width - Front to Back": (p) => dim(p, "internal_dimensions_in", "width"),
-  "Basin Depth - Top to Bottom": (p) => dim(p, "internal_dimensions_in", "depth"),
-  "Overall Product Weight": (p) => num(p.weight_lb ?? attr(p).product_weight_lb),
-  "Drain Diameter": (p) => num(p.drain_diameter_in ?? attr(p).drain_diameter_in),
-  "Stainless Steel Gauge": (p) => num(p.gauge ?? attr(p).gauge),
-  "Number of Basins": (p) => num(p.number_of_bowls ?? attr(p).number_of_bowls),
-  "Basin Split": (p) => String(p.basin_split ?? attr(p).basin_split ?? ""),
-  // NOTE: the API's "Sink Shape" vocabulary is ADJECTIVAL ("Rectangular") —
-  // distinct from the template's "Overall Shape" nouns ("Rectangle").
-  // Verified on live items 2026-08-19: S-636W carries Sink Shape=Rectangular
-  // AND Overall Shape=Rectangle. Push the raw PIM value; never noun-alias it.
-  "Sink Shape": (p) => String(p.shape ?? attr(p).sink_shape ?? ""),
-  "Material": (p) => String(p.material ?? ""),
-  "Finish": (p) => finish(p.finish),
-  "Warranty Length": (p) => String(attr(p).warranty_length ?? ""),
-  "Full or Limited Warranty": (p) => String(attr(p).warranty ?? ""),
-  // A divider only exists on multi-basin sinks; single-bowl → Does Not Apply.
-  "Short Height Divider": (p) => {
-    const bowls = Number(num(p.number_of_bowls ?? attr(p).number_of_bowls));
-    if (bowls > 0 && bowls <= 1) return "Does Not Apply";
-    return yesNo(attr(p).low_divider);
-  },
-  // Workstation sinks carry over-the-sink accessories (cutting board, drying
-  // rack, colander) or say so in the product type. SKU alone isn't reliable.
-  "Kitchen Sink Workstation": (p) => {
-    if (/workstation/i.test(String(p.product_type ?? ""))) return "Yes";
-    const acc = attr(p).accessories_included;
-    const list = Array.isArray(acc) ? acc.join(", ") : String(acc ?? "");
-    return /cutting board|drying rack|colander/i.test(list) ? "Yes" : "No";
-  },
-};
-
-// ---- Pattern rules for titles that vary by class ----
-// Checked only when no exact rule matched the item's attribute title.
-//
-// Titles matching EXCLUDE never pattern-match: they describe a DIFFERENT
-// measurement than the overall product (apron, basin, base/stand, cut-out…)
-// or a field we hold no PIM value for (commercial warranty) — filling those
-// with overall dims/residential values would corrupt the listing on push.
-const EXCLUDE = /apron|basin|interior|cut.?out|base\/stand|stand height|cabinet|drain|hole size|commercial|additional details|min(imum)?|max(imum)?/i;
-
-// Wayfair's axis convention names the axis in the title: "End to End" /
-// "Side to Side" = left-right (PIM length), "Front to Back" = PIM width,
-// "Top to Bottom" = vertical (PIM height/depth).
-//
-// ONE context-dependent case (same gotcha as the Excel templates): when a
-// class carries BOTH "Overall Length … End to End" and "Overall Width …
-// Side to Side" (e.g. Cutting Boards), the width title is the SHORT axis →
-// PIM width. When the width title is the only horizontal one (e.g. Strainers
-// & Colanders), side-to-side IS the long axis → PIM length. `ctx.hasPlainLength`
-// carries that per-item fact into the rule.
-type RuleCtx = { hasPlainLength: boolean };
-const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx) => string }> = [
-  // Class-specific measurements first
-  { re: /including handles/i, value: (p) => num(attr(p).length_with_handles_in) },
-  {
-    re: /^overall width .*side to side/i,
-    value: (p, ctx) => dim(p, "external_dimensions_in", ctx.hasPlainLength ? "width" : "length"),
-  },
-  { re: /^spout height/i, value: (p) => num(attr(p).spout_height_in) },
-  { re: /^spout reach/i, value: (p) => num(attr(p).spout_reach_in) },
-  { re: /flow rate/i, value: (p) => num(attr(p).max_flow_rate) },
-  { re: /number of (faucet )?handles/i, value: (p) => num(attr(p).number_of_handles) },
-  { re: /^faucet height/i, value: (p) => num(attr(p).faucet_height_in) || dim(p, "external_dimensions_in", "height") },
-  { re: /(number of (faucet |installation )?holes)/i, value: (p) => num(attr(p).number_of_installation_holes) },
-  { re: /(countertop|deck) thickness/i, value: (p) => num(attr(p).max_deck_thickness_in) },
-  // Overall dimensions by axis phrase (bathroom sinks, accessories…)
-  { re: /^overall .*(end to end|side to side)/i, value: (p) => dim(p, "external_dimensions_in", "length") },
-  { re: /^overall .*front to back/i, value: (p) => dim(p, "external_dimensions_in", "width") },
-  {
-    re: /^overall .*top to bottom/i,
-    value: (p) => dim(p, "external_dimensions_in", "height") || dim(p, "external_dimensions_in", "depth"),
-  },
-  { re: /^overall product weight$/i, value: (p) => num(p.weight_lb ?? attr(p).product_weight_lb) },
-  { re: /^warranty length$/i, value: (p) => String(attr(p).warranty_length ?? "") },
-  { re: /^material$/i, value: (p) => String(p.material ?? "") },
-  { re: /^finish$/i, value: (p) => finish(p.finish) },
-  { re: /^country of (origin|manufacture)$/i, value: (p) => String(attr(p).country_of_origin ?? "") },
-];
+// The PIM -> attribute-title rules live in _shared/wayfairAttributes.ts (shared
+// with wayfair-add-products so new listings and spec pushes never disagree).
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -296,14 +172,9 @@ Deno.serve(async (req) => {
     const diff: Record<string, { current: string[] | null; new: string; changed: boolean }> = {};
     const skipped: Record<string, string> = {};
     const eq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-    const ctx: RuleCtx = {
-      hasPlainLength: [...byTitle.keys()].some((t) =>
-        /^overall length\b.*end to end/i.test(t) && !/including handles/i.test(t)
-      ),
-    };
+    const ctx: RuleCtx = ruleContext(byTitle.keys());
     for (const [title, wf] of byTitle) {
-      const rule: ((p: Product, ctx: RuleCtx) => string) | undefined = EXACT_RULES[title] ??
-        (EXCLUDE.test(title) ? undefined : PATTERN_RULES.find((r) => r.re.test(title))?.value);
+      const rule = ruleForTitle(title);
       if (!rule) continue; // attribute we have no PIM mapping for
       let value = "";
       try { value = rule(product as Product, ctx).trim(); } catch { value = ""; }

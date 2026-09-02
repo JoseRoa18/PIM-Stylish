@@ -161,3 +161,41 @@ export async function setWayfairItemGroupId(sku, itemGroupId) {
     .eq('sku', sku);
   if (error) throw error;
 }
+
+/**
+ * Create NEW Wayfair listings (Product Addition V2) for products that are not
+ * in the supplier's catalog yet. The edge function maps the PIM (identity,
+ * copy, bullets, images, cost, shipping, specs) to the class's questions and
+ * reports what it couldn't map. `validateOnly` (default true) only validates;
+ * false submits the listing request — track it with checkWayfairAdditionStatus.
+ *
+ * @param {string[]} skus
+ * @param {Object} [opts]
+ * @param {'USA'|'CAN'} [opts.supplier='USA']
+ * @param {boolean} [opts.validateOnly=true]
+ * @param {boolean} [opts.sandbox=false]   run against Wayfair's sandbox (never creates)
+ * @param {boolean} [opts.force=false]     also submit SKUs already in the catalog
+ */
+export async function submitWayfairAdditions(skus, opts = {}) {
+  const { supplier = 'USA', validateOnly = true, sandbox = false, force = false, classId } = opts;
+  const data = await invokeWayfair('wayfair-add-products', { skus, supplier, validateOnly, sandbox, force, classId });
+  if (!validateOnly && !sandbox) {
+    for (const p of data?.products ?? []) {
+      logActivity({
+        action: 'push',
+        entityType: 'product',
+        entityId: p.sku,
+        target: 'wayfair',
+        summary: `Submitted ${p.sku} as a new Wayfair ${supplier} listing`,
+        metadata: { requestId: p.requestId ?? data.requestId, classId: p.classId, status: p.status, errors: p.errors?.length ?? 0 },
+      });
+    }
+  }
+  return data;
+}
+
+/** Status of a Product Addition request (per SKU validation + submission state). */
+export async function checkWayfairAdditionStatus(requestId, opts = {}) {
+  const { supplier = 'USA', sandbox = false } = opts;
+  return invokeWayfair('wayfair-add-products', { status: requestId, supplier, sandbox });
+}
