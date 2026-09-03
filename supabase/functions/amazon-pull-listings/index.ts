@@ -7,6 +7,7 @@
 // client polls:
 //
 //   { mode: "ping" }                → access token + marketplace participations
+//   sandbox: true on any mode        → static sandbox host (example data only)
 //   { mode: "report" }              → creates the report, returns reportId
 //   { mode: "fetch", reportId }     → polls; when DONE parses the rows and
 //                                     (with apply) caches them in amazon_links
@@ -95,9 +96,14 @@ Deno.serve(async (req) => {
       }, 500);
     }
 
+    // Sandbox apps (created before identity verification) only work against
+    // Amazon's static sandbox, which answers with fixed example data — useful
+    // to prove auth + plumbing, useless for real listings.
+    const sandbox = body.sandbox === true;
+    const host = sandbox ? `sandbox.${market.host}` : market.host;
     const token = await getToken(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
     const call = async (path: string, init: RequestInit = {}) => {
-      const r = await fetch(`https://${market.host}${path}`, {
+      const r = await fetch(`https://${host}${path}`, {
         ...init,
         headers: { "x-amz-access-token": token, "Content-Type": "application/json", ...(init.headers ?? {}) },
       });
@@ -127,6 +133,7 @@ Deno.serve(async (req) => {
       return json({
         ok: true,
         tokenOk: true,
+        env: sandbox ? "sandbox" : "production",
         marketplaces: list.map((m) => ({
           id: m.marketplace.id,
           name: m.marketplace.name,
