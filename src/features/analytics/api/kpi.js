@@ -84,17 +84,28 @@ export async function takeSnapshot() {
   return { date: today, rows: rows.length };
 }
 
-/** Raw audit rows for a period (the team-activity source). */
+/**
+ * Raw audit rows for a period (the team-activity source). Paged: the API
+ * returns at most 1,000 rows per request, and twelve weeks of activity is
+ * several thousand — a single request would silently drop the NEWEST weeks.
+ */
 export async function loadActivityRows(start, end) {
-  const { data, error } = await supabase
-    .from('audit_log')
-    .select('occurred_at, actor_email, actor_name, action, target, entity_type, entity_id, summary, metadata')
-    .gte('occurred_at', new Date(start).toISOString())
-    .lte('occurred_at', new Date(end).toISOString())
-    .order('occurred_at', { ascending: true })
-    .limit(10000);
-  if (error) throw error;
-  return data ?? [];
+  const PAGE = 1000;
+  const out = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('audit_log')
+      .select('occurred_at, actor_email, actor_name, action, target, entity_type, entity_id, summary, metadata')
+      .gte('occurred_at', new Date(start).toISOString())
+      .lte('occurred_at', new Date(end).toISOString())
+      .order('occurred_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    out.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
 }
 
 /**
@@ -145,13 +156,20 @@ export function aggregateActivity(rows) {
 
 /** Active minutes on screen per person per day, with the person's email/name. */
 export async function loadScreenTime(start, end) {
-  const { data, error } = await supabase
-    .from('screen_time')
-    .select('user_id, day, minutes')
-    .gte('day', toDateKey(start))
-    .lte('day', toDateKey(end));
-  if (error) throw error;
-  const rows = data ?? [];
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('screen_time')
+      .select('user_id, day, minutes')
+      .gte('day', toDateKey(start))
+      .lte('day', toDateKey(end))
+      .order('day', { ascending: true })
+      .order('user_id', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
   const ids = [...new Set(rows.map((r) => r.user_id))];
   const people = new Map();
   if (ids.length) {
