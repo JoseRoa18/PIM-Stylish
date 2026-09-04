@@ -105,13 +105,17 @@ export async function loadActivity(start, end) {
   return aggregateActivity(await loadActivityRows(start, end));
 }
 
+// What counts as what, shared by the totals and the drill-down so a number
+// and its detail can never disagree.
+export const ACTIVITY_KINDS = {
+  edits: (r) => r.action === 'update' && r.entity_type === 'product' && (r.target === 'pim' || r.target === 'channels'),
+  creates: (r) => r.action === 'create' && r.entity_type === 'product' && r.target === 'pim',
+  uploads: (r) => (r.action === 'media' && ['pim', 'supabase', 'media'].includes(r.target ?? '') && /Uploaded/i.test(r.summary ?? '')) || (r.action === 'media' && !!r.metadata?.count),
+  pushes: (r) => r.action === 'push' && r.entity_type === 'product',
+};
+
 export function aggregateActivity(rows) {
-  const kinds = {
-    edits: (r) => r.action === 'update' && r.entity_type === 'product' && (r.target === 'pim' || r.target === 'channels'),
-    creates: (r) => r.action === 'create' && r.entity_type === 'product' && r.target === 'pim',
-    uploads: (r) => r.action === 'media' && ['pim', 'supabase', 'media'].includes(r.target ?? '') && /Uploaded/i.test(r.summary ?? '') || (r.action === 'media' && r.metadata?.count),
-    pushes: (r) => r.action === 'push' && r.entity_type === 'product',
-  };
+  const kinds = ACTIVITY_KINDS;
   const empty = () => ({ edits: 0, creates: 0, uploads: 0, pushes: 0, products: new Set() });
   const byPerson = new Map();
   const totals = empty();

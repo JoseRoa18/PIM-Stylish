@@ -16,6 +16,8 @@ import TeamActivity from '@/features/analytics/components/TeamActivity';
 import TeamTrend from '@/features/analytics/components/TeamTrend';
 import TargetsDialog from '@/features/analytics/components/TargetsDialog';
 import { LineTrend } from '@/features/analytics/components/charts';
+import DetailDialog from '@/features/analytics/components/DetailDialog';
+import { activityDetail, completenessDetail } from '@/features/analytics/lib/details';
 import { formatTimeAgo } from '@/lib/format';
 
 // The page reads top to bottom like a weekly report: the week in one line,
@@ -41,6 +43,7 @@ export default function Analytics() {
   const [snapping, setSnapping] = useState(false);
   const [snapMsg, setSnapMsg] = useState(null);
   const [editingTargets, setEditingTargets] = useState(false);
+  const [detail, setDetail] = useState(null); // { kind } | { actor, label }
 
   const now = latestSnapshot(index, 'pim', 'all');
   const before = snapshotAt(index, 'pim', 'all', new Date(week.start.getTime() - 1));
@@ -52,6 +55,41 @@ export default function Analytics() {
     return fromSnaps.length ? fromSnaps : Object.keys(CATEGORY_LABEL);
   }, [index]);
   const latestTaken = snapshots.length ? snapshots.reduce((a, r) => (r.taken_at > a ? r.taken_at : a), '') : null;
+  const names = useMemo(() => new Map(launches.map((p) => [p.sku, p.model_name])), [launches]);
+  const weekRows = useMemo(() => {
+    if (!auditRows) return [];
+    const end = new Date(week.end.getTime() + 86399999);
+    return auditRows.filter((r) => { const t = new Date(r.occurred_at); return t >= week.start && t <= end; });
+  }, [auditRows, week]);
+  const detailView = useMemo(() => {
+    if (!detail) return null;
+    const range = `${week.name} · ${week.range}`;
+    if (detail.actor) {
+      return { title: detail.label, subtitle: `Everything they did in ${range}`, activity: activityDetail(weekRows, { actor: detail.actor, names }) };
+    }
+    const TITLES = { pushes: ['Pushes', 'Which products went to which channel, by whom and when'], edits: ['Products edited', 'Every product edit in the PIM'], uploads: ['Media uploaded', 'Images, videos and documents added to products'], creates: ['New products', 'Products created in the PIM'], touched: ['Products touched', 'Every product with any activity'] };
+    if (TITLES[detail.kind]) {
+      const [t, s] = TITLES[detail.kind];
+      return { title: t, subtitle: `${s} · ${range}`, activity: activityDetail(weekRows, { kind: detail.kind, names }) };
+    }
+    const c = completenessDetail(index, week, names);
+    if (detail.kind === 'complete') {
+      return {
+        title: 'Products at 100%',
+        subtitle: c.hasBefore ? `Compared with the last snapshot before ${week.name} began` : 'No earlier snapshot to compare with yet',
+        scores: { sections: [
+          { label: `Reached 100% in ${week.name}`, rows: c.reached, empty: c.hasBefore ? 'No product reached 100% this week yet.' : 'Needs a snapshot from before the week.' },
+          { label: 'Dropped below 100%', rows: c.dropped, empty: c.hasBefore ? 'None dropped.' : 'Needs a snapshot from before the week.' },
+          { label: 'All products at 100% now', rows: c.all },
+        ] },
+      };
+    }
+    return {
+      title: 'Biggest score changes',
+      subtitle: c.hasBefore ? `Products whose completeness moved most since ${week.name} began` : 'No earlier snapshot to compare with yet',
+      scores: { sections: [{ label: 'Score changes', rows: c.movers, empty: c.hasBefore ? 'No score changed this week.' : 'Needs a snapshot from before the week.' }] },
+    };
+  }, [detail, weekRows, index, week, names]);
   const weekIndex = weeks.findIndex((w) => w.key === week.key);
   const goWeek = (step) => { const next = weeks[weekIndex + step]; if (next) setWeekKey(next.key); };
 
@@ -177,7 +215,7 @@ export default function Analytics() {
 
           <Section id="overview" title="Overview" blurb="The week in one line, the headline numbers, and where the catalog is heading.">
             <WeekSummary index={index} week={week} activity={activity} />
-            <HeadlineKpis now={now} before={before} activity={activity} prevActivity={prevActivity} target={targets?.global} />
+            <HeadlineKpis now={now} before={before} activity={activity} prevActivity={prevActivity} target={targets?.global} onOpen={(kind) => setDetail({ kind })} />
             <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
               <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
                 <div>
@@ -211,7 +249,7 @@ export default function Analytics() {
           </Section>
 
           <Section id="team" title="Team" blurb="What the team did this week, by person, and the pace over the last 12 weeks.">
-            <TeamActivity activity={activity} prevActivity={prevActivity} week={week} />
+            <TeamActivity activity={activity} prevActivity={prevActivity} week={week} onOpen={setDetail} />
             <TeamTrend trend={activityTrend} />
           </Section>
 
@@ -223,6 +261,9 @@ export default function Analytics() {
 
       {editingTargets && (
         <TargetsDialog targets={targets} categories={categories} onClose={() => setEditingTargets(false)} onSaved={setTargets} />
+      )}
+      {detailView && (
+        <DetailDialog title={detailView.title} subtitle={detailView.subtitle} activity={detailView.activity} scores={detailView.scores} onClose={() => setDetail(null)} />
       )}
     </div>
   );

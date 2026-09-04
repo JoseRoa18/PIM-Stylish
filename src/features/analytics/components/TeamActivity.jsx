@@ -6,7 +6,7 @@ const TARGET_LABEL = { wix: 'Wix', wayfair: 'Wayfair', bestbuy: 'Best Buy', walm
 
 // What the team did in the selected week, from the audit log: per person and
 // in total, against the previous week.
-export default function TeamActivity({ activity, prevActivity, week }) {
+export default function TeamActivity({ activity, prevActivity, week, onOpen }) {
   if (!activity) {
     return <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest h-40 animate-pulse" aria-label="Loading team activity" />;
   }
@@ -21,10 +21,10 @@ export default function TeamActivity({ activity, prevActivity, week }) {
           <p className="text-body-sm text-on-surface-variant mt-0.5">{week.name} · {week.range} · from the activity log · {activity.events} events</p>
         </div>
         <div className="flex items-center gap-6 text-body-sm">
-          <Total label="Edits" value={t.edits} prev={p?.edits} />
-          <Total label="Media uploaded" value={t.uploads} prev={p?.uploads} />
-          <Total label="Pushes" value={t.pushes} prev={p?.pushes} />
-          <Total label="New products" value={t.creates} prev={p?.creates} />
+          <Total label="Edits" value={t.edits} prev={p?.edits} onClick={() => onOpen?.({ kind: 'edits' })} />
+          <Total label="Media uploaded" value={t.uploads} prev={p?.uploads} onClick={() => onOpen?.({ kind: 'uploads' })} />
+          <Total label="Pushes" value={t.pushes} prev={p?.pushes} onClick={() => onOpen?.({ kind: 'pushes' })} />
+          <Total label="New products" value={t.creates} prev={p?.creates} onClick={() => onOpen?.({ kind: 'creates' })} />
         </div>
       </header>
       {activity.people.length === 0 ? (
@@ -44,7 +44,7 @@ export default function TeamActivity({ activity, prevActivity, week }) {
             </thead>
             <tbody className="divide-y divide-outline-variant">
               {activity.people.map((person) => (
-                <tr key={person.email}>
+                <tr key={person.email} onClick={() => onOpen?.({ actor: person.email, label: person.name || nameFromEmail(person.email) || 'System' })} className="cursor-pointer hover:bg-surface-container-low/40 transition-colors" title="See everything this person did this week">
                   <td className="px-6 py-3">
                     <div className="text-body-md text-on-surface font-medium">{person.name || nameFromEmail(person.email) || 'System'}</div>
                     <div className="text-body-sm text-on-surface-variant">{person.email}</div>
@@ -69,12 +69,12 @@ export default function TeamActivity({ activity, prevActivity, week }) {
   );
 }
 
-function Total({ label, value, prev }) {
+function Total({ label, value, prev, onClick }) {
   return (
-    <div className="text-right">
+    <button type="button" onClick={onClick} className="text-right rounded-lg px-2 py-1 -my-1 hover:bg-surface-container-low/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40" title={`See the ${label.toLowerCase()} of this week`}>
       <div className="text-label-md text-on-surface-variant">{label}</div>
       <div className="text-title-md text-on-surface font-semibold tabular-nums">{value}</div>
       <DeltaChip value={prev == null ? null : value - prev} upIsGood vs="last week" />
-    </div>
+    </button>
   );
 }
