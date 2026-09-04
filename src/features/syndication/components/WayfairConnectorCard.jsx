@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import { CheckCircle2, AlertCircle, ShieldCheck, MinusCircle, DownloadCloud } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ShieldCheck, DownloadCloud, Send } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
-import { pushToWayfair, pullWayfairItemGroups, checkWayfairRequestStatus, pushWayfairAttributes } from '../api/wayfairSync';
+import { pullWayfairItemGroups, pushWayfairAttributes } from '../api/wayfairSync';
+import WayfairPushDialog from './WayfairPushDialog';
 
-// Wayfair syndication tester — push a product's content (marketing copy +
-// bullets) and images. Defaults to validate-only (safe: validates against
-// Wayfair without changing anything).
+// Wayfair syndication workspace — review-then-push media for one product
+// (title, description, bullets and prices never travel), validate spec
+// attributes, and import item-group ids.
 export default function WayfairConnectorCard() {
   const [sku, setSku] = useState('');
   const [target, setTarget] = useState('CAN_CA'); // supplier + storefront
-  const [itemGroupId, setItemGroupId] = useState('');
 
   // One dropdown covers both supplier accounts and their storefronts.
   // Labels stay short so the select never clips its value at narrow widths.
@@ -19,8 +19,7 @@ export default function WayfairConnectorCard() {
     USA_US: { supplier: 'USA', market: 'US', label: 'USA (StylishUSAInc)' },
   };
   const { supplier, market } = TARGETS[target];
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null); // full response | { error }
+  const [reviewing, setReviewing] = useState(false);
   const [pull, setPull] = useState(null); // { busy, done, total, summary?, error? }
   const [attrs, setAttrs] = useState(null); // attribute-push response | { error }
   const [attrsBusy, setAttrsBusy] = useState(false);
@@ -56,37 +55,17 @@ export default function WayfairConnectorCard() {
     }
   }
 
-  async function run(validateOnly) {
-    if (!sku.trim()) return;
-    setBusy(true);
-    setResult(null);
-    try {
-      const data = await pushToWayfair(sku.trim(), {
-        validateOnly,
-        market,
-        supplier,
-        itemGroupId: itemGroupId.trim() || undefined,
-      });
-      setResult(data);
-    } catch (err) {
-      setResult({ error: err.message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       {/* The page header already shows the Wayfair identity + env chip — the card starts at its content. */}
       <div className="px-6 py-5 space-y-3">
-        <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">Content &amp; images</p>
+        <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">Push a product</p>
         <p className="text-body-sm text-on-surface-variant">
-          Enter a product SKU, then validate the payload against Wayfair (safe — nothing changes) or
-          push it live. Content needs the product's Wayfair item-group id (stored on the product or
-          entered below); images push by SKU.
+          Enter a SKU and review what would travel: spec attributes, images, videos and documents, in that order.
+          Nothing is sent until you confirm. Title, description, bullets and prices never travel.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
             <span className="text-label-md text-on-surface-variant">Product SKU</span>
             <input
@@ -108,39 +87,28 @@ export default function WayfairConnectorCard() {
               ))}
             </select>
           </label>
-          <label className="block">
-            <span className="text-label-md text-on-surface-variant">Wayfair item-group id (optional)</span>
-            <input
-              value={itemGroupId}
-              onChange={(e) => setItemGroupId(e.target.value)}
-              placeholder="GTQE1086"
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </label>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            onClick={() => run(true)}
-            disabled={busy || !sku.trim()}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
-          >
-            {busy ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
-            Validate
-          </button>
-          <button
-            type="button"
-            onClick={() => run(false)}
-            disabled={busy || !sku.trim()}
+            onClick={() => setReviewing(true)}
+            disabled={!sku.trim()}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
           >
-            Push to Wayfair
+            <Send className="w-4 h-4" />
+            Review push…
           </button>
         </div>
-
-        {result && <WayfairResult result={result} />}
-        {result && !result.error && <WayfairStatusCheck result={result} />}
+        {reviewing && (
+          <WayfairPushDialog
+            sku={sku.trim()}
+            supplier={supplier}
+            market={market === 'CA_FR' ? 'CA_FR' : market}
+            label={TARGETS[target].label}
+            onClose={() => setReviewing(false)}
+          />
+        )}
 
         <div className="pt-3 border-t border-outline-variant space-y-2">
           <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">Spec attributes</p>
@@ -218,138 +186,5 @@ export default function WayfairConnectorCard() {
         </div>
       </div>
     </section>
-  );
-}
-
-function WayfairResult({ result }) {
-  if (result.error) {
-    return (
-      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
-        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-        <span className="break-words">{result.error}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="rounded-lg border border-outline-variant divide-y divide-outline-variant text-body-sm animate-banner-in">
-      <ResultRow label="Content (copy + bullets)" part={result.content} okText={(c) => `${c.bullets ?? 0} bullets · ${c.requestId ? 'validated' : 'ok'}`} />
-      <ResultRow label="Media (images)" part={result.media} okText={(m) => `${m.count ?? 0} images · ${m.requestId ? 'validated' : 'ok'}`} />
-    </div>
-  );
-}
-
-// "What did Wayfair do with my push?" — fetches statusOfUpdateRequest for each
-// requestId in the last result and shows status + per-property updates.
-function WayfairStatusCheck({ result }) {
-  const [statuses, setStatuses] = useState(null); // [{ label, status?, updates?, error? }]
-  const [busy, setBusy] = useState(false);
-
-  const requests = [
-    result?.content?.requestId && { label: 'Content', requestId: result.content.requestId },
-    result?.media?.requestId && { label: 'Media', requestId: result.media.requestId },
-  ].filter(Boolean);
-  if (requests.length === 0) return null;
-
-  async function check() {
-    setBusy(true);
-    const out = [];
-    for (const r of requests) {
-      try {
-        const s = await checkWayfairRequestStatus(r.requestId);
-        out.push({ label: r.label, ...s });
-      } catch (err) {
-        out.push({ label: r.label, error: err.message });
-      }
-    }
-    setStatuses(out);
-    setBusy(false);
-  }
-
-  return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        onClick={check}
-        disabled={busy}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
-      >
-        {busy ? <ThinkingOrb state="searching" size={20} className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-        Check status at Wayfair
-      </button>
-      {statuses && (
-        <div className="rounded-lg border border-outline-variant divide-y divide-outline-variant text-body-sm animate-banner-in">
-          {statuses.map((s) => (
-            <div key={s.label} className="px-3 py-2">
-              {s.error ? (
-                <span className="text-error">{s.label}: {s.error}</span>
-              ) : (
-                <>
-                  <span className="text-on-surface-variant">{s.label}: </span>
-                  <span className={s.status === 'COMPLETED' ? 'text-primary font-semibold' : 'text-on-surface'}>
-                    {s.status}
-                  </span>
-                  {s.validationOnly && <span className="text-on-surface-variant"> (validation-only run)</span>}
-                  {(s.problems?.length ?? 0) > 0 && (
-                    <ul className="mt-1 ml-4 list-disc text-error">
-                      {s.problems.map((p, i) => (
-                        <li key={i}>
-                          {p.title || p.code}
-                          {p.catalogEntityProperty && ` · ${p.catalogEntityProperty}`}
-                          {p.detail && ` — ${p.detail}`}
-                          {p.inputValue && ` (value: ${p.inputValue.length > 80 ? p.inputValue.slice(0, 80) + '…' : p.inputValue})`}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {(s.successfulUpdates?.length ?? 0) > 0 && (
-                    <ul className="mt-1 ml-4 list-disc text-on-surface-variant">
-                      {Object.entries(
-                        s.successfulUpdates.reduce((acc, u) => {
-                          const key = `${u.catalogEntityProperty} → ${u.entityIdentifier}`;
-                          acc[key] = (acc[key] ?? 0) + 1;
-                          return acc;
-                        }, {}),
-                      ).map(([key, n]) => (
-                        <li key={key}>{n > 1 ? `${n} × ${key}` : key}</li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ResultRow({ label, part, okText }) {
-  let icon, text, cls;
-  if (!part) {
-    icon = <MinusCircle className="w-4 h-4 text-on-surface-variant" />;
-    text = 'not run';
-    cls = 'text-on-surface-variant';
-  } else if (part.error) {
-    icon = <AlertCircle className="w-4 h-4 text-error" />;
-    text = part.error;
-    cls = 'text-error';
-  } else if (part.skipped) {
-    icon = <MinusCircle className="w-4 h-4 text-on-surface-variant" />;
-    text = part.skipped;
-    cls = 'text-on-surface-variant';
-  } else {
-    icon = <CheckCircle2 className="w-4 h-4 text-primary" />;
-    text = okText(part);
-    cls = 'text-on-surface';
-  }
-  return (
-    <div className="flex items-start gap-2 px-3 py-2">
-      <span className="mt-0.5 flex-shrink-0">{icon}</span>
-      <span className="min-w-0">
-        <span className="text-on-surface-variant">{label}: </span>
-        <span className={`break-words ${cls}`}>{text}</span>
-      </span>
-    </div>
   );
 }

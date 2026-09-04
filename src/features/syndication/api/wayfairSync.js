@@ -31,33 +31,39 @@ async function invokeWayfair(name, body) {
 }
 
 /**
- * Push a product to Wayfair: marketing copy + feature bullets (content) and/or
- * product images (media). `validateOnly` (default true) validates the payload
- * against Wayfair without changing anything — safe to run against production.
- *
- * Content needs the product's Wayfair itemGroupId (stored on the product, or
- * passed here). Media pushes by SKU and needs no itemGroupId.
+ * The push plan for a listed product: every step in order (images, videos,
+ * documents) with its items, plus whether the product is in the supplier's
+ * catalog. Reads only — nothing is sent. Title, description, bullets and
+ * prices are never part of a Wayfair push.
+ */
+export async function planWayfairPush(sku, opts = {}) {
+  const { supplier = 'CAN', market } = opts;
+  return invokeWayfair('wayfair-push-content', { sku, mode: 'plan', supplier, market });
+}
+
+/**
+ * Push media to a listed Wayfair product, step by step in the plan's order.
+ * Each step comes back with Wayfair's requestId (or its refusal).
  *
  * @param {string} sku
  * @param {Object} [opts]
- * @param {boolean} [opts.validateOnly=true]
- * @param {boolean} [opts.pushContent=true]
- * @param {boolean} [opts.pushMedia=true]
- * @param {string}  [opts.itemGroupId]  override the stored item-group id
+ * @param {{images?: boolean, videos?: boolean, documents?: boolean}} [opts.steps]
+ * @param {boolean} [opts.validateOnly=false]
  */
-export async function pushToWayfair(sku, opts = {}) {
-  const { validateOnly = true, pushContent = true, pushMedia = true, itemGroupId, market, supplier = 'CAN' } = opts;
-  const data = await invokeWayfair('wayfair-push-content', { sku, validateOnly, pushContent, pushMedia, itemGroupId, market, supplier });
-
+export async function pushWayfairMedia(sku, opts = {}) {
+  const { supplier = 'CAN', market, steps, validateOnly = false } = opts;
+  const data = await invokeWayfair('wayfair-push-content', { sku, mode: 'push', supplier, market, steps, validateOnly });
   if (!validateOnly) {
-    logActivity({
-      action: 'push',
-      entityType: 'product',
-      entityId: sku,
-      target: 'wayfair',
-      summary: `Pushed ${sku} to Wayfair${data?.env === 'sandbox' ? ' (sandbox)' : ''}`,
-      metadata: { content: data?.content, media: data?.media, env: data?.env ?? null, supplier },
-    });
+    for (const r of data?.results ?? []) {
+      logActivity({
+        action: 'push',
+        entityType: 'product',
+        entityId: sku,
+        target: 'wayfair',
+        summary: `Pushed ${r.count} ${r.step} to Wayfair ${supplier}${data?.env === 'sandbox' ? ' (sandbox)' : ''}${r.error ? ' — refused' : ''}`,
+        metadata: { step: r.step, count: r.count, requestId: r.requestId, error: r.error ?? null, env: data?.env ?? null, supplier },
+      });
+    }
   }
   return data;
 }
@@ -99,8 +105,9 @@ export async function pushWayfairAttributes(sku, opts = {}) {
  * push is processed as validation-only, so this is how you see it "working".
  * @param {string} requestId  requestId returned by pushToWayfair
  */
-export async function checkWayfairRequestStatus(requestId) {
-  return invokeWayfair('wayfair-push-content', { statusRequestId: requestId });
+export async function checkWayfairRequestStatus(requestId, opts = {}) {
+  const { supplier = 'CAN' } = opts;
+  return invokeWayfair('wayfair-push-content', { statusRequestId: requestId, supplier });
 }
 
 /**
