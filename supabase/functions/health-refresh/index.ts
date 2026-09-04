@@ -293,6 +293,7 @@ async function runRefresh() {
         .map((p) => ({
           sku: p.sku,
           category: p.category,
+          workflow_status: p.workflow_status,
           result: scoreCompleteness(p, (p.product_media as unknown[]) ?? []),
         }));
       const rows = snapshotMetrics(scored, today) as Record<string, unknown>[];
@@ -310,6 +311,35 @@ async function runRefresh() {
           },
         });
       }
+      // Price alignment per Wix site from each site's latest catalog pull
+      // (rows carry expected + price_diff), and Wayfair spec sync from the
+      // latest audit — the same reports the Pricing and Wayfair tabs show.
+      const priceSites: [string, string][] = [
+        ["sinksdirect_ca", "wix"],
+        ["sinksdirect_us", "wix_sinksdirect_us"],
+        ["stylish_ca", "wix_stylish_ca"],
+        ["stylish_us", "wix_stylish_us"],
+      ];
+      for (const [site, channel] of priceSites) {
+        const map = await latestSnapshotMap(channel);
+        if (!map) continue;
+        let total = 0;
+        let aligned = 0;
+        for (const r of map.values() as Iterable<Record<string, unknown>>) {
+          if (r.state === "not_in_pim" || r.state === "missing" || !("expected" in r) || r.expected == null) continue;
+          total += 1;
+          if (!r.price_diff) aligned += 1;
+        }
+        rows.push({ snapshot_date: today, scope: "price", key: site, metrics: { total, aligned, pct: total ? Math.round((aligned / total) * 100) : 0 } });
+      }
+      try {
+        const wf = await restSelect("channel_health?channel=eq.wayfair&select=total,in_sync,with_diffs,errors,run_at&order=run_at.desc&limit=1");
+        if (wf?.[0]) {
+          const w = wf[0];
+          const checked = (w.in_sync ?? 0) + (w.with_diffs ?? 0);
+          rows.push({ snapshot_date: today, scope: "sync", key: "wayfair", metrics: { total: w.total, in_sync: w.in_sync, with_diffs: w.with_diffs, errors: w.errors, pct: checked ? Math.round(((w.in_sync ?? 0) / checked) * 100) : 0, audited_at: w.run_at } });
+        }
+      } catch { /* no audit yet */ }
       await rest("kpi_snapshots?on_conflict=snapshot_date,scope,key", {
         method: "POST",
         body: JSON.stringify(rows.map((r) => ({ ...r, taken_at: new Date().toISOString() }))),

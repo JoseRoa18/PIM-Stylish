@@ -69,7 +69,7 @@ export function Sparkline({ points, width = 120, height = 32, max = 100 }) {
  * Single-series line over weeks with crosshair + tooltip. `points` =
  * [{ label, value|null, date }]. Y is 0–100 (a share) unless `max` is set.
  */
-export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLabel }) {
+export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLabel, reference = null }) {
   const [hover, setHover] = useState(null);
   const width = 720;
   const pad = { l: 40, r: 56, t: 16, b: 28 };
@@ -118,6 +118,12 @@ export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLab
             <text key={p.label + i} x={x(i)} y={height - 8} textAnchor="middle" fontSize="11" fill="currentColor">{p.label}</text>
           ) : null;
         })}
+        {reference && typeof reference.value === 'number' && (
+          <g>
+            <line x1={pad.l} x2={width - pad.r} y1={y(reference.value)} y2={y(reference.value)} stroke="var(--color-secondary)" strokeWidth="1.5" />
+            <text x={width - pad.r} y={y(reference.value) - 6} textAnchor="end" fontSize="11" fill="var(--color-on-surface-variant)">{reference.label}</text>
+          </g>
+        )}
         {area && <path d={area} fill="var(--color-primary)" opacity="0.1" />}
         {path && <path d={path} fill="none" stroke="var(--color-primary)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
         {valid.map((p) => (
@@ -140,6 +146,52 @@ export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLab
         >
           <div className="text-label-md text-on-surface-variant">Week {String(hover.label).replace(/^W/, '')}{hover.range ? ` · ${hover.range}` : ''}{hover.date ? ` · snapshot ${hover.date}` : ''}</div>
           <div className="text-on-surface font-semibold">{typeof hover.value === 'number' ? `${hover.value}${unit}` : 'no snapshot'}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Small-multiple column chart: one series, <= 24px columns growing from a
+ * baseline, the last column in the accent, value on the cap of the last
+ * column only, per-column tooltip on hover.
+ */
+export function Columns({ points, height = 96, ariaLabel, format = (v) => v }) {
+  const [hover, setHover] = useState(null);
+  const width = 360;
+  const pad = { l: 8, r: 8, t: 18, b: 22 };
+  const n = Math.max(1, points.length);
+  const max = Math.max(1, ...points.map((p) => p.value ?? 0));
+  const band = (width - pad.l - pad.r) / n;
+  const bw = Math.min(24, band - 4);
+  const ih = height - pad.t - pad.b;
+  const y = (v) => pad.t + ih - (v / max) * ih;
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto text-on-surface-variant" role="img" aria-label={ariaLabel} onPointerLeave={() => setHover(null)}>
+        <line x1={pad.l} x2={width - pad.r} y1={pad.t + ih} y2={pad.t + ih} stroke="var(--color-outline-variant)" strokeWidth="1" />
+        {points.map((p, i) => {
+          const v = p.value ?? 0;
+          const x = pad.l + i * band + (band - bw) / 2;
+          const last = i === n - 1;
+          const h = Math.max(0, pad.t + ih - y(v));
+          return (
+            <g key={p.label + i} onPointerEnter={() => setHover({ ...p, i, x: x + bw / 2 })}>
+              <rect x={pad.l + i * band} y={pad.t} width={band} height={ih} fill="transparent" />
+              <rect x={x} y={y(v)} width={bw} height={h} rx={h > 4 ? 4 : 0} fill={last ? 'var(--color-primary)' : 'var(--color-secondary)'} opacity={hover && hover.i !== i ? 0.6 : 1} />
+              {(n <= 8 || i === 0 || last || (n - 1 - i) % 2 === 0) && (
+                <text x={x + bw / 2} y={height - 6} textAnchor="middle" fontSize="10" fill="currentColor">{p.label}</text>
+              )}
+              {last && v > 0 && <text x={x + bw / 2} y={y(v) - 5} textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--color-on-surface)">{format(v)}</text>}
+            </g>
+          );
+        })}
+      </svg>
+      {hover && (
+        <div className="absolute top-0 pointer-events-none rounded-lg border border-outline-variant bg-surface-container-lowest px-2.5 py-1.5 text-body-sm shadow-sm" style={{ left: `calc(${(hover.x / width) * 100}% + 8px)` }}>
+          <div className="text-label-md text-on-surface-variant">Week {String(hover.label).replace(/^W/, '')}{hover.range ? ` · ${hover.range}` : ''}</div>
+          <div className="text-on-surface font-semibold">{format(hover.value ?? 0)}</div>
         </div>
       )}
     </div>

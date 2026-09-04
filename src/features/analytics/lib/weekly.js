@@ -173,3 +173,52 @@ export function compact(n) {
   if (Math.abs(n) >= 10000) return `${(n / 1000).toFixed(1)}K`;
   return n.toLocaleString('en-CA');
 }
+
+/** Bucket audit rows into the last `weeks` ISO weeks: [{ week, label, rows }]. */
+export function weekBuckets(rows, weeks = 12, today = new Date()) {
+  const start = weekStart(today);
+  const out = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const s = addDays(start, -7 * i);
+    out.push({ week: s, label: weekTag(s), range: `${formatShort(s)} – ${formatShort(addDays(s, 6))}`, rows: [] });
+  }
+  for (const r of rows) {
+    const t = new Date(r.occurred_at);
+    const idx = Math.floor((t - out[0].week) / (7 * DAY));
+    if (idx >= 0 && idx < out.length) out[idx].rows.push(r);
+  }
+  return out;
+}
+
+/**
+ * Gap aging from the daily catalog snapshots: for every check, how long each
+ * SKU has been missing it (consecutive days up to the latest snapshot).
+ * Returns [{ key, count, over7, over30, oldestDays, oldestSku }].
+ */
+export function gapAging(idx, today = new Date()) {
+  const list = idx.get('pim|all') ?? [];
+  const withSkus = list.filter((r) => r.metrics?.missing_skus);
+  if (!withSkus.length) return [];
+  const latest = withSkus[withSkus.length - 1];
+  const out = [];
+  for (const [key, skus] of Object.entries(latest.metrics.missing_skus)) {
+    let over7 = 0;
+    let over30 = 0;
+    let oldestDays = 0;
+    let oldestSku = null;
+    for (const sku of skus) {
+      // Walk back through consecutive snapshots that still list the SKU.
+      let since = latest.snapshot_date;
+      for (let i = withSkus.length - 2; i >= 0; i--) {
+        if ((withSkus[i].metrics.missing_skus?.[key] ?? []).includes(sku)) since = withSkus[i].snapshot_date;
+        else break;
+      }
+      const days = Math.max(0, Math.round((today - parseDateKey(since)) / DAY));
+      if (days >= 7) over7 += 1;
+      if (days >= 30) over30 += 1;
+      if (days > oldestDays) { oldestDays = days; oldestSku = sku; }
+    }
+    out.push({ key, count: skus.length, over7, over30, oldestDays, oldestSku });
+  }
+  return out.sort((a, b) => b.over30 - a.over30 || b.over7 - a.over7 || b.count - a.count);
+}

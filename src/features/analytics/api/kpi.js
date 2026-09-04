@@ -2,6 +2,8 @@ import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { scoreCompleteness, snapshotMetrics } from '@/features/products/lib/completeness';
 import { computeListingHealth } from '@/features/dashboard/api/listingHealthData';
+import { loadLatestAlignment } from '@/features/pricing/api/priceAlignment';
+import { WIX_SITES } from '@/features/syndication/lib/wixSites';
 import { toDateKey, addDays } from '../lib/weekly';
 
 /** Every snapshot row since `fromDate` (default: 16 weeks back). */
@@ -29,9 +31,27 @@ export async function takeSnapshot() {
   if (error) throw error;
   const scored = (products ?? []).map((p) => {
     const { product_media: media, ...product } = p;
-    return { sku: p.sku, category: p.category, result: scoreCompleteness(product, media ?? []) };
+    return { sku: p.sku, category: p.category, workflow_status: p.workflow_status, result: scoreCompleteness(product, media ?? []) };
   });
   const rows = snapshotMetrics(scored, today);
+
+  // Price alignment per Wix site (latest saved report) and Wayfair spec sync.
+  for (const site of Object.keys(WIX_SITES)) {
+    try {
+      const rep = await loadLatestAlignment(site);
+      if (!rep) continue;
+      const aligned = rep.counts.promo_ok + rep.counts.map_ok;
+      const total = rep.total - rep.counts.no_map - rep.counts.missing;
+      rows.push({ snapshot_date: today, scope: 'price', key: site, metrics: { total, aligned, pct: total ? Math.round((aligned / total) * 100) : 0 } });
+    } catch { /* keep going */ }
+  }
+  try {
+    const { data: wf } = await supabase.from('channel_health').select('total, in_sync, with_diffs, errors, run_at').eq('channel', 'wayfair').order('run_at', { ascending: false }).limit(1).maybeSingle();
+    if (wf) {
+      const checked = (wf.in_sync ?? 0) + (wf.with_diffs ?? 0);
+      rows.push({ snapshot_date: today, scope: 'sync', key: 'wayfair', metrics: { total: wf.total, in_sync: wf.in_sync, with_diffs: wf.with_diffs, errors: wf.errors, pct: checked ? Math.round(((wf.in_sync ?? 0) / checked) * 100) : 0, audited_at: wf.run_at } });
+    }
+  } catch { /* no audit yet */ }
 
   // Channel coverage from the same pipeline the Listing Health tabs use.
   try {
@@ -64,19 +84,28 @@ export async function takeSnapshot() {
   return { date: today, rows: rows.length };
 }
 
+/** Raw audit rows for a period (the team-activity source). */
+export async function loadActivityRows(start, end) {
+  const { data, error } = await supabase
+    .from('audit_log')
+    .select('occurred_at, actor_email, actor_name, action, target, entity_type, entity_id, summary, metadata')
+    .gte('occurred_at', new Date(start).toISOString())
+    .lte('occurred_at', new Date(end).toISOString())
+    .order('occurred_at', { ascending: true })
+    .limit(10000);
+  if (error) throw error;
+  return data ?? [];
+}
+
 /**
  * Team activity for a period, straight from the audit log: product edits,
  * media uploads, pushes and new products, by person.
  */
 export async function loadActivity(start, end) {
-  const { data, error } = await supabase
-    .from('audit_log')
-    .select('occurred_at, actor_email, actor_name, action, target, entity_type, entity_id, metadata')
-    .gte('occurred_at', new Date(start).toISOString())
-    .lte('occurred_at', new Date(end).toISOString())
-    .limit(5000);
-  if (error) throw error;
-  const rows = data ?? [];
+  return aggregateActivity(await loadActivityRows(start, end));
+}
+
+export function aggregateActivity(rows) {
   const kinds = {
     edits: (r) => r.action === 'update' && r.entity_type === 'product' && (r.target === 'pim' || r.target === 'channels'),
     creates: (r) => r.action === 'create' && r.entity_type === 'product' && r.target === 'pim',
@@ -106,6 +135,40 @@ export async function loadActivity(start, end) {
     .filter((p) => p.total > 0)
     .sort((a, b) => b.total - a.total);
   return { people, totals: { ...totals, touched: totals.products.size }, pushesByTarget, events: rows.length };
+}
+
+/** Launch funnel: workflow status now, plus creations and Ready-to-sell dates. */
+export async function loadLaunches() {
+  const { data, error } = await supabase
+    .from('products')
+    .select('sku, model_name, category, workflow_status, created_at, ready_to_sell_date')
+    .neq('workflow_status', 'archived');
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Promotions: the current and next period with their execution stamps and SKU counts. */
+export async function loadPromotions() {
+  const { data: promos, error } = await supabase
+    .from('promotions')
+    .select('id, name, period, status, created_at, activated_at, ended_at, bb_scheduled_at, us_applied_at, ca_applied_at')
+    .order('period', { ascending: false })
+    .limit(6);
+  if (error) throw error;
+  const ids = (promos ?? []).map((p) => p.id);
+  const counts = {};
+  if (ids.length) {
+    const { data: prices } = await supabase.from('promotion_prices').select('promotion_id').in('promotion_id', ids);
+    for (const r of prices ?? []) counts[r.promotion_id] = (counts[r.promotion_id] ?? 0) + 1;
+  }
+  const { data: runs } = await supabase
+    .from('audit_log')
+    .select('occurred_at, summary, metadata, target')
+    .eq('entity_type', 'promotion')
+    .eq('action', 'push')
+    .order('occurred_at', { ascending: false })
+    .limit(12);
+  return { promos: (promos ?? []).map((p) => ({ ...p, skus: counts[p.id] ?? 0 })), runs: runs ?? [] };
 }
 
 /** Targets per category: { global: {pct, date}, categories: { [cat]: {pct, date} } } */

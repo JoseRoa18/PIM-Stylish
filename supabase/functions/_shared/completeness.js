@@ -192,7 +192,20 @@ export function snapshotMetrics(rows, date) {
       missing,
     };
   };
-  const out = [{ snapshot_date: date, scope: 'pim', key: 'all', metrics: totals(rows) }];
+  // The catalog row also carries per-SKU detail: every product's score, which
+  // SKUs miss each check (gap aging = how many days a SKU stays in that
+  // list) and the workflow funnel. Small enough (a few KB) to keep daily.
+  const all = totals(rows);
+  const scores = {};
+  const missingSkus = {};
+  const workflow = {};
+  for (const r of rows) {
+    scores[r.sku] = r.result.score;
+    const w = r.workflow_status ?? 'unknown';
+    workflow[w] = (workflow[w] ?? 0) + 1;
+    for (const m of r.result.missing) (missingSkus[m.key] ??= []).push(r.sku);
+  }
+  const out = [{ snapshot_date: date, scope: 'pim', key: 'all', metrics: { ...all, scores, missing_skus: missingSkus, workflow } }];
   const byCat = new Map();
   for (const r of rows) {
     const cat = r.category ?? 'uncategorized';
