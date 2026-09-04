@@ -3,7 +3,7 @@ import { AlertCircle, Camera, Download, Info } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useKpi } from '@/features/analytics/hooks/useKpi';
 import { takeSnapshot } from '@/features/analytics/api/kpi';
-import { latestSnapshot, snapshotAt, weeklySeries, formatShort, toDateKey } from '@/features/analytics/lib/weekly';
+import { latestSnapshot, snapshotAt, weeklySeries, formatShort } from '@/features/analytics/lib/weekly';
 import { CATEGORY_LABEL } from '@/features/products/lib/completeness';
 import HeadlineKpis from '@/features/analytics/components/HeadlineKpis';
 import CategoryProgress from '@/features/analytics/components/CategoryProgress';
@@ -48,7 +48,7 @@ export default function Analytics() {
   }
 
   function exportCsv() {
-    const lines = [['Week', week.range], [], ['Category', 'Products', 'At 100%', 'Share', 'Avg score', 'Change since week start']];
+    const lines = [[week.name, week.range], [], ['Category', 'Products', 'At 100%', 'Share', 'Avg score', `Change since ${week.name} started`]];
     for (const cat of categories) {
       const n = latestSnapshot(index, 'pim_category', cat)?.metrics;
       const b = snapshotAt(index, 'pim_category', cat, new Date(week.start.getTime() - 1))?.metrics;
@@ -63,7 +63,7 @@ export default function Analytics() {
     const blob = new Blob(['﻿', csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `pim-kpis-week-${toDateKey(week.start)}.csv`;
+    a.download = `pim-kpis-${week.year}-${week.tag}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -73,13 +73,13 @@ export default function Analytics() {
       <header className="mb-6 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-display-lg text-on-surface">Analytics</h1>
-          <p className="text-body-md text-on-surface-variant mt-1">Weekly progress of the catalog's data, channel coverage and the team's work.</p>
+          <p className="text-body-md text-on-surface-variant mt-1">{week.name} · {week.range}{week.hint ? ` · ${week.hint}` : ''}. Progress of the catalog's data, channel coverage and the team's work.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-body-sm text-on-surface-variant flex items-center gap-2">
             Week
             <select value={week.key} onChange={(e) => setWeekKey(e.target.value)} className="px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
-              {weeks.map((w) => <option key={w.key} value={w.key}>{w.label} · {w.range}</option>)}
+              {weeks.map((w) => <option key={w.key} value={w.key}>{w.name}{w.hint ? ` (${w.hint})` : ''} · {w.range}</option>)}
             </select>
           </label>
           <button type="button" onClick={exportCsv} disabled={loading} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60">
@@ -144,7 +144,7 @@ export default function Analytics() {
           <TeamActivity activity={activity} prevActivity={prevActivity} week={week} />
 
           <p className="text-body-sm text-on-surface-variant">
-            Completeness uses the same rules as the PIM tab in Listing Health. Weeks run Monday to Sunday; "week start" compares with the last snapshot before {formatShort(week.start)}.
+            Completeness uses the same rules as the PIM tab in Listing Health. Weeks are numbered the ISO way, Monday to Sunday; "week start" compares with the last snapshot before {week.name} began on {formatShort(week.start)}.
           </p>
         </div>
       )}

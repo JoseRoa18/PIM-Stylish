@@ -36,7 +36,7 @@ export default function CategoryProgress({ index, week, targets, canEditTargets,
       <header className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-title-md text-on-surface">Progress by category</h3>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">Products at 100% now, the change since {formatShort(week.start)}, and the pace toward each target.</p>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">Products at 100% now, the change since {week.name} started ({formatShort(week.start)}), and the pace toward each target.</p>
         </div>
         {canEditTargets && (
           <button type="button" onClick={onEditTargets} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">

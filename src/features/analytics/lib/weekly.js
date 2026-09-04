@@ -31,6 +31,25 @@ export function addDays(d, n) {
   return x;
 }
 
+/** ISO-8601 week number (weeks start Monday; week 1 holds the year's first Thursday). */
+export function isoWeek(d) {
+  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dow = x.getUTCDay() || 7;
+  x.setUTCDate(x.getUTCDate() + 4 - dow);
+  const yearStart = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  return { year: x.getUTCFullYear(), week: Math.ceil(((x - yearStart) / DAY + 1) / 7) };
+}
+
+/** "Week 36" — how the team names a week. */
+export function weekName(d) {
+  return `Week ${isoWeek(d).week}`;
+}
+
+/** "W36" — the short form for axis ticks and file names. */
+export function weekTag(d) {
+  return `W${isoWeek(d).week}`;
+}
+
 /** The weeks available for the picker: this week + the previous `count - 1`. */
 export function recentWeeks(count = 8, today = new Date()) {
   const out = [];
@@ -38,12 +57,17 @@ export function recentWeeks(count = 8, today = new Date()) {
   for (let i = 0; i < count; i++) {
     const s = addDays(start, -7 * i);
     const e = addDays(s, 6);
+    const { year, week } = isoWeek(s);
     out.push({
       key: toDateKey(s),
       start: s,
       end: i === 0 ? today : e,
       endOfWeek: e,
-      label: i === 0 ? 'This week' : i === 1 ? 'Last week' : `Week of ${formatShort(s)}`,
+      number: week,
+      year,
+      name: `Week ${week}`,
+      tag: `W${week}`,
+      hint: i === 0 ? 'this week' : i === 1 ? 'last week' : null,
       range: `${formatShort(s)} – ${formatShort(e)}`,
     });
   }
@@ -97,7 +121,7 @@ export function weeklySeries(idx, scope, key, metric, weeks = 12, today = new Da
     // Only count a snapshot that belongs to that week (or earlier for the
     // first point) — otherwise a single old row would flat-line the chart.
     const inWeek = snap && (snap.snapshot_date >= toDateKey(s) || i === weeks - 1);
-    points.push({ week: s, label: formatShort(s), value: inWeek ? snap.metrics?.[metric] ?? null : null, date: inWeek ? snap.snapshot_date : null });
+    points.push({ week: s, label: weekTag(s), range: `${formatShort(s)} – ${formatShort(addDays(s, 6))}`, value: inWeek ? snap.metrics?.[metric] ?? null : null, date: inWeek ? snap.snapshot_date : null });
   }
   return points;
 }

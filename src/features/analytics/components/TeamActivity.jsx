@@ -18,7 +18,7 @@ export default function TeamActivity({ activity, prevActivity, week }) {
       <header className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-title-md text-on-surface">Team activity</h3>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">{week.range} · from the activity log · {activity.events} events</p>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">{week.name} · {week.range} · from the activity log · {activity.events} events</p>
         </div>
         <div className="flex items-center gap-6 text-body-sm">
           <Total label="Edits" value={t.edits} prev={p?.edits} />

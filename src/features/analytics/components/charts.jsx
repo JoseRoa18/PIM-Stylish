@@ -131,7 +131,7 @@ export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLab
           className="absolute top-2 pointer-events-none rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 text-body-sm shadow-sm"
           style={{ left: `calc(${(x(hover.i) / width) * 100}% + 8px)` }}
         >
-          <div className="text-label-md text-on-surface-variant">{hover.label}{hover.date ? ` · ${hover.date}` : ''}</div>
+          <div className="text-label-md text-on-surface-variant">Week {String(hover.label).replace(/^W/, '')}{hover.range ? ` · ${hover.range}` : ''}{hover.date ? ` · snapshot ${hover.date}` : ''}</div>
           <div className="text-on-surface font-semibold">{typeof hover.value === 'number' ? `${hover.value}${unit}` : 'no snapshot'}</div>
         </div>
       )}
