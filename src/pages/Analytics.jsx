@@ -38,7 +38,7 @@ export default function Analytics() {
   const [weekKey, setWeekKey] = useState(null);
   const {
     weeks, week, index, snapshots, targets, setTargets, auditRows, activity, prevActivity, activityTrend,
-    launches, promotions, loading, error, reloadSnapshots,
+    launches, promotions, screen, prevScreen, screenTrend, loading, error, reloadSnapshots,
   } = useKpi(weekKey);
   const [snapping, setSnapping] = useState(false);
   const [snapMsg, setSnapMsg] = useState(null);
@@ -248,9 +248,9 @@ export default function Analytics() {
             <PromoStatus promotions={promotions} />
           </Section>
 
-          <Section id="team" title="Team" blurb="What the team did this week, by person, and the pace over the last 12 weeks.">
-            <TeamActivity activity={activity} prevActivity={prevActivity} week={week} onOpen={setDetail} />
-            <TeamTrend trend={activityTrend} />
+          <Section id="team" title="Team" blurb="What the team did this week, by person, time on screen, and the pace over the last 12 weeks.">
+            <TeamActivity activity={activity} prevActivity={prevActivity} week={week} onOpen={setDetail} screen={screen} prevScreen={prevScreen} />
+            <TeamTrend trend={activityTrend} screenTrend={screenTrend} />
           </Section>
 
           <p className="text-body-sm text-on-surface-variant">

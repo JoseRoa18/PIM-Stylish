@@ -143,6 +143,24 @@ export function aggregateActivity(rows) {
   return { people, totals: { ...totals, touched: totals.products.size }, pushesByTarget, events: rows.length };
 }
 
+/** Active minutes on screen per person per day, with the person's email/name. */
+export async function loadScreenTime(start, end) {
+  const { data, error } = await supabase
+    .from('screen_time')
+    .select('user_id, day, minutes')
+    .gte('day', toDateKey(start))
+    .lte('day', toDateKey(end));
+  if (error) throw error;
+  const rows = data ?? [];
+  const ids = [...new Set(rows.map((r) => r.user_id))];
+  const people = new Map();
+  if (ids.length) {
+    const { data: profiles } = await supabase.from('profiles').select('id, email, full_name').in('id', ids);
+    for (const p of profiles ?? []) people.set(p.id, { email: p.email, name: p.full_name });
+  }
+  return rows.map((r) => ({ ...r, email: people.get(r.user_id)?.email ?? r.user_id, name: people.get(r.user_id)?.name ?? null }));
+}
+
 /** Launch funnel: workflow status now, plus creations and Ready-to-sell dates. */
 export async function loadLaunches() {
   const { data, error } = await supabase

@@ -1,5 +1,6 @@
 import { createContext, useContext, useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useScreenTime } from '@/features/analytics/hooks/useScreenTime';
 import { setActivityActor } from '@/features/activity/api/activityLog';
 
 const AuthContext = createContext(null);
@@ -68,6 +69,9 @@ export function AuthProvider({ children }) {
       active = false;
     };
   }, [session?.user?.id]);
+
+  // Screen time (Analytics → Team): one minute per active, visible minute.
+  useScreenTime(Boolean(session?.user?.id));
 
   // Presence heartbeat: stamp profiles.last_seen_at while the app is open.
   // Auth's own last_sign_in_at only moves on an explicit login — sessions
