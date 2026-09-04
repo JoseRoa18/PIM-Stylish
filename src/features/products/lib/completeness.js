@@ -13,13 +13,18 @@ const SINKS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink', 
 const KITCHEN_SINKS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink'];
 const FAUCETS = ['kitchen_faucet', 'bathroom_faucet', 'pot_filler'];
 const ALL = null; // applies to every category
+// Faucets describe size by spout height/reach, not by an overall L×W×H.
+const NOT_FAUCETS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink', 'bathroom_sink', 'colander_drying_rack', 'accessory'];
 
 const text = (v) => typeof v === 'string' && v.trim().length > 0;
 const num = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
 const list = (v, min = 1) => Array.isArray(v) && v.filter((x) => text(String(x ?? ''))).length >= min;
 const dims = (v) => !!v && typeof v === 'object' && Object.values(v).filter((x) => num(x)).length >= 2;
 const attr = (p, k) => p?.attributes?.[k] ?? null;
-const field = (p, k) => (p?.[k] ?? attr(p, k));
+// Some fields live both as a product column and inside attributes; an empty
+// column ('' / [] / null) must not hide a filled attribute.
+const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
+const field = (p, k) => (empty(p?.[k]) ? attr(p, k) : p[k]);
 const stainless = (p) => /stainless/i.test(String(p.material ?? ''));
 const PLACEHOLDER_UPC = /^(0+|840994000000)$/;
 
@@ -68,7 +73,7 @@ export const CHECKS = [
   // ---- Specs ----
   { key: 'material', label: 'Material', group: 'Specs', cats: ALL, check: (p) => text(p.material) },
   { key: 'finish', label: 'Finish', group: 'Specs', cats: ALL, check: (p) => text(p.finish) },
-  { key: 'external_dims', label: 'External dimensions', group: 'Specs', cats: ALL, check: (p) => dims(attr(p, 'external_dimensions_in')) },
+  { key: 'external_dims', label: 'External dimensions', group: 'Specs', cats: NOT_FAUCETS, check: (p) => dims(attr(p, 'external_dimensions_in')) },
   { key: 'installation', label: 'Installation type', group: 'Specs', cats: SINKS, check: (p) => text(String(field(p, 'installation_type') ?? '')) || list(field(p, 'installation_type')) },
   { key: 'bowls', label: 'Number of bowls', group: 'Specs', cats: SINKS, check: (p) => num(Number(field(p, 'number_of_bowls'))) },
   { key: 'internal_dims', label: 'Bowl (internal) dimensions', group: 'Specs', cats: SINKS, check: (p) => dims(attr(p, 'internal_dimensions_in')) },
