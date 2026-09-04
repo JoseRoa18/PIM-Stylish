@@ -94,7 +94,11 @@ export default function MediaSection({ sku, familyNumber = null, category = null
   // buckets/chips entirely and instead gets pinned into EVERY filter view,
   // leading the grid next to the marketplace Primary.
   const sdMainImage = allImagesRaw.find((m) => m.image_role === 'sinksdirect_main') ?? null;
-  const allImages = allImagesRaw.filter((m) => m.image_role !== 'sinksdirect_main');
+  // The marketplace Primary (white main) is language-neutral too (rule
+  // 2026-09-04): ONE white main and ONE gray hero per product, pinned in
+  // front of every language set — never a copy of the main per language.
+  const primaryImage = allImagesRaw.find((m) => m.is_primary && m.image_role !== 'sinksdirect_main') ?? null;
+  const allImages = allImagesRaw.filter((m) => m.image_role !== 'sinksdirect_main' && m !== primaryImage);
   const allVideos = visualMedia.filter((m) => m.media_type === 'video');
   const BUCKET_ORDER = ['universal', 'en', 'fr', 'en_fr', 'en_es'];
 
@@ -115,7 +119,8 @@ export default function MediaSection({ sku, familyNumber = null, category = null
   const langFilteredImages = activeFilter
     ? allImages.filter((m) => bucketOf(m) === activeFilter)
     : allImages;
-  const filteredImages = sdMainImage ? [sdMainImage, ...langFilteredImages] : langFilteredImages;
+  const pinned = [sdMainImage, primaryImage].filter(Boolean);
+  const filteredImages = [...pinned, ...langFilteredImages];
   const filteredVideos = activeVideoFilter
     ? allVideos.filter((m) => bucketOf(m) === activeVideoFilter)
     : allVideos;
@@ -672,7 +677,7 @@ export default function MediaSection({ sku, familyNumber = null, category = null
                   key={item.id}
                   item={item}
                   canEdit={canEdit}
-                  reorderEnabled={reorderEnabled && item.image_role !== 'sinksdirect_main'}
+                  reorderEnabled={reorderEnabled && item.image_role !== 'sinksdirect_main' && !item.is_primary}
                   selected={selectedIds.has(item.id)}
                   onToggleSelect={() => toggleSelect(item.id)}
                   onSetPrimary={() => handleSetPrimary(item.id)}

@@ -303,6 +303,9 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
       sku,
       is_primary: shouldBePrimary,
       ...(asHero ? { image_role: 'sinksdirect_main' } : {}),
+      // Mains are language-neutral (rule 2026-09-04): one white main and one
+      // gray hero per product, pinned in front of every language set.
+      ...(shouldBePrimary || asHero ? { language: null } : {}),
       display_order: takeOrder(sku),
     });
     if (isVideo) {
@@ -573,7 +576,7 @@ export async function setSinksDirectMain(sku, mediaId, { unset = false } = {}) {
   if (!unset) {
     const { error } = await supabase
       .from('product_media')
-      .update({ image_role: 'sinksdirect_main' })
+      .update({ image_role: 'sinksdirect_main', language: null })
       .eq('id', mediaId);
     if (error) throw error;
   }
@@ -598,9 +601,11 @@ export async function setPrimaryMedia(sku, mediaId) {
 
   if (clearError) throw clearError;
 
+  // The main is language-neutral: it leads EVERY language set, so it drops
+  // whatever language tag it carried.
   const { error } = await supabase
     .from('product_media')
-    .update({ is_primary: true })
+    .update({ is_primary: true, language: null })
     .eq('id', mediaId);
 
   if (error) throw error;

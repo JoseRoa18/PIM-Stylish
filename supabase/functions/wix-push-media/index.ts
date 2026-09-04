@@ -188,18 +188,21 @@ Deno.serve(async (req) => {
       const valid = ((media ?? []) as PimImage[]).filter((m) => /^https?:\/\//i.test(m.storage_path ?? ""));
       if (!valid.length) return json({ error: `${sku} has no images in the PIM.` }, 400);
 
+      // Main pictures are LANGUAGE-NEUTRAL (rule 2026-09-04): one white main
+      // (is_primary) and one gray hero (image_role = sinksdirect_main) per
+      // product, pinned in front of whichever language set the site gets —
+      // never copies of the main inside each language set.
       // Dual main pictures (rule 2026-08-31): EVERY Wix site — SinksDirect
-      // AND Stylish — leads with the gray-background hero (image_role =
-      // sinksdirect_main); the white marketplace main (is_primary) stays OUT
-      // of the Wix push (same shot, duplicate here) and remains the main for
-      // non-Wix channels. Products without a tagged hero fall back to the
-      // white main leading.
+      // AND Stylish — leads with the gray hero; the white main stays OUT of
+      // the Wix push (same shot) and remains the main for non-Wix channels.
+      // Products without a tagged hero lead with the white main instead.
       const sdMain = valid.find((m) => m.image_role === "sinksdirect_main");
-      const all = valid.filter((m) =>
-        m.image_role !== "sinksdirect_main" && !(sdMain && m.is_primary));
+      const primary = valid.find((m) => m.is_primary && m.image_role !== "sinksdirect_main");
+      const lead = sdMain ?? primary ?? null;
+      const all = valid.filter((m) => m !== sdMain && m !== primary);
 
       const { chosen, set } = pickLanguageSet(all, site.market);
-      const ordered = [...(sdMain ? [sdMain] : []), ...chosen];
+      const ordered = [...(lead ? [lead] : []), ...chosen];
       report.sinksdirect_main = Boolean(sdMain);
       if (sdMain) report.marketplace_main_skipped = valid.some((m) => m.is_primary);
       report.pim_images = all.length;
