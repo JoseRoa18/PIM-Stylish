@@ -67,7 +67,7 @@ export default function Analytics() {
     if (detail.actor) {
       return { title: detail.label, subtitle: `Everything they did in ${range}`, activity: activityDetail(weekRows, { actor: detail.actor, names }) };
     }
-    const TITLES = { pushes: ['Pushes', 'Which products went to which channel, by whom and when'], edits: ['Products edited', 'Every product edit in the PIM'], uploads: ['Media uploaded', 'Images, videos and documents added to products'], creates: ['New products', 'Products created in the PIM'], touched: ['Products touched', 'Every product with any activity'] };
+    const TITLES = { pushes: ['Pushes', 'Which products went to which channel, by whom and when'], tests: ['Sandbox tests', 'Pushes that validated at the channel without changing anything live'], edits: ['Products edited', 'Every product edit in the PIM'], uploads: ['Media uploaded', 'Images, videos and documents added to products'], creates: ['New products', 'Products created in the PIM'], touched: ['Products touched', 'Every product with any activity'] };
     if (TITLES[detail.kind]) {
       const [t, s] = TITLES[detail.kind];
       return { title: t, subtitle: `${s} · ${range}`, activity: activityDetail(weekRows, { kind: detail.kind, names }) };

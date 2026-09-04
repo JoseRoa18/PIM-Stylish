@@ -30,7 +30,7 @@ export default function HeadlineKpis({ now, before, activity, prevActivity, targ
       </button>
 
       <Tile label="Average completeness" value={m ? `${m.avg}%` : '—'} delta={d('avg')} suffix=" pts" sub="across every field that applies" onClick={() => onOpen?.('movers')} hint="See the biggest score changes" />
-      <Tile label="Pushes this week" value={pushes ?? '—'} delta={pushes != null && prevPushes != null ? pushes - prevPushes : null} sub={activity ? `${activity.totals.touched} products touched` : 'loading activity'} vs="last week" onClick={() => onOpen?.('pushes')} hint="See which products went where" />
+      <Tile label="Pushes this week" value={pushes ?? '—'} delta={pushes != null && prevPushes != null ? pushes - prevPushes : null} sub={activity ? `${activity.totals.touched} products touched${activity.totals.tests ? ` · ${activity.totals.tests} sandbox tests not counted` : ''}` : 'loading activity'} vs="last week" onClick={() => onOpen?.('pushes')} hint="See which products went where" />
       <Tile label="Products edited" value={activity ? activity.totals.edits : '—'} delta={activity && prevActivity ? activity.totals.edits - prevActivity.totals.edits : null} sub={activity ? `${activity.totals.uploads} media uploaded` : ' '} vs="last week" onClick={() => onOpen?.('edits')} hint="See which products were edited" />
     </section>
   );

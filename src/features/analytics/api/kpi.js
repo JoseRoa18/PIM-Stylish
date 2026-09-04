@@ -111,12 +111,14 @@ export const ACTIVITY_KINDS = {
   edits: (r) => r.action === 'update' && r.entity_type === 'product' && (r.target === 'pim' || r.target === 'channels'),
   creates: (r) => r.action === 'create' && r.entity_type === 'product' && r.target === 'pim',
   uploads: (r) => (r.action === 'media' && ['pim', 'supabase', 'media'].includes(r.target ?? '') && /Uploaded/i.test(r.summary ?? '')) || (r.action === 'media' && !!r.metadata?.count),
-  pushes: (r) => r.action === 'push' && r.entity_type === 'product',
+  pushes: (r) => r.action === 'push' && r.entity_type === 'product' && r.metadata?.env !== 'sandbox' && !/\(sandbox\)/i.test(r.summary ?? ''),
+  // Sandbox pushes validate at the channel and change nothing live.
+  tests: (r) => r.action === 'push' && r.entity_type === 'product' && (r.metadata?.env === 'sandbox' || /\(sandbox\)/i.test(r.summary ?? '')),
 };
 
 export function aggregateActivity(rows) {
   const kinds = ACTIVITY_KINDS;
-  const empty = () => ({ edits: 0, creates: 0, uploads: 0, pushes: 0, products: new Set() });
+  const empty = () => ({ edits: 0, creates: 0, uploads: 0, pushes: 0, tests: 0, products: new Set() });
   const byPerson = new Map();
   const totals = empty();
   const pushesByTarget = {};
@@ -135,7 +137,7 @@ export function aggregateActivity(rows) {
     }
   }
   const people = [...byPerson.values()]
-    .map((p) => ({ ...p, touched: p.products.size, total: p.edits + p.creates + p.uploads + p.pushes }))
+    .map((p) => ({ ...p, touched: p.products.size, total: p.edits + p.creates + p.uploads + p.pushes + p.tests }))
     .filter((p) => p.total > 0)
     .sort((a, b) => b.total - a.total);
   return { people, totals: { ...totals, touched: totals.products.size }, pushesByTarget, events: rows.length };

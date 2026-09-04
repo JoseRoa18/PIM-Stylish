@@ -14,6 +14,12 @@ const TARGET_LABEL = { wix: 'Wix', wayfair: 'Wayfair', bestbuy: 'Best Buy', walm
 
 /** Where a push went, from its audit row (site in metadata beats the generic target). */
 export function pushDestination(r) {
+  const sandbox = r.metadata?.env === 'sandbox' || /\(sandbox\)/i.test(r.summary ?? '');
+  const base = destinationName(r);
+  return sandbox ? `${base} (sandbox test, nothing changed live)` : base;
+}
+
+function destinationName(r) {
   const site = r.metadata?.site;
   if (site && SITE_LABEL[site]) return SITE_LABEL[site];
   if (r.metadata?.results && typeof r.metadata.results === 'object') {

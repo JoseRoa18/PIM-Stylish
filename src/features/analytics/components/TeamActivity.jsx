@@ -39,6 +39,7 @@ export default function TeamActivity({ activity, prevActivity, week, onOpen }) {
                 <th className="text-right px-6 py-3 font-medium">Edits</th>
                 <th className="text-right px-6 py-3 font-medium">Media</th>
                 <th className="text-right px-6 py-3 font-medium">Pushes</th>
+                <th className="text-right px-6 py-3 font-medium" title="Sandbox pushes: validated at the channel, nothing changed live">Tests</th>
                 <th className="text-right px-6 py-3 font-medium">New</th>
               </tr>
             </thead>
@@ -53,6 +54,7 @@ export default function TeamActivity({ activity, prevActivity, week, onOpen }) {
                   <td className="px-6 py-3 text-right tabular-nums text-on-surface">{person.edits}</td>
                   <td className="px-6 py-3 text-right tabular-nums text-on-surface">{person.uploads}</td>
                   <td className="px-6 py-3 text-right tabular-nums text-on-surface">{person.pushes}</td>
+                  <td className="px-6 py-3 text-right tabular-nums text-on-surface-variant">{person.tests || '—'}</td>
                   <td className="px-6 py-3 text-right tabular-nums text-on-surface">{person.creates}</td>
                 </tr>
               ))}

@@ -55,8 +55,8 @@ export async function pushToWayfair(sku, opts = {}) {
       entityType: 'product',
       entityId: sku,
       target: 'wayfair',
-      summary: `Pushed ${sku} to Wayfair`,
-      metadata: { content: data?.content, media: data?.media },
+      summary: `Pushed ${sku} to Wayfair${data?.env === 'sandbox' ? ' (sandbox)' : ''}`,
+      metadata: { content: data?.content, media: data?.media, env: data?.env ?? null, supplier },
     });
   }
   return data;
@@ -86,8 +86,8 @@ export async function pushWayfairAttributes(sku, opts = {}) {
       entityType: 'product',
       entityId: sku,
       target: 'wayfair',
-      summary: `Pushed ${sku} spec attributes to Wayfair`,
-      metadata: { updates: data?.updates, changed: data?.changedCount, requestId: data?.mutation?.requestId },
+      summary: `Pushed ${sku} spec attributes to Wayfair${data?.env === 'sandbox' ? ' (sandbox)' : ''}`,
+      metadata: { updates: data?.updates, changed: data?.changedCount, requestId: data?.mutation?.requestId, env: data?.env ?? null, supplier },
     });
   }
   return data;
