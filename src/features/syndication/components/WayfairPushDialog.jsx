@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Image as ImageIcon, Film, FileText, Ruler } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
-import { planWayfairPush, pushWayfairMedia, pushWayfairAttributes, checkWayfairRequestStatus } from '../api/wayfairSync';
+import { planWayfairPush, pushWayfairMedia, pushWayfairAttributes, checkWayfairRequestStatus, setWayfairLeadImage } from '../api/wayfairSync';
 
 const STEP_ICON = { specs: Ruler, images: ImageIcon, videos: Film, documents: FileText };
 const thumb = (url) => url.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/') + '?width=96&height=96&resize=contain';
@@ -20,6 +20,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
   const [phase, setPhase] = useState('review'); // review | pushing | done
   const [progress, setProgress] = useState([]); // [{ key, label, state, requestId, error, count }]
   const [status, setStatus] = useState({});
+  const [lead, setLead] = useState(null); // null | 'busy' | { requestId } | { error }
 
   useEffect(() => {
     let active = true;
@@ -78,6 +79,14 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
     }
   }
 
+  const imagesRequest = progress.find((p) => p.key === 'images' && p.requestId);
+  const imagesDone = imagesRequest && status[imagesRequest.requestId]?.status === 'COMPLETED' && !(status[imagesRequest.requestId]?.problems?.length);
+
+  async function forceLead() {
+    setLead('busy');
+    try { setLead(await setWayfairLeadImage(sku, { supplier, market })); } catch (e) { setLead({ error: e.message }); }
+  }
+
   async function refreshStatus() {
     const out = {};
     for (const p of progress) {
@@ -101,7 +110,18 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
               {plan.env !== 'production' ? ' · sandbox' : ''}
             </span>
           )}
-          {phase === 'done' && <button type="button" onClick={refreshStatus} className="mr-auto inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low"><RefreshCw className="w-4 h-4" />Check what Wayfair did</button>}
+          {phase === 'done' && (
+            <span className="mr-auto inline-flex items-center gap-2 flex-wrap">
+              <button type="button" onClick={refreshStatus} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low"><RefreshCw className="w-4 h-4" />Check what Wayfair did</button>
+              {imagesDone && (
+                <button type="button" onClick={forceLead} disabled={lead === 'busy'} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-60" title="Wayfair only honors the lead override once it holds the image, so this runs after the upload completed">
+                  {lead === 'busy' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                  Set the white main as lead
+                </button>
+              )}
+              {lead && lead !== 'busy' && <span className={`text-label-md ${lead.error ? 'text-error' : 'text-success'}`}>{lead.error ?? `lead requested (${String(lead.requestId).slice(0, 8)}…)`}</span>}
+            </span>
+          )}
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">{phase === 'done' ? 'Close' : 'Cancel'}</button>
           {phase === 'review' && (
             <button type="button" onClick={push} disabled={!plan || !plan.listed || active.length === 0} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed">
@@ -177,7 +197,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
               )}
             </li>
           ))}
-          {phase === 'done' && <p className="text-body-sm text-on-surface-variant">Wayfair processes requests in the background. "Check what Wayfair did" reads each request's outcome; media can take a few minutes to show on the listing.</p>}
+          {phase === 'done' && <p className="text-body-sm text-on-surface-variant">Wayfair processes requests in the background. "Check what Wayfair did" reads each request's outcome; media can take a few minutes to show on the listing. Once the images request is completed, set the white main as the lead image (Wayfair ignores the override on an image it does not hold yet).</p>}
         </ol>
       )}
     </Dialog>

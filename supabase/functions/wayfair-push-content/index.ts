@@ -204,8 +204,25 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ---- push: execute the chosen steps, in order ----
     if (!listed) return json({ error: `${sku} is not in the Wayfair ${supplier} catalog — media can only be pushed to listed products.` }, 409);
+
+    // ---- lead: Wayfair ignores leadImageOverride on an image it does not
+    //      have yet, so the lead is forced in a SECOND pass, once the upload
+    //      request has completed. Same URL → Wayfair matches the existing
+    //      image and only applies the override.
+    if (mode === "lead") {
+      const lead = plan.steps[0].items.find((it) => it.lead);
+      if (!lead) return json({ error: `${sku} has no white main picture to lead with.` }, 400);
+      const gql = await call(
+        "mutation setLead($input: UpdateCatalogItemsMediaInput!) { updateCatalogEntitiesMutations { updateCatalogItemsMedia(input: $input) { requestId } } }",
+        { input: { supplierId: String(SUPPLIER_ID), validateOnly: false, catalogItemsToUpdate: [{ supplierPartNumber: sku, mediaUrl: lead.url, mediaType: "IMAGE", action: "UPLOAD", leadImageOverride: true }] } },
+        "setLead",
+      );
+      if (gql.errors) return json({ error: gql.errors[0]?.message, details: gql.errors }, 502);
+      return json({ ok: true, env: ENV, sku, supplier, lead: lead.label, requestId: gql.data?.updateCatalogEntitiesMutations?.updateCatalogItemsMedia?.requestId ?? null });
+    }
+
+    // ---- push: execute the chosen steps, in order ----
     const wanted = body.steps ?? { images: true, videos: true, documents: true };
     const validateOnly = body.validateOnly === true;
     const results: Record<string, unknown>[] = [];

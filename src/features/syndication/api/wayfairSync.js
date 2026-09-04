@@ -105,6 +105,21 @@ export async function pushWayfairAttributes(sku, opts = {}) {
  * push is processed as validation-only, so this is how you see it "working".
  * @param {string} requestId  requestId returned by pushToWayfair
  */
+/** Second pass after the images landed: force the white main as Wayfair's lead image. */
+export async function setWayfairLeadImage(sku, opts = {}) {
+  const { supplier = 'CAN', market } = opts;
+  const data = await invokeWayfair('wayfair-push-content', { sku, mode: 'lead', supplier, market });
+  logActivity({
+    action: 'push',
+    entityType: 'product',
+    entityId: sku,
+    target: 'wayfair',
+    summary: `Set the lead image on Wayfair ${supplier} for ${sku}${data?.env === 'sandbox' ? ' (sandbox)' : ''}`,
+    metadata: { step: 'lead', requestId: data?.requestId ?? null, env: data?.env ?? null, supplier },
+  });
+  return data;
+}
+
 export async function checkWayfairRequestStatus(requestId, opts = {}) {
   const { supplier = 'CAN' } = opts;
   return invokeWayfair('wayfair-push-content', { statusRequestId: requestId, supplier });
