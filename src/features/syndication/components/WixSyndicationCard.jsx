@@ -473,12 +473,18 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
                     try {
                       const res = await pushMediaToWix(product.sku, cfg.key);
                       const setLabel = { en_fr: 'EN/FR', en: 'EN', en_es_universal: 'EN/ES + universal' }[res.language_set] ?? '';
-                      const parts = [`Sent ${res.added} ${setLabel} image${res.added === 1 ? '' : 's'}`];
+                      const live = res.wix_media_now ?? res.added ?? 0;
+                      const parts = [`${live} ${setLabel} image${live === 1 ? '' : 's'} live on Wix`];
+                      if (res.uploaded) parts.push(`${res.uploaded} uploaded`);
                       if (res.skipped_other_language) parts.push(`${res.skipped_other_language} other-language skipped`);
-                      if (res.over_wix_cap) parts.push(`${res.over_wix_cap} may be dropped by Wix's ~16 cap`);
+                      if (res.over_wix_cap) parts.push(`${res.over_wix_cap} beyond Wix's 16-image cap, not sent`);
+                      const failed = res.failed_uploads?.length ?? 0;
+                      const problems = [];
+                      if (res.missing) problems.push(`${res.missing} did not land`);
+                      if (failed) problems.push(`${failed} failed to upload: ${res.failed_uploads.map((f) => f.file).join(', ')}`);
                       setMediaMsg({
-                        tone: 'success',
-                        text: `${parts.join(' · ')} — Wix ingests them in ~30s; reload to see them here.`,
+                        tone: problems.length ? 'error' : 'success',
+                        text: problems.length ? `${parts.join(' · ')} — ${problems.join('; ')}` : parts.join(' · '),
                       });
                     } catch (err) {
                       setMediaMsg({ tone: 'error', text: err.message ?? 'Image push failed' });

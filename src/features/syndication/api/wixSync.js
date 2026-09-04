@@ -172,8 +172,12 @@ export async function pushProductToAllWixSites(sku, brand = null) {
     // per-brand main-picture rule applied by wix-push-media (gray hero on
     // SinksDirect, white main on Stylish). The name is NEVER pushed.
     try {
-      await pushMediaToWix(sku, site);
-      results[site].media = 'ok';
+      const m = await pushMediaToWix(sku, site);
+      // The push verifies the gallery after attaching: "ok" only when every
+      // image is actually live on Wix.
+      results[site].media = m.missing || m.failed_uploads?.length
+        ? `warning: ${m.wix_media_now ?? 0} live, ${m.missing ?? 0} missing, ${m.failed_uploads?.length ?? 0} failed uploads`
+        : `ok (${m.wix_media_now ?? m.added ?? 0} live)`;
     } catch (err) {
       results[site].media = `failed: ${err.message}`;
     }
@@ -308,6 +312,11 @@ export async function pushMediaToWix(sku, site = DEFAULT_WIX_SITE) {
       language_set: data.language_set ?? null,
       skipped_other_language: data.skipped_other_language ?? 0,
       over_wix_cap: data.over_wix_cap ?? 0,
+      uploaded: data.uploaded ?? 0,
+      reused: data.reused ?? 0,
+      live: data.wix_media_now ?? null,
+      missing: data.missing ?? 0,
+      failed_uploads: data.failed_uploads?.length ?? 0,
     },
   });
   return data;
