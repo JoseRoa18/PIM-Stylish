@@ -27,7 +27,7 @@ const NAV_ITEMS = [
   { to: '/templates', icon: FileSpreadsheet, label: 'Templates', prefetch: 'templates' },
   { to: '/pricing', icon: DollarSign, label: 'Pricing', prefetch: 'pricing' },
   { to: '/listing-health', icon: Activity, label: 'Listing Health', prefetch: 'listingHealth' },
-  { to: '/analytics', icon: BarChart3, label: 'Analytics', soon: true, prefetch: 'comingSoon' },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics', prefetch: 'analytics' },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true, prefetch: 'users' },
   { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true, prefetch: 'activity' },
   { to: '/settings', icon: Settings, label: 'Settings', adminOnly: true, prefetch: 'settings' },

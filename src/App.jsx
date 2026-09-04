@@ -25,6 +25,7 @@ const Users = lazy(ROUTE_IMPORTS.users);
 const Activity = lazy(ROUTE_IMPORTS.activity);
 const SettingsPage = lazy(ROUTE_IMPORTS.settings);
 const ComingSoon = lazy(ROUTE_IMPORTS.comingSoon);
+const Analytics = lazy(ROUTE_IMPORTS.analytics);
 
 function PageFallback() {
   return (
@@ -104,7 +105,7 @@ export default function App() {
 
           {/* Not built yet — show a friendly "Coming soon" instead of a dead redirect */}
           <Route path="/assets" element={<ComingSoon />} />
-          <Route path="/analytics" element={<ComingSoon />} />
+          <Route path="/analytics" element={<Analytics />} />
         </Route>
 
         {/* Catch-all → redirect to home */}

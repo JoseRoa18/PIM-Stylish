@@ -21,6 +21,8 @@
 
 // @ts-ignore — plain JS module shared with the browser app
 import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHealth.js";
+// @ts-ignore — plain JS module shared with the browser app
+import { scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
 import { etToday, marketWindow, windowContains } from "../_shared/promoCalendar.ts";
 import { WIX_SITES, type WixSite } from "../_shared/wixSites.ts";
 
@@ -259,7 +261,7 @@ async function runRefresh() {
   // Re-score the catalog against the (now fresh) snapshots.
   try {
     const list = await restSelect(
-      "products?select=*,product_media(id,storage_path,media_type,is_primary,display_order)&limit=2000",
+      "products?select=*,product_media(id,storage_path,media_type,is_primary,display_order,image_role,language,document_type)&limit=2000",
     );
     const { perMarketplaceData } = buildListingHealthData(list, {
       wayfairMap: await latestSnapshotMap("wayfair"),
@@ -280,6 +282,43 @@ async function runRefresh() {
         ([mkt, data]) => [mkt, (data as { stats: { avgScore: number } }).stats.avgScore],
       ),
     );
+
+    // Daily KPI snapshot (Analytics): PIM completeness totals per category
+    // plus channel coverage. Upsert, so the second run of the day just
+    // refreshes the row. History = weekly progress.
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const scored = (list as Record<string, unknown>[])
+        .filter((p) => p.workflow_status !== "archived")
+        .map((p) => ({
+          sku: p.sku,
+          category: p.category,
+          result: scoreCompleteness(p, (p.product_media as unknown[]) ?? []),
+        }));
+      const rows = snapshotMetrics(scored, today) as Record<string, unknown>[];
+      type MktData = { stats: { avgScore: number; distribution: Record<string, number> }; linkedCount: number; products: unknown[] };
+      for (const [mkt, data] of Object.entries(perMarketplaceData as Record<string, MktData>)) {
+        rows.push({
+          snapshot_date: today,
+          scope: "channel",
+          key: mkt,
+          metrics: {
+            total: data.products.length,
+            linked: data.linkedCount,
+            avg: data.stats.avgScore,
+            distribution: data.stats.distribution,
+          },
+        });
+      }
+      await rest("kpi_snapshots?on_conflict=snapshot_date,scope,key", {
+        method: "POST",
+        body: JSON.stringify(rows.map((r) => ({ ...r, taken_at: new Date().toISOString() }))),
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      });
+      report.steps.kpi_snapshot = rows.length;
+    } catch (err) {
+      report.errors.push(`kpi_snapshot: ${(err as Error).message}`);
+    }
   } catch (err) {
     report.errors.push(`listing_health: ${(err as Error).message}`);
   }
