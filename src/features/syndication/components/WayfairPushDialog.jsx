@@ -115,7 +115,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
             <span className="mr-auto inline-flex items-center gap-2 flex-wrap">
               <button type="button" onClick={refreshStatus} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low"><RefreshCw className="w-4 h-4" />Check what Wayfair did</button>
               {imagesDone && (
-                <button type="button" onClick={forceLead} disabled={lead === 'busy'} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-60" title="Wayfair only honors the lead override once it holds the image, so this runs after the upload completed">
+                <button type="button" onClick={forceLead} disabled={lead === 'busy'} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-60" title="Asks Wayfair to lead with the white main. Wayfair accepts the request, but in our tests Partner Home kept its own lead, so confirm it there">
                   {lead === 'busy' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
                   Set the white main as lead
                 </button>
@@ -202,7 +202,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
               )}
             </li>
           ))}
-          {phase === 'done' && <p className="text-body-sm text-on-surface-variant">Wayfair processes requests in the background. "Check what Wayfair did" reads each request's outcome; media can take a few minutes to show on the listing. Once the images request is completed, set the white main as the lead image (Wayfair ignores the override on an image it does not hold yet).</p>}
+          {phase === 'done' && <p className="text-body-sm text-on-surface-variant">Wayfair processes requests in the background; "Check what Wayfair did" reads each outcome. New images land beside the ones Wayfair already holds: once the request completes, remove the old set in Partner Home (Variant Media) and confirm the lead there with "Use as Lead" if the white main is not it.</p>}
         </ol>
       )}
     </Dialog>

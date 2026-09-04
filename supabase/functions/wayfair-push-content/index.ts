@@ -116,7 +116,7 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
   const skippedDocs = media.filter((m) => m.media_type === "document").length - docItems.length;
   return {
     steps: [
-      { key: "images", label: "Images", items: imageItems, note: `${set === "en_fr" ? "EN-FR set" : set === "en" ? "EN set" : "all images"} · white main leads · gray hero not sent${orderedImages.length > IMAGE_CAP ? ` · ${orderedImages.length - IMAGE_CAP} beyond the cap not sent` : ""}` },
+      { key: "images", label: "Images", items: imageItems, note: `${set === "en_fr" ? "EN-FR set" : set === "en" ? "EN set" : "all images"} · white main first · gray hero not sent${orderedImages.length > IMAGE_CAP ? ` · ${orderedImages.length - IMAGE_CAP} beyond the cap not sent` : ""}` },
       { key: "videos", label: "Videos", items: videoItems, note: videoItems.length ? "MP4 files of the product family" : "no video file in the PIM" },
       { key: "documents", label: "Documents", items: docItems.slice(0, DOC_CAP), note: `PDF only${skippedDocs > 0 ? ` · ${skippedDocs} not sent (DXF, EN-ES or beyond the cap)` : ""}` },
     ],
