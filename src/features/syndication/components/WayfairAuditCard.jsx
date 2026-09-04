@@ -460,7 +460,7 @@ export default function WayfairAuditCard() {
 
           {!run.busy && rows.length > 0 && withDiffs.length === 0 && (
             <p className="px-6 py-4 text-body-sm text-on-surface animate-banner-in">
-              Every audited product matches the PIM. Nothing to fix. ✨
+              Every audited product matches the PIM. Nothing to fix.
             </p>
           )}
         </div>
@@ -516,7 +516,7 @@ function DiffDetailDialog({ sku, supplier, market, onClose }) {
         <div className="space-y-3">
           {changes.length === 0 ? (
             <p className="text-body-sm text-on-surface py-1">
-              Already in sync — the last audit's diff has been resolved. ✨
+              Already in sync. The last audit's diff has been resolved.
             </p>
           ) : (
             <ul className="rounded-xl border border-outline-variant divide-y divide-outline-variant max-h-[50vh] overflow-y-auto scrollbar-slim" data-lenis-prevent>
