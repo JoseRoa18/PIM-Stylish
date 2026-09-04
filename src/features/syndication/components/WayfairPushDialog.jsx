@@ -89,12 +89,13 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
 
   async function refreshStatus() {
     const out = {};
-    for (const p of progress) {
-      if (!p.requestId) continue;
-      try { out[p.requestId] = await checkWayfairRequestStatus(p.requestId, { supplier }); } catch (e) { out[p.requestId] = { error: e.message }; }
+    const ids = [...progress.map((p) => p.requestId), lead?.requestId].filter(Boolean);
+    for (const id of ids) {
+      try { out[id] = await checkWayfairRequestStatus(id, { supplier }); } catch (e) { out[id] = { error: e.message }; }
     }
     setStatus(out);
   }
+  const leadStatus = lead?.requestId ? status[lead.requestId] : null;
 
   return (
     <Dialog
@@ -119,7 +120,11 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
                   Set the white main as lead
                 </button>
               )}
-              {lead && lead !== 'busy' && <span className={`text-label-md ${lead.error ? 'text-error' : 'text-success'}`}>{lead.error ?? `lead requested (${String(lead.requestId).slice(0, 8)}…)`}</span>}
+              {lead && lead !== 'busy' && (
+                <span className={`text-label-md ${lead.error || leadStatus?.problems?.length ? 'text-error' : 'text-success'}`}>
+                  {lead.error ?? (leadStatus ? `lead ${leadStatus.status ?? leadStatus.error ?? ''}${leadStatus.problems?.length ? ` · ${leadStatus.problems.length} problems` : ''}` : `lead requested (${String(lead.requestId).slice(0, 8)}…)`)}
+                </span>
+              )}
             </span>
           )}
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">{phase === 'done' ? 'Close' : 'Cancel'}</button>
