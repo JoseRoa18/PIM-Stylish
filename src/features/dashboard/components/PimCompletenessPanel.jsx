@@ -45,34 +45,40 @@ export default function PimCompletenessPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <p className="text-body-sm text-on-surface-variant">
-          Data completeness per category, computed live from the PIM · {data.totals.complete} of {data.totals.total} products at 100% · updated {formatTimeAgo(data.computedAt)}
-        </p>
-        <button
-          type="button"
-          onClick={reload}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Recompute
-        </button>
-      </div>
-
-      {/* Summary tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Tile label="Products" value={data.totals.total} />
-        <Tile label="At 100%" value={data.totals.complete} sub={`${data.totals.pct}% of catalog`} tone={data.totals.pct >= 90 ? 'good' : data.totals.pct >= 60 ? 'warn' : 'bad'} />
-        <Tile label="Average completeness" value={`${data.totals.avg}%`} />
-        <Tile label="Categories" value={data.categories.length} />
-      </div>
+      {/* Overview: same card language as the marketplace tabs */}
+      <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-title-lg text-on-surface">PIM data completeness</h2>
+            <p className="text-body-sm text-on-surface-variant mt-1">
+              Live from the PIM, no channel state · updated {formatTimeAgo(data.computedAt)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={reload}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Recalculate
+          </button>
+        </div>
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <Stat label="At 100%" value={data.totals.complete} sub={`of ${data.totals.total} products`} tone={data.totals.pct >= 90 ? 'good' : data.totals.pct >= 60 ? 'warn' : 'bad'} />
+          <Stat label="Average completeness" value={`${data.totals.avg}%`} sub="across the fields that apply" />
+          <Stat label="Catalog share" value={`${data.totals.pct}%`} sub="products with nothing missing" />
+        </div>
+        <div className="mt-5 h-2 rounded-full bg-surface-container-high overflow-hidden" role="img" aria-label={`${data.totals.pct}% of products complete`}>
+          <div className={`h-full rounded-full ${data.totals.pct >= 90 ? 'bg-tertiary' : data.totals.pct >= 60 ? 'bg-warning' : 'bg-error'}`} style={{ width: `${data.totals.pct}%` }} />
+        </div>
+      </section>
 
       {/* Per-category table */}
       <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
         <header className="px-6 py-4 border-b border-outline-variant">
           <h3 className="text-title-md text-on-surface">By category</h3>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">Click a category to see its products and what each one is missing.</p>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">Open a category to see each product and what it is missing.</p>
         </header>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
@@ -81,8 +87,8 @@ export default function PimCompletenessPanel() {
                 <th className="text-left px-6 py-3 font-medium">Category</th>
                 <th className="text-right px-6 py-3 font-medium">Products</th>
                 <th className="text-right px-6 py-3 font-medium">At 100%</th>
-                <th className="px-6 py-3 font-medium text-left w-56">Share complete</th>
-                <th className="text-right px-6 py-3 font-medium">Avg score</th>
+                <th className="px-6 py-3 font-medium text-left w-56">Complete</th>
+                <th className="text-right px-6 py-3 font-medium">Avg</th>
                 <th className="text-left px-6 py-3 font-medium">Most common gaps</th>
               </tr>
             </thead>
@@ -132,7 +138,7 @@ export default function PimCompletenessPanel() {
           <header className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-4 flex-wrap">
             <div>
               <h3 className="text-title-md text-on-surface">{cat.label}</h3>
-              <p className="text-body-sm text-on-surface-variant mt-0.5">{cat.complete} of {cat.total} at 100% · showing {products.length}</p>
+              <p className="text-body-sm text-on-surface-variant mt-0.5">{cat.complete} of {cat.total} at 100%{products.length !== cat.total ? ` · ${products.length} shown` : ''}</p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="relative">
@@ -153,7 +159,16 @@ export default function PimCompletenessPanel() {
           </header>
           {products.length === 0 ? (
             <div className="px-6 py-12 text-center text-body-sm text-on-surface-variant">
-              {onlyIncomplete ? 'Every product in this category is at 100%. ✨' : 'No products match.'}
+              {search.trim() ? (
+                <>No product in {cat.label} matches "{search.trim()}"{onlyIncomplete ? ' among the incomplete ones' : ''}.</>
+              ) : onlyIncomplete ? (
+                <>
+                  Every product in {cat.label} is at 100%.{' '}
+                  <button type="button" onClick={() => setOnlyIncomplete(false)} className="text-primary font-semibold hover:underline">Show all {cat.total}</button>
+                </>
+              ) : (
+                <>No products in {cat.label}.</>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -219,13 +234,13 @@ export default function PimCompletenessPanel() {
   );
 }
 
-function Tile({ label, value, sub, tone }) {
+function Stat({ label, value, sub, tone }) {
   const toneClass = tone === 'good' ? 'text-tertiary' : tone === 'warn' ? 'text-warning' : tone === 'bad' ? 'text-error' : 'text-on-surface';
   return (
-    <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-5 py-4">
-      <p className="text-label-md text-on-surface-variant">{label}</p>
+    <div>
+      <p className="text-label-md text-on-surface-variant uppercase tracking-wider">{label}</p>
       <p className={`text-headline-md font-semibold mt-1 tabular-nums ${toneClass}`}>{value}</p>
-      {sub && <p className="text-body-sm text-on-surface-variant mt-0.5">{sub}</p>}
+      {sub && <p className="text-body-sm text-on-surface-variant">{sub}</p>}
     </div>
   );
 }
@@ -233,7 +248,7 @@ function Tile({ label, value, sub, tone }) {
 // Missing fields grouped by the product tab where they get filled in.
 function MissingBreakdown({ sku, result }) {
   if (result.missing.length === 0) {
-    return <p className="text-body-sm text-on-surface animate-banner-in">All {result.passed.length} fields filled — 100%. ✨</p>;
+    return <p className="text-body-sm text-on-surface animate-banner-in">All {result.passed.length} fields filled. Nothing to fix.</p>;
   }
   const groups = Object.keys(GROUPS)
     .sort((a, b) => GROUPS[a].order - GROUPS[b].order)
@@ -243,8 +258,9 @@ function MissingBreakdown({ sku, result }) {
     <div className="animate-banner-in flex flex-wrap gap-x-8 gap-y-3">
       {groups.map((g) => (
         <div key={g.group} className="min-w-[14rem]">
-          <Link to={`/catalog/${sku}?tab=${g.tab}`} className="text-label-md font-semibold uppercase tracking-wider text-primary hover:underline">
-            {g.group} · {g.items.length} →
+          <Link to={`/catalog/${sku}?tab=${g.tab}`} className="inline-flex items-center gap-1 text-label-md font-semibold uppercase tracking-wider text-primary hover:underline">
+            {g.group} · {g.items.length}
+            <ArrowRight className="w-3.5 h-3.5" />
           </Link>
           <ul className="mt-1.5 space-y-1">
             {g.items.map((m) => (

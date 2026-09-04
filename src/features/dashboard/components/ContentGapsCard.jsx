@@ -38,7 +38,7 @@ export default function ContentGapsCard({ gaps, hasSummaries }) {
           {hasSummaries ? (
             <>
               <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
-              No missing content across marketplaces. ✨
+              No missing content across marketplaces.
             </>
           ) : (
             <span>

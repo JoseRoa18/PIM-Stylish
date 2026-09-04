@@ -48,7 +48,7 @@ function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'th
   if (result.issues.length === 0) {
     return (
       <p className="text-body-sm text-on-surface animate-banner-in">
-        All {result.passed.length} checks pass — nothing to fix. ✨
+        All {result.passed.length} checks pass. Nothing to fix.
       </p>
     );
   }
