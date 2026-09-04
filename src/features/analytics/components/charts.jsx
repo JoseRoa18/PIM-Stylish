@@ -72,7 +72,7 @@ export function Sparkline({ points, width = 120, height = 32, max = 100 }) {
 export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLabel }) {
   const [hover, setHover] = useState(null);
   const width = 720;
-  const pad = { l: 36, r: 16, t: 16, b: 28 };
+  const pad = { l: 40, r: 56, t: 16, b: 28 };
   const iw = width - pad.l - pad.r;
   const ih = height - pad.t - pad.b;
   const n = points.length;
@@ -111,16 +111,23 @@ export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLab
             <text x={pad.l - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fill="currentColor">{Math.round(t)}{unit}</text>
           </g>
         ))}
-        {points.map((p, i) => (
-          <text key={p.label + i} x={x(i)} y={height - 8} textAnchor="middle" fontSize="11" fill="currentColor" opacity={n > 8 && i % 2 === 1 ? 0 : 1}>{p.label}</text>
-        ))}
+        {points.map((p, i) => {
+          // Thin the ticks on dense axes but never drop the first or the last.
+          const show = n <= 8 || i === 0 || i === n - 1 || (n - 1 - i) % 2 === 0;
+          return show ? (
+            <text key={p.label + i} x={x(i)} y={height - 8} textAnchor="middle" fontSize="11" fill="currentColor">{p.label}</text>
+          ) : null;
+        })}
         {area && <path d={area} fill="var(--color-primary)" opacity="0.1" />}
         {path && <path d={path} fill="none" stroke="var(--color-primary)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
         {valid.map((p) => (
           <circle key={p.i} cx={x(p.i)} cy={y(p.value)} r={hover?.i === p.i ? 5 : 4} fill="var(--color-primary)" stroke="var(--color-surface-container-lowest)" strokeWidth="2" />
         ))}
         {last && (
-          <text x={x(last.i) + 8} y={y(last.value) + 4} fontSize="12" fontWeight="600" fill="var(--color-on-surface)">{last.value}{unit}</text>
+          <text x={x(last.i) + 10} y={y(last.value) + 4} fontSize="12" fontWeight="600" fill="var(--color-on-surface)">{last.value}{unit}</text>
+        )}
+        {valid.length === 1 && (
+          <text x={x(last.i) - 10} y={y(last.value) + 4} textAnchor="end" fontSize="11" fill="currentColor">history starts here</text>
         )}
         {hover && (
           <line x1={x(hover.i)} x2={x(hover.i)} y1={pad.t} y2={pad.t + ih} stroke="var(--color-outline)" strokeWidth="1" />

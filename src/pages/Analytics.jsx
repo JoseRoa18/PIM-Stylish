@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertCircle, Camera, Download, Info } from 'lucide-react';
+import { AlertCircle, Camera, ChevronLeft, ChevronRight, Download, Info } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useKpi } from '@/features/analytics/hooks/useKpi';
 import { takeSnapshot } from '@/features/analytics/api/kpi';
@@ -68,20 +68,34 @@ export default function Analytics() {
     URL.revokeObjectURL(a.href);
   }
 
+  const weekIndex = weeks.findIndex((w) => w.key === week.key);
+  const goWeek = (step) => {
+    const next = weeks[weekIndex + step];
+    if (next) setWeekKey(next.key);
+  };
+
   return (
     <div className="max-w-7xl mx-auto">
-      <header className="mb-6 flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-display-lg text-on-surface">Analytics</h1>
-          <p className="text-body-md text-on-surface-variant mt-1">{week.name} · {week.range}{week.hint ? ` · ${week.hint}` : ''}. Progress of the catalog's data, channel coverage and the team's work.</p>
+      <header className="mb-4">
+        <h1 className="text-display-lg text-on-surface">Analytics</h1>
+        <p className="text-body-md text-on-surface-variant mt-1">Weekly progress of the catalog's data, channel coverage and the team's work.</p>
+      </header>
+
+      {/* The week controls stay pinned while the page scrolls, so switching
+          weeks never means scrolling back up. Newer week = right arrow. */}
+      <div className="sticky top-0 z-20 -mt-1 mb-6 py-3 bg-background/95 backdrop-blur border-b border-outline-variant flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <button type="button" onClick={() => goWeek(1)} disabled={weekIndex >= weeks.length - 1} title="Earlier week" aria-label="Earlier week" className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <select value={week.key} onChange={(e) => setWeekKey(e.target.value)} aria-label="Week" className="px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
+            {weeks.map((w) => <option key={w.key} value={w.key}>{w.name}{w.hint ? ` (${w.hint})` : ''} · {w.range}</option>)}
+          </select>
+          <button type="button" onClick={() => goWeek(-1)} disabled={weekIndex <= 0} title="Later week" aria-label="Later week" className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <label className="text-body-sm text-on-surface-variant flex items-center gap-2">
-            Week
-            <select value={week.key} onChange={(e) => setWeekKey(e.target.value)} className="px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
-              {weeks.map((w) => <option key={w.key} value={w.key}>{w.name}{w.hint ? ` (${w.hint})` : ''} · {w.range}</option>)}
-            </select>
-          </label>
           <button type="button" onClick={exportCsv} disabled={loading} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60">
             <Download className="w-4 h-4" />
             Export week
@@ -93,7 +107,7 @@ export default function Analytics() {
             </button>
           )}
         </div>
-      </header>
+      </div>
 
       {snapMsg && (
         <div className={`mb-4 px-4 py-3 rounded-xl text-body-sm flex items-center gap-2 animate-banner-in ${snapMsg.tone === 'ok' ? 'bg-success-container text-on-success-container' : 'bg-error-container text-on-error-container'}`}>
@@ -132,7 +146,12 @@ export default function Analytics() {
             <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
               <div>
                 <h3 className="text-title-md text-on-surface">Share of products at 100%, last 12 weeks</h3>
-                <p className="text-body-sm text-on-surface-variant mt-0.5">One point per week, the last snapshot of that week. {latestTaken ? `Latest snapshot ${formatTimeAgo(latestTaken)}.` : ''}</p>
+                <p className="text-body-sm text-on-surface-variant mt-0.5">
+                  {trend.filter((p) => typeof p.value === 'number').length <= 1
+                    ? `History starts in ${week.name}: one point per week from now on, the last snapshot of each week.`
+                    : 'One point per week, the last snapshot of that week.'}
+                  {latestTaken ? ` Latest snapshot ${formatTimeAgo(latestTaken)}.` : ''}
+                </p>
               </div>
               {targets?.global?.pct != null && <span className="text-body-sm text-on-surface-variant">Target {targets.global.pct}%{targets.global.date ? ` by ${targets.global.date}` : ''}</span>}
             </div>
