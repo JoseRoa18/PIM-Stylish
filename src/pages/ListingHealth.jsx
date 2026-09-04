@@ -11,6 +11,7 @@ import {
 import { useListingHealth } from '@/features/dashboard/hooks/useListingHealth';
 import ListingHealthOverview from '@/features/dashboard/components/ListingHealthOverview';
 import ListingHealthActions from '@/features/dashboard/components/ListingHealthActions';
+import PimCompletenessPanel from '@/features/dashboard/components/PimCompletenessPanel';
 import {
   categorizeScore,
   MARKETPLACES,
@@ -21,6 +22,10 @@ import { refreshBestBuyOffers } from '@/features/syndication/api/bestbuySync';
 import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
 import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import SCORE_BADGE_STYLES from '@/lib/scoreBadgeStyles';
+
+// The PIM tab scores the catalog's OWN data completeness, live — it leads
+// the strip because every channel score starts from it.
+const PIM_TAB = 'pim';
 
 const SOURCE_STYLES = {
   wix_cache: { label: 'Wix cache', class: 'bg-tertiary/25 text-on-tertiary-container border border-tertiary/40' },
@@ -139,8 +144,10 @@ export default function ListingHealth() {
   // (used by the Syndication channel workspaces).
   const initialTab = new URLSearchParams(window.location.search).get('tab');
   const [marketplace, setMarketplace] = useState(
-    API_MARKETPLACE_KEYS.includes(initialTab) ? initialTab : API_MARKETPLACE_KEYS[0],
+    initialTab === PIM_TAB || API_MARKETPLACE_KEYS.includes(initialTab) ? initialTab : PIM_TAB,
   );
+  const isPim = marketplace === PIM_TAB;
+  const TAB_KEYS = [PIM_TAB, ...API_MARKETPLACE_KEYS];
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('score_asc');
   const [filter, setFilter] = useState('all');
@@ -169,7 +176,7 @@ export default function ListingHealth() {
     return () => window.removeEventListener('resize', updateTabsScroll);
   }, [updateTabsScroll, byMarketplace]);
 
-  const mktDef = MARKETPLACES[marketplace];
+  const mktDef = isPim ? null : MARKETPLACES[marketplace];
   const mktData = byMarketplace[marketplace];
   const products = mktData?.products ?? [];
   const stats = mktData?.stats ?? null;
@@ -229,7 +236,7 @@ export default function ListingHealth() {
     wix_stylish_ca: { run: () => refreshWixCatalog('stylish_ca'), label: 'the site' },
     wix_stylish_us: { run: () => refreshWixCatalog('stylish_us'), label: 'the site' },
   };
-  const refreshDef = CHANNEL_REFRESH[mktDef.key] ?? CHANNEL_REFRESH[mktDef.dataSource];
+  const refreshDef = mktDef ? (CHANNEL_REFRESH[mktDef.key] ?? CHANNEL_REFRESH[mktDef.dataSource]) : null;
 
   async function refreshChannel() {
     if (refreshing) return;
@@ -272,7 +279,7 @@ export default function ListingHealth() {
       </header>
 
       {/* Marketplace tabs — only API-connected channels */}
-      {API_MARKETPLACE_KEYS.length > 1 && (
+      {TAB_KEYS.length > 1 && (
       <div className="relative mb-6">
       <div
         ref={tabsRef}
@@ -280,9 +287,9 @@ export default function ListingHealth() {
         className="border-b border-outline-variant overflow-x-auto scrollbar-hide"
       >
         <nav className="flex min-w-max gap-1" role="tablist">
-          {API_MARKETPLACE_KEYS.map((key) => {
-            const def = MARKETPLACES[key];
-            const data = byMarketplace[key];
+          {TAB_KEYS.map((key) => {
+            const def = key === PIM_TAB ? { label: 'PIM' } : MARKETPLACES[key];
+            const data = key === PIM_TAB ? null : byMarketplace[key];
             const avg = data?.stats?.avgScore ?? 0;
             const isActive = key === marketplace;
             return (
@@ -299,6 +306,9 @@ export default function ListingHealth() {
                 }`}
               >
                 {def.label}
+                {key === PIM_TAB && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold bg-tertiary/20 text-on-tertiary-container">live</span>
+                )}
                 {data && (
                   <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold ${SCORE_BADGE_STYLES[categorizeScore(avg)]}`}>
                     {avg}
@@ -326,7 +336,9 @@ export default function ListingHealth() {
       </div>
       )}
 
-      {loading && (
+      {isPim && <PimCompletenessPanel />}
+
+      {!isPim && loading && (
         <div role="status" aria-label="Loading catalog health" className="animate-pulse space-y-6">
           <div className="h-56 rounded-2xl bg-surface-container" />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -344,14 +356,14 @@ export default function ListingHealth() {
         </div>
       )}
 
-      {error && (
+      {!isPim && error && (
         <div className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>
       )}
 
-      {!loading && !error && mktData && (
+      {!isPim && !loading && !error && mktData && (
         <>
           {/* Wayfair-only: the FULL spec-attributes audit lives right here —
               last run, per-SKU diffs and the mass push — so sync issues are
