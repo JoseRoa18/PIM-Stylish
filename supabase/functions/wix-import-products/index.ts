@@ -53,7 +53,8 @@ async function fetchAllWixProducts(apiKey: string, siteId: string): Promise<WixP
         "wix-site-id": siteId,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ query: { paging: { limit, offset } } }),
+      // Stable unique sort — offset paging without it drops/duplicates products.
+      body: JSON.stringify({ query: { sort: '[{"numericId":"asc"}]', paging: { limit, offset } } }),
     });
 
     if (!resp.ok) {

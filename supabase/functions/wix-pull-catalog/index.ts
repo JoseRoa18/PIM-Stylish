@@ -80,7 +80,11 @@ Deno.serve(async (req) => {
         // products — a linked product someone hid on the site would read as a
         // BROKEN LINK instead of "hidden". Found by the CRUD test: a fresh
         // hidden product never showed up in the pull.
-        body: JSON.stringify({ query: { paging: { limit, offset } }, includeHiddenProducts: true }),
+        // A stable, unique sort is REQUIRED for offset paging: without it Wix
+        // shuffles products between pages, so every pull duplicated a few and
+        // silently dropped others — random false "missing" listings in Price
+        // Alignment and Listing Health (S-320T on 2026-09-09).
+        body: JSON.stringify({ query: { sort: '[{"numericId":"asc"}]', paging: { limit, offset } }, includeHiddenProducts: true }),
       });
       if (!resp.ok) {
         const errBody = await resp.text();
