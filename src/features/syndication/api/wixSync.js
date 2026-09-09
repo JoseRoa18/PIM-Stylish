@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { etToday, marketWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { WIX_SITES, DEFAULT_WIX_SITE } from '../lib/wixSites';
+import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells } from '../lib/wixSites';
 import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
 
 const siteLabel = (site) => WIX_SITES[site]?.label ?? 'Wix';
@@ -142,6 +142,10 @@ export async function pushProductToAllWixSites(sku, brand = null) {
     .select('media_type, document_type, storage_path, file_name, language')
     .eq('sku', sku);
   if (p?.wix_product_id) sites.add('sinksdirect_ca');
+  // Brand rule (2026-09-09): a store that never carries the product's brand
+  // is skipped even when a stale link exists (Azuni on the Stylish sites).
+  if (brand === 'stylish' && p && !wixSiteSells('stylish_ca', p)) throw new Error(`${sku} is ${p.brand} — not sold on the Stylish stores.`);
+  sites = new Set([...sites].filter((k) => wixSiteSells(k, p)));
   // Brand split (rule 2026-08-31): pushes run per brand — 'sinksdirect'
   // covers CA + US, 'stylish' covers CA + US.
   if (brand) sites = new Set([...sites].filter((k) => k.startsWith(brand)));
@@ -347,7 +351,7 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
 
   const { data: prods, error } = await supabase
     .from('products')
-    .select(`sku, base:${cfg.priceField}`);
+    .select(`sku, brand, base:${cfg.priceField}`);
   if (error) throw error;
   const { data: linkRows, error: linkErr } = await supabase
     .from('wix_links')
@@ -355,6 +359,10 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
     .eq('site', site);
   if (linkErr) throw linkErr;
   const baseBySku = new Map((prods ?? []).map((p) => [p.sku, p.base]));
+  // Brand scope: products of a brand this store never carries are out of
+  // scope — neither drift nor a broken link (Azuni on the Stylish sites).
+  const outOfScope = new Set((prods ?? []).filter((p) => !wixSiteSells(cfg, p)).map((p) => p.sku));
+  let skippedBrand = 0;
 
   const promoField = cfg.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const promoBySku = new Map();
@@ -383,6 +391,7 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
   let priceDiffs = 0;
   let broken = 0;
   for (const p of linkRows ?? []) {
+    if (outOfScope.has(p.sku)) { skippedBrand += 1; continue; }
     const w = wixById.get(p.wix_product_id);
     if (!w) {
       broken += 1;
@@ -432,5 +441,5 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
     results: [...results, ...orphans],
   });
 
-  return { total, linked: (linkRows ?? []).length, inSync, priceDiffs, broken, orphans: orphans.length };
+  return { total, linked: (linkRows ?? []).length - skippedBrand, skippedBrand, inSync, priceDiffs, broken, orphans: orphans.length };
 }

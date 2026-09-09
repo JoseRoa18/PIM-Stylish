@@ -4,7 +4,7 @@ import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers, pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
 import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
-import { WIX_SITES, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
+import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells } from '@/features/syndication/lib/wixSites';
 
 /**
  * Price Alignment Analyzer — the four Wix sites plus Best Buy.
@@ -81,7 +81,7 @@ export const ALIGN_TARGET_KEYS = Object.keys(ALIGN_TARGETS);
 
 const eq = (a, b) => a != null && b != null && Math.abs(a - b) <= 0.01;
 
-function classifySnapshot(snapshot) {
+function classifySnapshot(snapshot, outOfScope = null) {
   const counts = { promo_ok: 0, map_ok: 0, promo_missing: 0, misaligned: 0, no_map: 0, missing: 0 };
   const problems = [];
   let total = 0;
@@ -89,6 +89,7 @@ function classifySnapshot(snapshot) {
 
   for (const r of snapshot.results ?? []) {
     if (r.state === 'not_in_pim') continue; // Wix orphans — out of scope
+    if (outOfScope?.has(r.sku)) continue; // brand the store never carries
     total += 1;
     if (r.state === 'missing') {
       counts.missing += 1;
@@ -211,7 +212,15 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
     .limit(1);
   if (error) throw error;
   if (!data?.length) return null;
-  return classifySnapshot(data[0]);
+  // Brand scope applies to older snapshots too: products of a brand the site
+  // never carries are dropped before classifying (Azuni on the Stylish sites).
+  let outOfScope = null;
+  if (cfg.excludedBrands?.length) {
+    const { data: prods, error: prodErr } = await supabase.from('products').select('sku, brand');
+    if (prodErr) throw prodErr;
+    outOfScope = new Set((prods ?? []).filter((p) => !wixSiteSells(cfg, p)).map((p) => p.sku));
+  }
+  return classifySnapshot(data[0], outOfScope);
 }
 
 /** Fresh live analysis — pulls the channel now and PERSISTS the snapshot. */

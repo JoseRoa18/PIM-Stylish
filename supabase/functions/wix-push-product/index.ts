@@ -27,7 +27,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { formatDescription } from "../_shared/aiFormat.ts";
-import { resolveWixSite } from "../_shared/wixSites.ts";
+import { resolveWixSite, siteSells } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -235,6 +235,14 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: `Product not found in PIM: ${sku}` }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Brand rule (2026-09-09): Azuni is never sold on the Stylish stores.
+    if (!siteSells(site, pimRow.brand)) {
+      return new Response(
+        JSON.stringify({ error: `${sku} is ${pimRow.brand} — ${pimRow.brand} products are not sold on ${site.label}.` }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 

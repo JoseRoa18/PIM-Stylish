@@ -149,6 +149,10 @@ function PreviewPanel({ preview, onConfirm, onCancel }) {
         <StatTile icon={AlertCircle} label="Wix-only (skipped)" value={summary.wixOnly} />
       </div>
 
+      {summary.skippedBrand > 0 && (
+        <p className="text-body-sm text-on-surface-variant">{summary.skippedBrand} Azuni product{summary.skippedBrand === 1 ? '' : 's'} on this store skipped — Azuni is not sold on the Stylish stores.</p>
+      )}
+
       {summary.skippedNoSku > 0 && (
         <div className="rounded-lg border border-outline-variant bg-surface-container-low p-3">
           <p className="text-label-md text-on-surface font-semibold mb-1">
@@ -232,6 +236,7 @@ function ResultPanel({ result, onReset }) {
             New links: {result.summary.newLinks} · Already linked: {result.summary.alreadyLinked} ·
             {' '}Wix-only: {result.summary.wixOnly}
             {result.summary.skippedNoSku > 0 && ` · No SKU: ${result.summary.skippedNoSku}`}
+            {result.summary.skippedBrand > 0 && ` · Azuni not sold here: ${result.summary.skippedBrand}`}
           </p>
         </div>
       </div>

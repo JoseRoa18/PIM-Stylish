@@ -24,7 +24,7 @@ import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHeal
 // @ts-ignore — plain JS module shared with the browser app
 import { scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
 import { etToday, marketWindow, windowContains } from "../_shared/promoCalendar.ts";
-import { WIX_SITES, type WixSite } from "../_shared/wixSites.ts";
+import { WIX_SITES, siteSells, type WixSite } from "../_shared/wixSites.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -149,8 +149,14 @@ async function refreshWalmart(market: "us" | "ca") {
 // so only the BASE price is compared against MSRP.
 async function refreshWix(site: WixSite) {
   const { total, products: wixProducts } = await invokeFn("wix-pull-catalog", { site: site.key });
-  const prods = await restSelect(`products?select=sku,base:${site.priceField}`);
+  const prods = await restSelect(`products?select=sku,brand,base:${site.priceField}`);
   const links = await restSelect(`wix_links?select=sku,wix_product_id&site=eq.${site.key}`);
+  // Brand scope: products of a brand this store never carries are out of
+  // scope — neither drift nor a broken link (Azuni on the Stylish sites).
+  const outOfScope = new Set(
+    (prods as { sku: string; brand: string | null }[]).filter((p) => !siteSells(site, p.brand)).map((p) => p.sku),
+  );
+  let skippedBrand = 0;
 
   const promoField = site.market === "us" ? "promo_price_usd" : "promo_price_cad";
   const promoBySku = new Map<string, number>();
@@ -184,6 +190,7 @@ async function refreshWix(site: WixSite) {
   let priceDiffs = 0;
   let broken = 0;
   for (const p of links as { sku: string; wix_product_id: string }[]) {
+    if (outOfScope.has(p.sku)) { skippedBrand += 1; continue; }
     const w = wixById.get(p.wix_product_id);
     if (!w) {
       broken += 1;
@@ -225,7 +232,7 @@ async function refreshWix(site: WixSite) {
     top_offenders: results.filter((r) => r.state === "missing" || r.price_diff).slice(0, 10),
     results: [...results, ...orphans],
   }]);
-  return { total, linked: links.length, inSync, priceDiffs, broken, orphans: orphans.length };
+  return { total, linked: links.length - skippedBrand, skippedBrand, inSync, priceDiffs, broken, orphans: orphans.length };
 }
 
 // ---- The full refresh ----

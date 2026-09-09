@@ -18,7 +18,7 @@
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { resolveWixSite } from "../_shared/wixSites.ts";
+import { resolveWixSite, siteSells } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
     console.log(`[wix-link] loading PIM rows…`);
     const { data: existing, error: loadErr } = await supabase
       .from("products")
-      .select("sku");
+      .select("sku, brand");
     if (loadErr) {
       throw new Error(`Database select failed: ${loadErr.message ?? JSON.stringify(loadErr)}`);
     }
@@ -118,10 +118,10 @@ Deno.serve(async (req) => {
     if (linksErr) throw new Error(`Link select failed: ${linksErr.message}`);
     console.log(`[wix-link] loaded ${existing?.length ?? 0} PIM rows, ${links?.length ?? 0} existing links`);
 
-    type ExistingRow = { sku: string; wix_product_id: string | null };
+    type ExistingRow = { sku: string; brand: string | null; wix_product_id: string | null };
     const bySku = new Map<string, ExistingRow>();
-    for (const row of (existing ?? []) as { sku: string }[]) {
-      bySku.set(row.sku, { sku: row.sku, wix_product_id: null });
+    for (const row of (existing ?? []) as { sku: string; brand: string | null }[]) {
+      bySku.set(row.sku, { sku: row.sku, brand: row.brand, wix_product_id: null });
     }
     for (const link of (links ?? []) as { sku: string; wix_product_id: string }[]) {
       const row = bySku.get(link.sku);
@@ -140,6 +140,7 @@ Deno.serve(async (req) => {
       alreadyLinked: 0,   // PIM row found AND already has the same wix_product_id
       wixOnly: 0,         // Wix has it, PIM does not (skipped)
       skippedNoSku: 0,    // Wix product without SKU (skipped)
+      skippedBrand: 0,    // brand this store never carries (Azuni on Stylish) — never linked
     };
 
     const sampleNewLinks: Array<{ sku: string; name: string | null }> = [];
@@ -156,6 +157,13 @@ Deno.serve(async (req) => {
       if (!pimRow) {
         summary.wixOnly++;
         if (wixOnly.length < 50) wixOnly.push({ sku, name: p.name ?? null, wix_product_id: p.id });
+        continue;
+      }
+
+      // Brand rule (2026-09-09): Azuni is never sold on the Stylish stores,
+      // so a listing there is never linked — the PIM ignores it.
+      if (!siteSells(site, pimRow.brand)) {
+        summary.skippedBrand++;
         continue;
       }
 

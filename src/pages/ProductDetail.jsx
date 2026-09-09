@@ -44,7 +44,7 @@ import StatusBadge from '@/features/products/components/StatusBadge';
 import MediaSection from '@/features/media/components/MediaSection';
 import DocumentsSection from '@/features/media/components/DocumentsSection';
 import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
-import { WIX_SITES, WIX_SITE_KEYS, DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
+import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
 import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
@@ -1650,7 +1650,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
     <div className="space-y-6">
       {/* Channel overview — one tile per connection; Wix tiles switch the card below. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-        {WIX_SITE_KEYS.map((key) => (
+        {wixSitesFor(product).map((key) => (
           <ChannelTile
             key={key}
             label={WIX_SITES[key].short}
@@ -1694,6 +1694,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
           {pushAll === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
           Push SinksDirect
         </button>
+        {/* Brand rule: Azuni is never sold on the Stylish stores. */}
+        {wixSiteSells('stylish_ca', product) && (
         <button
           type="button"
           onClick={() => runPushAll('stylish')}
@@ -1704,6 +1706,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
           {pushAll === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
           Push Stylish
         </button>
+        )}
         {pushAll && pushAll !== 'busy' && (
           pushAll instanceof Error ? (
             <span className="text-body-sm text-error">{pushAll.message}</span>
@@ -1718,7 +1721,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
             <span className="text-body-sm text-error">{autoLink.message}</span>
           ) : (
             <span className="text-body-sm text-on-surface-variant">
-              Wix links: {Object.values(autoLink.wix ?? {}).reduce((a, b) => a + b, 0)}/4 sites
+              Wix links: {Object.values(autoLink.wix ?? {}).reduce((a, b) => a + b, 0)}/{wixSitesFor(product).length} sites
               {' '}· Wayfair: {autoLink.wayfair ? 'linked' : 'not found'}
               {autoLink.bestbuy ? ' · on Best Buy' : ''}
               {autoLink.walmart_us ? ' · on Walmart US' : ''}
@@ -1727,7 +1730,11 @@ function MarketplacesTab({ product, media, onUpdate }) {
         )}
       </div>
 
-      <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
+      {wixSiteSells(wixSite, product) ? (
+        <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
+      ) : (
+        <p className="text-body-sm text-on-surface-variant">{product.brand} products are not sold on {WIX_SITES[wixSite].label}.</p>
+      )}
       <div ref={wayfairRef} className="scroll-mt-24">
         <WayfairProductCard product={product} onUpdate={onUpdate} />
       </div>

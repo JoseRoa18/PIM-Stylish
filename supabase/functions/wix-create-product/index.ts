@@ -21,7 +21,7 @@
 // Caller must be an authenticated admin or editor.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { resolveWixSite, type WixSite } from "../_shared/wixSites.ts";
+import { resolveWixSite, siteSells, type WixSite } from "../_shared/wixSites.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -119,6 +119,8 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (pimErr) throw new Error(`PIM read failed: ${pimErr.message}`);
     if (!pim) return json({ error: `${sku} not found in the PIM.` }, 404);
+    // Brand rule (2026-09-09): Azuni is never sold on the Stylish stores.
+    if (!siteSells(site, pim.brand)) return json({ error: `${sku} is ${pim.brand} — ${pim.brand} products are not sold on ${site.label}.` }, 409);
     const { data: linkRow, error: linkReadErr } = await admin
       .from("wix_links")
       .select("wix_product_id")

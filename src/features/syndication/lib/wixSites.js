@@ -19,6 +19,7 @@ export const WIX_SITES = {
     priceLabel: 'Price (CAD) — MAP',
     priceShort: 'MAP (CAD)',
     priceHint: 'SinksDirect sells at the Canadian MAP.',
+    excludedBrands: [],
     market: 'ca',
     hasSale: true,
     hasCollections: true,
@@ -36,6 +37,7 @@ export const WIX_SITES = {
     priceLabel: 'Price (USD) — MAP',
     priceShort: 'MAP (USD)',
     priceHint: 'SinksDirect USA sells at the US MAP.',
+    excludedBrands: [],
     market: 'us',
     hasSale: false,
     hasCollections: false,
@@ -53,6 +55,7 @@ export const WIX_SITES = {
     priceLabel: 'Price (CAD) — MSRP',
     priceShort: 'MSRP (CAD)',
     priceHint: 'The Stylish brand store sells at the Canadian MSRP.',
+    excludedBrands: ['azuni'],
     market: 'ca',
     hasSale: false,
     hasCollections: false,
@@ -70,6 +73,7 @@ export const WIX_SITES = {
     priceLabel: 'Price (USD) — MSRP',
     priceShort: 'MSRP (USD)',
     priceHint: 'The Stylish brand store sells at the US MSRP.',
+    excludedBrands: ['azuni'],
     market: 'us',
     hasSale: false,
     hasCollections: false,
@@ -78,3 +82,18 @@ export const WIX_SITES = {
 
 export const WIX_SITE_KEYS = Object.keys(WIX_SITES);
 export const DEFAULT_WIX_SITE = 'sinksdirect_ca';
+
+/**
+ * Brand rule (2026-09-09): Azuni products are NEVER sold on the Stylish brand
+ * stores. For those sites they don't exist — not in Listing Health, not in
+ * pricing or price alignment, not in links or pushes. SinksDirect carries
+ * every brand. `product` may be a product row or a brand string.
+ */
+export function wixSiteSells(siteOrKey, product) {
+  const cfg = typeof siteOrKey === 'string' ? WIX_SITES[siteOrKey] : siteOrKey;
+  const brand = (typeof product === 'string' ? product : product?.brand ?? '').toLowerCase();
+  return !(cfg?.excludedBrands ?? []).some((b) => brand.includes(b));
+}
+
+/** The site keys that carry this product's brand. */
+export const wixSitesFor = (product) => WIX_SITE_KEYS.filter((k) => wixSiteSells(k, product));

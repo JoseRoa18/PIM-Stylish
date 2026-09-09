@@ -283,6 +283,7 @@ export const MARKETPLACES = {
   },
   wix_stylish_ca: {
     key: 'wix_stylish_ca',
+    excludedBrands: ['azuni'],
     label: 'Stylish Canada',
     subtitle: 'Wix Stores',
     dataSource: 'wix_site',
@@ -305,6 +306,7 @@ export const MARKETPLACES = {
   },
   wix_stylish_us: {
     key: 'wix_stylish_us',
+    excludedBrands: ['azuni'],
     label: 'Stylish USA',
     subtitle: 'Wix Stores',
     dataSource: 'wix_site',
@@ -637,7 +639,14 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
   const perMarketplaceData = {};
   for (const mkt of API_MARKETPLACE_KEYS) {
     const def = MARKETPLACES[mkt];
-    const scores = enriched.map((e) => {
+    // Brand scope: a store that never carries a brand doesn't score it at
+    // all — those products are neither linked nor missing there (Azuni is
+    // not sold on the Stylish brand sites, rule 2026-09-09).
+    const excludedBrands = def.excludedBrands ?? [];
+    const inScope = excludedBrands.length
+      ? enriched.filter((e) => !excludedBrands.some((b) => (e.brand ?? '').toLowerCase().includes(b)))
+      : enriched;
+    const scores = inScope.map((e) => {
       let product;
       let media;
       if (def.dataSource === 'wix_cache' && e.wixData) {

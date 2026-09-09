@@ -28,11 +28,14 @@ export interface WixSite {
   hasSale: boolean;
   /** wix_collection_ids stores SinksDirect CA collection GUIDs only. */
   hasCollections: boolean;
+  /** Brands this store never carries (lower-case substrings of products.brand). */
+  excludedBrands: string[];
 }
 
 export const WIX_SITES: Record<string, WixSite> = {
   sinksdirect_ca: {
     key: "sinksdirect_ca",
+    excludedBrands: [],
     channel: "wix",
     promoAware: true,
     label: "Sinks Direct Canada",
@@ -46,6 +49,7 @@ export const WIX_SITES: Record<string, WixSite> = {
   },
   sinksdirect_us: {
     key: "sinksdirect_us",
+    excludedBrands: [],
     channel: "wix_sinksdirect_us",
     promoAware: true,
     label: "Sinks Direct USA",
@@ -59,6 +63,7 @@ export const WIX_SITES: Record<string, WixSite> = {
   },
   stylish_ca: {
     key: "stylish_ca",
+    excludedBrands: ["azuni"],
     channel: "wix_stylish_ca",
     promoAware: false,
     label: "Stylish Canada",
@@ -72,6 +77,7 @@ export const WIX_SITES: Record<string, WixSite> = {
   },
   stylish_us: {
     key: "stylish_us",
+    excludedBrands: ["azuni"],
     channel: "wix_stylish_us",
     promoAware: false,
     label: "Stylish USA",
@@ -84,6 +90,14 @@ export const WIX_SITES: Record<string, WixSite> = {
     hasCollections: false,
   },
 };
+
+/** Brand rule (2026-09-09): Azuni products are NEVER sold on the Stylish brand
+ * stores — for those sites they are out of scope everywhere (snapshots,
+ * listing health, links, pushes). SinksDirect carries every brand. */
+export function siteSells(site: WixSite, brand: string | null | undefined): boolean {
+  const b = (brand ?? "").toLowerCase();
+  return !site.excludedBrands.some((x) => b.includes(x));
+}
 
 /** Resolve the `site` key from a request body; defaults to SinksDirect CA
  * so every pre-multi-site caller keeps its exact old behavior. Throws on
