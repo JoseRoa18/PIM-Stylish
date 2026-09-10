@@ -114,6 +114,7 @@ const FIELDS = {
   multiple_images: { label: '5+ Images', check: (p) => countImages(p._media) >= 5 },
   linked_to_wix: { label: 'Linked to Wix', check: (p) => hasText(p.wix_product_id) },
   linked_to_wayfair: { label: 'Linked to Wayfair', check: (p) => hasText(p.wayfair_item_group_id) },
+  linked_to_wayfair_usa: { label: 'Linked to Wayfair USA', check: (p) => hasText(p.wayfair_usa_item_group_id) },
   // Channel titles come from the marketing title, not the short internal
   // model name ("Topaz") — that's what pushes/exports actually send.
   marketing_title: {
@@ -133,6 +134,15 @@ const FIELDS = {
     check: (p) => {
       if (p._wayfairAudit === undefined) return true;
       if (p._wayfairAudit === null) return !hasText(p.wayfair_item_group_id);
+      return p._wayfairAudit.changed === 0;
+    },
+  },
+  // Same rule against the USA supplier's audit (channel wayfair_usa).
+  wayfair_usa_specs_synced: {
+    label: 'Spec Attributes in Sync',
+    check: (p) => {
+      if (p._wayfairAudit === undefined) return true;
+      if (p._wayfairAudit === null) return !hasText(p.wayfair_usa_item_group_id);
       return p._wayfairAudit.changed === 0;
     },
   },
@@ -329,8 +339,8 @@ export const MARKETPLACES = {
   },
   wayfair: {
     key: 'wayfair',
-    // The audit targets the CAN/default supplier — this is the Canadian
-    // storefront (the US supplier has no audit yet).
+    // The Canadian supplier (31948): audit channel 'wayfair', ids in
+    // wayfair_item_group_id. The USA supplier is the next entry.
     label: 'Wayfair Canada',
     subtitle: 'Product Catalog API',
     dataSource: 'wayfair',
@@ -353,6 +363,34 @@ export const MARKETPLACES = {
       { field: 'number_of_bowls', category: 'Specs', weight: 3, severity: 'minor' },
       { field: 'shipping_weight', category: 'Shipping', weight: 5, severity: 'major' },
       { field: 'wayfair_specs_synced', category: 'Channel Sync', weight: 12, severity: 'major', needsLink: true },
+    ],
+  },
+  wayfair_usa: {
+    key: 'wayfair_usa',
+    // The USA supplier (StylishUSAInc, 36896): its own audit channel and
+    // its own listing ids.
+    label: 'Wayfair USA',
+    subtitle: 'Product Catalog API',
+    dataSource: 'wayfair_usa',
+    connectionType: 'api',
+    requiresLink: true,
+    linkField: 'linked_to_wayfair_usa',
+    checks: [
+      { field: 'linked_to_wayfair_usa', category: 'Identity', weight: 14, severity: 'critical' },
+      { field: 'marketing_title', category: 'Identity', weight: 8, severity: 'critical' },
+      { field: 'upc', category: 'Identity', weight: 6, severity: 'major' },
+      { field: 'description', category: 'Content', weight: 10, severity: 'critical' },
+      { field: 'bullet_points', category: 'Content', weight: 8, severity: 'major' },
+      { field: 'warranty', category: 'Content', weight: 4, severity: 'minor' },
+      { field: 'primary_image', category: 'Images', weight: 10, severity: 'critical' },
+      { field: 'multiple_images', category: 'Images', weight: 5, severity: 'minor' },
+      { field: 'external_dimensions', category: 'Specs', weight: 8, severity: 'critical' },
+      { field: 'material', category: 'Specs', weight: 4, severity: 'major' },
+      { field: 'finish', category: 'Specs', weight: 4, severity: 'major' },
+      { field: 'gauge', category: 'Specs', weight: 3, severity: 'minor' },
+      { field: 'number_of_bowls', category: 'Specs', weight: 3, severity: 'minor' },
+      { field: 'shipping_weight', category: 'Shipping', weight: 5, severity: 'major' },
+      { field: 'wayfair_usa_specs_synced', category: 'Channel Sync', weight: 12, severity: 'major', needsLink: true },
     ],
   },
   bestbuy: {
@@ -617,7 +655,7 @@ export function extractWixData(wixRaw) {
  *                  { wayfairMap, bestbuyMap, walmartMaps: { walmart_us, walmart_ca } }
  *                  A null map = no snapshot yet (checks treat unknown as pass).
  */
-export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = null, walmartMaps = { walmart_us: null, walmart_ca: null }, wixSiteMaps = {} } = {}) {
+export function buildListingHealthData(list, { wayfairMap = null, wayfairUsaMap = null, bestbuyMap = null, walmartMaps = { walmart_us: null, walmart_ca: null }, wixSiteMaps = {} } = {}) {
   // Enrich each product once with parsed Wix data + base fields
   const enriched = list.map((p) => {
     const wixData = extractWixData(p.wix_raw);
@@ -649,13 +687,14 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
     const scores = inScope.map((e) => {
       let product;
       let media;
+      const auditMap = def.dataSource === 'wayfair' ? wayfairMap : def.dataSource === 'wayfair_usa' ? wayfairUsaMap : null;
       if (def.dataSource === 'wix_cache' && e.wixData) {
         product = { ...e.raw, ...e.wixData };
         media = e.wixData._wix_media;
-      } else if (def.dataSource === 'wayfair') {
+      } else if (def.dataSource === 'wayfair' || def.dataSource === 'wayfair_usa') {
         product = {
           ...e.raw,
-          _wayfairAudit: wayfairMap ? (wayfairMap.get(e.sku) ?? null) : undefined,
+          _wayfairAudit: auditMap ? (auditMap.get(e.sku) ?? null) : undefined,
         };
         media = e.pimMedia;
       } else if (def.dataSource === 'bestbuy') {
@@ -696,6 +735,8 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
             ? e.hasWixCache ? 'wix_cache' : (e.wix_product_id ? 'pim_fallback' : 'not_linked')
             : def.dataSource === 'wayfair'
               ? e.raw.wayfair_item_group_id ? 'pim' : 'not_linked'
+              : def.dataSource === 'wayfair_usa'
+                ? e.raw.wayfair_usa_item_group_id ? 'pim' : 'not_linked'
               : def.dataSource === 'bestbuy'
                 ? (bestbuyMap && bestbuyMap.get(e.sku) ? 'offer' : 'not_linked')
                 : def.dataSource in walmartMaps
@@ -712,7 +753,7 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
         // Which spec attributes differ at Wayfair (from the audit),
         // so the breakdown can name them.
         wayfair_audit:
-          def.dataSource === 'wayfair' && wayfairMap ? wayfairMap.get(e.sku) ?? null : undefined,
+          auditMap ? auditMap.get(e.sku) ?? null : undefined,
         // The live Best Buy offer (price/stock/msrp), for the breakdown.
         bb_offer:
           def.dataSource === 'bestbuy' && bestbuyMap ? bestbuyMap.get(e.sku) ?? null : undefined,
@@ -730,6 +771,8 @@ export function buildListingHealthData(list, { wayfairMap = null, bestbuyMap = n
     const linkedCount =
       def.dataSource === 'wayfair'
         ? enriched.filter((e) => e.raw.wayfair_item_group_id).length
+        : def.dataSource === 'wayfair_usa'
+          ? enriched.filter((e) => e.raw.wayfair_usa_item_group_id).length
         : def.dataSource === 'wix_site'
           ? scores.filter((s) => s.source === 'site').length
           : scores.filter((s) => s.wix_product_id).length;

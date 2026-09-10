@@ -74,12 +74,9 @@ Deno.serve(async (req) => {
       overwrite?: boolean;
       supplier?: string;
     };
-    // products.wayfair_item_group_id holds the CANADIAN supplier's listing ids;
-    // for other suppliers this endpoint is read-only (diff/report) until the
-    // schema grows a per-supplier column.
-    if (apply && supplier !== "CAN") {
-      return json({ error: `apply=true is only supported for the CAN supplier (got ${supplier})` }, 400);
-    }
+    // One column per supplier: products.wayfair_item_group_id (Canada, 31948)
+    // and products.wayfair_usa_item_group_id (USA, 36896).
+    const COL = supplier === "USA" ? "wayfair_usa_item_group_id" : "wayfair_item_group_id";
 
     const CLIENT_ID = supplier === "USA" ? Deno.env.get("WAYFAIR_USA_CLIENT_ID") : Deno.env.get("WAYFAIR_CLIENT_ID");
     const CLIENT_SECRET = supplier === "USA" ? Deno.env.get("WAYFAIR_USA_CLIENT_SECRET") : Deno.env.get("WAYFAIR_CLIENT_SECRET");
@@ -141,19 +138,20 @@ Deno.serve(async (req) => {
 
     // Read PIM SKUs (optionally restricted) with their current group ids.
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    let q = supabase.from("products").select("sku, wayfair_item_group_id");
+    let q = supabase.from("products").select(`sku, ${COL}`);
     if (skus?.length) q = q.in("sku", skus);
     const { data: pimRows, error: pErr } = await q;
     if (pErr) return json({ error: `PIM read failed: ${pErr.message}` }, 500);
 
     const pimSkus = new Set((pimRows ?? []).map((r) => r.sku));
     const updates: { sku: string; id: string; had: string | null }[] = [];
-    for (const row of pimRows ?? []) {
-      const id = wfMap.get(row.sku);
+    for (const row of (pimRows ?? []) as Record<string, string | null>[]) {
+      const id = wfMap.get(row.sku as string);
       if (!id) continue;
-      if (row.wayfair_item_group_id && !overwrite) continue;
-      if (row.wayfair_item_group_id === id) continue;
-      updates.push({ sku: row.sku, id, had: row.wayfair_item_group_id });
+      const had = row[COL] ?? null;
+      if (had && !overwrite) continue;
+      if (had === id) continue;
+      updates.push({ sku: row.sku as string, id, had });
     }
 
     let applied = 0;
@@ -161,7 +159,7 @@ Deno.serve(async (req) => {
       for (const u of updates) {
         const { error } = await supabase
           .from("products")
-          .update({ wayfair_item_group_id: u.id })
+          .update({ [COL]: u.id })
           .eq("sku", u.sku);
         if (!error) applied++;
       }

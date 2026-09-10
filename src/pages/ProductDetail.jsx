@@ -1586,6 +1586,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
   // price rule); keying by site remounts the card so it reads that site live.
   const [wixSite, setWixSite] = useState(DEFAULT_WIX_SITE);
   const wayfairRef = useRef(null);
+  const wayfairUsaRef = useRef(null);
   const [autoLink, setAutoLink] = useState(null); // null | 'busy' | summary | Error
   const [pushAll, setPushAll] = useState(null); // null | 'busy' | results | Error
 
@@ -1649,7 +1650,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
   return (
     <div className="space-y-6">
       {/* Channel overview — one tile per connection; Wix tiles switch the card below. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {wixSitesFor(product).map((key) => (
           <ChannelTile
             key={key}
@@ -1669,6 +1670,15 @@ function MarketplacesTab({ product, media, onUpdate }) {
           linkedText="Connected"
           notLinkedText="No group id"
           onClick={() => wayfairRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        />
+        <ChannelTile
+          label="Wayfair USA"
+          avatar="WF"
+          avatarClass="bg-brand-wayfair/15 text-brand-wayfair"
+          linked={Boolean(product.wayfair_usa_item_group_id)}
+          linkedText="Connected"
+          notLinkedText="No listing id"
+          onClick={() => wayfairUsaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         />
       </div>
 
@@ -1722,7 +1732,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
           ) : (
             <span className="text-body-sm text-on-surface-variant">
               Wix links: {Object.values(autoLink.wix ?? {}).reduce((a, b) => a + b, 0)}/{wixSitesFor(product).length} sites
-              {' '}· Wayfair: {autoLink.wayfair ? 'linked' : 'not found'}
+              {' '}· Wayfair CA: {autoLink.wayfair ? 'linked' : 'not found'}
+              {' '}· Wayfair USA: {autoLink.wayfair_usa ? 'linked' : 'not found'}
               {autoLink.bestbuy ? ' · on Best Buy' : ''}
               {autoLink.walmart_us ? ' · on Walmart US' : ''}
             </span>
@@ -1737,6 +1748,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
       )}
       <div ref={wayfairRef} className="scroll-mt-24">
         <WayfairProductCard product={product} onUpdate={onUpdate} />
+      </div>
+      <div ref={wayfairUsaRef} className="scroll-mt-24">
+        <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />
       </div>
       <WayfairAdditionCard product={product} supplier="USA" />
       <ExportTemplatesCard product={product} media={media} />

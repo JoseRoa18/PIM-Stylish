@@ -70,6 +70,9 @@ async function restInsert(table: string, rows: unknown[]) {
 // {sync: true} (with a small limit) to await inline for testing.
 async function runAudit(supplier: string, market: string | undefined, limit: number) {
   const startedAt = Date.now();
+  // One snapshot channel per supplier so the Canada and USA tabs never
+  // overwrite each other.
+  const channel = supplier === "USA" ? "wayfair_usa" : "wayfair";
   try {
 
     const products = await restSelect("products?select=sku&order=category,sku");
@@ -81,7 +84,7 @@ async function runAudit(supplier: string, market: string | undefined, limit: num
     // a day keep every SKU at most ~a day stale, and the published snapshot
     // is always full-catalog.
     const prevRows = await restSelect(
-      "channel_health?channel=eq.wayfair&select=results&order=run_at.desc&limit=1",
+      `channel_health?channel=eq.${channel}&select=results&order=run_at.desc&limit=1`,
     );
     const prevBySku = new Map<string, Record<string, unknown>>(
       (prevRows?.[0]?.results ?? []).map((r: { sku: string }) => [r.sku, r]),
@@ -167,7 +170,7 @@ async function runAudit(supplier: string, market: string | undefined, limit: num
     // live in the report's error_groups.
     const uncovered = skus.length - rows.length;
     const snapshot = {
-      channel: "wayfair",
+      channel,
       target: `${supplier}/${market ?? "default"}`,
       total: skus.length,
       in_sync: rows.filter((r) => r.changed === 0).length,

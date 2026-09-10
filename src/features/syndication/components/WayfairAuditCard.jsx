@@ -24,8 +24,8 @@ const TARGETS = {
 };
 const CONCURRENCY = 3;
 
-export default function WayfairAuditCard() {
-  const [target, setTarget] = useState('CAN_CA');
+export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
+  const [target, setTarget] = useState(defaultTarget);
   const [run, setRun] = useState(null); // { busy, done, total, rows, errors }
   const [push, setPush] = useState(null); // { busy, done, total, ok, failed }
   const [lastSnap, setLastSnap] = useState(null); // latest channel_health snapshot (read-only)
@@ -49,9 +49,9 @@ export default function WayfairAuditCard() {
   // without re-running the ~1 min live audit.
   useEffect(() => {
     let active = true;
-    latestSnapshot('wayfair').then((s) => { if (active) setLastSnap(s); });
+    latestSnapshot(TARGETS[target].supplier === 'USA' ? 'wayfair_usa' : 'wayfair').then((s) => { if (active) setLastSnap(s); });
     return () => { active = false; };
-  }, []);
+  }, [target]);
 
   // Fix every discrepancy at once: push the PIM's spec attributes for each
   // SKU the audit flagged. (Against the sandbox this is processed by Wayfair
@@ -139,7 +139,7 @@ export default function WayfairAuditCard() {
           fields: Object.entries(r.diff).filter(([, d]) => d.changed).slice(0, 4).map(([t]) => t),
         }));
       await supabase.from('channel_health').insert({
-        channel: 'wayfair',
+        channel: supplier === 'USA' ? 'wayfair_usa' : 'wayfair',
         target: `${supplier}/${market}`,
         total: state.total,
         in_sync: state.rows.filter((r) => r.changed === 0).length,

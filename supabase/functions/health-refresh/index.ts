@@ -272,6 +272,7 @@ async function runRefresh() {
     );
     const { perMarketplaceData } = buildListingHealthData(list, {
       wayfairMap: await latestSnapshotMap("wayfair"),
+      wayfairUsaMap: await latestSnapshotMap("wayfair_usa"),
       bestbuyMap: await latestSnapshotMap("bestbuy"),
       walmartMaps: {
         walmart_us: await latestSnapshotMap("walmart_us"),
@@ -339,14 +340,16 @@ async function runRefresh() {
         }
         rows.push({ snapshot_date: today, scope: "price", key: site, metrics: { total, aligned, pct: total ? Math.round((aligned / total) * 100) : 0 } });
       }
-      try {
-        const wf = await restSelect("channel_health?channel=eq.wayfair&select=total,in_sync,with_diffs,errors,run_at&order=run_at.desc&limit=1");
-        if (wf?.[0]) {
-          const w = wf[0];
-          const checked = (w.in_sync ?? 0) + (w.with_diffs ?? 0);
-          rows.push({ snapshot_date: today, scope: "sync", key: "wayfair", metrics: { total: w.total, in_sync: w.in_sync, with_diffs: w.with_diffs, errors: w.errors, pct: checked ? Math.round(((w.in_sync ?? 0) / checked) * 100) : 0, audited_at: w.run_at } });
-        }
-      } catch { /* no audit yet */ }
+      for (const key of ["wayfair", "wayfair_usa"]) {
+        try {
+          const wf = await restSelect(`channel_health?channel=eq.${key}&select=total,in_sync,with_diffs,errors,run_at&order=run_at.desc&limit=1`);
+          if (wf?.[0]) {
+            const w = wf[0];
+            const checked = (w.in_sync ?? 0) + (w.with_diffs ?? 0);
+            rows.push({ snapshot_date: today, scope: "sync", key, metrics: { total: w.total, in_sync: w.in_sync, with_diffs: w.with_diffs, errors: w.errors, pct: checked ? Math.round(((w.in_sync ?? 0) / checked) * 100) : 0, audited_at: w.run_at } });
+          }
+        } catch { /* no audit yet */ }
+      }
       await rest("kpi_snapshots?on_conflict=snapshot_date,scope,key", {
         method: "POST",
         body: JSON.stringify(rows.map((r) => ({ ...r, taken_at: new Date().toISOString() }))),

@@ -23,7 +23,7 @@ export async function autoLinkChannels(skus) {
   const list = [skus].flat().filter(Boolean);
   if (!list.length) return null;
 
-  const summary = { wix: {}, wayfair: 0, bestbuy: 0, walmart_us: 0, errors: [] };
+  const summary = { wix: {}, wayfair: 0, wayfair_usa: 0, bestbuy: 0, walmart_us: 0, errors: [] };
 
   // --- Wix: one link-only run per site (matches by SKU, idempotent) --------
   await Promise.allSettled(
@@ -46,15 +46,17 @@ export async function autoLinkChannels(skus) {
     .in('sku', list);
   for (const l of links ?? []) summary.wix[l.site] = (summary.wix[l.site] ?? 0) + 1;
 
-  // --- Wayfair Canada: store the listing's item-group id when it exists ----
-  try {
-    const { data, error } = await supabase.functions.invoke('wayfair-pull-groups', {
-      body: { skus: list, apply: true, supplier: 'CAN' },
-    });
-    if (error) throw new Error(error.message);
-    summary.wayfair = data?.updates?.length ?? data?.applied ?? 0;
-  } catch (err) {
-    summary.errors.push(`Wayfair: ${err.message}`);
+  // --- Wayfair Canada + USA: store each supplier's listing id when it exists
+  for (const [supplier, key] of [['CAN', 'wayfair'], ['USA', 'wayfair_usa']]) {
+    try {
+      const { data, error } = await supabase.functions.invoke('wayfair-pull-groups', {
+        body: { skus: list, apply: true, supplier },
+      });
+      if (error) throw new Error(error.message);
+      summary[key] = data?.updates?.length ?? data?.applied ?? 0;
+    } catch (err) {
+      summary.errors.push(`Wayfair ${supplier}: ${err.message}`);
+    }
   }
 
   // --- Snapshot-only channels: report presence, write nothing --------------
@@ -81,7 +83,7 @@ export async function autoLinkChannels(skus) {
     target: 'channels',
     summary:
       `Auto-linked ${list.length === 1 ? list[0] : `${list.length} products`} across channels — ` +
-      `Wix links: ${wixTotal}, Wayfair: ${summary.wayfair}` +
+      `Wix links: ${wixTotal}, Wayfair CA: ${summary.wayfair}, Wayfair USA: ${summary.wayfair_usa}` +
       (summary.errors.length ? ` · ${summary.errors.length} channel error(s)` : ''),
     metadata: { skus: list.slice(0, 50), ...summary },
   });

@@ -34,12 +34,12 @@ export const LIVE_CHANNELS = [
     avatarClass: 'bg-brand-wayfair/15 text-brand-wayfair',
     env: 'Production',
     envClass: 'bg-success-container text-on-success-container',
-    stat: async (totals) => {
-      const { count } = await supabase
-        .from('products')
-        .select('sku', { count: 'exact', head: true })
-        .not('wayfair_item_group_id', 'is', null);
-      return { value: `${count ?? 0}/${totals.products}`, label: 'item groups linked' };
+    stat: async () => {
+      const [{ count: ca }, { count: us }] = await Promise.all([
+        supabase.from('products').select('sku', { count: 'exact', head: true }).not('wayfair_item_group_id', 'is', null),
+        supabase.from('products').select('sku', { count: 'exact', head: true }).not('wayfair_usa_item_group_id', 'is', null),
+      ]);
+      return { value: `${ca ?? 0} CA · ${us ?? 0} US`, label: 'listings linked' };
     },
   },
   {

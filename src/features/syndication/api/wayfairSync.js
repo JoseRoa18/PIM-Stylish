@@ -176,10 +176,11 @@ export async function pullWayfairItemGroups(opts = {}) {
 }
 
 /** Save the Wayfair item-group id for a product (needed to push content). */
-export async function setWayfairItemGroupId(sku, itemGroupId) {
+export async function setWayfairItemGroupId(sku, itemGroupId, supplier = 'CAN') {
+  const column = supplier === 'USA' ? 'wayfair_usa_item_group_id' : 'wayfair_item_group_id';
   const { error } = await supabase
     .from('products')
-    .update({ wayfair_item_group_id: itemGroupId?.trim() || null })
+    .update({ [column]: itemGroupId?.trim() || null })
     .eq('sku', sku);
   if (error) throw error;
 }

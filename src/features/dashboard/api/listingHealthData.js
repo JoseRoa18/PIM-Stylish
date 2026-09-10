@@ -44,6 +44,7 @@ export async function computeListingHealth() {
 
   return buildListingHealthData(dbProducts ?? [], {
     wayfairMap: await latestSnapshotMap('wayfair'),
+    wayfairUsaMap: await latestSnapshotMap('wayfair_usa'),
     bestbuyMap: await latestSnapshotMap('bestbuy'),
     walmartMaps: {
       walmart_us: await latestSnapshotMap('walmart_us'),

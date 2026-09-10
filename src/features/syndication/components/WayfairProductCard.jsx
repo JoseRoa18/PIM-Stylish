@@ -5,24 +5,28 @@ import { formatTimeAgo } from '@/lib/format';
 import { useAuth } from '@/features/auth/AuthContext';
 import WayfairPushDialog from './WayfairPushDialog';
 
-// Per-product Wayfair panel (Marketplaces tab): the item-group id, and one
-// "Review push" that shows exactly what would travel before anything is sent.
-export default function WayfairProductCard({ product, onUpdate }) {
+// Per-product Wayfair panel (Marketplaces tab), one per supplier: the
+// listing id, and one "Review push" that shows exactly what would travel
+// before anything is sent.
+export default function WayfairProductCard({ product, onUpdate, supplier = 'CAN' }) {
+  const usa = supplier === 'USA';
+  const column = usa ? 'wayfair_usa_item_group_id' : 'wayfair_item_group_id';
+  const label = usa ? 'Wayfair USA' : 'Wayfair Canada';
   // Viewers see the card read-only: no group-id editing, no push.
   const { canEdit } = useAuth();
-  const [groupId, setGroupId] = useState(product.wayfair_item_group_id ?? '');
+  const [groupId, setGroupId] = useState(product[column] ?? '');
   const [savingId, setSavingId] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [reviewing, setReviewing] = useState(false);
 
-  const dirty = (groupId.trim() || null) !== (product.wayfair_item_group_id ?? null);
+  const dirty = (groupId.trim() || null) !== (product[column] ?? null);
 
   async function saveGroupId() {
     setSavingId(true);
     setSaveError(null);
     try {
-      await setWayfairItemGroupId(product.sku, groupId);
-      onUpdate?.({ wayfair_item_group_id: groupId.trim() || null });
+      await setWayfairItemGroupId(product.sku, groupId, supplier);
+      onUpdate?.({ [column]: groupId.trim() || null });
     } catch (err) {
       setSaveError(err.message);
     } finally {
@@ -38,11 +42,13 @@ export default function WayfairProductCard({ product, onUpdate }) {
             WF
           </div>
           <div>
-            <h2 className="text-title-lg text-on-surface leading-tight">Wayfair Canada</h2>
+            <h2 className="text-title-lg text-on-surface leading-tight">{label}</h2>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Wayfair API · {product.wayfair_synced_at
-                ? `last pushed ${formatTimeAgo(product.wayfair_synced_at)}`
-                : 'not pushed yet'}
+              Wayfair API · {usa
+                ? 'StylishUSAInc supplier'
+                : product.wayfair_synced_at
+                  ? `last pushed ${formatTimeAgo(product.wayfair_synced_at)}`
+                  : 'not pushed yet'}
             </p>
           </div>
         </div>
@@ -96,10 +102,11 @@ export default function WayfairProductCard({ product, onUpdate }) {
       {reviewing && (
         <WayfairPushDialog
           sku={product.sku}
-          supplier="CAN"
-          label="Wayfair Canada"
+          supplier={supplier}
+          market={usa ? 'US' : 'CA'}
+          label={label}
           onClose={() => setReviewing(false)}
-          onPushed={() => onUpdate?.({ wayfair_synced_at: new Date().toISOString() })}
+          onPushed={usa ? undefined : () => onUpdate?.({ wayfair_synced_at: new Date().toISOString() })}
         />
       )}
     </section>

@@ -6,7 +6,8 @@
 //     Wayfair already carries the copy; prices have no API at all.
 //   - Everything that travels is media, by public URL, in this order:
 //       images  → white main leads, gray SinksDirect hero stays out,
-//                 the market's language set (CA: EN-FR, else EN, else all)
+//                 the market's language set (CA: EN-FR, else EN, else all;
+//                 US: EN, else EN-ES, else EN-FR, else all but French)
 //       videos  → the product family's .mp4 files
 //       documents → PDFs: spec sheet, installation, cut-out template, warranty
 //     Spec attributes are pushed by wayfair-push-attributes (separate call).
@@ -83,8 +84,17 @@ function pickImages(all: MediaRow[], lang: "ca" | "us") {
   const en = all.filter((m) => m.language === "en");
   if (lang === "ca" && enFr.length) return { chosen: enFr, set: "en_fr" };
   if (en.length) return { chosen: en, set: "en" };
-  const rest = lang === "us" ? all.filter((m) => m.language !== "en_fr" && m.language !== "fr") : all;
-  return { chosen: rest, set: "all" };
+  if (lang === "us") {
+    // USA (rule 2026-09-10): EN, else EN-ES, else the bilingual EN-FR set —
+    // never a lone main picture while a full set exists. French-only images
+    // never travel to the US listing.
+    const enEs = all.filter((m) => m.language === "en_es");
+    if (enEs.length) return { chosen: enEs, set: "en_es" };
+    const enFrOnly = all.filter((m) => m.language === "en_fr");
+    if (enFrOnly.length) return { chosen: enFrOnly, set: "en_fr" };
+    return { chosen: all.filter((m) => m.language !== "fr"), set: "all" };
+  }
+  return { chosen: all, set: "all" };
 }
 
 function buildPlan(media: MediaRow[], lang: "ca" | "us") {
@@ -116,7 +126,7 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
   const skippedDocs = media.filter((m) => m.media_type === "document").length - docItems.length;
   return {
     steps: [
-      { key: "images", label: "Images", items: imageItems, note: `${set === "en_fr" ? "EN-FR set" : set === "en" ? "EN set" : "all images"} · white main first · gray hero not sent${orderedImages.length > IMAGE_CAP ? ` · ${orderedImages.length - IMAGE_CAP} beyond the cap not sent` : ""}` },
+      { key: "images", label: "Images", items: imageItems, note: `${set === "en_fr" ? "EN-FR set" : set === "en_es" ? "EN-ES set" : set === "en" ? "EN set" : "all images"} · white main first · gray hero not sent${orderedImages.length > IMAGE_CAP ? ` · ${orderedImages.length - IMAGE_CAP} beyond the cap not sent` : ""}` },
       { key: "videos", label: "Videos", items: videoItems, note: videoItems.length ? "MP4 files of the product family" : "no video file in the PIM" },
       { key: "documents", label: "Documents", items: docItems.slice(0, DOC_CAP), note: `PDF only · type and language are set in Partner Home after the upload${skippedDocs > 0 ? ` · ${skippedDocs} not sent (DXF, EN-ES or beyond the cap)` : ""}` },
     ],

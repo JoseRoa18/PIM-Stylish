@@ -25,8 +25,9 @@ export default function ChannelCoverage({ index, week }) {
     const priceKey = PRICE_SITE[key];
     const price = priceKey ? latestSnapshot(index, 'price', priceKey) : null;
     const priceBefore = priceKey ? snapshotAt(index, 'price', priceKey, weekEdge) : null;
-    const sync = key === 'wayfair' ? latestSnapshot(index, 'sync', 'wayfair') : null;
-    const syncBefore = key === 'wayfair' ? snapshotAt(index, 'sync', 'wayfair', weekEdge) : null;
+    const hasSync = key === 'wayfair' || key === 'wayfair_usa';
+    const sync = hasSync ? latestSnapshot(index, 'sync', key) : null;
+    const syncBefore = hasSync ? snapshotAt(index, 'sync', key, weekEdge) : null;
     return { key, label: MARKETPLACES[key]?.label ?? key, now, before, price, priceBefore, sync, syncBefore, series: weeklySeries(index, 'channel', key, 'avg') };
   }).sort((a, b) => (b.now?.metrics?.linked ?? 0) - (a.now?.metrics?.linked ?? 0));
 

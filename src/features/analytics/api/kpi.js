@@ -45,13 +45,15 @@ export async function takeSnapshot() {
       rows.push({ snapshot_date: today, scope: 'price', key: site, metrics: { total, aligned, pct: total ? Math.round((aligned / total) * 100) : 0 } });
     } catch { /* keep going */ }
   }
-  try {
-    const { data: wf } = await supabase.from('channel_health').select('total, in_sync, with_diffs, errors, run_at').eq('channel', 'wayfair').order('run_at', { ascending: false }).limit(1).maybeSingle();
-    if (wf) {
-      const checked = (wf.in_sync ?? 0) + (wf.with_diffs ?? 0);
-      rows.push({ snapshot_date: today, scope: 'sync', key: 'wayfair', metrics: { total: wf.total, in_sync: wf.in_sync, with_diffs: wf.with_diffs, errors: wf.errors, pct: checked ? Math.round(((wf.in_sync ?? 0) / checked) * 100) : 0, audited_at: wf.run_at } });
-    }
-  } catch { /* no audit yet */ }
+  for (const key of ['wayfair', 'wayfair_usa']) {
+    try {
+      const { data: wf } = await supabase.from('channel_health').select('total, in_sync, with_diffs, errors, run_at').eq('channel', key).order('run_at', { ascending: false }).limit(1).maybeSingle();
+      if (wf) {
+        const checked = (wf.in_sync ?? 0) + (wf.with_diffs ?? 0);
+        rows.push({ snapshot_date: today, scope: 'sync', key, metrics: { total: wf.total, in_sync: wf.in_sync, with_diffs: wf.with_diffs, errors: wf.errors, pct: checked ? Math.round(((wf.in_sync ?? 0) / checked) * 100) : 0, audited_at: wf.run_at } });
+      }
+    } catch { /* no audit yet */ }
+  }
 
   // Channel coverage from the same pipeline the Listing Health tabs use.
   try {

@@ -82,7 +82,7 @@ function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'th
                         <span className="text-on-surface-variant">· {i.category}</span>
                       )}
                     </span>
-                    {i.key === 'wayfair_specs_synced' && wayfairAudit?.fields?.length > 0 && (
+                    {(i.key === 'wayfair_specs_synced' || i.key === 'wayfair_usa_specs_synced') && wayfairAudit?.fields?.length > 0 && (
                       <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant max-w-md">
                         Differs at Wayfair in:{' '}
                         <span className="text-on-surface">{wayfairAudit.fields.join(' · ')}</span>
@@ -369,9 +369,9 @@ export default function ListingHealth() {
               last run, per-SKU diffs and the mass push — so sync issues are
               worked without bouncing to the Syndication page. The cron runs
               it 20 minutes before each health refresh (6:40 & 1:40 VET). */}
-          {mktDef.dataSource === 'wayfair' && (
+          {(mktDef.dataSource === 'wayfair' || mktDef.dataSource === 'wayfair_usa') && (
             <div className="mb-6">
-              <WayfairAuditCard />
+              <WayfairAuditCard key={mktDef.key} defaultTarget={mktDef.dataSource === 'wayfair_usa' ? 'USA_US' : 'CAN_CA'} />
             </div>
           )}
 
@@ -387,7 +387,7 @@ export default function ListingHealth() {
               {mktDef.dataSource === 'pim' && (
                 <> · scoring against PIM data needed to fill the template</>
               )}
-              {mktDef.dataSource === 'wayfair' && (
+              {(mktDef.dataSource === 'wayfair' || mktDef.dataSource === 'wayfair_usa') && (
                 <> · PIM readiness + spec-attribute sync from the latest audit</>
               )}
               {mktDef.dataSource === 'bestbuy' && (
