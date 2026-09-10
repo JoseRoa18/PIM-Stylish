@@ -79,21 +79,16 @@ const fileName = (u: string) => decodeURIComponent(u.split("?")[0].split("/").po
 // Same language rule as the Wix Canada push, so the two channels show the
 // same artwork: EN-FR set when it exists, else EN, else everything (US: EN,
 // else everything that is not French).
-function pickImages(all: MediaRow[], lang: "ca" | "us") {
+// ONE listing serves both suppliers (verified 2026-09-10: the 12 images
+// pushed through Canada show under the USA supplier, spec diffs are
+// identical SKU by SKU, same listingId), so both markets get the SAME
+// set: the bilingual EN-FR set, else EN, else everything. A market-specific
+// set would pile a second gallery onto the shared listing.
+function pickImages(all: MediaRow[], _lang: "ca" | "us") {
   const enFr = all.filter((m) => m.language === "en_fr" || m.language === "fr");
   const en = all.filter((m) => m.language === "en");
-  if (lang === "ca" && enFr.length) return { chosen: enFr, set: "en_fr" };
+  if (enFr.length) return { chosen: enFr, set: "en_fr" };
   if (en.length) return { chosen: en, set: "en" };
-  if (lang === "us") {
-    // USA (rule 2026-09-10): EN, else EN-ES, else the bilingual EN-FR set —
-    // never a lone main picture while a full set exists. French-only images
-    // never travel to the US listing.
-    const enEs = all.filter((m) => m.language === "en_es");
-    if (enEs.length) return { chosen: enEs, set: "en_es" };
-    const enFrOnly = all.filter((m) => m.language === "en_fr");
-    if (enFrOnly.length) return { chosen: enFrOnly, set: "en_fr" };
-    return { chosen: all.filter((m) => m.language !== "fr"), set: "all" };
-  }
   return { chosen: all, set: "all" };
 }
 
@@ -109,7 +104,6 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
 
   const videoItems: Item[] = media
     .filter((m) => m.media_type === "video" && isHttp(m.storage_path) && /\.(mp4|mov)(\?|$)/i.test(m.storage_path))
-    .filter((m) => lang === "ca" || (m.language !== "fr"))
     .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
     .slice(0, VIDEO_CAP)
     .map((m) => ({ url: m.storage_path, label: m.file_name || fileName(m.storage_path), kind: "video", language: m.language }));
@@ -119,7 +113,6 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
   for (const [re, label] of DOC_ORDER) {
     for (const m of docs.filter((d) => re.test(d.document_type ?? ""))) {
       if (m.language === "en_es") continue;
-      if (lang === "us" && m.language === "fr") continue;
       docItems.push({ url: m.storage_path, label: `${label}${m.language ? ` (${m.language.toUpperCase().replace("_", "-")})` : ""}`, kind: "document", language: m.language, docType: m.document_type });
     }
   }
@@ -131,6 +124,9 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
       { key: "documents", label: "Documents", items: docItems.slice(0, DOC_CAP), note: `PDF only · type and language are set in Partner Home after the upload${skippedDocs > 0 ? ` · ${skippedDocs} not sent (DXF, EN-ES or beyond the cap)` : ""}` },
     ],
     neverSent: ["Title", "Description (marketing copy)", "Feature bullets", "Prices"],
+    // Canada and USA share the listing: media and specs pushed through one
+    // supplier show under the other.
+    sharedListing: true,
   };
 }
 

@@ -108,6 +108,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
           {phase === 'review' && plan && (
             <span className="mr-auto text-body-sm text-on-surface-variant">
               {plan.listed ? `Listed on Wayfair · ${plan.wayfair?.className ?? ''} · ${plan.wayfair?.status ?? ''}` : 'Not in the Wayfair catalog — media cannot be pushed'}
+              {plan.sharedListing ? ' · one listing for Canada and USA' : ''}
               {plan.env !== 'production' ? ' · sandbox' : ''}
             </span>
           )}
