@@ -63,7 +63,8 @@ import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/ho
 import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
 import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/homeDepotCaExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
-import { templateMatchesProduct } from '@/features/templates/api/templates';
+import { templateMatchesProduct, purposesIn, templatePurpose, templatePurposeLabel } from '@/features/templates/api/templates';
+import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useLengthUnit, toDisplayLength, withUnit, toFractionLength } from '@/features/products/lib/units';
 import UnitToggle from '@/components/ui/UnitToggle';
@@ -1795,11 +1796,11 @@ function ExportTemplatesCard({ product, media }) {
   const { templates, loading } = useTemplates();
   const [exporting, setExporting] = useState(null);
   const [error, setError] = useState(null);
+  const [asking, setAsking] = useState(null); // { marketplace, purposes }
 
-  // One action per marketplace — the file list is an implementation detail.
-  // Menards is a multi-file SET that always downloads as one ZIP, so it
-  // collapses to a single entry (reference-only files excluded, same as the
-  // bulk export). Other marketplaces get one entry per matching template.
+  // One action per marketplace. A marketplace can carry files for several
+  // purposes (new listing, update, prices, promotions): with one purpose the
+  // button says which; with more, clicking asks before anything downloads.
   const entries = useMemo(() => {
     const byMarket = new Map();
     for (const t of templates) {
@@ -1807,60 +1808,77 @@ function ExportTemplatesCard({ product, media }) {
       if (!byMarket.has(t.marketplace)) byMarket.set(t.marketplace, []);
       byMarket.get(t.marketplace).push(t);
     }
-    return [...byMarket.entries()].flatMap(([marketplace, files]) => {
-      if (/menards/i.test(marketplace)) {
-        const set = files.filter((t) => !/recipient|reference\.xls/i.test(t.file_name));
-        if (!set.length) return [];
-        return [{
-          key: marketplace,
-          marketplace,
-          files: set,
-          detail: `Set of ${set.length} files · downloads as one ZIP`,
-        }];
-      }
-      // Lowe's is also a set: Item Template + SOS Freight Analysis, one action.
-      if (/lowe/i.test(marketplace)) {
-        return [{
-          key: marketplace,
-          marketplace,
-          files,
-          detail: files.length > 1 ? `Set of ${files.length} files · downloads as one ZIP` : files[0].file_name,
-        }];
-      }
-      return files.map((t) => ({ key: t.id, marketplace, files: [t], detail: t.file_name }));
-    });
+    return [...byMarket.entries()].map(([marketplace, files]) => {
+      const purposes = purposesIn(files);
+      const single = purposes.length === 1 ? purposes[0] : null;
+      const set = filesFor(marketplace, files, single?.value ?? 'new_listing');
+      return {
+        key: marketplace,
+        marketplace,
+        files,
+        purposes,
+        detail: single
+          ? `${single.label} · ${setDetail(marketplace, set)}`
+          : purposes.map((p) => p.label).join(' · '),
+      };
+    }).filter((e) => e.files.length);
   }, [templates, product]);
 
-  async function handleExport(entry) {
-    setExporting(entry.key);
+  // The files of one purpose, with the per-marketplace set rules (Menards
+  // and Lowe's ship multi-file sets that download as one ZIP).
+  function filesFor(marketplace, files, purpose) {
+    const own = files.filter((t) => templatePurpose(t) === purpose);
+    if (/menards/i.test(marketplace)) return own.filter((t) => !/recipient|reference\.xls/i.test(t.file_name));
+    return own;
+  }
+  function setDetail(marketplace, set) {
+    if (!set.length) return 'no file';
+    if (/menards|lowe/i.test(marketplace) && set.length > 1) return `set of ${set.length} files · one ZIP`;
+    return set[0].file_name;
+  }
+
+  function startExport(entry) {
+    if (entry.purposes.length > 1) {
+      setAsking({ marketplace: entry.marketplace, purposes: entry.purposes, files: entry.files });
+      return;
+    }
+    runExport(entry.marketplace, entry.files, entry.purposes[0]?.value ?? 'new_listing');
+  }
+
+  async function runExport(marketplace, files, purpose) {
+    setAsking(null);
+    setExporting(marketplace);
     setError(null);
     try {
-      const base = (product.model_name || product.sku).replace(/[^\w-]+/g, '_');
-      if (/menards/i.test(entry.marketplace)) {
-        await generateMenardsFromTemplates(entry.files, [product]);
-      } else if (/wayfair/i.test(entry.marketplace)) {
+      const set = filesFor(marketplace, files, purpose);
+      if (!set.length) throw new Error(`No ${templatePurposeLabel(purpose)} file for ${marketplace} fits this product.`);
+      const tag = purpose === 'new_listing' ? '' : `_${templatePurposeLabel(purpose).replace(/[^\w]+/g, '')}`;
+      const base = `${(product.model_name || product.sku).replace(/[^\w-]+/g, '_')}${tag}`;
+      if (/menards/i.test(marketplace)) {
+        await generateMenardsFromTemplates(set, [product]);
+      } else if (/wayfair/i.test(marketplace)) {
         // Wayfair exports the whole variant family, so name the file by collection.
-        const res = await generateWayfairFromTemplate(entry.files[0].storage_path, [product], `Wayfair_${base}`);
+        const res = await generateWayfairFromTemplate(set[0].storage_path, [product], `Wayfair_${base}`);
         if (res.warnings?.length) {
           setError(
-            `Downloaded ${res.count} variant(s). ⚠ ${res.warnings.length} share a finish — set a 2nd Variant Grouping in Excel before uploading (details in console).`
+            `Downloaded ${res.count} variant(s). ${res.warnings.length} share a finish — set a 2nd Variant Grouping in Excel before uploading (details in console).`
           );
         }
-      } else if (/amazon/i.test(entry.marketplace)) {
-        await generateAmazonFromTemplate(entry.files[0].storage_path, [product], `Amazon_${base}`);
-      } else if (/walmart/i.test(entry.marketplace)) {
-        await generateWalmartFromTemplate(entry.files[0].storage_path, [product], `Walmart_${base}`);
-      } else if (/home ?depot.*(\bca\b|canada)/i.test(entry.marketplace)) {
-        await generateHomeDepotCaFromTemplate(entry.files[0].storage_path, [product], `HomeDepotCA_${base}`);
-      } else if (/home ?depot/i.test(entry.marketplace)) {
-        await generateHomeDepotFromTemplate(entry.files[0].storage_path, [product], `HomeDepot_${base}`);
-      } else if (/lowe/i.test(entry.marketplace)) {
-        await generateLowesSet(entry.files, [product], `Lowes_${base}`);
-      } else if (/bb&b|bbb|overstock/i.test(entry.marketplace)) {
-        await generateBBBFromTemplate(entry.files[0].storage_path, product, media);
+      } else if (/amazon/i.test(marketplace)) {
+        await generateAmazonFromTemplate(set[0].storage_path, [product], `Amazon_${base}`);
+      } else if (/walmart/i.test(marketplace)) {
+        await generateWalmartFromTemplate(set[0].storage_path, [product], `Walmart_${base}`);
+      } else if (/home ?depot.*(\bca\b|canada)/i.test(marketplace)) {
+        await generateHomeDepotCaFromTemplate(set[0].storage_path, [product], `HomeDepotCA_${base}`);
+      } else if (/home ?depot/i.test(marketplace)) {
+        await generateHomeDepotFromTemplate(set[0].storage_path, [product], `HomeDepot_${base}`);
+      } else if (/lowe/i.test(marketplace)) {
+        await generateLowesSet(set, [product], `Lowes_${base}`);
+      } else if (/bb&b|bbb|overstock/i.test(marketplace)) {
+        await generateBBBFromTemplate(set[0].storage_path, product, media);
       } else {
         throw new Error(
-          `${entry.marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B and Menards are supported so far.`
+          `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B and Menards are supported so far.`
         );
       }
     } catch (err) {
@@ -1882,7 +1900,7 @@ function ExportTemplatesCard({ product, media }) {
           <div>
             <h3 className="text-title-lg text-on-surface leading-tight">Export Templates</h3>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Pre-filled XLSX files for manual upload to each marketplace.
+              Pre-filled files for manual upload. A marketplace with several kinds of file asks which one first.
             </p>
           </div>
         </div>
@@ -1896,7 +1914,7 @@ function ExportTemplatesCard({ product, media }) {
             <button
               key={entry.key}
               type="button"
-              onClick={() => handleExport(entry)}
+              onClick={() => startExport(entry)}
               disabled={exporting === entry.key}
               className="group flex items-center gap-3 px-3.5 py-3 rounded-xl border border-outline-variant bg-surface hover:border-primary/40 hover:bg-surface-container-low transition-colors text-left disabled:opacity-60"
             >
@@ -1921,6 +1939,14 @@ function ExportTemplatesCard({ product, media }) {
           <p className="text-body-sm text-error mt-3 animate-banner-in">{error}</p>
         )}
       </div>
+      {asking && (
+        <ExportPurposeDialog
+          marketplace={asking.marketplace}
+          purposes={asking.purposes}
+          onPick={(purpose) => runExport(asking.marketplace, asking.files, purpose)}
+          onClose={() => setAsking(null)}
+        />
+      )}
     </section>
   );
 }

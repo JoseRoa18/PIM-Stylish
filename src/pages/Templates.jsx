@@ -16,8 +16,12 @@ import {
   uploadTemplate,
   deleteTemplate,
   updateTemplateCategories,
+  updateTemplatePurpose,
   TEMPLATE_CATEGORIES,
+  TEMPLATE_PURPOSES,
   templateCategoryLabel,
+  templatePurposeLabel,
+  templatePurpose,
 } from '@/features/templates/api/templates';
 import { formatTimeAgo } from '@/lib/format';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -159,25 +163,25 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
   // of categories lands in ONE group regardless of the order each file stored
   // them; past 3 categories the joined label stops scanning, so it collapses
   // to a count.
+  // Purpose first (new listing / update / prices / promotions), then the
+  // category set — the export flow asks the purpose, so it leads here too.
   const byCategory = new Map();
   for (const t of templates) {
     const labels = (t.categories ?? []).map(templateCategoryLabel).sort((a, b) => a.localeCompare(b));
-    const key = labels.length ? labels.join('|') : 'General · all products';
+    const purpose = templatePurposeLabel(templatePurpose(t));
+    const key = `${purpose}|${labels.length ? labels.join('|') : 'General · all products'}`;
     if (!byCategory.has(key)) {
-      byCategory.set(key, {
-        key,
-        labels,
-        summaryLabel: labels.length === 0
-          ? 'General · all products'
-          : labels.length > 3
-            ? `${labels.length} categories`
-            : labels.join(' + '),
-        items: [],
-      });
+      const cats = labels.length === 0
+        ? 'General · all products'
+        : labels.length > 3
+          ? `${labels.length} categories`
+          : labels.join(' + ');
+      byCategory.set(key, { key, purpose, labels, summaryLabel: `${purpose} · ${cats}`, items: [] });
     }
     byCategory.get(key).items.push(t);
   }
-  const catGroups = [...byCategory.values()].sort((a, b) => a.summaryLabel.localeCompare(b.summaryLabel));
+  const order = (label) => TEMPLATE_PURPOSES.findIndex((p) => p.label === label);
+  const catGroups = [...byCategory.values()].sort((a, b) => (order(a.purpose) - order(b.purpose)) || a.summaryLabel.localeCompare(b.summaryLabel));
   const summary = catGroups.map((g) => `${g.summaryLabel} (${g.items.length})`).join(' · ');
 
   return (
@@ -221,6 +225,9 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
               return (
                 <div key={group.key}>
                   <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <span className="px-2 py-0.5 rounded-lg bg-tertiary-container text-on-tertiary-container text-label-sm font-semibold">
+                      {group.purpose}
+                    </span>
                     {group.labels.length > 0 ? (
                       group.labels.map((l) => (
                         <span
@@ -262,6 +269,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(template.categories ?? []);
+  const [purposeDraft, setPurposeDraft] = useState(templatePurpose(template));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -280,6 +288,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
 
   function startEdit() {
     setDraft(template.categories ?? []);
+    setPurposeDraft(templatePurpose(template));
     setError(null);
     setEditing(true);
   }
@@ -293,6 +302,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
     setError(null);
     try {
       await updateTemplateCategories(template.id, draft);
+      if (purposeDraft !== templatePurpose(template)) await updateTemplatePurpose(template.id, purposeDraft);
       setEditing(false);
       reload();
     } catch (err) {
@@ -352,7 +362,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
               type="button"
               onClick={startEdit}
               className="p-2 rounded-full text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
-              title="Edit categories"
+              title="Edit purpose and categories"
             >
               <Pencil className="w-4 h-4" />
             </button>
@@ -372,6 +382,24 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
 
       {editing ? (
         <div className="flex flex-col gap-2">
+          <p className="text-label-md text-on-surface-variant">This file is for:</p>
+          <div className="flex flex-wrap gap-2">
+            {TEMPLATE_PURPOSES.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setPurposeDraft(p.value)}
+                title={p.hint}
+                className={`px-3 py-1 rounded-full border text-label-md transition-colors ${
+                  purposeDraft === p.value
+                    ? 'bg-tertiary-container text-on-tertiary-container border-tertiary-container'
+                    : 'border-outline-variant text-on-surface hover:bg-surface-container-low'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <p className="text-label-md text-on-surface-variant">Available for categories (none = general):</p>
           <div className="flex flex-wrap gap-2">
             {TEMPLATE_CATEGORIES.map((c) => {
@@ -425,6 +453,7 @@ function UploadCard({ onDone, onCancel }) {
   const [marketplace, setMarketplace] = useState('');
   const [customMarketplace, setCustomMarketplace] = useState('');
   const [categories, setCategories] = useState([]);
+  const [purpose, setPurpose] = useState('new_listing');
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -448,7 +477,7 @@ function UploadCard({ onDone, onCancel }) {
     try {
       for (let i = 0; i < files.length; i++) {
         setProgress(i + 1);
-        await uploadTemplate(effectiveMarketplace, files[i], categories);
+        await uploadTemplate(effectiveMarketplace, files[i], categories, purpose);
       }
       onDone();
     } catch (err) {
@@ -523,6 +552,30 @@ function UploadCard({ onDone, onCancel }) {
                 ? files[0].name
                 : `${files.length} files selected`}
           </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-label-md text-on-surface-variant">This file is for</label>
+        <p className="text-body-sm text-on-surface-variant -mt-0.5 mb-1">
+          The export asks which one to download when a marketplace has more than one.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {TEMPLATE_PURPOSES.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => setPurpose(p.value)}
+              title={p.hint}
+              className={`px-3 py-1.5 rounded-full border text-label-md transition-colors ${
+                purpose === p.value
+                  ? 'bg-tertiary-container text-on-tertiary-container border-tertiary-container'
+                  : 'border-outline-variant text-on-surface hover:bg-surface-container-low'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
       </div>
 

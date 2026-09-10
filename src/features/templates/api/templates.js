@@ -14,6 +14,25 @@ export const TEMPLATE_CATEGORIES = [
   { value: 'accessory', label: 'Accessory' },
 ];
 
+// What a template is FOR. A marketplace can ship one file per purpose; the
+// export flow asks which one to fill when more than one exists.
+export const TEMPLATE_PURPOSES = [
+  { value: 'new_listing', label: 'New listing', hint: 'Create products the marketplace does not carry yet' },
+  { value: 'update', label: 'Update listing', hint: 'Change content of products already listed' },
+  { value: 'prices', label: 'Prices', hint: 'Send cost or price changes' },
+  { value: 'promotions', label: 'Promotions', hint: 'Load promotional prices and dates' },
+];
+const PURPOSE_LABEL = Object.fromEntries(TEMPLATE_PURPOSES.map((p) => [p.value, p.label]));
+export const templatePurposeLabel = (value) => PURPOSE_LABEL[value ?? 'new_listing'] ?? value;
+export const templatePurpose = (template) => template?.purpose ?? 'new_listing';
+
+/** The purposes present in a template list, in the canonical order, with counts. */
+export function purposesIn(templates) {
+  const counts = new Map();
+  for (const t of templates) counts.set(templatePurpose(t), (counts.get(templatePurpose(t)) ?? 0) + 1);
+  return TEMPLATE_PURPOSES.filter((p) => counts.has(p.value)).map((p) => ({ ...p, count: counts.get(p.value) }));
+}
+
 const CATEGORY_LABEL = Object.fromEntries(TEMPLATE_CATEGORIES.map((c) => [c.value, c.label]));
 export const templateCategoryLabel = (value) => CATEGORY_LABEL[value] ?? value;
 
@@ -81,7 +100,7 @@ export async function listTemplates() {
   return data ?? [];
 }
 
-export async function uploadTemplate(marketplace, file, categories = []) {
+export async function uploadTemplate(marketplace, file, categories = [], purpose = 'new_listing') {
   const storagePath = `marketplace-templates/${marketplace.toLowerCase().replace(/[^a-z0-9]/g, '_')}/${Date.now()}_${file.name}`;
 
   const isMacroEnabled = /\.xlsm$/i.test(file.name);
@@ -105,6 +124,7 @@ export async function uploadTemplate(marketplace, file, categories = []) {
       file_name: file.name,
       storage_path: storagePath,
       categories: categories.length ? categories : null,
+      purpose,
     })
     .select('*')
     .single();
@@ -121,6 +141,17 @@ export async function updateTemplateCategories(id, categories) {
     .select('*')
     .single();
 
+  if (error) throw new Error(`Update failed: ${error.message}`);
+  return data;
+}
+
+export async function updateTemplatePurpose(id, purpose) {
+  const { data, error } = await supabase
+    .from('marketplace_templates')
+    .update({ purpose })
+    .eq('id', id)
+    .select('*')
+    .single();
   if (error) throw new Error(`Update failed: ${error.message}`);
   return data;
 }

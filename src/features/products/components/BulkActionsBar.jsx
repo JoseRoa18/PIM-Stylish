@@ -27,7 +27,8 @@ import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/ho
 import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
 import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/homeDepotCaExport';
 import { generatePimExport, fetchAllProducts } from '@/features/syndication/exports/pimExport';
-import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind } from '@/features/templates/api/templates';
+import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind, purposesIn, templatePurpose } from '@/features/templates/api/templates';
+import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -50,6 +51,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   const [editingFields, setEditingFields] = useState(false);
   // Post-export column readiness ([{file, rows, columns}] → dialog).
   const [readiness, setReadiness] = useState(null);
+  // A marketplace with several kinds of template asks which one to fill.
+  const [asking, setAsking] = useState(null); // { marketplace, purposes, templates }
 
   const count = selectedSkus.size;
   if (count === 0) return null;
@@ -213,7 +216,19 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   async function handleExportMarketplace(marketplace) {
     if (marketplace === '__pim_selected__') return handleExportPim('selected');
     if (marketplace === '__pim_all__') return handleExportPim('all');
-    const templates = (await listTemplates()).filter((t) => t.marketplace === marketplace);
+    const all = (await listTemplates()).filter((t) => t.marketplace === marketplace);
+    const purposes = purposesIn(all);
+    if (purposes.length > 1) {
+      setAsking({ marketplace, purposes, templates: all });
+      return;
+    }
+    return runMarketplaceExport(marketplace, all);
+  }
+
+  // The chosen purpose's files go through the marketplace's own exporter.
+  function runMarketplaceExport(marketplace, templates, purpose = null) {
+    setAsking(null);
+    if (purpose) templates = templates.filter((t) => templatePurpose(t) === purpose);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
     if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
     if (/lowe/i.test(marketplace)) return handleExportLowes(templates);
@@ -581,6 +596,15 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
     {readiness && (
       <ExportReadinessDialog reports={readiness} onClose={() => setReadiness(null)} />
+    )}
+
+    {asking && (
+      <ExportPurposeDialog
+        marketplace={asking.marketplace}
+        purposes={asking.purposes}
+        onPick={(purpose) => runMarketplaceExport(asking.marketplace, asking.templates, purpose)}
+        onClose={() => setAsking(null)}
+      />
     )}
     </>
   );
