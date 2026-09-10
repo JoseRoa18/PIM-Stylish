@@ -115,7 +115,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
             <span className="mr-auto inline-flex items-center gap-2 flex-wrap">
               <button type="button" onClick={refreshStatus} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low"><RefreshCw className="w-4 h-4" />Check what Wayfair did</button>
               {imagesDone && (
-                <button type="button" onClick={forceLead} disabled={lead === 'busy'} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-60" title="Asks Wayfair to lead with the white main. Wayfair accepts the request, but in our tests Partner Home kept its own lead, so confirm it there">
+                <button type="button" onClick={forceLead} disabled={lead === 'busy'} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-60" title="Asks Wayfair to lead with the white main. Wayfair applies it in 15 minutes to a few hours, and only if the image passes its white-background check; confirm in Partner Home">
                   {lead === 'busy' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
                   Set the white main as lead
                 </button>
@@ -202,7 +202,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
               )}
             </li>
           ))}
-          {phase === 'done' && <p className="text-body-sm text-on-surface-variant">Wayfair processes requests in the background; "Check what Wayfair did" reads each outcome. New images land beside the ones Wayfair already holds: once the request completes, remove the old set in Partner Home (Variant Media) and confirm the lead there with "Use as Lead" if the white main is not it.</p>}
+          {phase === 'done' && <p className="text-body-sm text-on-surface-variant">Wayfair processes requests in the background; "Check what Wayfair did" reads each outcome. New images land beside the ones Wayfair already holds: once the request completes, remove the old set in Partner Home (Variant Media). The lead takes 15 minutes to a few hours to apply; documents get their type and language in Partner Home after the upload.</p>}
         </ol>
       )}
     </Dialog>
