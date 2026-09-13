@@ -9,10 +9,13 @@
 //     carrying the PIM's MAP/MSRP (the API exposes no pricing)
 //   - members Wayfair doesn't carry are skipped and reported
 //
-// Fill rule (confirmed against the July submission):
+// Fill rule (confirmed against the July submission, Canada supplier):
 //   A = SKU · K (B2C Promotion Discount %) = 0
 //   L (B2C Promotion Base Cost USD) = the promotion's wayfair_ca_usd cost
 //   M (Promotional MAP USD) = left empty (Canada supplier)
+// USA supplier (same layout, its own Partner Home file): L = wayfair_usd
+// cost, M = the promotion's USD promo MAP; listing check and "Current"
+// columns use the USA audit snapshot and the USD prices.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -31,7 +34,9 @@ import { logActivity } from '@/features/activity/api/activityLog';
 const HEADER_ROW = 2; // technical names: SupplierPartNumber, ..., PromotionalDiscountPercent
 const FIRST_DATA_ROW = 5;
 
-export async function fillWayfairPromoFile(file, promotion) {
+export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
+  const usa = supplier === 'USA';
+  const costSlug = usa ? 'wayfair_usd' : 'wayfair_ca_usd';
   const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const sharedFile = zip.file('xl/sharedStrings.xml');
@@ -54,11 +59,12 @@ export async function fillWayfairPromoFile(file, promotion) {
   const prices = await getPromotionPrices(promotion.id);
   const costBySku = new Map(
     prices
-      .filter((r) => r.promo_costs?.wayfair_ca_usd != null)
-      .map((r) => [r.sku, r.promo_costs.wayfair_ca_usd]),
+      .filter((r) => r.promo_costs?.[costSlug] != null)
+      .map((r) => [r.sku, r.promo_costs[costSlug]]),
   );
+  const promoMapBySku = new Map(prices.filter((r) => r.promo_price_usd != null).map((r) => [r.sku, r.promo_price_usd]));
   if (!costBySku.size) {
-    throw new Error('This promotion has no Wayfair Canada (USD) promo costs loaded.');
+    throw new Error(`This promotion has no Wayfair ${usa ? 'USA' : 'Canada'} (USD) promo costs loaded.`);
   }
 
   const cellsByRow = new Map();
@@ -71,10 +77,12 @@ export async function fillWayfairPromoFile(file, promotion) {
     const cost = costBySku.get(sku);
     if (cost == null) continue;
     const rowNum = i + 1;
-    cellsByRow.set(rowNum, new Map([
+    const cells = new Map([
       [11, buildCell(`K${rowNum}`, 0)],
       [12, buildCell(`L${rowNum}`, cost)],
-    ]));
+    ]);
+    if (usa && promoMapBySku.get(sku) != null) cells.set(13, buildCell(`M${rowNum}`, promoMapBySku.get(sku)));
+    cellsByRow.set(rowNum, cells);
     filled += 1;
   }
 
@@ -89,7 +97,7 @@ export async function fillWayfairPromoFile(file, promotion) {
   const { data: snaps } = await supabase
     .from('channel_health')
     .select('results')
-    .eq('channel', 'wayfair')
+    .eq('channel', usa ? 'wayfair_usa' : 'wayfair')
     .order('run_at', { ascending: false })
     .limit(1);
   if (snaps?.length) {
@@ -109,7 +117,7 @@ export async function fillWayfairPromoFile(file, promotion) {
     // MSRP (CAD). Status/base-cost/B2B stay blank (Wayfair-side data).
     const { data: pimRows } = await supabase
       .from('products')
-      .select('sku, map_cad, msrp_cad')
+      .select(usa ? 'sku, map:map_usd, msrp:msrp_usd' : 'sku, map:map_cad, msrp:msrp_cad')
       .in('sku', toAppend);
     const pimBySku = new Map((pimRows ?? []).map((p) => [p.sku, p]));
 
@@ -119,25 +127,26 @@ export async function fillWayfairPromoFile(file, promotion) {
       const pim = pimBySku.get(sku);
       rowsXml += `<row r="${rn}">` +
         buildCell(`A${rn}`, sku) +
-        (pim?.map_cad != null ? buildCell(`H${rn}`, Number(pim.map_cad)) : '') +
-        (pim?.msrp_cad != null ? buildCell(`I${rn}`, Number(pim.msrp_cad)) : '') +
+        (pim?.map != null ? buildCell(`H${rn}`, Number(pim.map)) : '') +
+        (pim?.msrp != null ? buildCell(`I${rn}`, Number(pim.msrp)) : '') +
         buildCell(`K${rn}`, 0) +
         buildCell(`L${rn}`, costBySku.get(sku)) +
+        (usa && promoMapBySku.get(sku) != null ? buildCell(`M${rn}`, promoMapBySku.get(sku)) : '') +
         '</row>';
     }
     merged = injectRows(merged, rowsXml, lastRow + toAppend.length);
   }
   zip.file(path, merged);
 
-  const baseName = `Wayfair_Promotions_${String(promotion.period).slice(0, 7)}`;
+  const baseName = `Wayfair_${usa ? 'USA' : 'Canada'}_Promotions_${String(promotion.period).slice(0, 7)}`;
   await downloadZip(zip, baseName, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
 
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
-    target: 'wayfair',
-    summary: `Filled Wayfair promotions template for "${promotion.name}" (${filled} rows)`,
+    target: usa ? 'wayfair_usa' : 'wayfair',
+    summary: `Filled Wayfair ${usa ? 'USA' : 'Canada'} promotions template for "${promotion.name}" (${filled} rows)`,
     metadata: {
       filled,
       appended: toAppend.length,

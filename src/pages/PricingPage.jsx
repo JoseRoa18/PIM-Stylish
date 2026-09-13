@@ -40,6 +40,9 @@ import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { fillBBBPromoFile } from '@/features/pricing/lib/bbbPromoFill';
+import { PROMO_CHANNELS, promoTemplateFor } from '@/features/pricing/lib/promoChannels';
+import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
+import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link } from 'react-router-dom';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
@@ -768,7 +771,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
   const [msg, setMsg] = useState(null);
   const [progress, setProgress] = useState(null);
   const [importModal, setImportModal] = useState(false);
-  const [fillModal, setFillModal] = useState(false);
+  const [fillModal, setFillModal] = useState(null); // filler key of FILE_FILLERS, or null
 
   const meta = STATUS_META[promo.status] ?? STATUS_META.draft;
 
@@ -930,12 +933,6 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
                   })}
                 />
               )}
-              <ActionButton
-                icon={Send}
-                label="Fill marketplace file"
-                busy={busy === 'fill'}
-                onClick={() => setFillModal(true)}
-              />
               {promo.status !== 'ended' && (
                 <ActionButton
                   icon={Plus}
@@ -966,10 +963,18 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
           {fillModal && (
             <FillMarketplaceFileDialog
               promo={promo}
-              onClose={() => setFillModal(false)}
-              onDone={(m) => { setFillModal(false); setMsg(m); }}
+              initial={fillModal}
+              onClose={() => setFillModal(null)}
+              onDone={(m) => { setFillModal(null); setMsg(m); }}
             />
           )}
+
+          <PromoChannelsPanel
+            promo={promo}
+            canEdit={canEdit}
+            onFillFile={(key) => setFillModal(key)}
+            onMsg={setMsg}
+          />
 
           {importModal && (
             <ImportPromoDialog
@@ -1153,8 +1158,8 @@ function CopySkusButton({ skus }) {
 // the matching, the summary turns its report into the card message.
 const FILE_FILLERS = {
   wayfair: {
-    label: 'Wayfair',
-    monogram: 'WA',
+    label: 'Wayfair Canada',
+    monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: 'Partner Home promotions file — existing rows are filled, missing promo members are appended (only those Wayfair actually lists).',
     accept: '.xlsx,.xlsm',
@@ -1163,6 +1168,20 @@ const FILE_FILLERS = {
       const parts = [`Wayfair file ready — ${r.filled} existing rows filled`];
       if (r.appended.length) parts.push(`${r.appended.length} rows added (${r.appended.slice(0, 8).join(', ')}${r.appended.length > 8 ? '…' : ''})`);
       if (r.notOnWayfair.length) parts.push(`skipped, not listed on Wayfair: ${r.notOnWayfair.join(', ')}`);
+      return parts.join(' · ');
+    },
+  },
+  wayfair_us: {
+    label: 'Wayfair USA',
+    monogram: 'WF',
+    monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
+    hint: 'Partner Home promotions file of the USA supplier — base cost (USD) and promotional MAP USD are filled; missing promo members are appended (only those listed there).',
+    accept: '.xlsx,.xlsm',
+    fill: (file, promo) => fillWayfairPromoFile(file, promo, 'USA'),
+    summarize: (r) => {
+      const parts = [`Wayfair USA file ready — ${r.filled} existing rows filled`];
+      if (r.appended.length) parts.push(`${r.appended.length} rows added (${r.appended.slice(0, 8).join(', ')}${r.appended.length > 8 ? '…' : ''})`);
+      if (r.notOnWayfair.length) parts.push(`skipped, not listed on Wayfair USA: ${r.notOnWayfair.join(', ')}`);
       return parts.join(' · ');
     },
   },
@@ -1184,8 +1203,146 @@ const FILE_FILLERS = {
   },
 };
 
-function FillMarketplaceFileDialog({ promo, onClose, onDone }) {
-  const [marketplace, setMarketplace] = useState(null);
+// ============================ Marketplace channels ============================
+
+// Where this promotion has to reach and how far it got: automatic channels
+// show their stamps, portal files and templates show the last generated
+// file, template channels without a promotions template say so.
+function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
+  const { templates } = useTemplates();
+  const [history, setHistory] = useState({}); // audit target → last export time
+  const [busy, setBusy] = useState(null);
+  const [market, setMarket] = useState('all');
+
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from('audit_log')
+      .select('target, occurred_at')
+      .eq('entity_type', 'promotion')
+      .eq('entity_id', String(promo.id))
+      .eq('action', 'export')
+      .order('occurred_at', { ascending: false })
+      .then(({ data }) => {
+        if (!active) return;
+        const h = {};
+        for (const r of data ?? []) if (!h[r.target]) h[r.target] = r.occurred_at;
+        setHistory(h);
+      });
+    return () => { active = false; };
+  }, [promo.id]);
+
+  const when = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : null);
+
+  async function generate(channel, template) {
+    setBusy(channel.key);
+    try {
+      const r = await fillPromoTemplate(template, promo, channel);
+      setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
+      onMsg({ tone: 'success', text: summarizePromoFill(channel, r) });
+    } catch (err) {
+      onMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const rows = PROMO_CHANNELS
+    .filter((ch) => market === 'all' || ch.market === market)
+    .map((ch) => {
+      const template = promoTemplateFor(ch, templates);
+      let status;
+      let tone;
+      if (ch.kind === 'api') {
+        if (ch.key === 'bestbuy') {
+          const sch = promo.bb_schedule;
+          status = sch ? `${sch.scheduled} discounts scheduled ${when(promo.bb_scheduled_at)}` : 'Nothing scheduled yet';
+          tone = sch ? 'ok' : 'muted';
+        } else {
+          status = promo[ch.stamp] ? `Applied ${when(promo[ch.stamp])}` : promo.status === 'ended' ? 'Ended' : 'Waiting for the start day';
+          tone = promo[ch.stamp] ? 'ok' : 'muted';
+        }
+      } else {
+        const last = history[ch.auditTarget ?? ch.key];
+        status = last ? `File generated ${when(last)}` : ch.kind === 'template' && !template ? 'No promotions template uploaded' : 'Not generated yet';
+        tone = last ? 'ok' : ch.kind === 'template' && !template ? 'warn' : 'muted';
+      }
+      return { ...ch, template, status, tone };
+    });
+
+  return (
+    <section className="rounded-xl border border-outline-variant overflow-hidden">
+      <header className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap bg-surface-container-low">
+        <div>
+          <p className="text-label-lg text-on-surface font-semibold">Marketplaces</p>
+          <p className="text-body-sm text-on-surface-variant">Where this promotion goes and how far it got.</p>
+        </div>
+        <div className="inline-flex rounded-full bg-surface-container p-1">
+          {[['all', 'All'], ['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setMarket(key)}
+              className={`px-3 py-1 rounded-full text-label-md transition-colors ${market === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px]">
+          <thead>
+            <tr className="text-label-md text-on-surface-variant border-b border-outline-variant">
+              <th className="text-left font-medium px-4 py-2">Channel</th>
+              <th className="text-left font-medium px-4 py-2">How the promo gets there</th>
+              <th className="text-left font-medium px-4 py-2">Status</th>
+              <th className="text-right font-medium px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((ch) => (
+              <tr key={ch.key} className="border-b border-outline-variant/60 last:border-b-0">
+                <td className="px-4 py-2.5">
+                  <span className="inline-flex items-center gap-2.5">
+                    <span className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-sm font-bold flex-shrink-0">{ch.monogram}</span>
+                    <span className="text-body-md text-on-surface">{ch.label}</span>
+                    <span className="text-label-sm text-on-surface-variant uppercase">{ch.market}</span>
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-body-sm text-on-surface-variant max-w-[28rem]">
+                  {ch.kind === 'template'
+                    ? ch.template
+                      ? <>Generated from <span className="text-on-surface" title={ch.template.file_name}>{ch.template.file_name}</span></>
+                      : 'Generated from the marketplace\'s promotions template once it is uploaded.'
+                    : ch.how}
+                </td>
+                <td className={`px-4 py-2.5 text-body-sm ${ch.tone === 'ok' ? 'text-success' : ch.tone === 'warn' ? 'text-error' : 'text-on-surface-variant'}`}>{ch.status}</td>
+                <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                  {canEdit && ch.kind === 'portal_file' && (
+                    <button type="button" onClick={() => onFillFile(ch.filler)} className="px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Fill file…</button>
+                  )}
+                  {canEdit && ch.kind === 'template' && ch.template && (
+                    <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50">
+                      {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      Generate file
+                    </button>
+                  )}
+                  {canEdit && ch.kind === 'template' && !ch.template && (
+                    <Link to="/templates" className="text-label-md text-primary font-medium hover:underline">Upload template</Link>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
+  const [marketplace, setMarketplace] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const def = marketplace ? FILE_FILLERS[marketplace] : null;
