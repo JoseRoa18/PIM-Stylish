@@ -1214,6 +1214,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
   const [history, setHistory] = useState({}); // audit target → last export time
   const [busy, setBusy] = useState(null);
   const [market, setMarket] = useState('all');
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -1251,8 +1252,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
     }
   }
 
-  const rows = PROMO_CHANNELS
-    .filter((ch) => market === 'all' || ch.market === market)
+  const allRows = PROMO_CHANNELS
     .map((ch) => {
       const template = promoTemplateFor(ch, templates);
       let status;
@@ -1288,15 +1288,28 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
       }
       return { ...ch, template, status, tone, detail };
     });
+  const rows = allRows.filter((ch) => market === 'all' || ch.market === market);
+  const count = (tone) => allRows.filter((r) => r.tone === tone).length;
+  const summary = [`${count('ok')} ready`, `${count('muted')} pending`, count('warn') ? `${count('warn')} without template` : null].filter(Boolean).join(' · ');
 
   const chip = { ok: 'bg-success-container text-on-success-container', warn: 'bg-error-container/60 text-on-error-container', muted: 'bg-surface-container-high text-on-surface-variant' };
   const actionCls = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50';
 
   return (
     <section className="rounded-xl border border-outline-variant overflow-hidden">
-      <header className="px-4 py-2.5 flex items-center justify-between gap-3 bg-surface-container-low">
-        <p className="text-label-lg text-on-surface font-semibold">Marketplaces</p>
-        <div className="inline-flex rounded-full bg-surface-container p-0.5">
+      <header className="pr-4 flex items-center gap-3 bg-surface-container-low">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex-1 min-w-0 px-4 py-2.5 flex items-center gap-2 text-left"
+        >
+          <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+          <span className="text-label-lg text-on-surface font-semibold">Marketplaces</span>
+          <span className="text-body-sm text-on-surface-variant truncate">{summary}</span>
+        </button>
+        {open && (
+        <div className="inline-flex rounded-full bg-surface-container p-0.5 flex-shrink-0">
           {[['all', 'All'], ['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
             <button
               key={key}
@@ -1308,7 +1321,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
             </button>
           ))}
         </div>
+        )}
       </header>
+      {open && (
       <ul className="divide-y divide-outline-variant/60">
         {rows.map((ch) => (
           <li key={ch.key} className="flex items-center gap-3 px-4 py-2" title={ch.detail}>
@@ -1332,6 +1347,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
           </li>
         ))}
       </ul>
+      )}
     </section>
   );
 }
