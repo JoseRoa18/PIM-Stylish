@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import {
   Upload,
   Trash2,
@@ -24,6 +24,7 @@ import {
   templatePurpose,
 } from '@/features/templates/api/templates';
 import { formatTimeAgo } from '@/lib/format';
+import FileDropzone from '@/components/ui/FileDropzone';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 const MARKETPLACE_OPTIONS = [
@@ -458,7 +459,6 @@ function UploadCard({ onDone, onCancel }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
-  const fileRef = useRef(null);
 
   const effectiveMarketplace = marketplace === '__custom__' ? customMarketplace.trim() : marketplace;
   const canSubmit = effectiveMarketplace && files.length > 0 && !uploading;
@@ -486,11 +486,6 @@ function UploadCard({ onDone, onCancel }) {
       setUploading(false);
       setProgress(0);
     }
-  }
-
-  function handleFileChange(e) {
-    const list = [...(e.target.files ?? [])];
-    if (list.length) setFiles(list);
   }
 
   return (
@@ -532,26 +527,20 @@ function UploadCard({ onDone, onCancel }) {
 
         <div className="flex flex-col gap-1.5">
           <label className="text-label-md text-on-surface-variant">Template file(s)</label>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".xlsx,.xlsm,.xls,.csv"
+          <FileDropzone
             multiple
-            onChange={handleFileChange}
-            className="hidden"
-          />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
+            accept=".xlsx,.xlsm,.xls,.csv"
+            disabled={uploading}
+            onFiles={(list) => setFiles(list)}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-outline-variant bg-surface hover:bg-surface-container-low transition-colors text-body-md text-on-surface-variant"
           >
             <Upload className="w-4 h-4" />
             {files.length === 0
-              ? 'Choose .xlsx, .xlsm or .csv files…'
+              ? 'Drop .xlsx, .xlsm or .csv files here, or click to browse'
               : files.length === 1
                 ? files[0].name
                 : `${files.length} files selected`}
-          </button>
+          </FileDropzone>
         </div>
       </div>
 

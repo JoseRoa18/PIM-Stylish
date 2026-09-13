@@ -7,7 +7,7 @@ import { useRef, useState } from 'react';
  * file is hovering. Extension checking runs on drop too — the input's
  * `accept` attribute only filters the browse dialog, never a drop.
  */
-export default function FileDropzone({ onFile, accept = '', disabled = false, className = '', children }) {
+export default function FileDropzone({ onFile, onFiles, multiple = false, accept = '', disabled = false, className = '', children }) {
   const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState(null);
   // Enter/leave fire for every child node — a counter beats flicker.
@@ -18,14 +18,23 @@ export default function FileDropzone({ onFile, accept = '', disabled = false, cl
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.startsWith('.'));
 
-  function acceptFile(file) {
-    if (!file) return;
-    if (extensions.length && !extensions.some((ext) => file.name.toLowerCase().endsWith(ext))) {
-      setDropError(`Only ${extensions.join(' / ')} files — got "${file.name}".`);
-      return;
+  // One file by default; with `multiple` every accepted file goes to
+  // onFiles at once (a set of workbooks dropped together).
+  function acceptFiles(fileList) {
+    const list = [...(fileList ?? [])].filter(Boolean);
+    if (!list.length) return;
+    const ok = (f) => !extensions.length || extensions.some((ext) => f.name.toLowerCase().endsWith(ext));
+    const rejected = list.filter((f) => !ok(f));
+    if (rejected.length) {
+      setDropError(`Only ${extensions.join(' / ')} files — got "${rejected[0].name}"${rejected.length > 1 ? ` and ${rejected.length - 1} more` : ''}.`);
+      if (!multiple) return;
+    } else {
+      setDropError(null);
     }
-    setDropError(null);
-    onFile(file);
+    const valid = list.filter(ok);
+    if (!valid.length) return;
+    if (multiple) onFiles?.(valid);
+    else onFile?.(valid[0]);
   }
 
   return (
@@ -47,7 +56,7 @@ export default function FileDropzone({ onFile, accept = '', disabled = false, cl
           e.preventDefault();
           depth.current = 0;
           setDragging(false);
-          if (!disabled) acceptFile(e.dataTransfer.files?.[0]);
+          if (!disabled) acceptFiles(multiple ? e.dataTransfer.files : [e.dataTransfer.files?.[0]]);
         }}
         className={`${className} ${dragging ? 'ring-2 ring-primary border-primary bg-primary-container/20' : ''} ${disabled ? 'opacity-40 pointer-events-none' : 'cursor-pointer'}`}
       >
@@ -55,12 +64,13 @@ export default function FileDropzone({ onFile, accept = '', disabled = false, cl
         <input
           type="file"
           accept={accept}
+          multiple={multiple}
           className="hidden"
           disabled={disabled}
           onChange={(e) => {
-            const file = e.target.files?.[0];
+            const picked = multiple ? [...e.target.files] : [e.target.files?.[0]];
             e.target.value = '';
-            acceptFile(file);
+            acceptFiles(picked);
           }}
         />
       </label>
