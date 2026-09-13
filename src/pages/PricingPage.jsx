@@ -41,6 +41,7 @@ import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { fillBBBPromoFile } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor } from '@/features/pricing/lib/promoChannels';
+import { marketWindow } from '@/features/pricing/lib/promoCalendar';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
@@ -1206,9 +1207,8 @@ const FILE_FILLERS = {
 
 // ============================ Marketplace channels ============================
 
-// Where this promotion has to reach and how far it got: automatic channels
-// show their stamps, portal files and templates show the last generated
-// file, template channels without a promotions template say so.
+// One line per channel: name, a status chip, and the one action that applies.
+// The long explanation of how each channel gets the promo lives on hover.
 function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
   const { templates } = useTemplates();
   const [history, setHistory] = useState({}); // audit target → last export time
@@ -1233,7 +1233,8 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
     return () => { active = false; };
   }, [promo.id]);
 
-  const when = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : null);
+  const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : null);
+  const dayOf = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 
   async function generate(channel, template) {
     setBusy(channel.key);
@@ -1256,31 +1257,46 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
       const template = promoTemplateFor(ch, templates);
       let status;
       let tone;
+      let detail = ch.how ?? '';
       if (ch.kind === 'api') {
         if (ch.key === 'bestbuy') {
           const sch = promo.bb_schedule;
-          status = sch ? `${sch.scheduled} discounts scheduled ${when(promo.bb_scheduled_at)}` : 'Nothing scheduled yet';
+          status = sch ? `${sch.scheduled} scheduled` : 'Not scheduled';
           tone = sch ? 'ok' : 'muted';
+          if (sch) detail += ` Sent ${day(promo.bb_scheduled_at)} for ${sch.period} to ${sch.end}.`;
+        } else if (promo[ch.stamp]) {
+          status = `Live since ${day(promo[ch.stamp])}`;
+          tone = 'ok';
+        } else if (promo.status === 'ended') {
+          status = 'Ended';
+          tone = 'muted';
         } else {
-          status = promo[ch.stamp] ? `Applied ${when(promo[ch.stamp])}` : promo.status === 'ended' ? 'Ended' : 'Waiting for the start day';
-          tone = promo[ch.stamp] ? 'ok' : 'muted';
+          status = `Starts ${dayOf(marketWindow(promo.period, ch.market).start)}`;
+          tone = 'muted';
         }
+      } else if (history[ch.auditTarget ?? ch.key]) {
+        status = `Generated ${day(history[ch.auditTarget ?? ch.key])}`;
+        tone = 'ok';
+      } else if (ch.kind === 'template' && !template) {
+        status = 'No template';
+        tone = 'warn';
+        detail = 'Upload the marketplace\'s promotions template in Templates, marked Promotions.';
       } else {
-        const last = history[ch.auditTarget ?? ch.key];
-        status = last ? `File generated ${when(last)}` : ch.kind === 'template' && !template ? 'No promotions template uploaded' : 'Not generated yet';
-        tone = last ? 'ok' : ch.kind === 'template' && !template ? 'warn' : 'muted';
+        status = 'Not generated';
+        tone = 'muted';
+        if (template) detail = `Generated from ${template.file_name}.`;
       }
-      return { ...ch, template, status, tone };
+      return { ...ch, template, status, tone, detail };
     });
+
+  const chip = { ok: 'bg-success-container text-on-success-container', warn: 'bg-error-container/60 text-on-error-container', muted: 'bg-surface-container-high text-on-surface-variant' };
+  const actionCls = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50';
 
   return (
     <section className="rounded-xl border border-outline-variant overflow-hidden">
-      <header className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap bg-surface-container-low">
-        <div>
-          <p className="text-label-lg text-on-surface font-semibold">Marketplaces</p>
-          <p className="text-body-sm text-on-surface-variant">Where this promotion goes and how far it got.</p>
-        </div>
-        <div className="inline-flex rounded-full bg-surface-container p-1">
+      <header className="px-4 py-2.5 flex items-center justify-between gap-3 bg-surface-container-low">
+        <p className="text-label-lg text-on-surface font-semibold">Marketplaces</p>
+        <div className="inline-flex rounded-full bg-surface-container p-0.5">
           {[['all', 'All'], ['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
             <button
               key={key}
@@ -1293,53 +1309,29 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
           ))}
         </div>
       </header>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px]">
-          <thead>
-            <tr className="text-label-md text-on-surface-variant border-b border-outline-variant">
-              <th className="text-left font-medium px-4 py-2">Channel</th>
-              <th className="text-left font-medium px-4 py-2">How the promo gets there</th>
-              <th className="text-left font-medium px-4 py-2">Status</th>
-              <th className="text-right font-medium px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((ch) => (
-              <tr key={ch.key} className="border-b border-outline-variant/60 last:border-b-0">
-                <td className="px-4 py-2.5">
-                  <span className="inline-flex items-center gap-2.5">
-                    <span className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-sm font-bold flex-shrink-0">{ch.monogram}</span>
-                    <span className="text-body-md text-on-surface">{ch.label}</span>
-                    <span className="text-label-sm text-on-surface-variant uppercase">{ch.market}</span>
-                  </span>
-                </td>
-                <td className="px-4 py-2.5 text-body-sm text-on-surface-variant max-w-[28rem]">
-                  {ch.kind === 'template'
-                    ? ch.template
-                      ? <>Generated from <span className="text-on-surface" title={ch.template.file_name}>{ch.template.file_name}</span></>
-                      : 'Generated from the marketplace\'s promotions template once it is uploaded.'
-                    : ch.how}
-                </td>
-                <td className={`px-4 py-2.5 text-body-sm ${ch.tone === 'ok' ? 'text-success' : ch.tone === 'warn' ? 'text-error' : 'text-on-surface-variant'}`}>{ch.status}</td>
-                <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                  {canEdit && ch.kind === 'portal_file' && (
-                    <button type="button" onClick={() => onFillFile(ch.filler)} className="px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Fill file…</button>
-                  )}
-                  {canEdit && ch.kind === 'template' && ch.template && (
-                    <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50">
-                      {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                      Generate file
-                    </button>
-                  )}
-                  {canEdit && ch.kind === 'template' && !ch.template && (
-                    <Link to="/templates" className="text-label-md text-primary font-medium hover:underline">Upload template</Link>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ul className="divide-y divide-outline-variant/60">
+        {rows.map((ch) => (
+          <li key={ch.key} className="flex items-center gap-3 px-4 py-2" title={ch.detail}>
+            <span className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-sm font-bold flex-shrink-0">{ch.monogram}</span>
+            <span className="text-body-md text-on-surface min-w-0 truncate">{ch.label}</span>
+            <span className={`ml-auto px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap ${chip[ch.tone]}`}>{ch.status}</span>
+            <span className="w-32 text-right flex-shrink-0">
+              {canEdit && ch.kind === 'portal_file' && (
+                <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file</button>
+              )}
+              {canEdit && ch.kind === 'template' && ch.template && (
+                <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className={actionCls}>
+                  {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  Generate
+                </button>
+              )}
+              {canEdit && ch.kind === 'template' && !ch.template && (
+                <Link to="/templates" className="text-label-md text-primary font-medium hover:underline">Upload template</Link>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
