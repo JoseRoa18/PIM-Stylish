@@ -26,6 +26,7 @@ import {
   Info,
   Download,
   UploadCloud,
+  Fingerprint,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
@@ -46,6 +47,7 @@ import DocumentsSection from '@/features/media/components/DocumentsSection';
 import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
+import AliasesTab from '@/features/products/components/AliasesTab';
 import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
@@ -78,6 +80,7 @@ const TABS = [
   { key: 'pricing', label: 'Pricing', icon: DollarSign },
   { key: 'media', label: 'Media', icon: ImageIcon },
   { key: 'marketplaces', label: 'Marketplaces', icon: Store },
+  { key: 'aliases', label: 'Aliases', icon: Fingerprint },
 ];
 
 const WORKFLOW_OPTIONS = [
@@ -643,6 +646,7 @@ export default function ProductDetail() {
           />
         )}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
+        {activeTab === 'aliases' && <AliasesTab product={product} />}
       </div>
 
       {propagation && (
