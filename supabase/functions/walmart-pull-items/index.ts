@@ -111,13 +111,15 @@ Deno.serve(async (req) => {
       // it only says NOT_FOUND, so the regular price stays unknown then.
       const etDay = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : null);
       const enriched: Array<Record<string, unknown>> = items.map((it) => ({ ...it, price: null, discount_price: null, discount_start: null, discount_end: null, promo_id: null, promo_checked: false }));
+      // Fresh headers per call: Walmart keys requests by WM_QOS.CORRELATION_ID,
+      // and reusing one id across parallel calls slowed them to a crawl.
       const startedAt = Date.now();
       let cursor = 0;
       async function worker() {
-        while (cursor < enriched.length && Date.now() - startedAt < 60_000) {
+        while (cursor < enriched.length && Date.now() - startedAt < 100_000) {
           const row = enriched[cursor++];
           try {
-            const res = await fetch(`${BASE}/v3/promo/sku/${encodeURIComponent(String(row.sku))}`, { headers: caHeaders });
+            const res = await fetch(`${BASE}/v3/promo/sku/${encodeURIComponent(String(row.sku))}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": access_token, "WM_MARKET": "ca" }) });
             if (!res.ok) continue;
             const d = await res.json();
             row.promo_checked = true;
@@ -138,7 +140,7 @@ Deno.serve(async (req) => {
           } catch { /* keep the row without price */ }
         }
       }
-      await Promise.all(Array.from({ length: 6 }, worker));
+      await Promise.all(Array.from({ length: 8 }, () => worker()));
       const checked = enriched.filter((r) => r.promo_checked).length;
       const promos = enriched.filter((r) => r.discount_price != null).length;
       return json({ ok: true, market: "ca", total: enriched.length, feedDate: feed.feedDate ?? null, items: enriched, promos_checked: checked, promos_active: promos, partial: checked < enriched.length });
