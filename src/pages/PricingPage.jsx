@@ -419,9 +419,10 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                  prices: stale MAPs correct the offer price, missing promos become a scheduled
                  discount for the promo month.`
               : cfg.kind === 'walmart'
-                ? `Compares every Walmart item against its expected price — the active promo price
-                   for promo members, the regular ${cfg.priceShort} for everyone else. Analysis only:
-                   the Walmart connection is read-only, so corrections go through Seller Center.`
+                ? `Compares every Walmart item with a price on file against its expected price — the
+                   active promo price for promo members, the regular ${cfg.priceShort} for everyone else.
+                   Analysis only: regular prices are corrected in Seller Center; promotions are
+                   scheduled from the Promotions tab.`
                 : cfg.promoAware
                 ? `Compares every linked product's live store price against its expected price —
                    the active promo price for promo members, the regular ${cfg.priceShort} for everyone else.`
