@@ -46,9 +46,11 @@ Deno.serve(async (req) => {
   }
 
   let market = "us";
+  let bodyLimit = NaN;
   try {
     const body = await req.json();
     if (body?.market === "ca") market = "ca";
+    bodyLimit = Number(body?.promoLimit);
   } catch {
     // empty body → default market
   }
@@ -106,44 +108,87 @@ Deno.serve(async (req) => {
       } while (items.length < received);
 
       // Prices: Walmart CA serves no item read, but the promo endpoint answers
-      // for every SKU — with a promotion it carries the REGULAR price
+      // per SKU — with a promotion it carries the REGULAR price
       // (comparisonPrice) and the promo (currentPrice + window); without one
       // it only says NOT_FOUND, so the regular price stays unknown then.
-      const etDay = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : null);
-      const enriched: Array<Record<string, unknown>> = items.map((it) => ({ ...it, price: null, discount_price: null, discount_start: null, discount_end: null, promo_id: null, promo_checked: false }));
-      // Fresh headers per call: Walmart keys requests by WM_QOS.CORRELATION_ID,
-      // and reusing one id across parallel calls slowed them to a crawl.
-      const startedAt = Date.now();
-      let cursor = 0;
-      async function worker() {
-        while (cursor < enriched.length && Date.now() - startedAt < 100_000) {
-          const row = enriched[cursor++];
-          try {
-            const res = await fetch(`${BASE}/v3/promo/sku/${encodeURIComponent(String(row.sku))}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": access_token, "WM_MARKET": "ca" }) });
-            if (!res.ok) continue;
-            const d = await res.json();
-            row.promo_checked = true;
-            if (d?.status !== "OK") continue;
-            const pr = d.payload?.pricingList?.pricing?.[0];
-            if (!pr) continue;
-            const current = pr.currentPrice?.value?.amount ?? null;
-            const comparison = pr.comparisonPrice?.value?.amount ?? null;
-            if (pr.currentPriceType === "REDUCED") {
-              row.price = comparison;
-              row.discount_price = current;
-            } else {
-              row.price = current;
-            }
-            row.discount_start = etDay(pr.effectiveDate);
-            row.discount_end = etDay(pr.expirationDate);
-            row.promo_id = pr.promoId ?? null;
-          } catch { /* keep the row without price */ }
-        }
+      // Walmart rate-limits this read hard from the edge runtime (429s past
+      // ~1 call/s), so each pull checks a BUDGET of SKUs in priority order
+      // (members of current/upcoming promotions first, then the least
+      // recently checked) and carries the rest forward from the previous
+      // snapshot. Two cron runs a day keep promo members fresh daily.
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+      const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const restHeaders = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
+      const restGet = async (path: string) => {
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: restHeaders });
+        return r.ok ? await r.json() : [];
+      };
+      const prevSnap = await restGet("channel_health?channel=eq.walmart_ca&select=results&order=run_at.desc&limit=1");
+      const prevBySku = new Map<string, Record<string, unknown>>(
+        ((prevSnap?.[0]?.results ?? []) as Record<string, unknown>[]).map((r) => [String(r.sku), r]),
+      );
+      const monthStart = new Date().toISOString().slice(0, 7) + "-01";
+      const promos = await restGet(`promotions?select=promotion_prices(sku,promo_price_cad)&status=in.(draft,active)&period=gte.${monthStart}`);
+      const members = new Set<string>();
+      for (const pr of promos as { promotion_prices: { sku: string; promo_price_cad: number | null }[] }[]) {
+        for (const row of pr.promotion_prices ?? []) if (row.promo_price_cad != null) members.add(row.sku);
       }
-      await Promise.all(Array.from({ length: 8 }, () => worker()));
-      const checked = enriched.filter((r) => r.promo_checked).length;
-      const promos = enriched.filter((r) => r.discount_price != null).length;
-      return json({ ok: true, market: "ca", total: enriched.length, feedDate: feed.feedDate ?? null, items: enriched, promos_checked: checked, promos_active: promos, partial: checked < enriched.length });
+
+      const etDay = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : null);
+      const enriched: Array<Record<string, unknown>> = items.map((it) => {
+        const prev = prevBySku.get(it.sku) ?? {};
+        return {
+          ...it,
+          price: prev.price ?? null, discount_price: prev.discount_price ?? null,
+          discount_start: prev.discount_start ?? null, discount_end: prev.discount_end ?? null,
+          promo_id: prev.promo_id ?? null, promo_checked_at: prev.promo_checked_at ?? null,
+        };
+      });
+      const promoLimit = Number.isFinite(bodyLimit) ? Math.max(0, bodyLimit) : 60;
+      const twelveHoursAgo = new Date(Date.now() - 12 * 3600_000).toISOString();
+      const order = [...enriched].sort((a, b) => {
+        const am = members.has(String(a.sku)) ? 0 : 1;
+        const bm = members.has(String(b.sku)) ? 0 : 1;
+        if (am !== bm) return am - bm;
+        return String(a.promo_checked_at ?? "").localeCompare(String(b.promo_checked_at ?? ""));
+      }).filter((r) => !(members.has(String(r.sku)) && String(r.promo_checked_at ?? "") > twelveHoursAgo) || !members.has(String(r.sku)));
+      const queue = order.slice(0, promoLimit);
+
+      const startedAt = Date.now();
+      const failures: Record<string, number> = {};
+      let checkedNow = 0;
+      for (const row of queue) {
+        if (Date.now() - startedAt > 90_000) break;
+        try {
+          let res: Response | null = null;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            res = await fetch(`${BASE}/v3/promo/sku/${encodeURIComponent(String(row.sku))}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": access_token, "WM_MARKET": "ca" }) });
+            if (res.status !== 429 && res.status < 500) break;
+            const retryAfter = Number(res.headers.get("retry-after"));
+            await res.text();
+            await new Promise((r) => setTimeout(r, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1)));
+          }
+          if (!res || !res.ok) { const k = String(res?.status ?? "net"); failures[k] = (failures[k] ?? 0) + 1; continue; }
+          const d = await res.json();
+          row.promo_checked_at = new Date().toISOString();
+          checkedNow += 1;
+          if (d?.status !== "OK") { row.price = null; row.discount_price = null; row.discount_start = null; row.discount_end = null; row.promo_id = null; continue; }
+          const pr = d.payload?.pricingList?.pricing?.[0];
+          if (!pr) continue;
+          const current = pr.currentPrice?.value?.amount ?? null;
+          const comparison = pr.comparisonPrice?.value?.amount ?? null;
+          if (pr.currentPriceType === "REDUCED") { row.price = comparison; row.discount_price = current; }
+          else { row.price = current; row.discount_price = null; }
+          row.discount_start = etDay(pr.effectiveDate);
+          row.discount_end = etDay(pr.expirationDate);
+          row.promo_id = pr.promoId ?? null;
+        } catch { /* keep the carried values */ }
+        // Gentle pace: Walmart's limit sits near one read per second here.
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      const checked = enriched.filter((r) => r.promo_checked_at).length;
+      const promosActive = enriched.filter((r) => r.discount_price != null).length;
+      return json({ ok: true, market: "ca", total: enriched.length, feedDate: feed.feedDate ?? null, items: enriched, promos_checked: checked, promos_checked_now: checkedNow, promo_members: members.size, promos_active: promosActive, partial: checked < enriched.length, failures, ms: Date.now() - startedAt });
     }
 
     const items: Array<{
