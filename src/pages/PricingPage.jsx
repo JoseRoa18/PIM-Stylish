@@ -27,6 +27,7 @@ import {
   createPromotionFromFile,
   addFileToPromotion,
   autoScheduleBestBuyPromo,
+  scheduleWalmartCaPromo,
   markPromotionActive,
   deletePromotion,
   applyPromotion,
@@ -976,6 +977,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             canEdit={canEdit}
             onFillFile={(key) => setFillModal(key)}
             onMsg={setMsg}
+            onChanged={onChanged}
           />
 
           {importModal && (
@@ -1209,7 +1211,7 @@ const FILE_FILLERS = {
 
 // One line per channel: name, a status chip, and the one action that applies.
 // The long explanation of how each channel gets the promo lives on hover.
-function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
+function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged }) {
   const { templates } = useTemplates();
   const [history, setHistory] = useState({}); // audit target → last export time
   const [busy, setBusy] = useState(null);
@@ -1236,6 +1238,19 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
 
   const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : null);
   const dayOf = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+
+  async function schedule(channel) {
+    setBusy(channel.key);
+    try {
+      const r = await scheduleWalmartCaPromo(promo);
+      onMsg({ tone: r.itemsFailed ? 'error' : 'success', text: `Walmart Canada: ${Math.max(0, (r.attempted ?? 0) - (r.itemsFailed ?? 0))} promo prices scheduled for ${r.window?.start?.slice(0, 10)} to ${r.window?.end?.slice(0, 10)}` + (r.itemsFailed ? ` · ${r.itemsFailed} rejected: ${(r.failed ?? []).map((f) => f.sku).slice(0, 8).join(', ')}` : '') + (r.not_listed ? ` · ${r.not_listed} not listed on Walmart` : '') });
+      onChanged?.();
+    } catch (err) {
+      onMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function generate(channel, template) {
     setBusy(channel.key);
@@ -1264,6 +1279,12 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
           status = sch ? `${sch.scheduled} scheduled` : 'Not scheduled';
           tone = sch ? 'ok' : 'muted';
           if (sch) detail += ` Sent ${day(promo.bb_scheduled_at)} for ${sch.period} to ${sch.end}.`;
+        } else if (ch.key === 'walmart_ca') {
+          const sch = promo.wm_ca_schedule;
+          const sent = sch ? Math.max(0, (sch.attempted ?? 0) - (sch.itemsFailed ?? 0)) : 0;
+          status = sch ? `${sent} scheduled` : 'Not scheduled';
+          tone = sch ? (sch.itemsFailed ? 'warn' : 'ok') : 'muted';
+          if (sch) detail += ` Sent ${day(promo.wm_ca_scheduled_at)}, feed ${sch.feed_id ?? '?'}${sch.itemsFailed ? `, ${sch.itemsFailed} rejected` : ''}${sch.not_listed ? `, ${sch.not_listed} not listed there` : ''}.`;
         } else if (promo[ch.stamp]) {
           status = `Live since ${day(promo[ch.stamp])}`;
           tone = 'ok';
@@ -1331,6 +1352,12 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
             <span className="text-body-md text-on-surface min-w-0 truncate">{ch.label}</span>
             <span className={`ml-auto px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap ${chip[ch.tone]}`}>{ch.status}</span>
             <span className="w-32 text-right flex-shrink-0">
+              {canEdit && ch.kind === 'api' && ch.schedule && promo.status !== 'ended' && (
+                <button type="button" onClick={() => schedule(ch)} disabled={busy === ch.key} className={actionCls}>
+                  {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  {promo[ch.stamp] ? 'Re-send' : 'Schedule'}
+                </button>
+              )}
               {canEdit && ch.kind === 'portal_file' && (
                 <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file</button>
               )}

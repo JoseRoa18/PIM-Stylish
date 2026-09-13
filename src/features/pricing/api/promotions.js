@@ -394,6 +394,33 @@ export async function autoScheduleBestBuyPromo(promotion) {
 }
 
 /**
+ * Schedule the promotion on Walmart Canada as promotional prices (feed
+ * PRICE_AND_PROMOTION): regular price = the PIM MAP CAD, promo price = the
+ * promo MAP CAD, window = Canada's (first Thursday to the day before the
+ * next one). Walmart turns it on and off by itself. `skus` restricts the
+ * push (controlled tests); `dryRun` returns the payload and sends nothing.
+ */
+export async function scheduleWalmartCaPromo(promotion, { skus = null, dryRun = false } = {}) {
+  const { data, error } = await supabase.functions.invoke('walmart-push-promo', {
+    body: { mode: 'push', promotionId: promotion.id, dryRun, ...(skus ? { skus } : {}) },
+  });
+  if (error) throw new Error(error.message ?? 'walmart-push-promo failed');
+  if (data?.error) throw new Error(data.error);
+  if (!dryRun) {
+    logActivity({
+      action: 'push',
+      entityType: 'promotion',
+      entityId: String(promotion.id),
+      target: 'walmart_ca',
+      summary: `Scheduled "${promotion.name}" on Walmart Canada — ${data.attempted} promo prices (feed ${data.feedId ?? '?'})` +
+        (data.itemsFailed ? ` · ${data.itemsFailed} rejected` : '') + (data.not_listed ? ` · ${data.not_listed} not listed there` : ''),
+      metadata: { feed_id: data.feedId, attempted: data.attempted, failed: data.itemsFailed ?? 0, not_listed: data.not_listed, skus: skus ?? null },
+    });
+  }
+  return data;
+}
+
+/**
  * Push the promotion's member products to Wix (only those linked), one by
  * one with progress. Used after apply AND after end — it just syncs the
  * products' current pricing state to the store.
