@@ -61,11 +61,26 @@ export async function loadAliases(product) {
   return rows;
 }
 
+const amazonCode = (marketplace) => (/^amazon (canada|usa)$/i.test(marketplace) ? (/usa/i.test(marketplace) ? 'us' : 'ca') : null);
+
+/** RULE (2026-09-13): one alias per product per marketplace, never two. */
+async function existingAlias(sku, marketplace) {
+  const amazon = amazonCode(marketplace);
+  if (amazon) {
+    const { data } = await supabase.from('amazon_links').select('seller_sku').eq('marketplace', amazon).eq('sku', sku).limit(1);
+    return data?.[0]?.seller_sku ?? null;
+  }
+  const { data } = await supabase.from('product_aliases').select('alias').eq('marketplace', marketplace).eq('sku', sku).limit(1);
+  return data?.[0]?.alias ?? null;
+}
+
 /** Add an alias. Amazon marketplaces write amazon_links; the rest product_aliases. */
 export async function addAlias(sku, { marketplace, alias, kind = 'sku', note = null }) {
   const value = String(alias ?? '').trim();
   if (!value) throw new Error('Type the alias.');
-  const amazon = /^amazon (canada|usa)$/i.test(marketplace) ? (/usa/i.test(marketplace) ? 'us' : 'ca') : null;
+  const current = await existingAlias(sku, marketplace);
+  if (current && current !== value) throw new Error(`${sku} already has ${current} on ${marketplace}. One alias per marketplace: remove it first.`);
+  const amazon = amazonCode(marketplace);
   if (amazon) {
     const { error } = await supabase.from('amazon_links').insert({ marketplace: amazon, seller_sku: value, sku });
     if (error) throw new Error(/duplicate|unique/i.test(error.message) ? `${value} is already the Amazon ${amazon.toUpperCase()} seller SKU of another product.` : error.message);
@@ -91,7 +106,11 @@ export async function removeAlias(sku, row) {
 
 /**
  * Paste a list ("alias<TAB>sku" or "alias,sku" per line) for one marketplace.
- * Lines whose SKU is not in the PIM are reported, never written.
+ * Lines whose SKU is not in the PIM are reported, never written. One alias
+ * per product: a SKU listed with several aliases keeps the one containing
+ * "-CAN" on Amazon Canada (or "-US"/"-USA" on Amazon USA) when exactly one
+ * has it; otherwise the SKU is skipped and reported for a manual pick. A
+ * SKU that already has a different alias on the marketplace is skipped too.
  */
 export async function importAliasList(marketplace, text, kind = 'sku') {
   const lines = String(text ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -108,18 +127,46 @@ export async function importAliasList(marketplace, text, kind = 'sku') {
     const { data } = await supabase.from('products').select('sku').in('sku', skus.slice(i, i + 200));
     for (const p of data ?? []) known.add(p.sku);
   }
-  const usable = pairs.filter((p) => known.has(p.sku));
   const notInPim = [...new Set(pairs.filter((p) => !known.has(p.sku)).map((p) => p.sku))];
-  const amazon = /^amazon (canada|usa)$/i.test(marketplace) ? (/usa/i.test(marketplace) ? 'us' : 'ca') : null;
+  const amazon = amazonCode(marketplace);
+  const marker = amazon === 'ca' ? /-CAN(\b|-)/i : amazon === 'us' ? /-USA?(\b|-)/i : null;
+  const bySku = new Map();
+  for (const p of pairs.filter((x) => known.has(x.sku))) {
+    if (!bySku.has(p.sku)) bySku.set(p.sku, []);
+    if (!bySku.get(p.sku).includes(p.alias)) bySku.get(p.sku).push(p.alias);
+  }
+  const usable = [];
+  const review = [];
+  for (const [sku, aliases] of bySku) {
+    if (aliases.length === 1) { usable.push({ sku, alias: aliases[0] }); continue; }
+    const marked = marker ? aliases.filter((a) => marker.test(a)) : [];
+    if (marked.length === 1) usable.push({ sku, alias: marked[0] });
+    else review.push({ sku, aliases });
+  }
+  // A product that already answers to a different alias keeps it.
+  const conflicts = [];
+  const skusToWrite = usable.map((p) => p.sku);
+  for (let i = 0; i < skusToWrite.length; i += 200) {
+    const chunk = skusToWrite.slice(i, i + 200);
+    const { data } = amazon
+      ? await supabase.from('amazon_links').select('sku, alias:seller_sku').eq('marketplace', amazon).in('sku', chunk)
+      : await supabase.from('product_aliases').select('sku, alias').eq('marketplace', marketplace).in('sku', chunk);
+    for (const row of data ?? []) {
+      const wanted = usable.find((p) => p.sku === row.sku);
+      if (wanted && wanted.alias !== row.alias) conflicts.push({ sku: row.sku, current: row.alias, given: wanted.alias });
+    }
+  }
+  const conflictSkus = new Set(conflicts.map((c) => c.sku));
+  const toWrite = usable.filter((p) => !conflictSkus.has(p.sku));
   let written = 0;
-  for (let i = 0; i < usable.length; i += 200) {
-    const chunk = usable.slice(i, i + 200);
+  for (let i = 0; i < toWrite.length; i += 200) {
+    const chunk = toWrite.slice(i, i + 200);
     const { error } = amazon
       ? await supabase.from('amazon_links').upsert(chunk.map((p) => ({ marketplace: amazon, seller_sku: p.alias, sku: p.sku })), { onConflict: 'marketplace,seller_sku' })
       : await supabase.from('product_aliases').upsert(chunk.map((p) => ({ marketplace, alias: p.alias, sku: p.sku, kind })), { onConflict: 'marketplace,alias' });
     if (error) throw error;
     written += chunk.length;
   }
-  logActivity({ action: 'import', entityType: 'product', entityId: `${written} aliases`, target: 'pim', summary: `Imported ${written} ${marketplace} aliases${notInPim.length ? ` · ${notInPim.length} SKUs not in the PIM` : ''}`, metadata: { marketplace, written, notInPim: notInPim.slice(0, 50) } });
-  return { written, notInPim };
+  logActivity({ action: 'import', entityType: 'product', entityId: `${written} aliases`, target: 'pim', summary: `Imported ${written} ${marketplace} aliases${notInPim.length ? ` · ${notInPim.length} SKUs not in the PIM` : ''}${review.length ? ` · ${review.length} need a manual pick` : ''}`, metadata: { marketplace, written, notInPim: notInPim.slice(0, 50), review: review.slice(0, 50), conflicts: conflicts.slice(0, 50) } });
+  return { written, notInPim, review, conflicts };
 }

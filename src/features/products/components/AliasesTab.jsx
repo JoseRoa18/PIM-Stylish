@@ -202,7 +202,7 @@ function ImportAliasesDialog({ onClose, onImported }) {
   }
 
   return (
-    <Dialog onClose={onClose} title="Import aliases" subtitle="One line per product: the marketplace's alias, then the PIM SKU. Tab or comma between them." maxWidth="max-w-lg">
+    <Dialog onClose={onClose} title="Import aliases" subtitle="One line per product: the marketplace's alias, then the PIM SKU. Tab or comma between them. One alias per product." maxWidth="max-w-lg">
       <form onSubmit={submit} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
@@ -229,9 +229,15 @@ function ImportAliasesDialog({ onClose, onImported }) {
           className={`w-full font-mono text-body-sm ${inputCls}`}
         />
         {result && (
-          <p className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant">
-            {result.written} aliases saved.{result.notInPim.length ? ` Not in the PIM, skipped: ${result.notInPim.slice(0, 12).join(', ')}${result.notInPim.length > 12 ? ` and ${result.notInPim.length - 12} more` : ''}.` : ''}
-          </p>
+          <div className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant space-y-1">
+            <p>{result.written} aliases saved.{result.notInPim.length ? ` Not in the PIM, skipped: ${result.notInPim.slice(0, 12).join(', ')}${result.notInPim.length > 12 ? ` and ${result.notInPim.length - 12} more` : ''}.` : ''}</p>
+            {result.review?.length > 0 && (
+              <p>Several aliases for one product, pick one by hand: {result.review.slice(0, 10).map((r) => `${r.sku} (${r.aliases.join(' / ')})`).join('; ')}{result.review.length > 10 ? ` and ${result.review.length - 10} more` : ''}.</p>
+            )}
+            {result.conflicts?.length > 0 && (
+              <p>Already have a different alias, kept as they were: {result.conflicts.slice(0, 10).map((c) => `${c.sku} (${c.current})`).join('; ')}{result.conflicts.length > 10 ? ` and ${result.conflicts.length - 10} more` : ''}.</p>
+            )}
+          </div>
         )}
         {error && <p className="text-body-sm text-error">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
