@@ -42,6 +42,7 @@ import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { fillBBBPromoFile } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor } from '@/features/pricing/lib/promoChannels';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
+import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link } from 'react-router-dom';
 
@@ -1237,9 +1238,11 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg }) {
   async function generate(channel, template) {
     setBusy(channel.key);
     try {
-      const r = await fillPromoTemplate(template, promo, channel);
+      const text = channel.fill === 'amazon'
+        ? summarizeAmazonFill(channel, await fillAmazonPromoTemplate(template, promo, channel))
+        : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
-      onMsg({ tone: 'success', text: summarizePromoFill(channel, r) });
+      onMsg({ tone: 'success', text });
     } catch (err) {
       onMsg({ tone: 'error', text: err.message });
     } finally {

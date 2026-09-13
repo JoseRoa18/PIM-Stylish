@@ -256,7 +256,7 @@ Deno.serve(async (req) => {
           seen.add(k);
           return true;
         });
-        const { error } = await supabase.from("amazon_links").upsert(unique, { onConflict: "marketplace,sku" });
+        const { error } = await supabase.from("amazon_links").upsert(unique, { onConflict: "marketplace,seller_sku" });
         if (error) return json({ ok: false, step: "upsert", error: error.message, matched: matched.length }, 500);
         applied = unique.length;
       }
