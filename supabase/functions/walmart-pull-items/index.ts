@@ -8,9 +8,10 @@
 // - us: GET /v3/items → { sku, price, published, lifecycle }
 // - ca: Walmart's modern item-query API does NOT serve the CA catalog (every
 //   items/inventory read 404s even for SKUs the daily inventory feeds update),
-//   and the legacy /v3/ca stack rejects token auth. The one read that works
-//   is the FEED DETAIL: the latest MP_INVENTORY feed enumerates every CA SKU
-//   with its ingestion status → { sku, feedStatus } (presence/coverage only).
+//   and the legacy /v3/ca stack rejects token auth. Presence comes from the
+//   FEED DETAIL of the latest MP_INVENTORY feed → { sku, feedStatus }; prices
+//   from GET /v3/promo/sku/{sku} per SKU (regular + promo while a promotion
+//   exists) → price, discount_price, discount_start/end, promo_id.
 //
 // Required secrets: WALMART_US_PROD_CLIENT_ID, WALMART_US_PROD_CLIENT_SECRET
 // (the credential pair is multi-market; CA is selected via WM_MARKET).
@@ -44,10 +45,6 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const cid = Deno.env.get("WALMART_US_PROD_CLIENT_ID");
-  const sec = Deno.env.get("WALMART_US_PROD_CLIENT_SECRET");
-  if (!cid || !sec) return json({ error: "Walmart US secrets are not set" }, 500);
-
   let market = "us";
   try {
     const body = await req.json();
@@ -55,6 +52,11 @@ Deno.serve(async (req) => {
   } catch {
     // empty body → default market
   }
+  // Canada has its own credential pair since 2026-09-13 (falls back to the
+  // multi-market US pair when it is not set).
+  const cid = (market === "ca" && Deno.env.get("WALMART_CA_CLIENT_ID")) || Deno.env.get("WALMART_US_PROD_CLIENT_ID");
+  const sec = (market === "ca" && Deno.env.get("WALMART_CA_CLIENT_SECRET")) || Deno.env.get("WALMART_US_PROD_CLIENT_SECRET");
+  if (!cid || !sec) return json({ error: "Walmart secrets are not set" }, 500);
 
   try {
     const tokenRes = await fetch(`${BASE}/v3/token`, {
@@ -103,7 +105,43 @@ Deno.serve(async (req) => {
         if (!page.length) break;
       } while (items.length < received);
 
-      return json({ ok: true, market: "ca", total: items.length, feedDate: feed.feedDate ?? null, items });
+      // Prices: Walmart CA serves no item read, but the promo endpoint answers
+      // for every SKU — with a promotion it carries the REGULAR price
+      // (comparisonPrice) and the promo (currentPrice + window); without one
+      // it only says NOT_FOUND, so the regular price stays unknown then.
+      const etDay = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : null);
+      const enriched: Array<Record<string, unknown>> = items.map((it) => ({ ...it, price: null, discount_price: null, discount_start: null, discount_end: null, promo_id: null, promo_checked: false }));
+      const startedAt = Date.now();
+      let cursor = 0;
+      async function worker() {
+        while (cursor < enriched.length && Date.now() - startedAt < 60_000) {
+          const row = enriched[cursor++];
+          try {
+            const res = await fetch(`${BASE}/v3/promo/sku/${encodeURIComponent(String(row.sku))}`, { headers: caHeaders });
+            if (!res.ok) continue;
+            const d = await res.json();
+            row.promo_checked = true;
+            if (d?.status !== "OK") continue;
+            const pr = d.payload?.pricingList?.pricing?.[0];
+            if (!pr) continue;
+            const current = pr.currentPrice?.value?.amount ?? null;
+            const comparison = pr.comparisonPrice?.value?.amount ?? null;
+            if (pr.currentPriceType === "REDUCED") {
+              row.price = comparison;
+              row.discount_price = current;
+            } else {
+              row.price = current;
+            }
+            row.discount_start = etDay(pr.effectiveDate);
+            row.discount_end = etDay(pr.expirationDate);
+            row.promo_id = pr.promoId ?? null;
+          } catch { /* keep the row without price */ }
+        }
+      }
+      await Promise.all(Array.from({ length: 6 }, worker));
+      const checked = enriched.filter((r) => r.promo_checked).length;
+      const promos = enriched.filter((r) => r.discount_price != null).length;
+      return json({ ok: true, market: "ca", total: enriched.length, feedDate: feed.feedDate ?? null, items: enriched, promos_checked: checked, promos_active: promos, partial: checked < enriched.length });
     }
 
     const items: Array<{

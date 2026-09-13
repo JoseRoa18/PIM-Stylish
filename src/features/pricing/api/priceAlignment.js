@@ -76,6 +76,22 @@ export const ALIGN_TARGETS = {
     promoAware: true,
     market: 'us',
   },
+  // Walmart Canada exposes prices only while a promotion exists on the SKU
+  // (the promo read carries the regular price next to it), so the analysis
+  // covers promo compliance; SKUs without any price on file are left out.
+  walmart_ca: {
+    key: 'walmart_ca',
+    kind: 'walmart',
+    canFix: false,
+    channel: 'walmart_ca',
+    label: 'Walmart Canada',
+    short: 'Walmart CA',
+    symbol: 'C$',
+    priceField: 'map_cad',
+    priceShort: 'MAP (CAD)',
+    promoAware: true,
+    market: 'ca',
+  },
 };
 export const ALIGN_TARGET_KEYS = Object.keys(ALIGN_TARGETS);
 
@@ -182,6 +198,7 @@ async function loadOfferAlignment(cfg) {
   const results = [];
   for (const o of snapshot.results ?? []) {
     if (!baseBySku.has(o.sku)) continue; // channel SKU not in the PIM
+    if (o.price == null && o.discount_price == null) continue; // no price on file (Walmart CA without a promo)
     const base = baseBySku.get(o.sku) ?? null;
     const promo = promoBySku.get(o.sku);
     const expected = promo?.price ?? base;
@@ -227,7 +244,7 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
 export async function runPriceAlignment(target = DEFAULT_WIX_SITE) {
   const cfg = ALIGN_TARGETS[target];
   if (cfg.kind === 'bestbuy') await refreshBestBuyOffers();
-  else if (cfg.kind === 'walmart') await refreshWalmartItems('us');
+  else if (cfg.kind === 'walmart') await refreshWalmartItems(cfg.market);
   else await refreshWixCatalog(target);
   return loadLatestAlignment(target);
 }

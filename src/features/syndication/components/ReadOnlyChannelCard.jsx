@@ -32,11 +32,13 @@ const CHANNELS = {
   walmart_ca: {
     healthTab: 'walmart_ca',
     refresh: () => refreshWalmartItems('ca'),
+    shield: 'Content and stock are never written. Promotional prices go out from the Pricing section.',
     counters: (s) => [
-      { icon: CheckCircle2, tone: 'text-success', label: `${s.in_sync} SKUs updating OK in the daily inventory feed` },
+      { icon: CheckCircle2, tone: 'text-success', label: `${s.in_sync} SKUs in the daily inventory feed` },
       { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} feed rejections` },
+      { icon: CheckCircle2, tone: 'text-success', label: `${(s.results ?? []).filter((r) => r.discount_price != null).length} with a promotion on Walmart` },
     ],
-    note: "Walmart CA exposes no item API — presence comes from the latest MP_INVENTORY feed detail. Nothing is ever written to Walmart.",
+    note: 'Presence comes from the latest inventory feed; regular and promo prices are read per SKU from the promotion API, so a price is known only while the SKU has a promotion.',
   },
 };
 

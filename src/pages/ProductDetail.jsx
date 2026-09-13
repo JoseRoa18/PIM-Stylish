@@ -48,6 +48,8 @@ import WixSyndicationCard from '@/features/syndication/components/WixSyndication
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
 import AliasesTab from '@/features/products/components/AliasesTab';
+import WalmartCaProductCard from '@/features/syndication/components/WalmartCaProductCard';
+import { latestSnapshot } from '@/features/syndication/lib/channels';
 import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
@@ -1592,6 +1594,17 @@ function MarketplacesTab({ product, media, onUpdate }) {
   const [wixSite, setWixSite] = useState(DEFAULT_WIX_SITE);
   const wayfairRef = useRef(null);
   const wayfairUsaRef = useRef(null);
+  const walmartRef = useRef(null);
+  // Walmart Canada: this product's row in the latest snapshot (undefined = loading, null = absent).
+  const [wmCa, setWmCa] = useState(undefined);
+  useEffect(() => {
+    let active = true;
+    latestSnapshot('walmart_ca').then((snap) => {
+      if (!active) return;
+      setWmCa((snap?.results ?? []).find((r) => r.sku === product.sku) ?? null);
+    });
+    return () => { active = false; };
+  }, [product.sku]);
   const [autoLink, setAutoLink] = useState(null); // null | 'busy' | summary | Error
   const [pushAll, setPushAll] = useState(null); // null | 'busy' | results | Error
 
@@ -1655,7 +1668,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
   return (
     <div className="space-y-6">
       {/* Channel overview — one tile per connection; Wix tiles switch the card below. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
         {wixSitesFor(product).map((key) => (
           <ChannelTile
             key={key}
@@ -1684,6 +1697,15 @@ function MarketplacesTab({ product, media, onUpdate }) {
           linkedText="Connected"
           notLinkedText="No listing id"
           onClick={() => wayfairUsaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        />
+        <ChannelTile
+          label="Walmart Canada"
+          avatar="WM"
+          avatarClass="bg-brand-walmart/10 text-brand-walmart"
+          linked={wmCa === undefined ? null : Boolean(wmCa)}
+          linkedText="In feed"
+          notLinkedText="Not in feed"
+          onClick={() => walmartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         />
       </div>
 
@@ -1756,6 +1778,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
       </div>
       <div ref={wayfairUsaRef} className="scroll-mt-24">
         <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />
+      </div>
+      <div ref={walmartRef} className="scroll-mt-24">
+        <WalmartCaProductCard product={product} row={wmCa ?? null} loading={wmCa === undefined} />
       </div>
       <WayfairAdditionCard product={product} supplier="USA" />
       <ExportTemplatesCard product={product} media={media} />

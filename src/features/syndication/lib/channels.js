@@ -80,13 +80,13 @@ export const LIVE_CHANNELS = [
   {
     id: 'walmart_ca',
     name: 'Walmart Canada',
-    tagline: 'Presence via daily inventory feed',
+    tagline: 'Presence, prices and promotions via API',
     letter: 'W',
     logo: '/brand/channels/walmart.svg',
     avatarClass: 'bg-brand-walmart/10 text-brand-walmart',
     env: 'Production',
     envClass: 'bg-success-container text-on-success-container',
-    mode: 'Read-only',
+    mode: 'Promos via API',
     modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
       const snap = await latestSnapshot('walmart_ca');
