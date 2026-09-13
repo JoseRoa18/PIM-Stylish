@@ -60,6 +60,26 @@ export const WIX_SITES = {
     hasSale: false,
     hasCollections: false,
   },
+  // The Azuni brand store: only Azuni products exist for it (onlyBrands).
+  azuni_ca: {
+    key: 'azuni_ca',
+    channel: 'wix_azuni_ca',
+    promoAware: true,
+    label: 'Azuni Canada',
+    short: 'Azuni CA',
+    url: 'https://www.azuni.ca',
+    currency: 'CAD',
+    symbol: 'C$',
+    priceField: 'map_cad',
+    priceLabel: 'Price (CAD) — MAP',
+    priceShort: 'MAP (CAD)',
+    priceHint: 'The Azuni store sells at the Canadian MAP.',
+    excludedBrands: [],
+    onlyBrands: ['azuni'],
+    market: 'ca',
+    hasSale: false,
+    hasCollections: false,
+  },
   stylish_us: {
     key: 'stylish_us',
     channel: 'wix_stylish_us',
@@ -92,6 +112,7 @@ export const DEFAULT_WIX_SITE = 'sinksdirect_ca';
 export function wixSiteSells(siteOrKey, product) {
   const cfg = typeof siteOrKey === 'string' ? WIX_SITES[siteOrKey] : siteOrKey;
   const brand = (typeof product === 'string' ? product : product?.brand ?? '').toLowerCase();
+  if (cfg?.onlyBrands?.length) return cfg.onlyBrands.some((b) => brand.includes(b));
   return !(cfg?.excludedBrands ?? []).some((b) => brand.includes(b));
 }
 

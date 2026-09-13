@@ -56,6 +56,7 @@ export async function computeListingHealth() {
       wix_sinksdirect_us: await latestSnapshotMap('wix_sinksdirect_us'),
       wix_stylish_ca: await latestSnapshotMap('wix_stylish_ca'),
       wix_stylish_us: await latestSnapshotMap('wix_stylish_us'),
+      wix_azuni_ca: await latestSnapshotMap('wix_azuni_ca'),
     },
   });
 }

@@ -337,6 +337,30 @@ export const MARKETPLACES = {
       { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
     ],
   },
+  // The Azuni brand store: only Azuni products belong to it.
+  wix_azuni_ca: {
+    key: 'wix_azuni_ca',
+    onlyBrands: ['azuni'],
+    label: 'Azuni Canada',
+    subtitle: 'Wix Stores',
+    dataSource: 'wix_site',
+    connectionType: 'api',
+    requiresLink: true,
+    linkField: 'ws_listed',
+    checks: [
+      { field: 'ws_listed', category: 'Identity', weight: 15, severity: 'critical' },
+      { field: 'ws_live', category: 'Identity', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_name', category: 'Identity', weight: 8, severity: 'critical', needsLink: true },
+      { field: 'ws_price', category: 'Pricing', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_price_aligned', category: 'Pricing', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_description', category: 'Description', weight: 12, severity: 'critical', needsLink: true },
+      { field: 'ws_main_image', category: 'Images', weight: 10, severity: 'critical', needsLink: true },
+      { field: 'ws_images', category: 'Images', weight: 5, severity: 'minor', needsLink: true },
+      { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+    ],
+  },
   wayfair: {
     key: 'wayfair',
     // The Canadian supplier (31948): audit channel 'wayfair', ids in
@@ -681,9 +705,12 @@ export function buildListingHealthData(list, { wayfairMap = null, wayfairUsaMap 
     // all — those products are neither linked nor missing there (Azuni is
     // not sold on the Stylish brand sites, rule 2026-09-09).
     const excludedBrands = def.excludedBrands ?? [];
-    const inScope = excludedBrands.length
-      ? enriched.filter((e) => !excludedBrands.some((b) => (e.brand ?? '').toLowerCase().includes(b)))
-      : enriched;
+    const onlyBrands = def.onlyBrands ?? [];
+    const inScope = onlyBrands.length
+      ? enriched.filter((e) => onlyBrands.some((b) => (e.brand ?? '').toLowerCase().includes(b)))
+      : excludedBrands.length
+        ? enriched.filter((e) => !excludedBrands.some((b) => (e.brand ?? '').toLowerCase().includes(b)))
+        : enriched;
     const scores = inScope.map((e) => {
       let product;
       let media;

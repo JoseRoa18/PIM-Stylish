@@ -282,6 +282,7 @@ async function runRefresh() {
         wix_sinksdirect_us: await latestSnapshotMap("wix_sinksdirect_us"),
         wix_stylish_ca: await latestSnapshotMap("wix_stylish_ca"),
         wix_stylish_us: await latestSnapshotMap("wix_stylish_us"),
+        wix_azuni_ca: await latestSnapshotMap("wix_azuni_ca"),
       },
     });
     await restInsert("channel_health", buildSummaryRows(perMarketplaceData));
@@ -327,6 +328,7 @@ async function runRefresh() {
         ["sinksdirect_us", "wix_sinksdirect_us"],
         ["stylish_ca", "wix_stylish_ca"],
         ["stylish_us", "wix_stylish_us"],
+        ["azuni_ca", "wix_azuni_ca"],
       ];
       for (const [site, channel] of priceSites) {
         const map = await latestSnapshotMap(channel);

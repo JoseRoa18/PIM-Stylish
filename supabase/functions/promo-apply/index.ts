@@ -397,6 +397,28 @@ async function run(dryRun: boolean, reconcile: boolean) {
       const jobs: WixJob[] = [...linkedCa].map((sku) => ({ sku, site: "sinksdirect_ca", only: ["priceData", "discount"] }));
       const wixCa = await pushWixJobs(jobs, dryRun, errors);
       report.ca = { members: cadRows.length, linked: linkedCa.size, ...wixCa.sinksdirect_ca };
+
+      // Azuni store (Azuni products only, sells at MAP CAD, no sale fields):
+      // the promo travels as the price itself — promo MAP while the Canada
+      // window is open, regular MAP once it ends. Same pattern as SinksDirect US.
+      const linkedAz = new Set<string>();
+      for (const part of chunk(affected, 100)) {
+        const az = await restGet<{ sku: string }[]>(`wix_links?site=eq.azuni_ca&sku=${inList(part)}&select=sku`);
+        az.forEach((r) => linkedAz.add(r.sku));
+      }
+      if (linkedAz.size) {
+        const promoCad = new Map(cadRows.map((r) => [r.sku, r.promo_price_cad]));
+        const mapCad = new Map<string, number | null>();
+        for (const part of chunk([...linkedAz], 100)) {
+          const rows = await restGet<{ sku: string; map_cad: number | null }[]>(`products?select=sku,map_cad&sku=${inList(part)}`);
+          rows.forEach((r) => mapCad.set(r.sku, r.map_cad));
+        }
+        const azJobs: WixJob[] = [...linkedAz]
+          .map((sku) => ({ sku, site: "azuni_ca", only: ["priceData"], fields: { map_cad: promoCad.get(sku) ?? mapCad.get(sku) ?? null } }))
+          .filter((j) => (j.fields as { map_cad: number | null }).map_cad != null);
+        const wixAz = await pushWixJobs(azJobs, dryRun, errors);
+        report.azuni_ca = { linked: linkedAz.size, ...wixAz.azuni_ca };
+      }
     }
 
     // Safety net: the day-before prep normally schedules Best Buy. If it

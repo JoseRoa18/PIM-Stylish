@@ -30,6 +30,8 @@ export interface WixSite {
   hasCollections: boolean;
   /** Brands this store never carries (lower-case substrings of products.brand). */
   excludedBrands: string[];
+  /** When set, ONLY these brands belong to the store (the Azuni store). */
+  onlyBrands?: string[];
 }
 
 export const WIX_SITES: Record<string, WixSite> = {
@@ -75,6 +77,23 @@ export const WIX_SITES: Record<string, WixSite> = {
     hasSale: false,
     hasCollections: false,
   },
+  // The Azuni brand store: only Azuni products exist for it. Selling price
+  // rule provisional (MAP CAD) until verified against the live catalog.
+  azuni_ca: {
+    key: "azuni_ca",
+    excludedBrands: [],
+    onlyBrands: ["azuni"],
+    channel: "wix_azuni_ca",
+    promoAware: true,
+    label: "Azuni Canada",
+    siteId: "b854d577-48b6-4315-a985-be8d3f3e6cc2",
+    currency: "CAD",
+    priceField: "map_cad",
+    market: "ca",
+    legacyColumns: false,
+    hasSale: false,
+    hasCollections: false,
+  },
   stylish_us: {
     key: "stylish_us",
     excludedBrands: ["azuni"],
@@ -96,6 +115,7 @@ export const WIX_SITES: Record<string, WixSite> = {
  * listing health, links, pushes). SinksDirect carries every brand. */
 export function siteSells(site: WixSite, brand: string | null | undefined): boolean {
   const b = (brand ?? "").toLowerCase();
+  if (site.onlyBrands?.length) return site.onlyBrands.some((x) => b.includes(x));
   return !site.excludedBrands.some((x) => b.includes(x));
 }
 

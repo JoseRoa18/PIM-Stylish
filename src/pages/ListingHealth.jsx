@@ -153,11 +153,12 @@ export default function ListingHealth() {
     const family = {
       wix: ['Sinks Direct', 'Canada'], wix_sinksdirect_us: ['Sinks Direct', 'USA'],
       wix_stylish_ca: ['Stylish', 'Canada'], wix_stylish_us: ['Stylish', 'USA'],
+      wix_azuni_ca: ['Azuni', 'Canada'],
       wayfair: ['Wayfair', 'Canada'], wayfair_usa: ['Wayfair', 'USA'],
       bestbuy: ['Best Buy', 'Canada'],
       walmart_ca: ['Walmart', 'Canada'], walmart_us: ['Walmart', 'USA'],
     };
-    const order = ['Sinks Direct', 'Stylish', 'Wayfair', 'Best Buy', 'Walmart'];
+    const order = ['Sinks Direct', 'Stylish', 'Azuni', 'Wayfair', 'Best Buy', 'Walmart'];
     const groups = new Map();
     for (const key of API_MARKETPLACE_KEYS) {
       const [name, market] = family[key] ?? [MARKETPLACES[key]?.label ?? key, null];

@@ -7,7 +7,7 @@ import { categorizeScore } from '@/features/dashboard/lib/listingHealth';
 // Coverage per channel: how many products are linked and how healthy the
 // listings score, with the change since the week started.
 // Listing-health marketplace key → the Wix site key used by the price reports.
-const PRICE_SITE = { wix: 'sinksdirect_ca', wix_sinksdirect_us: 'sinksdirect_us', wix_stylish_ca: 'stylish_ca', wix_stylish_us: 'stylish_us' };
+const PRICE_SITE = { wix: 'sinksdirect_ca', wix_sinksdirect_us: 'sinksdirect_us', wix_stylish_ca: 'stylish_ca', wix_stylish_us: 'stylish_us', wix_azuni_ca: 'azuni_ca' };
 
 export default function ChannelCoverage({ index, week }) {
   const keys = [...(index.keys())].filter((k) => k.startsWith('channel|')).map((k) => k.split('|')[1]);
