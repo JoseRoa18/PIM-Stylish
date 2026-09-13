@@ -1,11 +1,10 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle,
   Search,
   ArrowRight,
   ChevronDown,
-  ChevronRight,
   RefreshCw,
 } from 'lucide-react';
 import { useListingHealth } from '@/features/dashboard/hooks/useListingHealth';
@@ -157,25 +156,6 @@ export default function ListingHealth() {
   const [expandedSku, setExpandedSku] = useState(null);
   const PAGE_SIZE = 25;
 
-  // The tab strip hides its scrollbar, so edge fades + a chevron are the only
-  // signal that more channels sit off-screen. Re-measured on scroll, resize,
-  // and when the average-score badges arrive (they widen the strip).
-  const tabsRef = useRef(null);
-  const [tabsCanScroll, setTabsCanScroll] = useState({ left: false, right: false });
-  const updateTabsScroll = useCallback(() => {
-    const el = tabsRef.current;
-    if (!el) return;
-    const left = el.scrollLeft > 4;
-    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
-    setTabsCanScroll((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
-  }, []);
-
-  useEffect(() => {
-    updateTabsScroll();
-    window.addEventListener('resize', updateTabsScroll);
-    return () => window.removeEventListener('resize', updateTabsScroll);
-  }, [updateTabsScroll, byMarketplace]);
-
   const mktDef = isPim ? null : MARKETPLACES[marketplace];
   const mktData = byMarketplace[marketplace];
   const products = mktData?.products ?? [];
@@ -280,13 +260,11 @@ export default function ListingHealth() {
 
       {/* Marketplace tabs — only API-connected channels */}
       {TAB_KEYS.length > 1 && (
-      <div className="relative mb-6">
-      <div
-        ref={tabsRef}
-        onScroll={updateTabsScroll}
-        className="border-b border-outline-variant overflow-x-auto scrollbar-hide"
-      >
-        <nav className="flex min-w-max gap-1" role="tablist">
+      <div className="mb-6">
+      {/* Every channel stays visible: the strip wraps onto more lines instead
+          of scrolling off-screen (twelve channels no longer fit one row). */}
+      <div className="border-b border-outline-variant">
+        <nav className="flex flex-wrap gap-x-1" role="tablist">
           {TAB_KEYS.map((key) => {
             const def = key === PIM_TAB ? { label: 'PIM' } : MARKETPLACES[key];
             const data = key === PIM_TAB ? null : byMarketplace[key];
@@ -319,20 +297,6 @@ export default function ListingHealth() {
           })}
         </nav>
       </div>
-      {tabsCanScroll.left && (
-        <div
-          aria-hidden="true"
-          className="absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-background to-transparent pointer-events-none"
-        />
-      )}
-      {tabsCanScroll.right && (
-        <div
-          aria-hidden="true"
-          className="absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-background to-transparent pointer-events-none flex items-center justify-end"
-        >
-          <ChevronRight className="w-4 h-4 text-on-surface-variant" />
-        </div>
-      )}
       </div>
       )}
 
