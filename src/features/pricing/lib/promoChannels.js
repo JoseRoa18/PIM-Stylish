@@ -14,6 +14,8 @@ import { templatePurpose } from '@/features/templates/api/templates';
  * channel's cost column takes; null = the channel gets prices only.
  * `fill` picks a marketplace-specific filler instead of the generic one
  * ('amazon': Seller Central flat file keyed by seller SKU).
+ * `sellerSku: 'pim'` means the marketplace uses the PIM SKU as is (Amazon
+ * USA); otherwise the seller SKU comes from amazon_links.
  */
 export const PROMO_CHANNELS = [
   { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', kind: 'api', stamp: 'ca_applied_at',
@@ -35,7 +37,7 @@ export const PROMO_CHANNELS = [
   { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null },
   { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us', kind: 'template', marketplace: /lowe.*\bus(a)?\b/i, costSlug: 'lowes_sod_bbb_usd' },
   { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'template', marketplace: /menards/i, costSlug: 'menards_usd' },
-  { key: 'amazon_us', label: 'Amazon USA', monogram: 'AM', market: 'us', kind: 'template', marketplace: /amazon.*\bus(a)?\b/i, costSlug: null, fill: 'amazon' },
+  { key: 'amazon_us', label: 'Amazon USA', monogram: 'AM', market: 'us', kind: 'template', marketplace: /amazon.*\bus(a)?\b/i, costSlug: null, fill: 'amazon', sellerSku: 'pim' }, // Amazon.com lists our products under the PIM SKU itself
   { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us', kind: 'template', marketplace: /walmart.*\bus(a)?\b/i, costSlug: null },
 ];
 

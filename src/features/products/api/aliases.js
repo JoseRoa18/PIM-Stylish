@@ -8,7 +8,8 @@ import { WIX_SITES } from '@/features/syndication/lib/wixSites';
  * Two sources feed the Aliases tab:
  *   - linked systems the PIM already talks to (Wix product ids, Wayfair
  *     listing ids, Amazon seller SKUs + ASINs) — shown as they are, and the
- *     Amazon ones can be added here because Amazon files are keyed by them;
+ *     Amazon Canada ones can be added here because its files are keyed by
+ *     them (Amazon USA sells under the PIM SKU itself);
  *   - product_aliases, the free list for every other marketplace (Home
  *     Depot item numbers, Lowe's, Menards, Walmart, Rona, Best Buy, BB&B…).
  */

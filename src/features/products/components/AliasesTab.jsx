@@ -5,7 +5,8 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { loadAliases, addAlias, removeAlias, importAliasList, ALIAS_MARKETPLACES, ALIAS_KINDS } from '../api/aliases';
 
-const AMAZON = ['Amazon Canada', 'Amazon USA'];
+// Amazon USA lists products under the PIM SKU itself, so only Canada takes aliases.
+const AMAZON = ['Amazon Canada'];
 const inputCls = 'px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
 /**

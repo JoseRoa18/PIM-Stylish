@@ -71,17 +71,22 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   if (!members.length) throw new Error(`This promotion has no ${market === 'us' ? 'USD' : 'CAD'} promo prices loaded.`);
   const priceBySku = new Map(members.map((r) => [r.sku, r[priceKey]]));
 
-  // Every Amazon offer of every member: seller SKU → promo price.
+  // Every Amazon offer of every member: seller SKU → promo price. Amazon USA
+  // lists our products under the PIM SKU itself; Canada needs the alias.
   const offers = [];
   const skus = members.map((r) => r.sku);
-  for (let i = 0; i < skus.length; i += 100) {
-    const { data, error } = await supabase
-      .from('amazon_links')
-      .select('sku, seller_sku')
-      .eq('marketplace', market)
-      .in('sku', skus.slice(i, i + 100));
-    if (error) throw error;
-    for (const l of data ?? []) offers.push({ seller: l.seller_sku, sku: l.sku, price: priceBySku.get(l.sku) });
+  if (channel.sellerSku === 'pim') {
+    for (const r of members) offers.push({ seller: r.sku, sku: r.sku, price: r[priceKey] });
+  } else {
+    for (let i = 0; i < skus.length; i += 100) {
+      const { data, error } = await supabase
+        .from('amazon_links')
+        .select('sku, seller_sku')
+        .eq('marketplace', market)
+        .in('sku', skus.slice(i, i + 100));
+      if (error) throw error;
+      for (const l of data ?? []) offers.push({ seller: l.seller_sku, sku: l.sku, price: priceBySku.get(l.sku) });
+    }
   }
   const withOffer = new Set(offers.map((o) => o.sku));
   const noOffer = skus.filter((s) => !withOffer.has(s)).sort();
