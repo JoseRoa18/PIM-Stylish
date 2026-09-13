@@ -147,6 +147,29 @@ export default function ListingHealth() {
   );
   const isPim = marketplace === PIM_TAB;
   const TAB_KEYS = [PIM_TAB, ...API_MARKETPLACE_KEYS];
+  // Store family → its markets, in display order. Channels the map doesn't
+  // know form a family of their own so a new connector still shows up.
+  const CHANNEL_GROUPS = useMemo(() => {
+    const family = {
+      wix: ['Sinks Direct', 'Canada'], wix_sinksdirect_us: ['Sinks Direct', 'USA'],
+      wix_stylish_ca: ['Stylish', 'Canada'], wix_stylish_us: ['Stylish', 'USA'],
+      wayfair: ['Wayfair', 'Canada'], wayfair_usa: ['Wayfair', 'USA'],
+      bestbuy: ['Best Buy', 'Canada'],
+      walmart_ca: ['Walmart', 'Canada'], walmart_us: ['Walmart', 'USA'],
+    };
+    const order = ['Sinks Direct', 'Stylish', 'Wayfair', 'Best Buy', 'Walmart'];
+    const groups = new Map();
+    for (const key of API_MARKETPLACE_KEYS) {
+      const [name, market] = family[key] ?? [MARKETPLACES[key]?.label ?? key, null];
+      if (!groups.has(name)) groups.set(name, { name, items: [] });
+      groups.get(name).items.push({ key, market: market ?? MARKETPLACES[key]?.label ?? key });
+    }
+    const rank = (n) => (order.includes(n) ? order.indexOf(n) : order.length);
+    const marketRank = (m) => (m === 'Canada' ? 0 : m === 'USA' ? 1 : 2);
+    return [...groups.values()]
+      .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
+      .map((g) => ({ ...g, items: [...g.items].sort((a, b) => marketRank(a.market) - marketRank(b.market)) }));
+  }, []);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('score_asc');
   const [filter, setFilter] = useState('all');
@@ -258,47 +281,79 @@ export default function ListingHealth() {
         </p>
       </header>
 
-      {/* Marketplace tabs — only API-connected channels */}
-      {TAB_KEYS.length > 1 && (
-      <div className="mb-6">
-      {/* Every channel stays visible: the strip wraps onto more lines instead
-          of scrolling off-screen (twelve channels no longer fit one row). */}
-      <div className="border-b border-outline-variant">
-        <nav className="flex flex-wrap gap-x-1" role="tablist">
-          {TAB_KEYS.map((key) => {
-            const def = key === PIM_TAB ? { label: 'PIM' } : MARKETPLACES[key];
-            const data = key === PIM_TAB ? null : byMarketplace[key];
-            const avg = data?.stats?.avgScore ?? 0;
-            const isActive = key === marketplace;
-            return (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setMarketplace(key)}
-                className={`inline-flex items-center gap-2 px-4 py-3 text-body-md whitespace-nowrap border-b-2 -mb-px transition-colors ${
-                  isActive
-                    ? 'border-primary text-primary font-semibold'
-                    : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
-                }`}
-              >
-                {def.label}
-                {key === PIM_TAB && (
+      {/* Channel selector: one tab per store family, then the market inside
+          it. Twelve flat tabs no longer fit a row; six families do. */}
+      {TAB_KEYS.length > 1 && (() => {
+        const scoreOf = (key) => (key === PIM_TAB ? null : byMarketplace[key]?.stats?.avgScore ?? null);
+        const badge = (key) => {
+          const avg = scoreOf(key);
+          return avg == null ? null : (
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold ${SCORE_BADGE_STYLES[categorizeScore(avg)]}`}>{avg}</span>
+          );
+        };
+        const activeGroup = CHANNEL_GROUPS.find((g) => g.items.some((i) => i.key === marketplace)) ?? null;
+        return (
+          <div className="mb-6 space-y-3">
+            <div className="border-b border-outline-variant">
+              <nav className="flex flex-wrap gap-x-1" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isPim}
+                  onClick={() => setMarketplace(PIM_TAB)}
+                  className={`inline-flex items-center gap-2 px-4 py-3 text-body-md whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                    isPim ? 'border-primary text-primary font-semibold' : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
+                  }`}
+                >
+                  PIM
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold bg-tertiary/20 text-on-tertiary-container">live</span>
-                )}
-                {data && (
-                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold ${SCORE_BADGE_STYLES[categorizeScore(avg)]}`}>
-                    {avg}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-      </div>
-      </div>
-      )}
+                </button>
+                {CHANNEL_GROUPS.map((g) => {
+                  const isActive = activeGroup?.name === g.name;
+                  const shown = isActive ? marketplace : g.items[0].key;
+                  return (
+                    <button
+                      key={g.name}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => setMarketplace(isActive ? marketplace : g.items[0].key)}
+                      className={`inline-flex items-center gap-2 px-4 py-3 text-body-md whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                        isActive ? 'border-primary text-primary font-semibold' : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
+                      }`}
+                    >
+                      {g.name}
+                      {g.items.length === 1 && badge(shown)}
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+            {activeGroup && activeGroup.items.length > 1 && (
+              <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label={`${activeGroup.name} markets`}>
+                {activeGroup.items.map((i) => {
+                  const isActive = i.key === marketplace;
+                  return (
+                    <button
+                      key={i.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => setMarketplace(i.key)}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-label-lg transition-colors ${
+                        isActive ? 'bg-surface text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                    >
+                      {i.market}
+                      {badge(i.key)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {isPim && <PimCompletenessPanel />}
 
