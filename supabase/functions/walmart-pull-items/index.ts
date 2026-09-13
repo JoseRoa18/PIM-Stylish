@@ -123,6 +123,16 @@ Deno.serve(async (req) => {
         const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: restHeaders });
         return r.ok ? await r.json() : [];
       };
+      // Walmart lists 89 of our products under an alias ("S-300XG-1"); the
+      // snapshot is keyed by the PIM SKU so every screen matches, and the
+      // Walmart SKU rides along for the writes.
+      const aliasRows = await restGet("product_aliases?marketplace=eq.Walmart%20CA&select=alias,sku&limit=2000");
+      const pimByAlias = new Map<string, string>((aliasRows as { alias: string; sku: string }[]).map((r) => [r.alias, r.sku]));
+      for (const it of items as Array<{ sku: string; walmart_sku?: string }>) {
+        it.walmart_sku = it.sku;
+        const pimSku = pimByAlias.get(it.sku);
+        if (pimSku) it.sku = pimSku;
+      }
       const prevSnap = await restGet("channel_health?channel=eq.walmart_ca&select=results&order=run_at.desc&limit=1");
       const prevBySku = new Map<string, Record<string, unknown>>(
         ((prevSnap?.[0]?.results ?? []) as Record<string, unknown>[]).map((r) => [String(r.sku), r]),
@@ -162,7 +172,7 @@ Deno.serve(async (req) => {
         try {
           let res: Response | null = null;
           for (let attempt = 0; attempt < 4; attempt++) {
-            res = await fetch(`${BASE}/v3/promo/sku/${encodeURIComponent(String(row.sku))}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": access_token, "WM_MARKET": "ca" }) });
+            res = await fetch(`${BASE}/v3/promo/sku/${encodeURIComponent(String(row.walmart_sku ?? row.sku))}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": access_token, "WM_MARKET": "ca" }) });
             if (res.status !== 429 && res.status < 500) break;
             const retryAfter = Number(res.headers.get("retry-after"));
             await res.text();

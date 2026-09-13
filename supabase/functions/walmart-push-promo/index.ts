@@ -135,9 +135,13 @@ Deno.serve(async (req) => {
       const { data } = await admin.from("products").select("sku, map_cad, msrp_cad").in("sku", skus.slice(i, i + 100));
       for (const p of data ?? []) pim.set(p.sku, { map_cad: p.map_cad, msrp_cad: p.msrp_cad });
     }
-    // Listed on Walmart Canada = present in the latest inventory-feed snapshot.
+    // Listed on Walmart Canada = present in the latest inventory-feed snapshot
+    // (rows keyed by PIM SKU). Products Walmart lists under an alias
+    // ("S-300XG-1") are sent under that alias.
     const { data: snap } = await admin.from("channel_health").select("results").eq("channel", "walmart_ca").order("run_at", { ascending: false }).limit(1).maybeSingle();
     const listed = snap?.results ? new Set((snap.results as { sku: string }[]).map((r) => r.sku)) : null;
+    const { data: aliasRows } = await admin.from("product_aliases").select("alias, sku").eq("marketplace", "Walmart CA").in("sku", skus);
+    const walmartSku = new Map<string, string>((aliasRows ?? []).map((r: { alias: string; sku: string }) => [r.sku, r.alias]));
 
     const window = marketWindow(promo.period, "ca");
     let start = etInstant(window.start, "00:00:00");
@@ -147,6 +151,7 @@ Deno.serve(async (req) => {
     if (end <= start) return json({ error: `The Canada window for ${promo.period} already ended (${window.end}).` }, 400);
 
     const lines: Record<string, unknown>[] = [];
+    let aliased = 0;
     const notListed: string[] = [];
     const noMap: string[] = [];
     const atOrAboveMap: string[] = [];
@@ -155,8 +160,10 @@ Deno.serve(async (req) => {
       const p = pim.get(m.sku);
       if (!p || p.map_cad == null) { noMap.push(m.sku); continue; }
       if (Number(m.promo_price_cad) >= Number(p.map_cad)) { atOrAboveMap.push(m.sku); continue; }
+      const wsku = walmartSku.get(m.sku) ?? m.sku;
+      if (wsku !== m.sku) aliased += 1;
       const price: Record<string, unknown> = {
-        sku: m.sku,
+        sku: wsku,
         price: Number(p.map_cad),
         promotionInformation: {
           promotionSettingAction: "Create",
@@ -184,7 +191,7 @@ Deno.serve(async (req) => {
     };
     const report: Record<string, unknown> = {
       promotion: promo.name, period: promo.period, window: { start, end },
-      attempted: lines.length, not_listed: notListed.length, no_map: noMap, at_or_above_map: atOrAboveMap,
+      attempted: lines.length, sent_under_alias: aliased, not_listed: notListed.length, no_map: noMap, at_or_above_map: atOrAboveMap,
     };
     if (dryRun) return json({ ok: true, dryRun: true, ...report, listed_known: listed != null, payload });
     if (!lines.length) return json({ error: "Nothing to send: no member is listed on Walmart Canada with a promo price below its MAP.", ...report }, 400);
