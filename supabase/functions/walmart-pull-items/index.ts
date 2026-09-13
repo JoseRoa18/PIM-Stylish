@@ -144,7 +144,7 @@ Deno.serve(async (req) => {
           promo_id: prev.promo_id ?? null, promo_checked_at: prev.promo_checked_at ?? null,
         };
       });
-      const promoLimit = Number.isFinite(bodyLimit) ? Math.max(0, bodyLimit) : 60;
+      const promoLimit = Number.isFinite(bodyLimit) ? Math.max(0, bodyLimit) : 40;
       const twelveHoursAgo = new Date(Date.now() - 12 * 3600_000).toISOString();
       const order = [...enriched].sort((a, b) => {
         const am = members.has(String(a.sku)) ? 0 : 1;
@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
       const failures: Record<string, number> = {};
       let checkedNow = 0;
       for (const row of queue) {
-        if (Date.now() - startedAt > 90_000) break;
+        if (Date.now() - startedAt > 55_000) break;
         try {
           let res: Response | null = null;
           for (let attempt = 0; attempt < 4; attempt++) {
