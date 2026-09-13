@@ -41,9 +41,9 @@ function locate(grid) {
     const end = row.findIndex((h) => /sale end date/.test(h));
     const skuIdx = row.findIndex((h) => /^(seller )?sku$/.test(h) || /^sku \(/.test(h));
     // Row under the display names: Amazon's technical field names
-    // (contribution_sku#1.value, purchasable_offer[...]...). Data starts
-    // after it; its first data row is Amazon's example ("ABC123"), which is
-    // replaced, never kept.
+    // (contribution_sku#1.value, purchasable_offer[...]...). Then Amazon's
+    // example row ("ABC123"), which stays exactly as it is (rule 2026-09-13):
+    // our rows go below it.
     const next = (grid[r + 1] ?? []).map(lower);
     const technical = next.some((h) => /^(item_sku|sku|sale_price|sale_from_date)$|contribution_sku|purchasable_offer|#1\.value$/.test(h));
     return { headerRow: r, dataStart: r + (technical ? 2 : 1), cols: { sku: skuIdx === -1 ? 0 : skuIdx, price, start, end } };
@@ -110,31 +110,24 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
 
   // Rows already on the sheet (a file that came back from Amazon with
   // offers listed): fill matching seller SKUs in place; append the rest.
-  // Amazon's example row (SKU "ABC123", with sample quantity, price and
-  // dates) is rebuilt from scratch with a real offer so none of its sample
-  // values survive.
+  // Amazon's example row (SKU "ABC123") is left untouched and our rows start
+  // right below it.
   const bySeller = new Map(offers.map((o) => [o.seller, o]));
   const cellsByRow = new Map();
   const onSheet = new Set();
-  const sampleRows = [];
   let lastRow = loc.dataStart; // 1-based row number of the last used row
   for (let i = loc.dataStart; i < grid.length; i++) {
     const seller = text(grid[i]?.[skuCol]);
     if (!seller) continue;
     lastRow = i + 1;
-    if (/^abc123$/i.test(seller)) { sampleRows.push(i + 1); continue; }
+    if (/^abc123$/i.test(seller)) continue; // Amazon's example, kept as is
     onSheet.add(seller);
     const o = bySeller.get(seller);
     if (o) cellsByRow.set(i + 1, cellsFor(i + 1, o));
   }
   let merged = cellsByRow.size ? mergeRows(xml, cellsByRow) : xml;
   const rowXml = (rn, o) => `<row r="${rn}">` + [...cellsFor(rn, o).entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
-  const pending = offers.filter((o) => !onSheet.has(o.seller));
-  for (const rn of sampleRows) {
-    const o = pending.shift();
-    merged = replaceRow(merged, rn, o ? rowXml(rn, o) : `<row r="${rn}"/>`);
-  }
-  const toAppend = pending;
+  const toAppend = offers.filter((o) => !onSheet.has(o.seller));
   if (toAppend.length) {
     let rowsXml = '';
     for (const [idx, o] of toAppend.entries()) rowsXml += rowXml(lastRow + 1 + idx, o);
@@ -149,7 +142,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
     offers: offers.length,
     products: withOffer.size,
     filled: cellsByRow.size,
-    appended: toAppend.length + Math.min(sampleRows.length, offers.length),
+    appended: toAppend.length,
     noOffer,
     window,
     columns: { sku: indexToCol(skuCol + 1), price: indexToCol(priceCol + 1), start: indexToCol(startCol + 1), end: indexToCol(endCol + 1) },
@@ -163,15 +156,6 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
     metadata: { template: template.file_name, ...report, noOffer: noOffer.length },
   });
   return report;
-}
-
-// Swap one <row> element for new XML (the whole row, not a cell merge).
-function replaceRow(sheetXml, rn, newRowXml) {
-  const start = sheetXml.indexOf(`<row r="${rn}"`);
-  if (start === -1) return sheetXml;
-  const tagClose = sheetXml.indexOf('>', start);
-  const end = sheetXml[tagClose - 1] === '/' ? tagClose + 1 : sheetXml.indexOf('</row>', tagClose) + '</row>'.length;
-  return sheetXml.slice(0, start) + newRowXml + sheetXml.slice(end);
 }
 
 export function summarizeAmazonFill(channel, r) {
