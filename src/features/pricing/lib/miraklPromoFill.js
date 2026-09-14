@@ -3,19 +3,17 @@
 // promotion. One header row of Mirakl offer columns, data from row 2:
 //
 //   sku                    OUR SKU (the shop SKU)
-//   product-id             the marketplace's own id for the product (the
-//                          product's alias there), when it has one
-//   price                  the regular selling price (the channel's price field)
+//   product-id             the marketplace's own id for the product (its
+//                          alias); products without one are left out
+//   price / retail-price   the regular selling price (the channel's price field)
 //   msrp                   the MSRP, when the channel names one
-//   discount-price         the promo price
-//   discount-start-date    the market's promo window, YYYY-MM-DD
-//   discount-end-date
+//   discount-price and discount-retail-price          the promo price
+//   discount-start/end-date and discount-retail-price-start/end-date
+//                          the market's promo window, YYYY-MM-DD
+//   quantity               1
+//   state                  11
 //   update-delete          "update"
-//
-// Every other column is left EMPTY on purpose. Mirakl's Normal import mode
-// blanks missing fields (quantity included — the Best Buy stock incident of
-// 2026-08-28), so the file must be imported as a PARTIAL UPDATE in the
-// marketplace portal; the summary says so every time.
+// (Home Depot USA rules given by the user 2026-09-14.)
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -48,9 +46,15 @@ function locate(grid) {
         productId: row.indexOf('product-id'),
         price: row.indexOf('price'),
         msrp: row.indexOf('msrp'),
+        retailPrice: row.indexOf('retail-price'),
+        discountRetail: row.indexOf('discount-retail-price'),
+        retailStart: row.indexOf('discount-retail-price-start-date'),
+        retailEnd: row.indexOf('discount-retail-price-end-date'),
         discount,
         start: row.indexOf('discount-start-date'),
         end: row.indexOf('discount-end-date'),
+        quantity: row.indexOf('quantity'),
+        state: row.indexOf('state'),
         updateDelete: row.indexOf('update-delete'),
       },
     };
@@ -103,8 +107,10 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
   const lines = [];
   const noRegular = [];
   const atOrAbove = [];
+  const noAlias = [];
   let aliased = 0;
   for (const m of members) {
+    if (channel.aliasMarketplace && !alias.has(m.sku)) { noAlias.push(m.sku); continue; }
     const p = pim.get(m.sku) ?? {};
     const regular = channel.priceField ? p[channel.priceField] : null;
     if (channel.priceField && regular == null) { noRegular.push(m.sku); continue; }
@@ -132,9 +138,15 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     put(cols.productId, l.productId);
     put(cols.price, l.price != null ? Number(l.price) : null);
     put(cols.msrp, l.msrp != null ? Number(l.msrp) : null);
+    put(cols.retailPrice, l.price != null ? Number(l.price) : null);
+    put(cols.discountRetail, l.discount);
+    put(cols.retailStart, window.start);
+    put(cols.retailEnd, window.end);
     put(cols.discount, l.discount);
     put(cols.start, window.start);
     put(cols.end, window.end);
+    put(cols.quantity, 1);
+    put(cols.state, 11);
     put(cols.updateDelete, 'update');
     rowsXml += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
   }
@@ -143,20 +155,21 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
   const period = String(promotion.period).slice(0, 7);
   await downloadZip(zip, `${channel.label.replace(/[^\w]+/g, '_')}_Promo_${period}`, templateExt(template.storage_path));
 
-  const report = { rows: lines.length, aliased, noRegular, atOrAbove, window, sheet: hit.name };
+  const report = { rows: lines.length, aliased, noAlias, noRegular, atOrAbove, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: channel.key,
     summary: `Filled ${channel.label} promotions file for "${promotion.name}" (${lines.length} offers)`,
-    metadata: { template: template.file_name, rows: lines.length, noRegular: noRegular.length, atOrAbove: atOrAbove.length, window },
+    metadata: { template: template.file_name, rows: lines.length, noAlias: noAlias.length, noRegular: noRegular.length, atOrAbove: atOrAbove.length, window },
   });
   return report;
 }
 
 export function summarizeMiraklFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.rows} offers, ${r.window.start} to ${r.window.end}, ${r.aliased} with the marketplace id in product-id. Import it in the portal as a PARTIAL UPDATE, never Normal, or quantities get blanked`];
+  const parts = [`${channel.label} file ready. ${r.rows} offers, ${r.window.start} to ${r.window.end}`];
+  if (r.noAlias.length) parts.push(`no ${channel.label} id on file, left out: ${r.noAlias.slice(0, 8).join(', ')}${r.noAlias.length > 8 ? ` and ${r.noAlias.length - 8} more` : ''}`);
   if (r.noRegular.length) parts.push(`no regular price in the PIM, left out: ${r.noRegular.slice(0, 8).join(', ')}${r.noRegular.length > 8 ? ` and ${r.noRegular.length - 8} more` : ''}`);
   if (r.atOrAbove.length) parts.push(`promo not below the regular price, left out: ${r.atOrAbove.slice(0, 8).join(', ')}`);
   return parts.join(' · ');
