@@ -56,10 +56,9 @@ const PROMO_COST_META = {
   rona_hd_cad: { label: 'Rona / Home Depot', unit: 'CAD', market: 'ca' },
   sod_cad: { label: 'Small Online Dealers', unit: 'CAD', market: 'ca' },
   wayfair_ca_usd: { label: 'Wayfair Canada', unit: 'USD', market: 'ca' },
-  lowes_sod_bbb_usd: { label: 'Lowes / SOD / BB&B', unit: 'USD', market: 'us' },
+  lowes_sod_bbb_usd: { label: 'Lowes / SOD / BB&B / Home Depot USA', unit: 'USD', market: 'us' },
   wayfair_usd: { label: 'Wayfair US', unit: 'USD', market: 'us' },
   menards_usd: { label: 'Menards', unit: 'USD', market: 'us' },
-  hd_usd: { label: 'Home Depot USA', unit: 'USD', market: 'us' },
 };
 const costMeta = (slug) =>
   PROMO_COST_META[slug] ?? { label: slug, unit: slug.endsWith('_usd') ? 'USD' : 'CAD', market: slug.includes('usd') && !slug.includes('_ca_') ? 'us' : 'ca' };
