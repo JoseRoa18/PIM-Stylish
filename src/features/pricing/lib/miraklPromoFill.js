@@ -5,9 +5,12 @@
 //   sku                    OUR SKU (the shop SKU)
 //   product-id             the marketplace's own id for the product (its
 //                          alias); products without one are left out
-//   price / retail-price   the regular selling price (the channel's price field)
-//   msrp                   the MSRP, when the channel names one
-//   discount-price and discount-retail-price          the promo price
+//   price                  the BASE COST — not in the PIM, left empty
+//   msrp and retail-price  the regular price (the channel's price field, MAP)
+//   discount-retail-price  the promo price
+//   discount-price         the PROMO COST (the channel's promoCostSlug in
+//                          promotion_prices.promo_costs), empty when the
+//                          list carries none
 //   discount-start/end-date and discount-retail-price-start/end-date
 //                          the market's promo window as Eastern-time stamps
 //                          (2026-10-01T00:00:00.000-04:00 … T23:59:59.999)
@@ -135,7 +138,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
       sku: m.sku,
       productId: alias.get(m.sku) ?? null,
       price: regular,
-      msrp: channel.msrpField ? p[channel.msrpField] ?? null : null,
+      promoCost: channel.promoCostSlug ? m.promo_costs?.[channel.promoCostSlug] ?? null : null,
       discount: Number(m[priceKey]),
     });
   }
@@ -151,13 +154,12 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     const put = (c, v) => { if (c != null && c !== -1 && v != null && v !== '') cells.set(c + 1, buildCell(`${indexToCol(c + 1)}${rn}`, v)); };
     put(cols.sku, l.sku);
     put(cols.productId, l.productId);
-    put(cols.price, l.price != null ? Number(l.price) : null);
-    put(cols.msrp, l.msrp != null ? Number(l.msrp) : null);
+    put(cols.msrp, l.price != null ? Number(l.price) : null);
     put(cols.retailPrice, l.price != null ? Number(l.price) : null);
     put(cols.discountRetail, l.discount);
     put(cols.retailStart, startStamp(window.start));
     put(cols.retailEnd, endStamp(window.end));
-    put(cols.discount, l.discount);
+    put(cols.discount, l.promoCost != null ? Number(l.promoCost) : null);
     put(cols.start, startStamp(window.start));
     put(cols.end, endStamp(window.end));
     put(cols.quantity, 1);
@@ -170,7 +172,8 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
   const period = String(promotion.period).slice(0, 7);
   await downloadZip(zip, `${channel.label.replace(/[^\w]+/g, '_')}_Promo_${period}`, templateExt(template.storage_path));
 
-  const report = { rows: lines.length, aliased, noAlias, noRegular, atOrAbove, window, sheet: hit.name };
+  const noPromoCost = lines.filter((l) => l.promoCost == null).length;
+  const report = { rows: lines.length, aliased, noAlias, noRegular, atOrAbove, noPromoCost, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
@@ -184,6 +187,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
 
 export function summarizeMiraklFill(channel, r) {
   const parts = [`${channel.label} file ready. ${r.rows} offers, ${startStamp(r.window.start)} to ${endStamp(r.window.end)}`];
+  if (r.noPromoCost) parts.push(`${r.noPromoCost} rows without a promo cost (column U empty)`);
   if (r.noAlias.length) parts.push(`no ${channel.label} id on file, left out: ${r.noAlias.slice(0, 8).join(', ')}${r.noAlias.length > 8 ? ` and ${r.noAlias.length - 8} more` : ''}`);
   if (r.noRegular.length) parts.push(`no regular price in the PIM, left out: ${r.noRegular.slice(0, 8).join(', ')}${r.noRegular.length > 8 ? ` and ${r.noRegular.length - 8} more` : ''}`);
   if (r.atOrAbove.length) parts.push(`promo not below the regular price, left out: ${r.atOrAbove.slice(0, 8).join(', ')}`);
