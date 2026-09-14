@@ -59,6 +59,7 @@ const PROMO_COST_META = {
   lowes_sod_bbb_usd: { label: 'Lowes / SOD / BB&B', unit: 'USD', market: 'us' },
   wayfair_usd: { label: 'Wayfair US', unit: 'USD', market: 'us' },
   menards_usd: { label: 'Menards', unit: 'USD', market: 'us' },
+  hd_usd: { label: 'Home Depot USA', unit: 'USD', market: 'us' },
 };
 const costMeta = (slug) =>
   PROMO_COST_META[slug] ?? { label: slug, unit: slug.endsWith('_usd') ? 'USD' : 'CAD', market: slug.includes('usd') && !slug.includes('_ca_') ? 'us' : 'ca' };

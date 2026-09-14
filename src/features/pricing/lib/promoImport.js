@@ -15,6 +15,7 @@ const COLUMN_SPEC = [
   { field: 'cost:lowes_sod_bbb_usd', header: 'PROMO COST LOWES-SOD-BBB (USD)', aliases: ['promocostlowessodbbbusd', 'promocostlowesbbbsmallonlinedealers', 'promocostlowesbbbusd', 'costlowessodbbbusd', 'promocostlowesbbbsmallonlinedealersusd'] },
   { field: 'cost:wayfair_usd', header: 'PROMO COST WAYFAIR US (USD)', aliases: ['promocostwayfairusUSD', 'promocostwayfairus', 'promocostwayfairusd', 'costwayfairususd'] },
   { field: 'cost:menards_usd', header: 'PROMO COST MENARDS (USD)', aliases: ['promocostmenardsusd', 'promocostmenards', 'costmenardsusd'] },
+  { field: 'cost:hd_usd', header: 'PROMO COST HOME DEPOT USA (USD)', aliases: ['promocosthomedepotusausd', 'promocosthomedepotusa', 'promocosthomedepotus', 'promocosthdusd', 'promocosthdus', 'costhomedepotusausd', 'costhdusd'] },
 ];
 
 const norm = (h) => String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -32,10 +33,10 @@ const TEMPLATES = {
   },
   us: {
     file: 'promotion-template-usa.csv',
-    fields: ['sku', 'promo_price_usd', 'cost:lowes_sod_bbb_usd', 'cost:wayfair_usd', 'cost:menards_usd'],
+    fields: ['sku', 'promo_price_usd', 'cost:lowes_sod_bbb_usd', 'cost:wayfair_usd', 'cost:menards_usd', 'cost:hd_usd'],
     examples: [
-      ['S-822N', '263', '151', '171', '184'],
-      ['K-131NR', '149', '86', '97', '104'],
+      ['S-822N', '263', '151', '171', '184', '158'],
+      ['K-131NR', '149', '86', '97', '104', '90'],
     ],
   },
 };
