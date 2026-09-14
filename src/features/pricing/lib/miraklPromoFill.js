@@ -9,7 +9,8 @@
 //   msrp                   the MSRP, when the channel names one
 //   discount-price and discount-retail-price          the promo price
 //   discount-start/end-date and discount-retail-price-start/end-date
-//                          the market's promo window, YYYY-MM-DD
+//                          the market's promo window as Eastern-time stamps
+//                          (2026-10-01T00:00:00.000-04:00 … T23:59:59.999)
 //   quantity               1
 //   state                  11
 //   update-delete          "update"
@@ -32,6 +33,20 @@ import { marketWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const norm = (v) => String(v ?? '').trim().toLowerCase();
+
+// Eastern-time offset for a calendar day: EDT (-04:00) from the second
+// Sunday of March to the first Sunday of November, EST (-05:00) otherwise.
+function etOffset(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  const nthSunday = (month, n) => { const first = new Date(Date.UTC(y, month - 1, 1)).getUTCDay(); return 1 + ((7 - first) % 7) + (n - 1) * 7; };
+  const t = m * 100 + d;
+  const dstStart = 3 * 100 + nthSunday(3, 2);
+  const dstEnd = 11 * 100 + nthSunday(11, 1);
+  return t >= dstStart && t < dstEnd ? '-04:00' : '-05:00';
+}
+// Home Depot's timestamps: 2026-09-11T00:00:00.000-04:00 / 2026-09-30T23:59:59.999-04:00
+const startStamp = (day) => `${day}T00:00:00.000${etOffset(day)}`;
+const endStamp = (day) => `${day}T23:59:59.999${etOffset(day)}`;
 
 function locate(grid) {
   for (let r = 0; r < Math.min(10, grid.length); r++) {
@@ -140,11 +155,11 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     put(cols.msrp, l.msrp != null ? Number(l.msrp) : null);
     put(cols.retailPrice, l.price != null ? Number(l.price) : null);
     put(cols.discountRetail, l.discount);
-    put(cols.retailStart, window.start);
-    put(cols.retailEnd, window.end);
+    put(cols.retailStart, startStamp(window.start));
+    put(cols.retailEnd, endStamp(window.end));
     put(cols.discount, l.discount);
-    put(cols.start, window.start);
-    put(cols.end, window.end);
+    put(cols.start, startStamp(window.start));
+    put(cols.end, endStamp(window.end));
     put(cols.quantity, 1);
     put(cols.state, 11);
     put(cols.updateDelete, 'update');
@@ -168,7 +183,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
 }
 
 export function summarizeMiraklFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.rows} offers, ${r.window.start} to ${r.window.end}`];
+  const parts = [`${channel.label} file ready. ${r.rows} offers, ${startStamp(r.window.start)} to ${endStamp(r.window.end)}`];
   if (r.noAlias.length) parts.push(`no ${channel.label} id on file, left out: ${r.noAlias.slice(0, 8).join(', ')}${r.noAlias.length > 8 ? ` and ${r.noAlias.length - 8} more` : ''}`);
   if (r.noRegular.length) parts.push(`no regular price in the PIM, left out: ${r.noRegular.slice(0, 8).join(', ')}${r.noRegular.length > 8 ? ` and ${r.noRegular.length - 8} more` : ''}`);
   if (r.atOrAbove.length) parts.push(`promo not below the regular price, left out: ${r.atOrAbove.slice(0, 8).join(', ')}`);
