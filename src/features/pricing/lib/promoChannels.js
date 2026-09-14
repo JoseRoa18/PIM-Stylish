@@ -16,6 +16,9 @@ import { templatePurpose } from '@/features/templates/api/templates';
  * ('amazon': Seller Central flat file keyed by seller SKU).
  * `sellerSku: 'pim'` means the marketplace uses the PIM SKU as is (Amazon
  * USA); otherwise the seller SKU comes from amazon_links.
+ * 'mirakl' fills a Mirakl offers-import file (Home Depot USA): price =
+ * `priceField`, msrp = `msrpField`, promo = discount-price + dates; the
+ * SKU is the product's alias on `aliasMarketplace` when it has one.
  */
 export const PROMO_CHANNELS = [
   { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', kind: 'api', stamp: 'ca_applied_at',
@@ -35,7 +38,9 @@ export const PROMO_CHANNELS = [
   { key: 'amazon_ca', label: 'Amazon Canada', monogram: 'AM', market: 'ca', kind: 'template', marketplace: /amazon.*(\bca\b|canada)/i, costSlug: null, fill: 'amazon' },
   { key: 'walmart_ca', label: 'Walmart Canada', monogram: 'WM', market: 'ca', kind: 'api', stamp: 'wm_ca_scheduled_at', schedule: 'walmart_ca',
     how: 'Promotional prices sent through the Walmart API for the Canada window. Walmart turns them on and off by itself.' },
-  { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null },
+  // Home Depot USA runs on Mirakl: its promotions file is the offers import
+  // (sku, price, msrp, discount-price + dates). Regular = MAP USD.
+  { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null, fill: 'mirakl', priceField: 'map_usd', msrpField: 'msrp_usd', aliasMarketplace: 'Home Depot US' },
   { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us', kind: 'template', marketplace: /lowe.*\bus(a)?\b/i, costSlug: 'lowes_sod_bbb_usd' },
   { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'template', marketplace: /menards/i, costSlug: 'menards_usd' },
   { key: 'amazon_us', label: 'Amazon USA', monogram: 'AM', market: 'us', kind: 'template', marketplace: /amazon.*\bus(a)?\b/i, costSlug: null, fill: 'amazon', sellerSku: 'pim' }, // Amazon.com lists our products under the PIM SKU itself
