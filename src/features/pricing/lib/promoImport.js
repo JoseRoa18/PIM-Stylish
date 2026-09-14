@@ -12,7 +12,7 @@ const COLUMN_SPEC = [
   { field: 'cost:sod_cad', header: 'PROMO COST SMALL ONLINE DEALERS (CAD)', aliases: ['promocostsmallonlinedealerscad', 'promocostsodcad', 'costsmallonlinedealerscad'] },
   { field: 'cost:wayfair_ca_usd', header: 'PROMO COST WAYFAIR CANADA (USD)', aliases: ['promocostwayfaircanadausd', 'promocostwayfaircausd', 'costwayfaircanadausd'] },
   { field: 'promo_price_usd', header: 'PROMO MAP USD', aliases: ['promomapusd', 'promomapus', 'promopriceusd'] },
-  { field: 'cost:lowes_sod_bbb_usd', header: 'PROMO COST LOWES-SOD-BBB (USD)', aliases: ['promocostlowessodbbbusd', 'promocostlowesbbbsmallonlinedealers', 'promocostlowesbbbusd', 'costlowessodbbbusd', 'promocostlowesbbbsmallonlinedealersusd'] },
+  { field: 'cost:lowes_sod_bbb_usd', header: 'PROMO COST LOWES-HD USA-SOD-BBB (USD)', aliases: ['promocostlowessodbbbusd', 'promocostloweshdusasodbbbusd', 'promocostloweshdusasodbbb', 'promocostlowessodbbbusd', 'promocostlowesbbbsmallonlinedealers', 'promocostlowesbbbusd', 'costlowessodbbbusd', 'promocostlowesbbbsmallonlinedealersusd'] },
   { field: 'cost:wayfair_usd', header: 'PROMO COST WAYFAIR US (USD)', aliases: ['promocostwayfairusUSD', 'promocostwayfairus', 'promocostwayfairusd', 'costwayfairususd'] },
   { field: 'cost:menards_usd', header: 'PROMO COST MENARDS (USD)', aliases: ['promocostmenardsusd', 'promocostmenards', 'costmenardsusd'] },
 ];

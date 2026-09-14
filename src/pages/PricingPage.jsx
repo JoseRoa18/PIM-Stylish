@@ -56,7 +56,7 @@ const PROMO_COST_META = {
   rona_hd_cad: { label: 'Rona / Home Depot', unit: 'CAD', market: 'ca' },
   sod_cad: { label: 'Small Online Dealers', unit: 'CAD', market: 'ca' },
   wayfair_ca_usd: { label: 'Wayfair Canada', unit: 'USD', market: 'ca' },
-  lowes_sod_bbb_usd: { label: 'Lowes / SOD / BB&B / Home Depot USA', unit: 'USD', market: 'us' },
+  lowes_sod_bbb_usd: { label: 'Lowes / HD USA / SOD / BB&B', unit: 'USD', market: 'us' },
   wayfair_usd: { label: 'Wayfair US', unit: 'USD', market: 'us' },
   menards_usd: { label: 'Menards', unit: 'USD', market: 'us' },
 };
@@ -690,7 +690,7 @@ function NewPromotionForm({ onClose, onCreated }) {
 
       {mode === 'file' ? (
         <div className="grid sm:grid-cols-2 gap-4">
-          {[['ca', 'Canada file', 'Promo MAP CAD + costs Rona/HD · Small Online · Wayfair CA'], ['us', 'USA file', 'Promo MAP USD + costs Lowes/SOD/BB&B · Wayfair US · Menards']].map(([market, title, hint]) => (
+          {[['ca', 'Canada file', 'Promo MAP CAD + costs Rona/HD · Small Online · Wayfair CA'], ['us', 'USA file', 'Promo MAP USD + costs Lowes/HD USA/SOD/BB&B · Wayfair US · Menards']].map(([market, title, hint]) => (
             <div key={market} className="rounded-xl border border-outline-variant p-4 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-label-lg font-semibold text-on-surface">{title}</span>

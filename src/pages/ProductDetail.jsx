@@ -1548,7 +1548,7 @@ function PricingTab({ product, edit, onAddPricing }) {
               <EditableField label="MSRP" fieldKey="msrp_usd" type="currency" product={product} edit={edit} />
               <DerivedCost label="B&M Cost" baseKey="msrp_usd" factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
               <EditableField label="MAP" fieldKey="map_usd" type="currency" product={product} edit={edit} />
-              <EditableField label="Cost — Lowes / Small Online / BB&B" fieldKey="cost_usd_lowes_sod_bbb" type="currency" product={product} edit={edit} />
+              <EditableField label="Cost — Lowes / Home Depot USA / Small Online / BB&B" fieldKey="cost_usd_lowes_sod_bbb" type="currency" product={product} edit={edit} />
               <EditableField label="Cost — Wayfair" fieldKey="cost_usd_wayfair" type="currency" product={product} edit={edit} />
               <EditableField label="Cost — Menards" fieldKey="cost_usd_menards" type="currency" product={product} edit={edit} />
             </div>

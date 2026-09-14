@@ -183,7 +183,7 @@ export const FIELD_HELP = {
   cost_cad_wayfair_sod: 'Canadian dealer cost for Wayfair and Small Online Dealers.',
   msrp_usd: 'US list price from the official price list.',
   map_usd: 'US Minimum Advertised Price — no channel may advertise below it.',
-  cost_usd_lowes_sod_bbb: 'US dealer cost for Lowes, Small Online Dealers and BB&B.',
+  cost_usd_lowes_sod_bbb: 'US dealer cost for Lowes, Home Depot USA, Small Online Dealers and BB&B.',
   cost_usd_wayfair: 'US dealer cost for Wayfair.',
   cost_usd_menards: 'US dealer cost for Menards.',
   sale_price_cad: 'Discounted price shown while "On sale" is enabled (promotions set this).',
