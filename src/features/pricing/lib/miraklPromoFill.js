@@ -2,8 +2,9 @@
 // other Mirakl marketplace that hands out the same layout) from a PIM
 // promotion. One header row of Mirakl offer columns, data from row 2:
 //
-//   sku                    the marketplace's SKU (the product's alias there,
-//                          else the PIM SKU)
+//   sku                    OUR SKU (the shop SKU)
+//   product-id             the marketplace's own id for the product (the
+//                          product's alias there), when it has one
 //   price                  the regular selling price (the channel's price field)
 //   msrp                   the MSRP, when the channel names one
 //   discount-price         the promo price
@@ -44,6 +45,7 @@ function locate(grid) {
       headerRow: r,
       cols: {
         sku,
+        productId: row.indexOf('product-id'),
         price: row.indexOf('price'),
         msrp: row.indexOf('msrp'),
         discount,
@@ -109,7 +111,8 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     if (regular != null && Number(m[priceKey]) >= Number(regular)) { atOrAbove.push(m.sku); continue; }
     if (alias.has(m.sku)) aliased += 1;
     lines.push({
-      sku: alias.get(m.sku) ?? m.sku,
+      sku: m.sku,
+      productId: alias.get(m.sku) ?? null,
       price: regular,
       msrp: channel.msrpField ? p[channel.msrpField] ?? null : null,
       discount: Number(m[priceKey]),
@@ -126,6 +129,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     const cells = new Map();
     const put = (c, v) => { if (c != null && c !== -1 && v != null && v !== '') cells.set(c + 1, buildCell(`${indexToCol(c + 1)}${rn}`, v)); };
     put(cols.sku, l.sku);
+    put(cols.productId, l.productId);
     put(cols.price, l.price != null ? Number(l.price) : null);
     put(cols.msrp, l.msrp != null ? Number(l.msrp) : null);
     put(cols.discount, l.discount);
@@ -152,7 +156,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
 }
 
 export function summarizeMiraklFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.rows} offers, ${r.window.start} to ${r.window.end}. Import it in the portal as a PARTIAL UPDATE, never Normal, or quantities get blanked`];
+  const parts = [`${channel.label} file ready. ${r.rows} offers, ${r.window.start} to ${r.window.end}, ${r.aliased} with the marketplace id in product-id. Import it in the portal as a PARTIAL UPDATE, never Normal, or quantities get blanked`];
   if (r.noRegular.length) parts.push(`no regular price in the PIM, left out: ${r.noRegular.slice(0, 8).join(', ')}${r.noRegular.length > 8 ? ` and ${r.noRegular.length - 8} more` : ''}`);
   if (r.atOrAbove.length) parts.push(`promo not below the regular price, left out: ${r.atOrAbove.slice(0, 8).join(', ')}`);
   return parts.join(' · ');
