@@ -37,11 +37,26 @@ const HD_DOC_TYPES = {
 };
 
 const attr = (p) => p.attributes || {};
+// HD wants NUMBERS, never fractions: "17 3/4" / "17-3/4" / "3/4" become
+// 17.75 / 17.75 / 0.75. Bowl splits (50/50, 60/40) are not fractions and are
+// left alone (numerator >= denominator, or a denominator that is not a
+// tape-measure one).
+const FRACTION_DENOMS = new Set([2, 3, 4, 5, 8, 10, 16, 32]);
+const fractionToDecimal = (whole, n, d) => {
+  const den = Number(d);
+  const nu = Number(n);
+  if (!FRACTION_DENOMS.has(den) || nu >= den) return null;
+  const v = Number(whole || 0) + nu / den;
+  return String(Math.round(v * 1000) / 1000);
+};
+const decimalize = (text) =>
+  String(text ?? '').replace(/(?:(\d+)[ -])?(\d+)\/(\d+)(?![\d/])/g, (m, whole, n, d) => fractionToDecimal(whole, n, d) ?? m);
 const num = (v) => {
   if (v == null || v === '') return '';
-  const m = String(v).match(/-?\d+(\.\d+)?/);
+  const m = decimalize(v).match(/-?\d+(\.\d+)?/);
   return m ? m[0] : '';
 };
+const isKitchenSink = (p) => /^kitchen/i.test(p.category ?? '');
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 const stripHtml = (h) =>
   String(h || '')
@@ -100,6 +115,49 @@ const hdCollection = (p, categories) => {
     if (score > bestScore) { bestScore = score; best = c; }
   }
   return best;
+};
+
+// HD title rule (2026-09-14): the INSTALLATION comes first, then the rest of
+// the PIM title; fractions are written as decimals. The installation wording
+// is lifted from the title itself when it carries one (Dual-Mount, Undermount,
+// Farmhouse Apron-Front…), otherwise the PIM installation type is prepended.
+const INSTALL_RE = /\b(dual[- ]?mount|dualmount|under[- ]?mount|top[- ]?mount|drop[- ]?in|farmhouse(?:\/| )apron[- ]front|farmhouse|apron[- ]front)\b/i;
+const hdTitle = (p) => {
+  let t = decimalize(attr(p).general_title_en || p.model_name || p.sku).replace(/\s+/g, ' ').trim();
+  const m = t.match(INSTALL_RE);
+  let install;
+  if (m) {
+    install = m[1];
+    t = t.replace(m[0], '').replace(/\s+/g, ' ').replace(/^[-,\s]+/, '').trim();
+  } else {
+    install = String([attr(p).installation_type ?? []].flat()[0] ?? '').trim();
+  }
+  return clamp(install ? `${install} ${t}` : t, 120);
+};
+
+// Country of origin, HD spelling (2026-09-14): the code column takes "CH"
+// for China, the name column the capitalized name ("China", not "CHINA") —
+// written as is, never snapped to the list's uppercase entry.
+const COUNTRY = {
+  china: ['CH', 'China'],
+  cn: ['CH', 'China'],
+  vietnam: ['VN', 'Vietnam'],
+  'viet nam': ['VN', 'Vietnam'],
+  vn: ['VN', 'Vietnam'],
+};
+const country = (p) => COUNTRY[String(attr(p).country_of_origin || 'China').trim().toLowerCase()] ?? null;
+
+// Material Breakdown takes the ReferenceData wording closest to the PIM
+// material; the percentage column then says 100 (the legend wants the
+// breakdown to total 100%).
+const materialBreakdown = (p) => {
+  const m = String(attr(p).material ?? p.material ?? '');
+  if (/stainless/i.test(m) || (!m && num(attr(p).gauge))) return ['Stainless Steel'];
+  if (/granite|composite|quartz/i.test(m)) return ['Granite Composite', 'Composite Granite', 'Granite', 'Engineered Quartz'];
+  if (/fire ?clay/i.test(m)) return ['Fire Clay', 'Fireclay'];
+  if (/porcelain/i.test(m)) return ['Porcelain'];
+  if (/ceramic|vitreous/i.test(m)) return ['Ceramic'];
+  return m ? [m] : '';
 };
 
 // GTIN = the UPC with "00" prefixed (HD correction, 2026-07-29).
@@ -166,28 +224,34 @@ const finishFamily = (p) => {
 export const HOME_DEPOT_RULES = {
   'Product Category': (p, ctx) => hdCollection(p, ctx.categories),
   'Shop SKU': (p) => p.sku,
-  'Product Name (120)': (p) => (attr(p).general_title_en || p.model_name || p.sku).slice(0, 120),
+  'Product Name (120)': hdTitle,
   'UPC': (p) => attr(p).upc || '',
   'globalTradeItemNumber (GTIN)': gtin14,
+  // The shipping barcode is the same GTIN (2026-09-14).
+  'Barcode (ITF-14, I2of5)': gtin14,
   'GLN': () => HD_GLN,
   'MFG Model #': (p) => p.sku,
   'MFG Part #': (p) => p.sku,
   'MFG Brand Name': (p) => brandMap(p.brand),
   'Item Weight (lb)': (p) => num(attr(p).product_weight_lb),
-  'Packaged Depth (in) (in)': (p) => num(attr(p).shipping_dimensions_in?.length),
+  // Packaged axes (2026-09-14): Height = the box LENGTH, Width = width,
+  // Depth = the remaining axis (the PIM's box height).
+  'Packaged Height (in) (in)': (p) => num(attr(p).shipping_dimensions_in?.length),
   'Packaged Width (in) (in)': (p) => num(attr(p).shipping_dimensions_in?.width),
-  'Packaged Height (in) (in)': (p) => num(attr(p).shipping_dimensions_in?.height),
+  'Packaged Depth (in) (in)': (p) => num(attr(p).shipping_dimensions_in?.height ?? attr(p).shipping_dimensions_in?.depth),
   'Packaged Gross Weight (lb) (lb)': (p) => num(p.shipping_weight_lb),
   'Is this product sold exclusively to and by The Home Depot?': () => 'No',
   'Is this a new version of an existing item?': () => 'No',
-  'COUNTRY OF ORIGIN': (p) => (/china|^cn$/i.test(attr(p).country_of_origin || 'China') ? 'CN' : ''),
-  'Country of Origin Name': (p) => (/china|^cn$/i.test(attr(p).country_of_origin || 'China') ? 'CHINA' : ''),
+  'COUNTRY OF ORIGIN': (p) => country(p)?.[0] ?? '',
+  'Country of Origin Name': (p) => ({ raw: country(p)?.[1] ?? '' }),
   'Sellable Unit?': () => 'Y',
   'Sell Pkg Qty (as sold to consumer)': () => '1',
   'Sell UOM (as sold to consumer)': () => 'EA-Each',
   'Made-To-Order': () => 'No',
   'Number of Boxes Shipped to Consumer': () => '1',
-  // 'Vendor Processing Days': HD-account term — business fills it.
+  'Vendor Processing Days': () => '1',
+  'Material Breakdown': materialBreakdown,
+  'Material Breakdown Percentage': (p) => (materialBreakdown(p) ? '100' : ''),
 
   // Highlights cap at 65 chars, marketing copy at 1000 (HD content review;
   // the header still says 1500 but HD trims at 1000).
@@ -247,7 +311,11 @@ export const HOME_DEPOT_RULES = {
   'Flow rate (gallons per minute)': (p) => num(attr(p).max_flow_rate),
   'Color Family': (p) => colorFamily(p.finish),
   'Color/Finish': (p) => p.finish || '',
-  'Finish Family': finishFamily,
+  // Kitchen sinks (2026-09-14): Finish Family, the bathroom dimensions,
+  // Cut-Out Depth and Number of Faucet Holes stay EMPTY. The generic rule
+  // below also skips every cell the "Columns" sheet marks NA (gray) for the
+  // product's collection.
+  'Finish Family': (p) => (isKitchenSink(p) ? '' : finishFamily(p)),
   // Never blank on a list column — "No Certifications or Listings" is an option.
   'Certifications and Listings': (p) =>
     attr(p).cupc_certified || attr(p).upc_certified
@@ -271,17 +339,20 @@ export const HOME_DEPOT_RULES = {
   // CANDIDATES; each column takes the first one its own list accepts.
   'Features': (p) => {
     if (/sink/i.test(p.category ?? '')) {
+      // "Select all applicable values": several, joined with "|".
       const acc = list(attr(p).accessories_included).join(' ');
+      const bullets = list(attr(p).bullet_points).join(' ');
       const m = `${attr(p).material ?? p.material ?? ''}`;
-      const cands = [];
-      if (/workstation/i.test(`${p.product_type ?? ''} ${acc}`)) cands.push('Workstation');
-      if (num(attr(p).sink_radius_mm) === '0') cands.push('Zero Radius');
-      if (attr(p).low_divider) cands.push('Low Divide');
-      if (attr(p).sink_radius_mm != null) cands.push('Tight Radius');
-      if (/stainless/i.test(m)) cands.push('Rust Resistant');
-      if (/granite|composite|quartz|porcelain|fireclay/i.test(m)) cands.push('Scratch Resistant');
-      cands.push('No Additional Features');
-      return cands;
+      const radius = attr(p).sink_radius_mm;
+      const items = [];
+      if (/workstation/i.test(`${p.product_type ?? ''} ${acc} ${attr(p).general_title_en ?? ''}`) || attr(p).has_workstation) items.push('Workstation');
+      if (num(radius) === '0') items.push('Zero Radius');
+      else if (radius != null && Number(radius) <= 15) items.push('Tight Radius');
+      if (attr(p).low_divider || attr(p).has_low_divider) items.push('Low Divide');
+      if (/noise|quiet|sound.?dampen/i.test(bullets)) items.push('Sound Dampening');
+      if (/stainless/i.test(m) || (!m && num(attr(p).gauge))) items.push('Rust Resistant');
+      if (/granite|composite|quartz|porcelain|fireclay/i.test(m)) items.push('Scratch Resistant', 'Heat Resistant');
+      return { multi: items, fallback: 'No Additional Features' };
     }
     const c = faucetCollection(p);
     if (c === 'Pull Down') return ['Pull Down Spray Wand', 'Gooseneck', 'No Additional Features'];
@@ -319,6 +390,7 @@ export const HOME_DEPOT_RULES = {
   // Undermount/vessel sinks carry no faucet holes unless the PIM says so.
   // One occurrence's list spells zero as "0", the other as "None".
   'Number of Faucet Holes': (p) => {
+    if (isKitchenSink(p)) return '';
     const n = num(attr(p).number_of_faucet_holes);
     return n && n !== '0' ? [n] : ['0', 'None'];
   },
@@ -360,12 +432,12 @@ export const HOME_DEPOT_RULES = {
   'Sink Front to Back Width (in.) (in)': (p) => num(attr(p).external_dimensions_in?.width),
   'Sink Top to Bottom Depth (in.) (in)': (p) =>
     num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height),
-  'Bathroom Sink Left to Right Length (In.)': (p) => num(attr(p).external_dimensions_in?.length),
-  'Bathroom Sink Front to Back Width (In.)': (p) => num(attr(p).external_dimensions_in?.width),
+  'Bathroom Sink Left to Right Length (In.)': (p) => (isKitchenSink(p) ? '' : num(attr(p).external_dimensions_in?.length)),
+  'Bathroom Sink Front to Back Width (In.)': (p) => (isKitchenSink(p) ? '' : num(attr(p).external_dimensions_in?.width)),
   'Bathroom Sink Top to Bottom Depth (in.)': (p) =>
-    num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height),
+    (isKitchenSink(p) ? '' : num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height)),
   'Cut-Out Width (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.length),
-  'Cut-Out Depth (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.width),
+  'Cut-Out Depth (in.) (in)': (p) => (isKitchenSink(p) ? '' : num(attr(p).cut_out_dimensions_in?.width)),
   // The list only has whole inches — a 29.25" minimum means the next size up.
   'Minimum Cabinet Size (in.)': (p, ctx, options) => {
     const v = Number(num(attr(p).min_external_cabinet_size_in));
@@ -391,15 +463,21 @@ export const HOME_DEPOT_RULES = {
   // don't either) — override via the overflow_location attribute if one ever does.
   'Overflow location': (p) => (/sink/i.test(p.category ?? '') ? attr(p).overflow_location || 'None' : ''),
   'Drain Finish': (p) => (/stainless/i.test(p.finish || '') ? 'Stainless' : ''),
-  // Repeated per collection with different lists — ordered candidates.
+  // Repeated per collection with different lists. Multi-value: every
+  // accessory in the box, in HD's own wording, joined with "|" (Mirakl's
+  // separator); each occurrence keeps only the values its list accepts.
   'Included': (p) => {
-    const acc = list(attr(p).accessories_included).join(' ');
-    const cands = [];
-    if (/strainer/i.test(acc) || attr(p).strainer_model) cands.push('Strainer Basket', 'Strainer');
-    if (/grid/i.test(acc) || attr(p).includes_grids) cands.push('Bottom Grids');
-    if (/rack/i.test(acc)) cands.push('Drying Rack');
-    cands.push('Mounting Hardware');
-    return cands;
+    const acc = list(attr(p).accessories_included).map(String);
+    const has = (re) => acc.some((a) => re.test(a));
+    const items = [];
+    if (has(/cutting board/i)) items.push('Cutting Board');
+    if (has(/colander/i)) items.push('Colander');
+    if (has(/rolling/i)) items.push('Rolling Drying Rack');
+    else if (has(/rack/i)) items.push('Drying Rack');
+    if (has(/strainer/i) || attr(p).strainer_model) items.push('Strainer');
+    if (has(/grid/i) || attr(p).includes_grids) items.push('Bottom Grids');
+    items.push('Mounting Hardware');
+    return { multi: items, fallback: 'No Additional Items Included' };
   },
 };
 
@@ -422,6 +500,25 @@ const isOption = (value, options) => options.some((o) => norm(o) === norm(value)
 // first candidate its own list accepts. A scalar that isn't in the column's
 // list is dropped (that occurrence belongs to another collection).
 const resolveForColumn = (v, options) => {
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    // { raw } is written exactly as given (no list snapping).
+    if ('raw' in v) return v.raw == null || v.raw === '' ? null : String(v.raw);
+    // { multi, fallback } keeps every value the column's list accepts,
+    // joined with "|" (Mirakl multi-value separator).
+    if (Array.isArray(v.multi)) {
+      const picked = [];
+      for (const c of v.multi) {
+        if (c === '' || c == null) continue;
+        const snapped = options?.length ? snapTo(c, options) : c;
+        if ((!options?.length || isOption(snapped, options)) && !picked.includes(snapped)) picked.push(snapped);
+      }
+      if (!picked.length && v.fallback) {
+        const fb = options?.length ? snapTo(v.fallback, options) : v.fallback;
+        if (!options?.length || isOption(fb, options)) picked.push(fb);
+      }
+      return picked.length ? picked.join('|') : null;
+    }
+  }
   const candidates = Array.isArray(v) ? v.filter((c) => c !== '' && c != null) : [v];
   if (!candidates.length) return null;
   if (!options?.length) return candidates[0];
@@ -473,6 +570,24 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
     categories: validByGuid[String(guids[0] ?? '')] ?? [],
   };
 
+  // "Columns" sheet: requiredness of every attribute per Product Category.
+  // NA is what Excel paints GRAY for that collection — never filled.
+  const naByGuid = new Map();
+  const colsPath = await sheetPathByName(zip, 'Columns');
+  if (colsPath) {
+    const cg = sheetToGrid(await zip.file(colsPath).async('string'), shared);
+    const heads = cg[0] || [];
+    for (let r = 1; r < cg.length; r++) {
+      const guid = cg[r]?.[0];
+      if (!guid) continue;
+      for (let c = 4; c < heads.length; c++) {
+        if (norm(cg[r]?.[c] ?? '') !== 'na') continue;
+        if (!naByGuid.has(String(guid))) naByGuid.set(String(guid), new Set());
+        naByGuid.get(String(guid)).add(String(heads[c] ?? '').trim());
+      }
+    }
+  }
+
   const skus = products.map((p) => p.sku);
   const imgBySku = await fetchImagesBySku(skus);
   const docBySku = await fetchDocsBySku(skus, HD_DOC_TYPES, Object.keys(HD_DOC_TYPES));
@@ -492,6 +607,7 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
     const rowNum = DATA_ROW + pi;
     p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
     p._docs = docBySku[p.sku] || [];
+    const collection = hdCollection(p, ctx.categories);
     let cells = '';
     for (let ci = 0; ci < labels.length; ci++) {
       // Consecutive image block wins over whatever rule the header may have.
@@ -507,6 +623,8 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
       if (!label) continue;
       const rule = HOME_DEPOT_RULES[String(label).trim()];
       if (!rule) continue;
+      // Gray (NA) cell for this product's collection: stays empty.
+      if (collection && naByGuid.get(String(guids[ci] ?? ''))?.has(collection)) continue;
       const opts = validByGuid[String(guids[ci] ?? '')];
       let v;
       // Rules get the column's ReferenceData options as a 3rd arg for
