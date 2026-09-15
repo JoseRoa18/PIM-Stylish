@@ -8,17 +8,12 @@
 -- lets robots through. One row per link; a row with url = null is a
 -- retailer the PIM knows the product is listed on but the page never links.
 --
--- verdict:
---   unchecked    scanned, HTTP probe still pending
---   ok           HTTP 2xx on the page
---   broken       HTTP 404/410, or the page says "not found"
---   redirected   landed somewhere else (home page, password page, other host)
---   blocked      the retailer refuses robots (403/429/bot page) — id check only
---   unreachable  timeout / network error
---   malformed    the URL itself is invalid (spaces, no product id…)
---   id_mismatch  the id in the URL is not the PIM's id for this product
---   missing      no link although the PIM knows the product is listed there
---   no_section   the product page has no WHERE TO BUY section at all
+-- verdict (four values only, user rule 2026-09-15; `note` carries the reason):
+--   ok       the link opens and shows the product
+--   broken   there is a link but it does not work (404, not-found page, redirect
+--            to login / home, cut address, or it opens another product)
+--   missing  the PIM knows the product is listed there, the page has no link
+--   pending  not verified yet (site blocks robots / no answer) — retried hourly
 
 create table if not exists public.where_to_buy_links (
   id uuid primary key default gen_random_uuid(),
@@ -54,8 +49,9 @@ create policy "where_to_buy_links_read" on public.where_to_buy_links
 -- Writes come only from the edge function (service role).
 
 -- Cron: one scan a day (09:20 UTC = 5:20 am VET, before the health refresh),
--- then HTTP probes every 5 minutes — each call checks one paced batch and
--- returns at once when nothing is pending. <CRON_SECRET> = the function
+-- then an HOURLY verification pass: the call probes one paced batch and
+-- chains the next one itself until nothing is due (pending links are due
+-- again one hour after their last try). <CRON_SECRET> = the function
 -- secret of the same name.
 select cron.schedule(
   'where-to-buy-scan-daily',
@@ -69,12 +65,12 @@ select cron.schedule(
 );
 
 select cron.schedule(
-  'where-to-buy-check-5min',
-  '*/5 * * * *',
+  'where-to-buy-check-hourly',
+  '7 * * * *',
   $$select net.http_post(
     url := 'https://vcmizxflfjcpxeccezlc.supabase.co/functions/v1/where-to-buy-audit',
     headers := '{"Content-Type":"application/json","x-cron-secret":"<CRON_SECRET>"}'::jsonb,
-    body := '{"mode":"check"}'::jsonb,
+    body := '{"mode":"check","chain":0}'::jsonb,
     timeout_milliseconds := 10000
   )$$
 );

@@ -136,8 +136,7 @@ export default function WhereToBuyPanel() {
               Every retailer link on the product pages, compared with the PIM and probed over HTTP.
             </p>
             <p className="text-body-sm text-on-surface-variant mt-1">
-              Scanned {fmtWhen(summary.lastScan)} · links checked {fmtWhen(summary.lastCheck)}
-              {summary.pending > 0 && <> · {summary.pending} pending</>}
+              Scanned {fmtWhen(summary.lastScan)} · links checked {fmtWhen(summary.lastCheck)} · pending links are retried every hour
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -172,7 +171,7 @@ export default function WhereToBuyPanel() {
                   onClick={runCheck}
                   disabled={busy != null}
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-40"
-                  title="Open every pending link (paced, a few minutes)"
+                  title="Probe the pending links now instead of waiting for the hourly pass"
                 >
                   {busy === 'check' ? `Checking · ${progress?.checked ?? 0}` : 'Check links'}
                 </button>
@@ -186,11 +185,8 @@ export default function WhereToBuyPanel() {
           {stat('Links', summary.links)}
           {stat('OK', counts.ok, 'text-success')}
           {stat('Broken', counts.broken, counts.broken ? 'text-error' : undefined)}
-          {stat('Wrong product', counts.id_mismatch, counts.id_mismatch ? 'text-error' : undefined)}
-          {stat('Malformed', counts.malformed, counts.malformed ? 'text-error' : undefined)}
-          {stat('Missing', counts.missing, counts.missing ? 'text-warning' : undefined)}
-          {stat('Redirects', counts.redirected, counts.redirected ? 'text-warning' : undefined)}
-          {stat('Not verifiable', counts.blocked)}
+          {stat('Missing link', counts.missing, counts.missing ? 'text-warning' : undefined)}
+          {stat('Pending', counts.pending)}
           {stat('Dropbox docs', summary.dropbox, summary.dropbox ? 'text-warning' : undefined)}
         </div>
       </div>

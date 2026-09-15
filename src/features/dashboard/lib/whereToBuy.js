@@ -35,20 +35,14 @@ export const WTB_RETAILERS = [
   { key: 'ebay', label: 'eBay', short: 'eBay', market: null },
   { key: 'stylish_locator', label: 'Store locator', short: 'Locator', market: null },
   { key: 'other', label: 'Other link', short: 'Other', market: null },
-  { key: 'none', label: 'Where to Buy section', short: '', market: null },
 ];
 
+// Four verdicts only (user rule, 2026-09-15). `note` carries the reason.
 export const WTB_VERDICTS = {
-  ok: { label: 'OK', tone: 'ok', problem: false },
-  unchecked: { label: 'Pending check', tone: 'muted', problem: false },
-  blocked: { label: 'Not verifiable', tone: 'muted', problem: false, hint: 'The site refuses automated checks. The id in the link was still compared with the PIM.' },
-  broken: { label: 'Broken', tone: 'error', problem: true },
-  redirected: { label: 'Redirects', tone: 'warning', problem: true },
-  unreachable: { label: 'No answer', tone: 'muted', problem: false, hint: 'The site did not answer the automated check (timeout or dropped connection). Re-checked on the next pass.' },
-  malformed: { label: 'Malformed', tone: 'error', problem: true },
-  id_mismatch: { label: 'Wrong product', tone: 'error', problem: true },
-  missing: { label: 'Missing', tone: 'warning', problem: true },
-  no_section: { label: 'No section', tone: 'warning', problem: true, hint: 'The product page has no WHERE TO BUY section.' },
+  ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product.' },
+  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not work: not found, redirects elsewhere, cut address or another product.' },
+  missing: { label: 'Missing link', tone: 'warning', problem: true, hint: 'The PIM knows the product is listed there and the page has no link.' },
+  pending: { label: 'Pending', tone: 'muted', problem: false, hint: 'Not verified yet: the site blocks automated checks or did not answer. Retried every hour.' },
 };
 
 export const isProblem = (verdict) => Boolean(WTB_VERDICTS[verdict]?.problem);
@@ -73,7 +67,7 @@ export function summarizeWhereToBuy(rows) {
     if (r.section === 'documents') s.docs += 1; else if (r.url) s.links += 1;
     s.byVerdict[r.verdict] = (s.byVerdict[r.verdict] ?? 0) + 1;
     if (isProblem(r.verdict)) s.problems += 1;
-    if (r.verdict === 'unchecked') s.pending += 1;
+    if (r.verdict === 'pending') s.pending += 1;
     if (r.retailer === 'dropbox') s.dropbox += 1;
     if (!s.lastScan || r.scanned_at > s.lastScan) s.lastScan = r.scanned_at;
     if (r.checked_at && (!s.lastCheck || r.checked_at > s.lastCheck)) s.lastCheck = r.checked_at;

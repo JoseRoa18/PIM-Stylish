@@ -3,15 +3,25 @@
 // mode "scan"  — reads every product of both sites through the Wix API,
 //                parses the WHERE TO BUY and DOCUMENTS TO DOWNLOAD sections
 //                into one row per link, cross-checks the ids in the URLs
-//                against what the PIM knows, flags malformed URLs and the
-//                retailers the product is listed on but never linked, and
-//                replaces the site's rows (HTTP results younger than 7 days
-//                carry over by URL).
+//                against what the PIM knows, flags the retailers the product
+//                is listed on but never linked, and replaces the site's rows
+//                (ok / broken results younger than 7 days carry over by URL).
 // mode "check" — probes a paced batch of pending URLs over HTTP (one lane
-//                per host, ~1.2 s between requests, ~35 s budget) and stores
-//                ok / broken / redirected / blocked / unreachable. Called
-//                every 15 min by cron and in a loop from the UI.
-// mode "status"— counts of pending rows.
+//                per host, ~1.2 s between requests, ~35 s budget). Pending
+//                links are retried once an hour until the site answers.
+//                Called hourly by cron (each call chains the next batch
+//                until nothing is due) and in a loop from the UI.
+// mode "status"— count of rows due for a probe.
+//
+// Only FOUR verdicts (user rule, 2026-09-15):
+//   ok       the link opens and shows the product
+//   broken   there is a link but it does not work: 404, "not found" page,
+//            redirect to a login / home page, malformed URL, or it opens
+//            another product (id differs from the PIM's)
+//   missing  the PIM knows the product is listed there, the page has no link
+//   pending  not verified yet: never probed, the site blocks robots, or it
+//            did not answer — retried every hour
+// The `note` column carries the reason.
 //
 // Auth: `x-cron-secret` (cron) or a signed-in user's JWT. Deployed with
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
@@ -30,9 +40,12 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const WIX_API_KEY = Deno.env.get("WIX_API_KEY") ?? "";
+const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
 
 const SITES = ["stylish_ca", "stylish_us"];
-const CARRY_DAYS = 7;
+const KEEP_DAYS = 7;        // ok / broken results stand for a week
+const RETRY_HOURS = 1;      // pending links are retried hourly
+const MAX_CHAIN = 80;       // cron chain: at most 80 batches per hour
 
 // ---------------------------------------------------------------- retailers
 interface Retailer { key: string; market: "ca" | "us" | null; label: string }
@@ -69,6 +82,9 @@ const RETAILERS: Array<{ host: RegExp } & Retailer> = [
 ];
 const retailerFor = (host: string): Retailer =>
   RETAILERS.find((r) => r.host.test(host)) ?? { key: "other", market: null, label: host };
+
+// Retailers whose URLs must carry a product id.
+const ID_REQUIRED = new Set(["wayfair_ca", "wayfair_us", "homedepot_us", "bestbuy_ca", "amazon_ca", "amazon_us", "sinksdirect_ca", "sinksdirect_us"]);
 
 // The id each retailer puts in its product URL.
 function extractId(retailer: string, url: string): string | null {
@@ -123,7 +139,7 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal", ...(init.headers ?? {}) },
   });
   if (!r.ok) throw new Error(`REST ${r.status} ${path.slice(0, 80)}: ${(await r.text()).slice(0, 200)}`);
-  if (init.method && init.method !== "GET" && (init.headers as Record<string, string> | undefined)?.Prefer !== "return=representation") return undefined as T;
+  if (init.method && init.method !== "GET") return undefined as T;
   return (await r.json()) as T;
 }
 async function restAll<T>(path: string): Promise<T[]> {
@@ -224,24 +240,21 @@ async function scanSite(siteKey: string, now: string) {
   const withSku = catalog.map((p) => ({ p, sku: skuOf(p) })).filter((x): x is { p: WixProduct; sku: string } => Boolean(x.sku));
   const pim = await loadPim(withSku.map((x) => x.sku));
 
-  // HTTP results younger than CARRY_DAYS carry over by URL.
-  const since = new Date(Date.now() - CARRY_DAYS * 86400e3).toISOString();
+  // ok / broken HTTP results younger than KEEP_DAYS carry over by URL.
+  const since = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
   const prior = new Map<string, { verdict: string; http_status: number | null; final_url: string | null; note: string | null; checked_at: string }>();
   for (const r of await restAll<{ url: string; verdict: string; http_status: number | null; final_url: string | null; note: string | null; checked_at: string }>(
-    `where_to_buy_links?select=url,verdict,http_status,final_url,note,checked_at&site=eq.${siteKey}&checked_at=gte.${since}&url=not.is.null`,
+    `where_to_buy_links?select=url,verdict,http_status,final_url,note,checked_at&site=eq.${siteKey}&verdict=in.(ok,broken)&http_status=not.is.null&checked_at=gte.${since}&url=not.is.null`,
   )) prior.set(r.url, r);
 
   const rows: Row[] = [];
-  const counts = { products: withSku.length, links: 0, docs: 0, malformed: 0, id_mismatch: 0, missing: 0, dropbox: 0, no_section: 0 };
+  const counts = { products: withSku.length, links: 0, docs: 0, broken: 0, missing: 0, dropbox: 0, no_section: 0 };
   for (const { p, sku } of withSku) {
     const sections = p.additionalInfoSections ?? [];
     const wtb = sections.find((s) => /where\s*to\s*buy/i.test(s.title ?? ""));
     const docs = sections.find((s) => /document/i.test(s.title ?? ""));
+    if (!wtb) counts.no_section += 1;
     const base = { site: siteKey, sku, wix_product_id: p.id ?? null, scanned_at: now };
-    if (!wtb) {
-      counts.no_section += 1;
-      rows.push({ ...base, section: "where_to_buy", market: null, retailer: "none", label: null, url: null, host: null, retailer_id: null, expected_id: null, verdict: "no_section", http_status: null, final_url: null, note: "The page has no WHERE TO BUY section", checked_at: null });
-    }
     const present = new Set<string>();
     const marketsSeen = new Set<string>();
 
@@ -263,25 +276,24 @@ async function scanSite(siteKey: string, now: string) {
         case "sinksdirect_us": expected = pim.sinksSlug.get(`sinksdirect_us|${sku}`) ?? null; break;
         case "bestbuy_ca": expected = pim.bestbuy.get(sku)?.id ?? null; break;
       }
-      let verdict = "unchecked";
+      // Decided at scan time (no HTTP needed): malformed URLs and links that
+      // point at another product are broken. Everything else starts pending.
+      let verdict = "pending";
       let note: string | null = null;
-      if (!parsed || !/^https?:$/.test(parsed.protocol) || !host) { verdict = "malformed"; note = "Not a valid URL"; }
-      else if (["wayfair_ca", "wayfair_us", "homedepot_us", "bestbuy_ca", "amazon_ca", "amazon_us", "sinksdirect_ca", "sinksdirect_us"].includes(ret.key) && !rid) { verdict = "malformed"; note = "No product id in the URL"; }
+      if (!parsed || !/^https?:$/.test(parsed.protocol) || !host) { verdict = "broken"; note = "Not a valid web address"; }
+      else if (ID_REQUIRED.has(ret.key) && !rid) { verdict = "broken"; note = "The address has no product id (cut link)"; }
       else if (expected && rid && expected.toLowerCase() !== rid.toLowerCase()) {
         if (ret.key === "sinksdirect_ca" || ret.key === "sinksdirect_us") {
-          // Old slugs usually redirect on Wix — the HTTP probe decides (it
-          // compares the landing slug with the expected one).
+          // Old slugs usually redirect on Wix — the HTTP probe decides.
           note = `Old address (current page is ${expected})`;
         } else if (ret.key === "wayfair_ca" || ret.key === "wayfair_us") {
           // The PIM holds the item GROUP id; variant links carry the child sku.
           note = `URL sku ${rid}, PIM group ${expected}`;
-        } else { verdict = "id_mismatch"; note = `URL has ${rid}, PIM has ${expected}`; }
+        } else { verdict = "broken"; note = `Opens another product: URL has ${rid}, PIM has ${expected}`; }
       }
-      else if (/\s/.test(a.url)) note = "URL contains spaces";
       if (ret.key === "dropbox") counts.dropbox += 1;
-      if (verdict === "malformed") counts.malformed += 1;
-      if (verdict === "id_mismatch") counts.id_mismatch += 1;
-      const carried = verdict === "unchecked" ? prior.get(a.url) : undefined;
+      if (verdict === "broken") counts.broken += 1;
+      const carried = verdict === "pending" ? prior.get(a.url) : undefined;
       rows.push({
         ...base, section, market, retailer: ret.key, label: a.label || null, url: a.url, host,
         retailer_id: rid, expected_id: expected,
@@ -295,9 +307,10 @@ async function scanSite(siteKey: string, now: string) {
     if (wtb?.description) for (const a of anchors(wtb.description)) pushLink("where_to_buy", a);
     if (docs?.description) for (const a of anchors(docs.description)) pushLink("documents", a);
 
-    // Retailers the PIM knows the product is on, absent from the section.
-    // Only flagged when the page lists that market at all (some pages carry
-    // one market only, on purpose).
+    // Retailers the PIM knows the product is on, absent from the page. When
+    // the page has a section, only flagged for the markets it lists at all
+    // (some pages carry one market on purpose); a page with NO section gets
+    // every known retailer flagged.
     const expectations: Array<[string, string, boolean]> = [
       ["sinksdirect_ca", "ca", pim.sinksLinked.has(`sinksdirect_ca|${sku}`)],
       ["sinksdirect_us", "us", pim.sinksLinked.has(`sinksdirect_us|${sku}`)],
@@ -310,10 +323,10 @@ async function scanSite(siteKey: string, now: string) {
       ["homedepot_us", "us", pim.hdUs.has(sku)],
     ];
     for (const [key, market, listed] of expectations) {
-      if (!listed || present.has(key) || !wtb) continue;
-      if (!marketsSeen.has(market)) continue;
+      if (!listed || present.has(key)) continue;
+      if (wtb && !marketsSeen.has(market)) continue;
       counts.missing += 1;
-      rows.push({ ...base, section: "where_to_buy", market, retailer: key, label: null, url: null, host: null, retailer_id: null, expected_id: null, verdict: "missing", http_status: null, final_url: null, note: "Listed there per the PIM, no link on the page", checked_at: null });
+      rows.push({ ...base, section: "where_to_buy", market, retailer: key, label: null, url: null, host: null, retailer_id: null, expected_id: null, verdict: "missing", http_status: null, final_url: null, note: wtb ? "Listed there per the PIM, no link on the page" : "The page has no WHERE TO BUY section", checked_at: null });
     }
   }
 
@@ -342,7 +355,9 @@ const DOC_HOST = /dropbox\.com|sharepoint\.com|supabase\.co/;
 const laneConfig = (host: string) =>
   /wayfair/.test(host) ? { pace: 3000, lanes: 1 } : DOC_HOST.test(host) ? { pace: 300, lanes: 3 } : { pace: 1200, lanes: 1 };
 
-async function probe(url: string, expectedSlug: string | null = null): Promise<{ verdict: string; http_status: number | null; final_url: string | null; note: string | null }> {
+interface Probe { verdict: "ok" | "broken" | "pending"; http_status: number | null; final_url: string | null; note: string | null }
+
+async function probe(url: string, expectedSlug: string | null = null): Promise<Probe> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000);
   try {
@@ -353,77 +368,81 @@ async function probe(url: string, expectedSlug: string | null = null): Promise<{
     if (DOC_HOST.test(new URL(finalUrl).hostname)) { try { await r.body?.cancel(); } catch { /* ignore */ } }
     else { try { body = (await r.text()).slice(0, 200000); } catch { body = ""; } }
     if (status === 404 || status === 410) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `HTTP ${status}` };
-    if (status === 403 || status === 429 || status === 401) return { verdict: "blocked", http_status: status, final_url: finalUrl, note: "The site refuses automated checks" };
-    // Amazon (and others) answer 500/503 to datacenter traffic — a robot
-    // block, not a broken page.
-    if (status >= 500) return { verdict: "blocked", http_status: status, final_url: finalUrl, note: `The site refuses automated checks (HTTP ${status})` };
-    if (BOT_RE.test(body)) return { verdict: "blocked", http_status: status, final_url: finalUrl, note: "Bot challenge page" };
+    // 401/403/429 and 5xx from retailers are robot blocks (Amazon answers
+    // 500/503 to datacenter traffic) — the link is not verified, try later.
+    if (status === 401 || status === 403 || status === 429 || status >= 500) return { verdict: "pending", http_status: status, final_url: finalUrl, note: `Blocked by the site (HTTP ${status}), retried hourly` };
+    if (BOT_RE.test(body)) return { verdict: "pending", http_status: status, final_url: finalUrl, note: "Blocked by the site (bot check page), retried hourly" };
     if (NOT_FOUND_RE.test(body)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "The page says the product was not found" };
     try {
       const a = new URL(url); const b = new URL(finalUrl);
       const rootHost = (h: string) => h.replace(/^www\./, "");
       if (expectedSlug) {
         const landed = b.pathname.match(/\/product-page\/([^/?#]+)/i)?.[1]?.toLowerCase() ?? null;
-        if (landed && landed !== expectedSlug.toLowerCase()) return { verdict: "id_mismatch", http_status: status, final_url: finalUrl, note: `Opens ${landed}, the product's page is ${expectedSlug}` };
+        if (landed && landed !== expectedSlug.toLowerCase()) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `Opens another product (${landed}); the product's page is ${expectedSlug}` };
       }
-      if (rootHost(a.hostname) !== rootHost(b.hostname)) return { verdict: "redirected", http_status: status, final_url: finalUrl, note: `Redirected to ${b.hostname}` };
-      if (/password|login|signin/i.test(b.pathname)) return { verdict: "redirected", http_status: status, final_url: finalUrl, note: "Redirected to a login / password page" };
-      if ((b.pathname === "/" || b.pathname === "") && a.pathname.length > 1) return { verdict: "redirected", http_status: status, final_url: finalUrl, note: "Redirected to the home page" };
+      if (rootHost(a.hostname) !== rootHost(b.hostname)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `Redirects to ${b.hostname}` };
+      if (/password|login|signin/i.test(b.pathname)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "Redirects to a login / password page" };
+      if ((b.pathname === "/" || b.pathname === "") && a.pathname.length > 1) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "Redirects to the home page" };
     } catch { /* keep ok */ }
     if (status >= 200 && status < 400) return { verdict: "ok", http_status: status, final_url: finalUrl, note: null };
-    return { verdict: "unreachable", http_status: status, final_url: finalUrl, note: `HTTP ${status}` };
+    return { verdict: "pending", http_status: status, final_url: finalUrl, note: `HTTP ${status}, retried hourly` };
   } catch (e) {
-    const msg = (e as Error).name === "AbortError" ? "No answer in 12 s" : /error sending request|connection|reset|refused/i.test((e as Error).message) ? "Connection dropped by the site" : (e as Error).message.slice(0, 120);
-    return { verdict: "unreachable", http_status: null, final_url: null, note: msg };
+    const msg = (e as Error).name === "AbortError" ? "No answer in 12 s, retried hourly" : /error sending request|connection|reset|refused/i.test((e as Error).message) ? "Connection dropped by the site, retried hourly" : (e as Error).message.slice(0, 120);
+    return { verdict: "pending", http_status: null, final_url: null, note: msg };
   } finally { clearTimeout(t); }
 }
 
+// Rows due for a probe: pending never probed or probed over an hour ago;
+// ok / broken HTTP results older than a week (scan-time "broken" rows have
+// no http_status and are never re-probed).
+const dueFilter = () => {
+  const retry = new Date(Date.now() - RETRY_HOURS * 3600e3).toISOString();
+  const keep = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
+  return `url=not.is.null&or=(and(verdict.eq.pending,or(checked_at.is.null,checked_at.lt.${retry})),and(verdict.in.(ok,broken),http_status.not.is.null,checked_at.lt.${keep}))`;
+};
+
 async function check(budgetMs = 35000, limit = 400) {
   const started = Date.now();
-  const since = new Date(Date.now() - CARRY_DAYS * 86400e3).toISOString();
-  // Pending: never probed, or probed more than CARRY_DAYS ago.
   const pending = await rest<Array<{ id: string; url: string; host: string; retailer: string; expected_id: string | null }>>(
-    `where_to_buy_links?select=id,url,host,retailer,expected_id&url=not.is.null&verdict=not.in.(malformed,id_mismatch,missing)&or=(checked_at.is.null,checked_at.lt.${since})&order=checked_at.asc.nullsfirst&limit=${limit}`,
+    `where_to_buy_links?select=id,url,host,retailer,expected_id&${dueFilter()}&order=checked_at.asc.nullsfirst&limit=${limit}`,
     { headers: { Prefer: "count=none" } },
   );
   const byHost = new Map<string, typeof pending>();
   for (const r of pending) { const h = (r.host ?? "").replace(/^www\./, ""); if (!byHost.has(h)) byHost.set(h, []); byHost.get(h)!.push(r); }
-  const results: Array<{ id: string } & Awaited<ReturnType<typeof probe>>> = [];
+  const results: Array<{ id: string } & Probe> = [];
   const hostStats: Record<string, { checked: number; blocked: number }> = {};
   await Promise.all([...byHost.entries()].map(async ([host, rows]) => {
     const stat = { checked: 0, blocked: 0 };
     hostStats[host] = stat;
     let blockedInARow = 0;
-    // Wayfair rate-limits hard: 3 s between hits; document hosts run 3
-    // lanes at 300 ms; everyone else one lane at 1.2 s.
     const { pace, lanes } = laneConfig(host);
     let next = 0;
     const lane = async () => {
       while (next < rows.length && Date.now() - started <= budgetMs) {
         const r = rows[next++];
-        let res: Awaited<ReturnType<typeof probe>>;
+        let res: Probe;
         if (blockedInARow >= 3) {
-          res = { verdict: "blocked", http_status: null, final_url: null, note: "The site refuses automated checks" };
+          // The host is blocking this run — mark the rest pending for the
+          // next hour without hitting it again.
+          res = { verdict: "pending", http_status: null, final_url: null, note: "Blocked by the site, retried hourly" };
         } else {
           res = await probe(r.url, /^sinksdirect_/.test(r.retailer) ? r.expected_id : null);
-          if (res.verdict === "blocked") blockedInARow += 1; else blockedInARow = 0;
+          const blocked = res.verdict === "pending" && /Blocked/.test(res.note ?? "");
+          blockedInARow = blocked ? blockedInARow + 1 : 0;
           await new Promise((ok) => setTimeout(ok, pace));
         }
         stat.checked += 1;
-        if (res.verdict === "blocked") stat.blocked += 1;
+        if (res.verdict === "pending") stat.blocked += 1;
         results.push({ id: r.id, ...res });
       }
     };
     await Promise.all(Array.from({ length: lanes }, lane));
   }));
   const now = new Date().toISOString();
-  // One PATCH per distinct outcome (not per row): the gateway drops the
-  // connection when 600 sequential updates follow a 45 s probe run.
-  // final_url is kept only where it matters (redirects).
+  // One PATCH per distinct outcome (not per row).
   const groups = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
   for (const r of results) {
-    const keepFinal = r.verdict === "redirected";
-    const patch = { verdict: r.verdict, http_status: r.http_status, final_url: keepFinal ? r.final_url : null, note: r.note, checked_at: now };
+    const patch = { verdict: r.verdict, http_status: r.http_status, final_url: r.verdict === "broken" ? r.final_url : null, note: r.note, checked_at: now };
     const key = JSON.stringify(patch);
     if (!groups.has(key)) groups.set(key, { patch, ids: [] });
     groups.get(key)!.ids.push(r.id);
@@ -435,22 +454,37 @@ async function check(budgetMs = 35000, limit = 400) {
   }
   const byVerdict: Record<string, number> = {};
   for (const r of results) byVerdict[r.verdict] = (byVerdict[r.verdict] ?? 0) + 1;
-  return { checked: results.length, remaining: Math.max(0, pending.length - results.length), morePending: pending.length >= limit || pending.length > results.length, byVerdict, hosts: hostStats, ms: Date.now() - started };
+  // Anything left in this batch, or a full batch, means more is due now.
+  const morePending = pending.length > results.length || pending.length >= limit;
+  return { checked: results.length, morePending, byVerdict, hosts: hostStats, ms: Date.now() - started };
 }
 
 async function status() {
-  const since = new Date(Date.now() - CARRY_DAYS * 86400e3).toISOString();
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/where_to_buy_links?select=id&url=not.is.null&verdict=not.in.(malformed,id_mismatch,missing)&or=(checked_at.is.null,checked_at.lt.${since})`, {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/where_to_buy_links?select=id&${dueFilter()}`, {
     method: "HEAD", headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, Prefer: "count=exact" },
   });
-  const pending = Number(r.headers.get("content-range")?.split("/")[1] ?? 0);
-  return { pending };
+  const due = Number(r.headers.get("content-range")?.split("/")[1] ?? 0);
+  return { due };
+}
+
+// Cron chain: the hourly cron call passes chain: 0; each batch that still
+// has due links fires the next one (fire-and-forget) until nothing is due
+// or MAX_CHAIN batches ran. Blocked hosts drain fast (3 hits, then skipped).
+function chainNext(chain: number) {
+  if (!CRON_SECRET || chain >= MAX_CHAIN) return;
+  const p = fetch(`${SUPABASE_URL}/functions/v1/where-to-buy-audit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-cron-secret": CRON_SECRET },
+    body: JSON.stringify({ mode: "check", chain: chain + 1 }),
+  }).then((r) => r.body?.cancel()).catch((e) => console.warn("[where-to-buy] chain failed:", (e as Error).message));
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(p);
 }
 
 // ---------------------------------------------------------------- auth
 async function authorized(req: Request): Promise<boolean> {
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret && req.headers.get("x-cron-secret") === cronSecret) return true;
+  if (CRON_SECRET && req.headers.get("x-cron-secret") === CRON_SECRET) return true;
   const auth = req.headers.get("authorization") ?? "";
   if (!auth.startsWith("Bearer ")) return false;
   const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: auth } });
@@ -471,7 +505,11 @@ Deno.serve(async (req) => {
       for (const s of sites) out.push(await scanSite(s, now));
       return json({ ok: true, scanned_at: now, sites: out });
     }
-    if (mode === "check") return json({ ok: true, ...(await check(body.budgetMs ?? 35000, body.limit ?? 400)) });
+    if (mode === "check") {
+      const result = await check(body.budgetMs ?? 35000, body.limit ?? 400);
+      if (typeof body.chain === "number" && result.morePending && result.checked > 0) chainNext(body.chain);
+      return json({ ok: true, chain: body.chain ?? null, ...result });
+    }
     return json({ ok: true, ...(await status()) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
