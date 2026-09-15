@@ -11,6 +11,7 @@ import { useListingHealth } from '@/features/dashboard/hooks/useListingHealth';
 import ListingHealthOverview from '@/features/dashboard/components/ListingHealthOverview';
 import ListingHealthActions from '@/features/dashboard/components/ListingHealthActions';
 import PimCompletenessPanel from '@/features/dashboard/components/PimCompletenessPanel';
+import WhereToBuyPanel from '@/features/dashboard/components/WhereToBuyPanel';
 import {
   categorizeScore,
   MARKETPLACES,
@@ -25,6 +26,8 @@ import SCORE_BADGE_STYLES from '@/lib/scoreBadgeStyles';
 // The PIM tab scores the catalog's OWN data completeness, live — it leads
 // the strip because every channel score starts from it.
 const PIM_TAB = 'pim';
+// Stylish brand sites only: the WHERE TO BUY link audit (own table, no score).
+const WTB_TAB = 'where_to_buy';
 
 const SOURCE_STYLES = {
   wix_cache: { label: 'Wix cache', class: 'bg-tertiary/25 text-on-tertiary-container border border-tertiary/40' },
@@ -143,10 +146,12 @@ export default function ListingHealth() {
   // (used by the Syndication channel workspaces).
   const initialTab = new URLSearchParams(window.location.search).get('tab');
   const [marketplace, setMarketplace] = useState(
-    initialTab === PIM_TAB || API_MARKETPLACE_KEYS.includes(initialTab) ? initialTab : PIM_TAB,
+    initialTab === PIM_TAB || initialTab === WTB_TAB || API_MARKETPLACE_KEYS.includes(initialTab) ? initialTab : PIM_TAB,
   );
   const isPim = marketplace === PIM_TAB;
-  const TAB_KEYS = [PIM_TAB, ...API_MARKETPLACE_KEYS];
+  const isWtb = marketplace === WTB_TAB;
+  const isChannel = !isPim && !isWtb;
+  const TAB_KEYS = [PIM_TAB, WTB_TAB, ...API_MARKETPLACE_KEYS];
   // Store family → its markets, in display order. Channels the map doesn't
   // know form a family of their own so a new connector still shows up.
   const CHANNEL_GROUPS = useMemo(() => {
@@ -167,9 +172,14 @@ export default function ListingHealth() {
     }
     const rank = (n) => (order.includes(n) ? order.indexOf(n) : order.length);
     const marketRank = (m) => (m === 'Canada' ? 0 : m === 'USA' ? 1 : 2);
-    return [...groups.values()]
+    const sorted = [...groups.values()]
       .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
       .map((g) => ({ ...g, items: [...g.items].sort((a, b) => marketRank(a.market) - marketRank(b.market)) }));
+    // The Where to Buy audit sits with the Stylish sites it reads.
+    const stylish = sorted.find((g) => g.name === 'Stylish');
+    if (stylish) stylish.items.push({ key: WTB_TAB, market: 'Where to Buy' });
+    else sorted.push({ name: 'Stylish', items: [{ key: WTB_TAB, market: 'Where to Buy' }] });
+    return sorted;
   }, []);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('score_asc');
@@ -180,7 +190,7 @@ export default function ListingHealth() {
   const [expandedSku, setExpandedSku] = useState(null);
   const PAGE_SIZE = 25;
 
-  const mktDef = isPim ? null : MARKETPLACES[marketplace];
+  const mktDef = isChannel ? MARKETPLACES[marketplace] : null;
   const mktData = byMarketplace[marketplace];
   const products = mktData?.products ?? [];
   const stats = mktData?.stats ?? null;
@@ -357,8 +367,9 @@ export default function ListingHealth() {
       })()}
 
       {isPim && <PimCompletenessPanel />}
+      {isWtb && <WhereToBuyPanel />}
 
-      {!isPim && loading && (
+      {isChannel && loading && (
         <div role="status" aria-label="Loading catalog health" className="animate-pulse space-y-6">
           <div className="h-56 rounded-2xl bg-surface-container" />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -376,14 +387,14 @@ export default function ListingHealth() {
         </div>
       )}
 
-      {!isPim && error && (
+      {isChannel && error && (
         <div className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>
       )}
 
-      {!isPim && !loading && !error && mktData && (
+      {isChannel && !loading && !error && mktData && (
         <>
           {/* Wayfair-only: the FULL spec-attributes audit lives right here —
               last run, per-SKU diffs and the mass push — so sync issues are

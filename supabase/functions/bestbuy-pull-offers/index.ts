@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
 
   try {
     const offers: Array<{
-      sku: string; price: number | null; quantity: number; active: boolean; state: string;
+      sku: string; bb_product_id: string | null; price: number | null; quantity: number; active: boolean; state: string;
       discount_price: number | null; discount_start: string | null; discount_end: string | null;
       origin_price: number | null;
       category_code: string | null; category_label: string | null;
@@ -110,6 +110,9 @@ Deno.serve(async (req) => {
       for (const o of data.offers ?? []) {
         offers.push({
           sku: o.shop_sku,
+          // Best Buy's own product number (the id in bestbuy.ca/en-ca/product/<id>)
+          // — the Where to Buy audit checks the Stylish pages against it.
+          bb_product_id: o.product_sku ? String(o.product_sku) : null,
           price: o.price ?? null,
           // Scheduled / active discount (Mirakl OF21 `discount` object). The
           // monthly promo is pushed as exactly this, so the alignment can only
