@@ -7,9 +7,14 @@ import { useAuth } from '@/features/auth/AuthContext';
 // Per-product "new listing" panel (Marketplaces tab): validate the PIM data
 // against Wayfair's Product Addition questions, then create the listing.
 // Validate never changes anything; Create only unlocks after a clean validation.
-export default function WayfairAdditionCard({ product, supplier = 'USA' }) {
+// New listings go to Wayfair CANADA (supplier 31948); Wayfair mirrors them to
+// USA. The Canadian app has no sandbox: Validate runs against production and
+// creates nothing.
+const SUPPLIER_LABEL = { CAN: 'Canada', USA: 'USA' };
+export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
   const { canEdit } = useAuth();
-  const [sandbox, setSandbox] = useState(true);
+  const hasSandbox = supplier !== 'CAN';
+  const [sandbox, setSandbox] = useState(hasSandbox);
   const [busy, setBusy] = useState(null); // 'validate' | 'create' | 'status' | null
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState(null);
@@ -19,7 +24,7 @@ export default function WayfairAdditionCard({ product, supplier = 'USA' }) {
   const clean = !!row && !row.errors?.length && !row.missingRequired?.length && !row.unmapped?.length;
 
   async function run(validateOnly) {
-    if (!validateOnly && !sandbox && !window.confirm(`Create ${product.sku} as a NEW Wayfair ${supplier} listing?`)) return;
+    if (!validateOnly && !sandbox && !window.confirm(`Create ${product.sku} as a NEW Wayfair ${SUPPLIER_LABEL[supplier] ?? supplier} listing? This is the real catalog.`)) return;
     setBusy(validateOnly ? 'validate' : 'create');
     setResult(null);
     setStatus(null);
@@ -53,11 +58,13 @@ export default function WayfairAdditionCard({ product, supplier = 'USA' }) {
             WF
           </div>
           <div>
-            <h2 className="text-title-lg text-on-surface leading-tight">Wayfair {supplier} · New listing</h2>
-            <p className="text-body-sm text-on-surface-variant mt-0.5">Product Addition · builds the listing from PIM data</p>
+            <h2 className="text-title-lg text-on-surface leading-tight">Wayfair {SUPPLIER_LABEL[supplier] ?? supplier} · New listing</h2>
+            <p className="text-body-sm text-on-surface-variant mt-0.5">
+              {supplier === 'CAN' ? 'Created in Canada; Wayfair mirrors it to USA. Validate creates nothing.' : 'Product Addition · builds the listing from PIM data'}
+            </p>
           </div>
         </div>
-        {canEdit && (
+        {canEdit && hasSandbox && (
           <label className="inline-flex items-center gap-2 text-label-sm text-on-surface-variant cursor-pointer" title="Sandbox validates only — nothing is created on Wayfair">
             <input type="checkbox" checked={sandbox} onChange={(e) => setSandbox(e.target.checked)} className="accent-primary" />
             Sandbox (test)

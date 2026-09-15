@@ -1782,7 +1782,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
       <div ref={walmartRef} className="scroll-mt-24">
         <WalmartCaProductCard product={product} row={wmCa ?? null} loading={wmCa === undefined} />
       </div>
-      <WayfairAdditionCard product={product} supplier="USA" />
+      {/* New listings go to Wayfair CANADA only — Wayfair mirrors them to USA
+          (user rule, 2026-09-15). */}
+      <WayfairAdditionCard product={product} supplier="CAN" />
       <ExportTemplatesCard product={product} media={media} />
     </div>
   );

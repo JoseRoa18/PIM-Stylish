@@ -18,7 +18,8 @@
 //
 // Request body: {
 //   skus: string[],                // up to 30 per call
-//   supplier?: "USA" | "CAN" = "USA",
+//   supplier?: "USA" | "CAN" = "USA",   // whose credentials / supplier id / cost
+//   market?: "US" | "CA",             // marketContext override (CAN defaults to US, see below)
 //   validateOnly?: boolean = true,
 //   sandbox?: boolean = false,     // hit the sandbox with the *_SANDBOX_* app
 //   force?: boolean = false,       // also submit SKUs already in the catalog
@@ -597,8 +598,16 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const supplier = String(body.supplier ?? "USA");
-    const cfg = SUPPLIERS[supplier];
-    if (!cfg) return json({ error: `unknown supplier "${supplier}" (use USA or CAN)` }, 400);
+    const base = SUPPLIERS[supplier];
+    if (!base) return json({ error: `unknown supplier "${supplier}" (use USA or CAN)` }, 400);
+    // marketContext override ("US" | "CA"). Wayfair's Product Addition API
+    // answers brands / questions for the Canadian supplier (31948) ONLY under
+    // the UNITED_STATES market context (CANADA returns no brands and
+    // "problems with our internal systems", seen 2026-09-15) — so CAN
+    // defaults to the US context while keeping its own credentials, supplier
+    // id and CAD cost.
+    const marketOverride = String(body.market ?? (supplier === "CAN" ? "US" : "")).toUpperCase();
+    const cfg = marketOverride === "US" ? { ...base, market: SUPPLIERS.USA.market } : marketOverride === "CA" ? { ...base, market: SUPPLIERS.CAN.market } : base;
     const sandbox = body.sandbox === true || (Deno.env.get("WAYFAIR_ENV") ?? "sandbox") !== "production";
     const validateOnly = body.validateOnly !== false;
     const includeDocuments = body.includeDocuments !== false;
@@ -657,6 +666,20 @@ Deno.serve(async (req) => {
         })),
         total: st?.pagination?.totalRecords ?? 0,
       });
+    }
+
+    // --- brands mode: raw brand associations of the supplier (diagnostics) --
+    if (body.brands) {
+      const out: Record<string, unknown> = {};
+      for (const [label, request] of Object.entries({
+        market: { supplierId: Number(SUPPLIER_ID), marketContext: cfg.market, page: 1, pageSize: 50 },
+        usMarket: { supplierId: Number(SUPPLIER_ID), marketContext: SUPPLIERS.USA.market, page: 1, pageSize: 50 },
+        noMarket: { supplierId: Number(SUPPLIER_ID), page: 1, pageSize: 50 },
+      })) {
+        const r = await call(BRANDS_Q, { request }, "brandAssociations");
+        out[label] = r.errors ? { errors: r.errors } : r.data?.supplierBrand?.brandAssociations;
+      }
+      return json({ ok: true, env, supplier, supplierId: SUPPLIER_ID, ...out });
     }
 
     // --- questions mode: the class's Product Addition questions with their
