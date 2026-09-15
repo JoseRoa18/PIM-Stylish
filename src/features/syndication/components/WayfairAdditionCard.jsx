@@ -122,6 +122,7 @@ export default function WayfairAdditionCard({ product, supplier = 'USA' }) {
               <span className="min-w-0 break-words">
                 <span className="text-on-surface-variant">{result.env} · </span>
                 {row.className} (class {row.classId}) · {row.attributes} attributes · {row.images} images · {row.documents} documents
+                {row.variant ? ` · ${row.variant}` : ''}
                 {row.status ? ` · ${row.status}` : ''}
                 {result.requestId && !result.validateOnly ? ` · request ${result.requestId}` : ''}
               </span>

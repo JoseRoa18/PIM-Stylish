@@ -25,6 +25,7 @@
 //   classId?: string,              // override the class for every SKU
 //   includeDocuments?: boolean = true,
 //   status?: string,               // poll mode: productAdditionRequestId
+//   questions?: string,            // list mode: the class id whose questions to return
 // }
 //
 // Secrets: WAYFAIR_USA_CLIENT_ID/SECRET/SUPPLIER_ID (+ WAYFAIR_USA_SANDBOX_CLIENT_ID/SECRET),
@@ -188,11 +189,107 @@ function productType(p: Product): string {
   return "Standard Kitchen Sink";
 }
 
+// ---- Faucet answers (Bathroom Sink Faucets 655 / Kitchen Faucets 653;
+// vocabularies read from the class questions 2026-09-15) ----
+const isFaucet = (p: Product) => /faucet/.test(String(p.category ?? ""));
+const isBathFaucet = (p: Product) => String(p.category ?? "") === "bathroom_faucet";
+const handles = (p: Product) => parseInt(num(attr(p).number_of_handles), 10) || 0;
+const holes = (p: Product) => parseInt(num(attr(p).number_of_installation_holes), 10) || 0;
+// First option of the question that matches one of the candidate patterns.
+const pick = (q: Question | undefined, ...cands: RegExp[]): string => {
+  const opts = (q?.possibleAnswers ?? []).map((a) => a.value);
+  for (const re of cands) {
+    const hit = opts.find((o) => re.test(o));
+    if (hit) return hit;
+  }
+  return "";
+};
+function faucetProductType(p: Product, q: Question): string {
+  const t = `${p.product_type ?? ""} ${attr(p).spout_type ?? ""} ${attr(p).spray_type ?? ""} ${attr(p).general_title_en ?? ""}`;
+  if (isBathFaucet(p)) return handles(p) <= 1 ? pick(q, /mono basin mixer/i) : "";
+  if (/pot ?filler/i.test(t)) return pick(q, /pot filler/i);
+  if (/\bbar\b|beverage|prep/i.test(t)) return pick(q, /bar faucet/i);
+  if (/pull.?down/i.test(t)) return pick(q, /pull-?down/i);
+  if (handles(p) >= 2) return pick(q, /double handle/i);
+  return pick(q, /single handle kitchen/i, /^standard$/i);
+}
+function faucetMounting(p: Product, q: Question): string {
+  const m = `${attr(p).mounting_type ?? ""} ${attr(p).installation_type ?? ""}`.toLowerCase();
+  if (/wall/.test(m)) return pick(q, /^wall$/i);
+  if (/vessel/.test(m)) return pick(q, /vessel/i);
+  if (/single|one hole|1 hole/.test(m) || holes(p) === 1) return pick(q, /single-?hole/i);
+  const centers = num(attr(p).faucet_centers);
+  if (Number(centers) >= 8) return pick(q, /widespread/i);
+  if (Number(centers) === 4) return pick(q, /centerset/i);
+  if (/widespread/.test(m)) return pick(q, /widespread/i);
+  if (/centerset/.test(m)) return pick(q, /centerset/i);
+  return "";
+}
+// Faucet Centers is a DECIMAL: a one-hole faucet has no spread → 0.
+const faucetCenters = (p: Product) => {
+  const v = num(attr(p).faucet_centers);
+  if (v) return v;
+  return holes(p) === 1 || /single|one hole/i.test(String(attr(p).mounting_type ?? "")) ? "0" : "";
+};
+// Plating = the coating named by the finish. Black / gunmetal / graphite
+// finishes are coatings, not platings → "Does Not Apply".
+function platingMaterial(p: Product, q: Question): string {
+  const explicit = text(attr(p).plating_material);
+  if (explicit) return explicit;
+  const f = text(p.finish).toLowerCase();
+  if (!f) return "";
+  if (/chrome/.test(f)) return pick(q, /^chrome$/i);
+  if (/nickel/.test(f)) return pick(q, /^nickel$/i);
+  if (/stainless/.test(f)) return pick(q, /stainless/i);
+  if (/gold|brass/.test(f)) return pick(q, /^brass$/i);
+  if (/bronze/.test(f)) return pick(q, /^bronze$/i);
+  if (/copper/.test(f)) return pick(q, /^copper$/i);
+  if (/black|gunmetal|graphite|white/.test(f)) return pick(q, /does not apply/i);
+  return "";
+}
+// Title 24: only an explicit PIM answer counts ("Ask Technical Team" = unknown).
+const title24 = (p: Product) => {
+  const v = text(attr(p).title_24_compliant).toLowerCase();
+  if (!v || /ask/.test(v)) return "";
+  if (/not|non|no\b/.test(v)) return "No";
+  if (/compliant|yes|true/.test(v)) return "Yes";
+  return "";
+};
+// Faucets certified cUPC are tested to ASME A112.18.1 / CSA B125.1.
+const plumbingFixtures = (p: Product, q: Question) => {
+  const asme = text(attr(p).asme_csa_certified);
+  if (/112\.18\.1/.test(asme)) return pick(q, /112\.18\.1/);
+  const cupc = `${attr(p).cupc_certified ?? ""} ${safetyListings(p)}`;
+  if (/yes|cupc|upc/i.test(cupc)) return pick(q, /112\.18\.1/);
+  if (/^no$/i.test(text(attr(p).cupc_certified))) return "No";
+  return "";
+};
+const faucetShape = (p: Product, q: Question) => {
+  const explicit = text(p.shape ?? attr(p).shape);
+  if (explicit) return explicit;
+  const spout = text(attr(p).spout_type).toLowerCase();
+  if (/gooseneck|high arc/.test(spout)) return pick(q, /gooseneck/i);
+  if (/straight|rigid/.test(spout)) return pick(q, /^straight$/i);
+  if (/low arc|curved/.test(spout)) return pick(q, /^curved$/i);
+  return "";
+};
+
 // Product Addition questions that need a different answer than the spec push
 // (compliance defaults, choice vocabularies, "Does Not Apply" fallbacks).
-// Multi-choice answers return string[]; "" or [] = no value.
+// Multi-choice answers return string[]; "" or [] = no value. Rules get the
+// question too, to pick among ITS valid answers (vocabularies differ per class).
 type Val = string | string[];
-const SPECIAL: Array<{ re: RegExp; value: (p: Product) => Val }> = [
+const SPECIAL: Array<{ re: RegExp; value: (p: Product, q: Question) => Val }> = [
+  // Faucets (the shared spec rules skip "Maximum …" titles on purpose)
+  { re: /^maximum flow rate$/i, value: (p) => num(attr(p).max_flow_rate) },
+  { re: /^handle style$/i, value: (p, q) => (isFaucet(p) ? pick(q, new RegExp(`^${text(attr(p).handle_style)}$`, "i")) || text(attr(p).handle_style) : "") },
+  { re: /^faucet centers$/i, value: (p) => (isFaucet(p) ? faucetCenters(p) : "") },
+  { re: /^title 24/i, value: (p) => title24(p) },
+  { re: /^plumbing fixtures compliant$/i, value: (p, q) => (isFaucet(p) ? plumbingFixtures(p, q) : "") },
+  { re: /^plating material$/i, value: (p, q) => (isFaucet(p) ? platingMaterial(p, q) : "") },
+  // Product weight: the PIM's product weight, else the shipping weight
+  // (noted in the report).
+  { re: /^overall product weight$/i, value: (p) => num(p.weight_lb ?? attr(p).product_weight_lb) || num(p.shipping_weight_lb) || num(attr(p).shipping_weight_lb) },
   { re: /^supplier intended and approved use$/i, value: () => "Residential Use" },
   { re: /^commercial warranty$/i, value: () => "No" },
   { re: /compliance vetting program/i, value: () => "No" },
@@ -220,11 +317,11 @@ const SPECIAL: Array<{ re: RegExp; value: (p: Product) => Val }> = [
         ? ["Scratch Resistant", "Stain Resistant", "Heat Resistant"]
         : ["Stain Resistant"],
   },
-  { re: /^mounting \/ installation$/i, value: (p) => mounting(p) },
+  { re: /^mounting \/ installation$/i, value: (p, q) => (isFaucet(p) ? faucetMounting(p, q) : mounting(p)) },
   { re: /^drain placement$/i, value: (p) => drainPlacement(p) },
-  { re: /^overall shape$/i, value: (p) => shapeNoun(p) },
+  { re: /^overall shape$/i, value: (p, q) => (isFaucet(p) ? faucetShape(p, q) : shapeNoun(p)) },
   { re: /^minimum base cabinet width/i, value: (p) => num(attr(p).min_external_cabinet_size_in) },
-  { re: /^product type$/i, value: (p) => isSink(p) ? productType(p) : "" },
+  { re: /^product type$/i, value: (p, q) => (isSink(p) ? productType(p) : isFaucet(p) ? faucetProductType(p, q) : "") },
   { re: /^material$/i, value: (p) => materialAnswer(p) },
   { re: /^finish$/i, value: (p) => finishValue(p) },
   { re: /^country of origin$/i, value: (p) => text(field(p, "country_of_origin")) },
@@ -290,7 +387,12 @@ function buildProduct(
   p: Product,
   media: MediaRow[],
   questions: Question[],
-  opts: { manufacturerId: string; costKey: string; region: string; includeDocuments: boolean },
+  opts: {
+    manufacturerId: string; costKey: string; region: string; includeDocuments: boolean;
+    // Variant grouping: join an existing Wayfair item group (its id) or start
+    // a new one with the family members of this batch. Finish is the axis.
+    group?: { referenceId: string; primary: boolean; existing: boolean };
+  },
 ) {
   const a = attr(p);
   const attrs: Attr[] = [];
@@ -318,7 +420,20 @@ function buildProduct(
   if (!upc || /^0+$/.test(upc) || upc === "840994000000") notes.push(upc ? "UPC is a placeholder — not sent" : "no UPC in the PIM");
   else add("core::universalProductCode", upc);
   add("core::collectionName", text(p.model_name));
-  add("variantGrouping::variantType", "Not Variant");
+  if (opts.group) {
+    add("variantGrouping::variantType", opts.group.primary ? "Primary Variant" : "Non-Primary Variant");
+    add("variantGrouping::groupReferenceId", opts.group.referenceId);
+    add("variantGrouping::variantGrouping", "Finish");
+    add("variantGrouping::variantAttributeNameOnSite", "Finish");
+    notes.push(opts.group.existing
+      ? `variant of the existing Wayfair group ${opts.group.referenceId} (Finish axis)`
+      : `${opts.group.primary ? "primary" : "non-primary"} variant of new group ${opts.group.referenceId} (Finish axis)`);
+  } else {
+    add("variantGrouping::variantType", "Not Variant");
+  }
+  if (!num(p.weight_lb ?? a.product_weight_lb) && (num(p.shipping_weight_lb) || num(a.shipping_weight_lb))) {
+    notes.push("no product weight in the PIM — the shipping weight is sent as Overall Product Weight");
+  }
 
   // Copy + bullets (deduped, Wayfair caps at 8)
   add("featureDescription::romanceCopy", stripHtml(p.description));
@@ -389,7 +504,7 @@ function buildProduct(
     if (!["REQUIRED", "RECOMMENDED"].includes(q.importanceType ?? "")) continue;
     let raw: Val = "";
     const special = SPECIAL.find((s) => s.re.test(q.displayName));
-    if (special) raw = special.value(p);
+    if (special) raw = special.value(p, q);
     else {
       const rule = ruleForTitle(q.displayName);
       if (rule) {
@@ -544,6 +659,15 @@ Deno.serve(async (req) => {
       });
     }
 
+    // --- questions mode: the class's Product Addition questions with their
+    // valid answers (to write / check mapping rules) -------------------------
+    if (body.questions) {
+      const classId = String(body.classId ?? body.questions);
+      const qr = await call(QUESTIONS_Q, { request: { classId: Number(classId), marketContext: cfg.market } }, "questions");
+      if (qr.errors) return json({ error: qr.errors[0]?.message, details: qr.errors }, 502);
+      return json({ ok: true, env, supplier, classId, questions: qr.data?.productAddition?.questions ?? [] });
+    }
+
     // --- build + submit ------------------------------------------------------
     const skus: string[] = Array.isArray(body.skus) ? body.skus.map(String) : body.sku ? [String(body.sku)] : [];
     if (!skus.length) return json({ error: "skus[] is required" }, 400);
@@ -584,6 +708,35 @@ Deno.serve(async (req) => {
         (brands.length === 1 ? brands[0] : undefined);
     };
 
+    // Family → existing Wayfair item group (this supplier's id column). A
+    // family already on Wayfair receives the new member as a non-primary
+    // variant of that group; a family with 2+ members in this batch and no
+    // group yet starts one (first member primary).
+    const groupCol = supplier === "CAN" ? "wayfair_item_group_id" : "wayfair_usa_item_group_id";
+    const families = [...new Set((products ?? []).map((p) => p.family_number).filter((f) => f != null))];
+    const groupByFamily = new Map<string, string>();
+    if (families.length) {
+      const { data: fam } = await supabase.from("products").select(`family_number, ${groupCol}`).in("family_number", families).not(groupCol, "is", null);
+      for (const r of (fam ?? []) as Record<string, unknown>[]) {
+        if (r[groupCol]) groupByFamily.set(String(r.family_number), String(r[groupCol]));
+      }
+    }
+    const batchByFamily = new Map<string, number>();
+    for (const p of (products ?? []) as Product[]) if (p.family_number != null) batchByFamily.set(String(p.family_number), (batchByFamily.get(String(p.family_number)) ?? 0) + 1);
+    const primarySeen = new Set<string>();
+    const groupFor = (p: Product) => {
+      if (p.family_number == null) return undefined;
+      const fam = String(p.family_number);
+      const existing = groupByFamily.get(fam);
+      if (existing) return { referenceId: existing, primary: false, existing: true };
+      if ((batchByFamily.get(fam) ?? 0) >= 2) {
+        const primary = !primarySeen.has(fam);
+        primarySeen.add(fam);
+        return { referenceId: `FAM-${fam}`, primary, existing: false };
+      }
+      return undefined;
+    };
+
     const questionsByClass = new Map<string, Question[]>();
     const proposed: { productId: string; classId: string; attributes: Attr[] }[] = [];
     const report: Record<string, unknown>[] = [];
@@ -612,11 +765,13 @@ Deno.serve(async (req) => {
         questions = (qr.data?.productAddition?.questions ?? []) as Question[];
         questionsByClass.set(cls.classId, questions);
       }
+      const group = groupFor(p);
       const built = buildProduct(p, mediaBySku.get(sku) ?? [], questions, {
         manufacturerId: String(manufacturer.id),
         costKey: cfg.costKey,
         region: cfg.region,
         includeDocuments,
+        group,
       });
       proposed.push({ productId: sku, classId: cls.classId, attributes: built.attrs });
       report.push({
@@ -625,6 +780,7 @@ Deno.serve(async (req) => {
         className: cls.className,
         manufacturer: manufacturer.name,
         attributes: built.attrs.length,
+        variant: group ? (group.existing ? `variant of group ${group.referenceId}` : `${group.primary ? "primary" : "non-primary"} variant, new group ${group.referenceId}`) : "not a variant",
         images: built.images,
         documents: built.documents,
         missingRequired: built.missingRequired,
