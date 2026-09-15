@@ -47,6 +47,7 @@ const SITES = ["stylish_ca", "stylish_us"];
 const KEEP_DAYS = 7;        // ok / broken results stand for a week
 const RETRY_HOURS = 1;      // pending links are retried hourly
 const MAX_CHAIN = 80;       // cron chain: at most 80 batches per hour
+const STANDARD_SHARE = 0.6; // a portal is "standard" when 60% of the pages link it
 
 // ---------------------------------------------------------------- retailers
 interface Retailer { key: string; market: "ca" | "us" | null; label: string }
@@ -230,14 +231,16 @@ async function scanSite(siteKey: string, now: string) {
   }
 
   // Missing links: the site's STANDARD portals are the retailers linked by
-  // at least half of the products that have a WHERE TO BUY section. A page
-  // without one of them (for a market it lists) gets a "missing" row; a page
-  // with no section at all gets one per standard portal.
+  // at least STANDARD_SHARE of the products that have a WHERE TO BUY
+  // section (measured 2026-09-15: SinksDirect, Amazon, Wayfair, Home Depot
+  // CA, Rona, Best Buy, Walmart CA on both sites). A page without one of
+  // them (for a market it lists) gets a "missing" row; a page with no
+  // section at all gets one per standard portal.
   const withSection = perProduct.filter((x) => x.hasSection);
   const tally = new Map<string, number>();
   for (const x of withSection) for (const k of x.present) tally.set(k, (tally.get(k) ?? 0) + 1);
   const standard = [...tally.entries()]
-    .filter(([k, n]) => k !== "other" && k !== "stylish_locator" && n >= withSection.length / 2)
+    .filter(([k, n]) => k !== "other" && k !== "stylish_locator" && n >= withSection.length * STANDARD_SHARE)
     .map(([k]) => k);
   counts.standardPortals = standard;
   const marketOf = (k: string) => RETAILERS.find((r) => r.key === k)?.market ?? null;
