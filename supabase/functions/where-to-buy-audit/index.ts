@@ -176,7 +176,12 @@ interface Row {
 async function scanSite(siteKey: string, now: string) {
   const site = resolveWixSite(siteKey);
   const catalog = await wixCatalog(siteKey);
-  const withSku = catalog.map((p) => ({ p, sku: skuOf(p) })).filter((x): x is { p: WixProduct; sku: string } => Boolean(x.sku));
+  // Open Box listings (SKUs like A-802B-B-OB-A, or "Open Box" in the name)
+  // are one-off clearance pages — never audited (user rule, 2026-09-15).
+  const isOpenBox = (sku: string, name: string) => /-OB(-|$)/i.test(sku) || /open\s*box/i.test(name);
+  const withSku = catalog
+    .map((p) => ({ p, sku: skuOf(p) }))
+    .filter((x): x is { p: WixProduct; sku: string } => Boolean(x.sku) && !isOpenBox(x.sku!, x.p.name ?? ""));
 
   // ok / broken HTTP results younger than KEEP_DAYS carry over by URL.
   const since = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
