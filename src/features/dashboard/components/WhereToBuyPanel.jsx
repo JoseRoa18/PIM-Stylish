@@ -133,7 +133,7 @@ export default function WhereToBuyPanel() {
           <div>
             <h2 className="text-title-md font-semibold text-on-surface">Where to Buy links</h2>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Every retailer link on the product pages, compared with the PIM and probed over HTTP.
+              Every retailer link on the product pages, opened to confirm it reaches the product page.
             </p>
             <p className="text-body-sm text-on-surface-variant mt-1">
               Scanned {fmtWhen(summary.lastScan)} · links checked {fmtWhen(summary.lastCheck)} · pending links are retried every hour

@@ -37,11 +37,12 @@ export const WTB_RETAILERS = [
   { key: 'other', label: 'Other link', short: 'Other', market: null },
 ];
 
-// Four verdicts only (user rule, 2026-09-15). `note` carries the reason.
+// Four verdicts only (user rule, 2026-09-15): a pure "does the link open the
+// product page" check, nothing compared with the PIM. `note` carries the reason.
 export const WTB_VERDICTS = {
   ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product.' },
-  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not work: not found, redirects elsewhere, cut address or another product.' },
-  missing: { label: 'Missing link', tone: 'warning', problem: true, hint: 'The PIM knows the product is listed there and the page has no link.' },
+  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address.' },
+  missing: { label: 'Missing link', tone: 'warning', problem: true, hint: 'The page has no link to this portal, although most products of the site link it.' },
   pending: { label: 'Pending', tone: 'muted', problem: false, hint: 'Not verified yet: the site blocks automated checks or did not answer. Retried every hour.' },
 };
 

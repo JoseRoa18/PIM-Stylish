@@ -2,10 +2,11 @@
 //
 // mode "scan"  — reads every product of both sites through the Wix API,
 //                parses the WHERE TO BUY and DOCUMENTS TO DOWNLOAD sections
-//                into one row per link, cross-checks the ids in the URLs
-//                against what the PIM knows, flags the retailers the product
-//                is listed on but never linked, and replaces the site's rows
-//                (ok / broken results younger than 7 days carry over by URL).
+//                into one row per link, flags the portals a page lacks
+//                (the ones most products of the site link), and replaces the
+//                site's rows (ok / broken results younger than 7 days carry
+//                over by URL). Nothing is compared with the PIM: this is a
+//                pure "does the link open the product page" check.
 // mode "check" — probes a paced batch of pending URLs over HTTP (one lane
 //                per host, ~1.2 s between requests, ~35 s budget). Pending
 //                links are retried once an hour until the site answers.
@@ -16,9 +17,9 @@
 // Only FOUR verdicts (user rule, 2026-09-15):
 //   ok       the link opens and shows the product
 //   broken   there is a link but it does not work: 404, "not found" page,
-//            redirect to a login / home page, malformed URL, or it opens
-//            another product (id differs from the PIM's)
-//   missing  the PIM knows the product is listed there, the page has no link
+//            redirect to a login / home page, or an invalid address
+//   missing  the page has no link to a portal that most products of the
+//            site (same market) do link
 //   pending  not verified yet: never probed, the site blocks robots, or it
 //            did not answer — retried every hour
 // The `note` column carries the reason.
@@ -83,30 +84,10 @@ const RETAILERS: Array<{ host: RegExp } & Retailer> = [
 const retailerFor = (host: string): Retailer =>
   RETAILERS.find((r) => r.host.test(host)) ?? { key: "other", market: null, label: host };
 
-// Retailers whose URLs must carry a product id.
-const ID_REQUIRED = new Set(["wayfair_ca", "wayfair_us", "homedepot_us", "bestbuy_ca", "amazon_ca", "amazon_us", "sinksdirect_ca", "sinksdirect_us"]);
-
-// The id each retailer puts in its product URL.
-function extractId(retailer: string, url: string): string | null {
-  const m = (re: RegExp) => url.match(re)?.[1] ?? null;
-  switch (retailer) {
-    case "wayfair_ca":
-    case "wayfair_us":
-      return (m(/-([a-z]{1,4}\d{4,10})(?:\.html|$|\?|#)/i) ?? m(/[?&](?:redir|piid)=([a-z]{1,4}\d{4,10})/i))?.toUpperCase() ?? null;
-    case "homedepot_us": return m(/\/(\d{9})(?:[/?#]|$)/);
-    case "homedepot_ca": return m(/\/(\d{10})(?:[/?#]|$)/);
-    case "bestbuy_ca": return m(/\/(?:product|p)\/(?:[^/?#]+\/)?(\d{6,})(?:[/?#]|$)/);
-    case "amazon_ca":
-    case "amazon_us": return m(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.toUpperCase() ?? null;
-    case "sinksdirect_ca":
-    case "sinksdirect_us": return m(/\/product-page\/([^/?#]+)/i)?.toLowerCase() ?? null;
-    case "walmart_ca": return m(/\/ip\/(?:[^/]+\/)?([A-Z0-9]{8,})/i);
-    case "walmart_us": return m(/\/ip\/(?:[^/]+\/)?(\d{6,})/);
-    case "lowes_us": return m(/\/pd\/[^/]+\/(\d+)/);
-    case "rona": return m(/-(\d{8,9})(?:[/?#]|$)/);
-    default: return null;
-  }
-}
+// Wayfair addresses need the product sku ("…-tkjs1238.html"); a cut link
+// without it lands on a 404 (verified 2026-09-15). Wayfair blocks robots, so
+// this is the one shape rule kept — the rest is decided by opening the link.
+const WAYFAIR_SKU_RE = /-[a-z]{1,4}\d{4,10}(?:\.html|$|\?|#)|[?&](?:redir|piid)=[a-z]{1,4}\d{4,10}/i;
 
 // ---------------------------------------------------------------- html
 const decode = (s: string) =>
@@ -191,54 +172,10 @@ interface Row {
   scanned_at: string; checked_at: string | null;
 }
 
-async function loadPim(skus: string[]) {
-  const products = new Map<string, { wayfair_item_group_id: string | null; wayfair_usa_item_group_id: string | null }>();
-  const hdUs = new Map<string, string>();
-  const asin = new Map<string, string>();      // `${market}|${sku}` → asin
-  const amazonListed = new Set<string>();      // `${market}|${sku}`
-  const sinksSlug = new Map<string, string>(); // `${site}|${sku}` → slug
-  const sinksLinked = new Set<string>();       // `${site}|${sku}`
-  for (const part of chunk(skus, 150)) {
-    const q = inList(part);
-    (await rest<Array<{ sku: string; wayfair_item_group_id: string | null; wayfair_usa_item_group_id: string | null }>>(
-      `products?select=sku,wayfair_item_group_id,wayfair_usa_item_group_id&sku=${q}`, { headers: { Prefer: "count=none" } },
-    )).forEach((p) => products.set(p.sku, p));
-    (await rest<Array<{ sku: string; alias: string }>>(`product_aliases?select=sku,alias&marketplace=eq.Home%20Depot%20US&sku=${q}`, { headers: { Prefer: "count=none" } }))
-      .forEach((a) => hdUs.set(a.sku, a.alias));
-    (await rest<Array<{ sku: string; marketplace: string; asin: string | null }>>(`amazon_links?select=sku,marketplace,asin&sku=${q}`, { headers: { Prefer: "count=none" } }))
-      .forEach((a) => { amazonListed.add(`${a.marketplace}|${a.sku}`); if (a.asin) asin.set(`${a.marketplace}|${a.sku}`, a.asin.toUpperCase()); });
-    (await rest<Array<{ sku: string; site: string }>>(`wix_links?select=sku,site&site=in.(sinksdirect_ca,sinksdirect_us)&sku=${q}`, { headers: { Prefer: "count=none" } }))
-      .forEach((l) => sinksLinked.add(`${l.site}|${l.sku}`));
-  }
-  // SinksDirect slugs come from the live catalogs (productPageUrl.path).
-  for (const s of ["sinksdirect_ca", "sinksdirect_us"]) {
-    try {
-      for (const p of await wixCatalog(s)) {
-        const sku = skuOf(p);
-        const slug = p.productPageUrl?.path?.match(/\/product-page\/([^/?#]+)/i)?.[1];
-        if (sku && slug) sinksSlug.set(`${s}|${sku}`, slug.toLowerCase());
-      }
-    } catch (e) { console.warn(`[where-to-buy] ${s} catalog skipped:`, (e as Error).message); }
-  }
-  // Best Buy: latest offers snapshot (active offers + product id when the pull stores it).
-  const bestbuy = new Map<string, { active: boolean; id: string | null }>();
-  const walmartCa = new Set<string>();
-  const latest = async (channel: string) => {
-    const rows = await rest<Array<{ results: Array<Record<string, unknown>> | null }>>(`channel_health?select=results&channel=eq.${channel}&order=run_at.desc&limit=1`, { headers: { Prefer: "count=none" } });
-    return rows[0]?.results ?? [];
-  };
-  for (const r of await latest("bestbuy")) {
-    if (r.sku && r.active) bestbuy.set(String(r.sku), { active: true, id: r.bb_product_id ? String(r.bb_product_id) : null });
-  }
-  for (const r of await latest("walmart_ca")) if (r.sku) walmartCa.add(String(r.sku));
-  return { products, hdUs, asin, amazonListed, sinksSlug, sinksLinked, bestbuy, walmartCa };
-}
-
 async function scanSite(siteKey: string, now: string) {
   const site = resolveWixSite(siteKey);
   const catalog = await wixCatalog(siteKey);
   const withSku = catalog.map((p) => ({ p, sku: skuOf(p) })).filter((x): x is { p: WixProduct; sku: string } => Boolean(x.sku));
-  const pim = await loadPim(withSku.map((x) => x.sku));
 
   // ok / broken HTTP results younger than KEEP_DAYS carry over by URL.
   const since = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
@@ -248,7 +185,9 @@ async function scanSite(siteKey: string, now: string) {
   )) prior.set(r.url, r);
 
   const rows: Row[] = [];
-  const counts = { products: withSku.length, links: 0, docs: 0, broken: 0, missing: 0, dropbox: 0, no_section: 0 };
+  const counts = { products: withSku.length, links: 0, docs: 0, broken: 0, missing: 0, dropbox: 0, no_section: 0, standardPortals: [] as string[] };
+  // Per product: which portals its section links, per market.
+  const perProduct: Array<{ base: { site: string; sku: string; wix_product_id: string | null; scanned_at: string }; hasSection: boolean; present: Set<string>; markets: Set<string> }> = [];
   for (const { p, sku } of withSku) {
     const sections = p.additionalInfoSections ?? [];
     const wtb = sections.find((s) => /where\s*to\s*buy/i.test(s.title ?? ""));
@@ -264,39 +203,19 @@ async function scanSite(siteKey: string, now: string) {
       try { parsed = new URL(a.url); host = parsed.hostname.toLowerCase(); } catch { parsed = null; }
       const ret = host ? retailerFor(host) : { key: "other", market: null, label: "" };
       const market = ret.market ?? (/canada/i.test(a.heading ?? "") ? "ca" : /usa|united states/i.test(a.heading ?? "") ? "us" : null);
-      const rid = host ? extractId(ret.key, a.url) : null;
-      let expected: string | null = null;
-      switch (ret.key) {
-        case "wayfair_ca": expected = pim.products.get(sku)?.wayfair_item_group_id ?? null; break;
-        case "wayfair_us": expected = pim.products.get(sku)?.wayfair_usa_item_group_id ?? null; break;
-        case "homedepot_us": expected = pim.hdUs.get(sku) ?? null; break;
-        case "amazon_ca": expected = pim.asin.get(`ca|${sku}`) ?? null; break;
-        case "amazon_us": expected = pim.asin.get(`us|${sku}`) ?? null; break;
-        case "sinksdirect_ca": expected = pim.sinksSlug.get(`sinksdirect_ca|${sku}`) ?? null; break;
-        case "sinksdirect_us": expected = pim.sinksSlug.get(`sinksdirect_us|${sku}`) ?? null; break;
-        case "bestbuy_ca": expected = pim.bestbuy.get(sku)?.id ?? null; break;
-      }
-      // Decided at scan time (no HTTP needed): malformed URLs and links that
-      // point at another product are broken. Everything else starts pending.
+      // Decided at scan time (no HTTP needed): an address that is not a URL,
+      // or a Wayfair link cut before the sku, cannot open. Everything else
+      // starts pending and the HTTP probe decides.
       let verdict = "pending";
       let note: string | null = null;
       if (!parsed || !/^https?:$/.test(parsed.protocol) || !host) { verdict = "broken"; note = "Not a valid web address"; }
-      else if (ID_REQUIRED.has(ret.key) && !rid) { verdict = "broken"; note = "The address has no product id (cut link)"; }
-      else if (expected && rid && expected.toLowerCase() !== rid.toLowerCase()) {
-        if (ret.key === "sinksdirect_ca" || ret.key === "sinksdirect_us") {
-          // Old slugs usually redirect on Wix — the HTTP probe decides.
-          note = `Old address (current page is ${expected})`;
-        } else if (ret.key === "wayfair_ca" || ret.key === "wayfair_us") {
-          // The PIM holds the item GROUP id; variant links carry the child sku.
-          note = `URL sku ${rid}, PIM group ${expected}`;
-        } else { verdict = "broken"; note = `Opens another product: URL has ${rid}, PIM has ${expected}`; }
-      }
+      else if ((ret.key === "wayfair_ca" || ret.key === "wayfair_us") && !WAYFAIR_SKU_RE.test(a.url)) { verdict = "broken"; note = "Cut address: Wayfair links need the product sku at the end"; }
       if (ret.key === "dropbox") counts.dropbox += 1;
       if (verdict === "broken") counts.broken += 1;
       const carried = verdict === "pending" ? prior.get(a.url) : undefined;
       rows.push({
         ...base, section, market, retailer: ret.key, label: a.label || null, url: a.url, host,
-        retailer_id: rid, expected_id: expected,
+        retailer_id: null, expected_id: null,
         verdict: carried ? carried.verdict : verdict,
         http_status: carried?.http_status ?? null, final_url: carried?.final_url ?? null,
         note: carried ? carried.note : note, checked_at: carried?.checked_at ?? null,
@@ -307,26 +226,28 @@ async function scanSite(siteKey: string, now: string) {
     if (wtb?.description) for (const a of anchors(wtb.description)) pushLink("where_to_buy", a);
     if (docs?.description) for (const a of anchors(docs.description)) pushLink("documents", a);
 
-    // Retailers the PIM knows the product is on, absent from the page. When
-    // the page has a section, only flagged for the markets it lists at all
-    // (some pages carry one market on purpose); a page with NO section gets
-    // every known retailer flagged.
-    const expectations: Array<[string, string, boolean]> = [
-      ["sinksdirect_ca", "ca", pim.sinksLinked.has(`sinksdirect_ca|${sku}`)],
-      ["sinksdirect_us", "us", pim.sinksLinked.has(`sinksdirect_us|${sku}`)],
-      ["wayfair_ca", "ca", Boolean(pim.products.get(sku)?.wayfair_item_group_id)],
-      ["wayfair_us", "us", Boolean(pim.products.get(sku)?.wayfair_usa_item_group_id)],
-      ["bestbuy_ca", "ca", pim.bestbuy.has(sku)],
-      ["walmart_ca", "ca", pim.walmartCa.has(sku)],
-      ["amazon_ca", "ca", pim.amazonListed.has(`ca|${sku}`)],
-      ["amazon_us", "us", pim.amazonListed.has(`us|${sku}`)],
-      ["homedepot_us", "us", pim.hdUs.has(sku)],
-    ];
-    for (const [key, market, listed] of expectations) {
-      if (!listed || present.has(key)) continue;
-      if (wtb && !marketsSeen.has(market)) continue;
+    perProduct.push({ base, hasSection: Boolean(wtb), present, markets: marketsSeen });
+  }
+
+  // Missing links: the site's STANDARD portals are the retailers linked by
+  // at least half of the products that have a WHERE TO BUY section. A page
+  // without one of them (for a market it lists) gets a "missing" row; a page
+  // with no section at all gets one per standard portal.
+  const withSection = perProduct.filter((x) => x.hasSection);
+  const tally = new Map<string, number>();
+  for (const x of withSection) for (const k of x.present) tally.set(k, (tally.get(k) ?? 0) + 1);
+  const standard = [...tally.entries()]
+    .filter(([k, n]) => k !== "other" && k !== "stylish_locator" && n >= withSection.length / 2)
+    .map(([k]) => k);
+  counts.standardPortals = standard;
+  const marketOf = (k: string) => RETAILERS.find((r) => r.key === k)?.market ?? null;
+  for (const x of perProduct) {
+    for (const k of standard) {
+      if (x.present.has(k)) continue;
+      const market = marketOf(k);
+      if (x.hasSection && market && !x.markets.has(market)) continue;
       counts.missing += 1;
-      rows.push({ ...base, section: "where_to_buy", market, retailer: key, label: null, url: null, host: null, retailer_id: null, expected_id: null, verdict: "missing", http_status: null, final_url: null, note: wtb ? "Listed there per the PIM, no link on the page" : "The page has no WHERE TO BUY section", checked_at: null });
+      rows.push({ ...x.base, section: "where_to_buy", market, retailer: k, label: null, url: null, host: null, retailer_id: null, expected_id: null, verdict: "missing", http_status: null, final_url: null, note: x.hasSection ? "No link to this portal (most products of the site have one)" : "The page has no WHERE TO BUY section", checked_at: null });
     }
   }
 
@@ -357,7 +278,7 @@ const laneConfig = (host: string) =>
 
 interface Probe { verdict: "ok" | "broken" | "pending"; http_status: number | null; final_url: string | null; note: string | null }
 
-async function probe(url: string, expectedSlug: string | null = null): Promise<Probe> {
+async function probe(url: string): Promise<Probe> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000);
   try {
@@ -376,10 +297,6 @@ async function probe(url: string, expectedSlug: string | null = null): Promise<P
     try {
       const a = new URL(url); const b = new URL(finalUrl);
       const rootHost = (h: string) => h.replace(/^www\./, "");
-      if (expectedSlug) {
-        const landed = b.pathname.match(/\/product-page\/([^/?#]+)/i)?.[1]?.toLowerCase() ?? null;
-        if (landed && landed !== expectedSlug.toLowerCase()) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `Opens another product (${landed}); the product's page is ${expectedSlug}` };
-      }
       if (rootHost(a.hostname) !== rootHost(b.hostname)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `Redirects to ${b.hostname}` };
       if (/password|login|signin/i.test(b.pathname)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "Redirects to a login / password page" };
       if ((b.pathname === "/" || b.pathname === "") && a.pathname.length > 1) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "Redirects to the home page" };
@@ -403,8 +320,8 @@ const dueFilter = () => {
 
 async function check(budgetMs = 35000, limit = 400) {
   const started = Date.now();
-  const pending = await rest<Array<{ id: string; url: string; host: string; retailer: string; expected_id: string | null }>>(
-    `where_to_buy_links?select=id,url,host,retailer,expected_id&${dueFilter()}&order=checked_at.asc.nullsfirst&limit=${limit}`,
+  const pending = await rest<Array<{ id: string; url: string; host: string; retailer: string }>>(
+    `where_to_buy_links?select=id,url,host,retailer&${dueFilter()}&order=checked_at.asc.nullsfirst&limit=${limit}`,
     { headers: { Prefer: "count=none" } },
   );
   const byHost = new Map<string, typeof pending>();
@@ -426,7 +343,7 @@ async function check(budgetMs = 35000, limit = 400) {
           // next hour without hitting it again.
           res = { verdict: "pending", http_status: null, final_url: null, note: "Blocked by the site, retried hourly" };
         } else {
-          res = await probe(r.url, /^sinksdirect_/.test(r.retailer) ? r.expected_id : null);
+          res = await probe(r.url);
           const blocked = res.verdict === "pending" && /Blocked/.test(res.note ?? "");
           blockedInARow = blocked ? blockedInARow + 1 : 0;
           await new Promise((ok) => setTimeout(ok, pace));

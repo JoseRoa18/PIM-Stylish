@@ -2,17 +2,15 @@
 -- Stylish USA on Wix). Every product page carries a WHERE TO BUY section
 -- (one link per retailer, per market) and a DOCUMENTS TO DOWNLOAD section.
 -- The `where-to-buy-audit` edge function scans those sections through the
--- Wix API, cross-checks each link against the ids the PIM already knows
--- (Wayfair item group, Home Depot USA id, Amazon ASIN, SinksDirect slug,
--- Best Buy product id) and probes the URL over HTTP where the retailer
--- lets robots through. One row per link; a row with url = null is a
--- retailer the PIM knows the product is listed on but the page never links.
+-- Wix API and opens every URL over HTTP to confirm it reaches the product
+-- page (nothing is compared with the PIM). One row per link; a row with
+-- url = null is a portal most products of the site link and this page lacks.
 --
 -- verdict (four values only, user rule 2026-09-15; `note` carries the reason):
 --   ok       the link opens and shows the product
 --   broken   there is a link but it does not work (404, not-found page, redirect
---            to login / home, cut address, or it opens another product)
---   missing  the PIM knows the product is listed there, the page has no link
+--            to login / home, or an invalid address)
+--   missing  the page has no link to a portal most products of the site link
 --   pending  not verified yet (site blocks robots / no answer) — retried hourly
 
 create table if not exists public.where_to_buy_links (
