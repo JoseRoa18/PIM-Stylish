@@ -41,6 +41,10 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
   }, [sku, supplier, market]);
 
   const specChanges = specs && !specs.error ? Object.entries(specs.diff ?? {}).filter(([, v]) => v.changed) : [];
+  // Every mapped attribute (changed or identical) + the ones with no PIM value.
+  const specAll = specs && !specs.error ? Object.entries(specs.diff ?? {}) : [];
+  const specSkipped = specs && !specs.error ? Object.entries(specs.skipped ?? {}) : [];
+  const [showAllSpecs, setShowAllSpecs] = useState(false);
   const steps = [
     { key: 'specs', label: 'Spec attributes', count: specChanges.length, note: specs?.error ? specs.error : specs ? `${specs.updates} mapped · ${specChanges.length} differ from Wayfair` : 'checking…' },
     ...(plan?.steps ?? []).map((s) => ({ key: s.key, label: s.label, count: s.items.length, note: s.note, items: s.items })),
@@ -154,20 +158,34 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
                   <span className="text-body-sm text-on-surface-variant">· {s.count} {s.key === 'specs' ? 'change' : 'item'}{s.count === 1 ? '' : 's'}</span>
                   <span className="ml-auto text-body-sm text-on-surface-variant truncate max-w-xs" title={s.note}>{s.note}</span>
                 </label>
-                {s.key === 'specs' && specChanges.length > 0 && (
+                {s.key === 'specs' && specAll.length > 0 && (
                   <div className="border-t border-outline-variant px-4 py-2 overflow-x-auto">
-                    <table className="w-full text-body-sm">
-                      <thead><tr className="text-label-md text-on-surface-variant"><th className="text-left py-1 font-medium">Attribute</th><th className="text-left py-1 font-medium">Wayfair now</th><th className="text-left py-1 font-medium">PIM (will be sent)</th></tr></thead>
-                      <tbody>
-                        {specChanges.map(([title, v]) => (
-                          <tr key={title} className="border-t border-outline-variant/60">
-                            <td className="py-1 pr-3 text-on-surface">{title}</td>
-                            <td className="py-1 pr-3 text-on-surface-variant">{v.current ? v.current.join(', ') : '—'}</td>
-                            <td className="py-1 text-on-surface font-medium">{v.new}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <button type="button" onClick={() => setShowAllSpecs(!showAllSpecs)} className="text-label-md text-primary hover:underline">
+                      {showAllSpecs ? 'Show only the changes' : `Show all ${specAll.length} mapped attributes${specSkipped.length ? ` (+${specSkipped.length} without PIM value)` : ''}`}
+                    </button>
+                    {(showAllSpecs || specChanges.length > 0) && (
+                      <table className="w-full text-body-sm mt-1">
+                        <thead><tr className="text-label-md text-on-surface-variant"><th className="text-left py-1 font-medium">Attribute</th><th className="text-left py-1 font-medium">Wayfair now</th><th className="text-left py-1 font-medium">PIM{showAllSpecs ? '' : ' (will be sent)'}</th>{showAllSpecs && <th className="text-left py-1 font-medium">Status</th>}</tr></thead>
+                        <tbody>
+                          {(showAllSpecs ? specAll : specChanges).map(([title, v]) => (
+                            <tr key={title} className="border-t border-outline-variant/60">
+                              <td className="py-1 pr-3 text-on-surface">{title}</td>
+                              <td className="py-1 pr-3 text-on-surface-variant">{v.current ? v.current.join(', ') : '—'}</td>
+                              <td className={`py-1 pr-3 text-on-surface ${v.changed ? 'font-medium' : ''}`}>{v.new}</td>
+                              {showAllSpecs && <td className={`py-1 ${v.changed ? 'text-warning font-medium' : 'text-on-surface-variant'}`}>{v.changed ? 'Will change' : 'Same'}</td>}
+                            </tr>
+                          ))}
+                          {showAllSpecs && specSkipped.map(([title, why]) => (
+                            <tr key={`skip-${title}`} className="border-t border-outline-variant/60 text-on-surface-variant">
+                              <td className="py-1 pr-3">{title}</td>
+                              <td className="py-1 pr-3">—</td>
+                              <td className="py-1 pr-3">—</td>
+                              <td className="py-1">Not sent · {why}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
                   </div>
                 )}
                 {s.items && s.items.length > 0 && (
