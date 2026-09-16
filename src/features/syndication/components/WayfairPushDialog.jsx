@@ -163,6 +163,11 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
                     <button type="button" onClick={() => setShowAllSpecs(!showAllSpecs)} className="text-label-md text-primary hover:underline">
                       {showAllSpecs ? 'Show only the changes' : `Show all ${specAll.length} mapped attributes${specSkipped.length ? ` (+${specSkipped.length} without PIM value)` : ''}`}
                     </button>
+                    {showAllSpecs && specs?.unmapped && Object.keys(specs.unmapped).length > 0 && (
+                      <p className="mt-1 text-label-md text-on-surface-variant" title={Object.keys(specs.unmapped).join(' · ')}>
+                        {Object.keys(specs.unmapped).length} more Wayfair attributes have no PIM rule yet and are left as they are.
+                      </p>
+                    )}
                     {(showAllSpecs || specChanges.length > 0) && (
                       <table className="w-full text-body-sm mt-1">
                         <thead><tr className="text-label-md text-on-surface-variant"><th className="text-left py-1 font-medium">Attribute</th><th className="text-left py-1 font-medium">Wayfair now</th><th className="text-left py-1 font-medium">PIM{showAllSpecs ? '' : ' (will be sent)'}</th>{showAllSpecs && <th className="text-left py-1 font-medium">Status</th>}</tr></thead>

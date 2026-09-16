@@ -171,11 +171,13 @@ Deno.serve(async (req) => {
     const updates: { attributeId: string; value: string[] }[] = [];
     const diff: Record<string, { current: string[] | null; new: string; changed: boolean }> = {};
     const skipped: Record<string, string> = {};
+    // Wayfair attributes of the item with NO PIM rule (reported, never touched).
+    const unmapped: Record<string, string[]> = {};
     const eq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
     const ctx: RuleCtx = ruleContext(byTitle.keys());
     for (const [title, wf] of byTitle) {
       const rule = ruleForTitle(title);
-      if (!rule) continue; // attribute we have no PIM mapping for
+      if (!rule) { unmapped[title] = wf.current; continue; } // no PIM mapping
       let value = "";
       try { value = rule(product as Product, ctx).trim(); } catch { value = ""; }
       if (!value) { skipped[title] = "no PIM value"; continue; }
@@ -227,6 +229,7 @@ Deno.serve(async (req) => {
       changedCount: Object.values(diff).filter((d) => d.changed).length,
       diff,
       skipped,
+      unmapped,
     };
 
     // 4. Mutation (unless dryRun)
