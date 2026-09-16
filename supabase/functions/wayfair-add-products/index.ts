@@ -732,10 +732,13 @@ Deno.serve(async (req) => {
         (brands.length === 1 ? brands[0] : undefined);
     };
 
-    // Family → existing Wayfair item group (this supplier's id column). A
-    // family already on Wayfair receives the new member as a non-primary
-    // variant of that group; a family with 2+ members in this batch and no
-    // group yet starts one (first member primary).
+    // Family → variant grouping. Wayfair's Product Addition groups ONLY the
+    // products of one submission (2+ parts, exactly one primary): a single
+    // new member CANNOT be attached to an existing item group through the
+    // API (rejected 2026-09-16: "Listing must contain at least 2 products").
+    // So: 2+ family members in this batch start a new group (first member
+    // primary); a lone member goes as Not Variant and the report says which
+    // existing group Wayfair should merge it into afterwards.
     const groupCol = supplier === "CAN" ? "wayfair_item_group_id" : "wayfair_usa_item_group_id";
     const families = [...new Set((products ?? []).map((p) => p.family_number).filter((f) => f != null))];
     const groupByFamily = new Map<string, string>();
@@ -751,8 +754,6 @@ Deno.serve(async (req) => {
     const groupFor = (p: Product) => {
       if (p.family_number == null) return undefined;
       const fam = String(p.family_number);
-      const existing = groupByFamily.get(fam);
-      if (existing) return { referenceId: existing, primary: false, existing: true };
       if ((batchByFamily.get(fam) ?? 0) >= 2) {
         const primary = !primarySeen.has(fam);
         primarySeen.add(fam);
@@ -760,6 +761,7 @@ Deno.serve(async (req) => {
       }
       return undefined;
     };
+    const existingGroupFor = (p: Product) => (p.family_number == null ? undefined : groupByFamily.get(String(p.family_number)));
 
     const questionsByClass = new Map<string, Question[]>();
     const proposed: { productId: string; classId: string; attributes: Attr[] }[] = [];
@@ -790,6 +792,7 @@ Deno.serve(async (req) => {
         questionsByClass.set(cls.classId, questions);
       }
       const group = groupFor(p);
+      const existingGroup = group ? undefined : existingGroupFor(p);
       const built = buildProduct(p, mediaBySku.get(sku) ?? [], questions, {
         manufacturerId: String(manufacturer.id),
         costKey: cfg.costKey,
@@ -804,12 +807,18 @@ Deno.serve(async (req) => {
         className: cls.className,
         manufacturer: manufacturer.name,
         attributes: built.attrs.length,
-        variant: group ? (group.existing ? `variant of group ${group.referenceId}` : `${group.primary ? "primary" : "non-primary"} variant, new group ${group.referenceId}`) : "not a variant",
+        variant: group
+          ? `${group.primary ? "primary" : "non-primary"} variant, new group ${group.referenceId}`
+          : existingGroup
+          ? `created alone — ask Wayfair to merge it into group ${existingGroup}`
+          : "not a variant",
         images: built.images,
         documents: built.documents,
         missingRequired: built.missingRequired,
         unmapped: built.unmapped,
-        notes: built.notes,
+        notes: existingGroup
+          ? [...built.notes, `its family is already on Wayfair as group ${existingGroup}; the API cannot attach one new product to an existing group — after creation, ask Wayfair (Partner Home ticket) to merge it into ${existingGroup} with Finish as the variant axis`]
+          : built.notes,
       });
     }
 

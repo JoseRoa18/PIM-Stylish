@@ -148,10 +148,22 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
               <span className="text-error">{status.error}</span>
             ) : (
               (status.products ?? []).map((p) => (
-                <div key={p.sku} className="break-words">
-                  <span className="text-on-surface-variant">{p.sku}: </span>
-                  validation {p.validationStatus ?? '—'} · submission {p.submissionStatus ?? '—'}
-                  {p.errors?.length ? ` · ${p.errors.length} errors` : ''}
+                <div key={p.sku} className="break-words space-y-1">
+                  <div>
+                    <span className="text-on-surface-variant">{p.sku}: </span>
+                    validation {p.validationStatus ?? '—'} · submission {p.submissionStatus ?? '—'}
+                    {p.errors?.length ? ` · ${p.errors.length} errors` : ''}
+                  </div>
+                  {p.errors?.length > 0 && (
+                    <ul className="ml-3 space-y-0.5 text-error">
+                      {p.errors.map((e, i) => <li key={i}>{e.attributeId}: {e.flaw}</li>)}
+                    </ul>
+                  )}
+                  {p.warnings?.length > 0 && (
+                    <ul className="ml-3 space-y-0.5 text-on-surface-variant">
+                      {p.warnings.map((e, i) => <li key={i}>{e.attributeId}: {e.flaw}</li>)}
+                    </ul>
+                  )}
                 </div>
               ))
             )}
