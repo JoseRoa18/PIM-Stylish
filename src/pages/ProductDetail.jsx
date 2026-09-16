@@ -117,6 +117,14 @@ const LIST_ATTRS = new Set([
 // Sink installation is a single choice — dual mount is its own option, not
 // a pair of values (drives the per-type installation manual slots).
 const INSTALLATION_TYPE_OPTIONS = ['Undermount', 'Drop-In', 'Dual Mount', 'Top Mount'];
+// Wayfair's "Overall Shape" vocabulary for faucet classes (Product Addition
+// questions, read 2026-09-15). The faucet-relevant ones lead the list.
+const FAUCET_SHAPE_OPTIONS = [
+  'Gooseneck / High Arc', 'Straight', 'Curved', 'Arch',
+  'Rectangle', 'Square', 'Triangle', 'Cylinder', 'Wedge', 'Oval', 'Round', 'Hexagon', 'T-Shaped',
+  'Free Form', 'Novelty', 'L-Shaped', 'Diamond', 'Circle', 'U-Shaped', 'Abstract', 'Cube', 'Concave',
+  'Flat', 'Elongated', 'Random', 'Crescent', 'Unique', 'Rounded Back', 'Can', 'P-Shaped', 'Unavailable',
+];
 
 // Attribute keys that must be coerced to numbers on save.
 const NUMBER_ATTRS = new Set([
@@ -1261,6 +1269,7 @@ function SpecsTab({ product, edit }) {
           <Section title="Faucet Configuration">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Spout Type" attrKey="spout_type" suggest product={product} edit={edit} />
+              <AttrField label="Overall Shape" attrKey="overall_shape" type="select" options={FAUCET_SHAPE_OPTIONS} help="Wayfair's Overall Shape list for faucets. Falls back to Spout Type when empty." product={product} edit={edit} />
               <AttrField label="Swivel Spout" attrKey="swivel_spout" product={product} edit={edit} />
               <AttrField label="Spout Rotation (Degrees)" attrKey="spout_rotation_degrees" type="number" help="How far the spout swivels, in degrees (e.g. 360)." product={product} edit={edit} />
               <AttrField label="Max Flow Rate (GPM)" attrKey="max_flow_rate" help="Maximum water flow in gallons per minute, typically measured at 60 psi." product={product} edit={edit} />

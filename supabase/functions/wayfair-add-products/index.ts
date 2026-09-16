@@ -266,7 +266,8 @@ const plumbingFixtures = (p: Product, q: Question) => {
   return "";
 };
 const faucetShape = (p: Product, q: Question) => {
-  const explicit = text(p.shape ?? attr(p).shape);
+  // The PIM's "Overall Shape" (Wayfair's own list) wins; Spout Type is the fallback.
+  const explicit = text(attr(p).overall_shape ?? p.shape ?? attr(p).shape);
   if (explicit) return explicit;
   const spout = text(attr(p).spout_type).toLowerCase();
   if (/gooseneck|high arc/.test(spout)) return pick(q, /gooseneck/i);
