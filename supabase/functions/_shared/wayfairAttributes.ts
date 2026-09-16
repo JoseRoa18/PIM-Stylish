@@ -60,6 +60,10 @@ export const EXACT_RULES: Record<string, (p: Product) => string> = {
   "Basin Length - Side to Side": (p) => dim(p, "internal_dimensions_in", "length"),
   "Basin Width - Front to Back": (p) => dim(p, "internal_dimensions_in", "width"),
   "Basin Depth - Top to Bottom": (p) => dim(p, "internal_dimensions_in", "depth"),
+  // Double-bowl sinks: Wayfair carries one depth per bowl (Kitchen Sinks
+  // class; added 2026-09-16 so the audit compares them).
+  "Left Basin/Tub Depth - Top to Bottom": (p) => num(attr(p).left_bowl_depth_in),
+  "Right Basin/Tub Depth - Top to Bottom": (p) => num(attr(p).right_bowl_depth_in),
   "Overall Product Weight": (p) => num(p.weight_lb ?? attr(p).product_weight_lb),
   "Drain Diameter": (p) => num(p.drain_diameter_in ?? attr(p).drain_diameter_in),
   "Stainless Steel Gauge": (p) => num(p.gauge ?? attr(p).gauge),

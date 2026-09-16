@@ -31,6 +31,8 @@ export const FIELD_HELP = {
   // ---------- Physical / dimensions ----------
   external_dimensions_in: 'Outside dimensions of the product (length × width × depth), in inches.',
   internal_dimensions_in: 'Inside bowl dimensions (length × width × depth), in inches.',
+  left_bowl_depth_in: 'Depth of the left bowl (double-bowl sinks), in inches. Wayfair: Left Basin/Tub Depth.',
+  right_bowl_depth_in: 'Depth of the right bowl (double-bowl sinks), in inches. Wayfair: Right Basin/Tub Depth.',
   cut_out_dimensions_in: 'Countertop cut-out size required for installation, in inches.',
   shipping_dimensions_in: 'Boxed dimensions used for freight quotes and marketplace logistics fields.',
   product_weight_lb: 'Product weight without packaging, in pounds.',

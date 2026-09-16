@@ -128,7 +128,7 @@ const FAUCET_SHAPE_OPTIONS = [
 
 // Attribute keys that must be coerced to numbers on save.
 const NUMBER_ATTRS = new Set([
-  'number_of_bowls', 'sink_radius_mm', 'drain_diameter_in', 'product_weight_lb',
+  'number_of_bowls', 'sink_radius_mm', 'drain_diameter_in', 'product_weight_lb', 'left_bowl_depth_in', 'right_bowl_depth_in',
   'min_external_cabinet_size_in', 'min_internal_cabinet_size_in', 'max_deck_thickness_in',
   'number_of_pieces', 'number_of_installation_holes', 'number_of_handles',
   'faucet_height_in', 'spout_reach_in', 'spout_height_in',
@@ -1372,6 +1372,13 @@ function SpecsTab({ product, edit }) {
           {!isFaucet && (
             <AttrDimensionsField label="Internal Dimensions" unit={unit} attrKey="internal_dimensions_in"
               keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
+          )}
+          {/* Double-bowl sinks: one depth per bowl (Wayfair's Left / Right Basin Depth). */}
+          {!isFaucet && Number(attr(product, 'number_of_bowls')) >= 2 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Left Bowl Depth" attrKey="left_bowl_depth_in" type="number" unit={unit} product={product} edit={edit} />
+              <AttrField label="Right Bowl Depth" attrKey="right_bowl_depth_in" type="number" unit={unit} product={product} edit={edit} />
+            </div>
           )}
           <AttrField label="Product Weight (lb)" attrKey="product_weight_lb" type="number" product={product} edit={edit} />
           {!isFaucet && (
