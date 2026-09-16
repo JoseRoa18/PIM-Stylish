@@ -175,7 +175,12 @@ Deno.serve(async (req) => {
     const unmapped: Record<string, string[]> = {};
     // Case-insensitive; Wayfair spells Centre/Center per locale on the same item.
     const canon = (v: string) => v.trim().toLowerCase().replace(/\bcentre\b/g, "center");
-    const eq = (a: string, b: string) => canon(a) === canon(b);
+    // Numbers compare within 0.01 (Wayfair stores two decimals: 6.81 vs 6.8125).
+    const eq = (a: string, b: string) => {
+      if (canon(a) === canon(b)) return true;
+      const x = Number(a), y = Number(b);
+      return a.trim() !== "" && b.trim() !== "" && Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) < 0.01;
+    };
     const sameSet = (a: string[], b: string[]) => {
       const A = [...new Set(a.map(canon))].sort();
       const B = [...new Set(b.map(canon))].sort();
