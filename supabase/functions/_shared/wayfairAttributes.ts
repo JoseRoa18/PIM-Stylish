@@ -58,6 +58,17 @@ const cat = (p: Product) => String(p.category ?? "");
 export const isSinkCat = (p: Product) => /sink/.test(cat(p));
 export const isFaucetCat = (p: Product) => /faucet/.test(cat(p));
 const isKitchenLike = (p: Product) => /kitchen_sink|bar_prep_sink/.test(cat(p));
+const isBathSink = (p: Product) => cat(p) === "bathroom_sink";
+const isUtilitySink = (p: Product) => /laundry_sink|outdoor_sink/.test(cat(p));
+const isAccessory = (p: Product) => cat(p) === "accessory";
+const isKitchenFaucet = (p: Product) => cat(p) === "kitchen_faucet";
+const dna = (v: unknown) => /does\s*no/i.test(String(v ?? "")); // "Does Not Apply" / "Does not Appy" / "Does No Apply"
+const yesNoOrDna = (v: unknown): string => (dna(v) ? "Does Not Apply" : yesNo(v));
+const oneOf = (v: unknown, options: string[]): string => {
+  const x = String(v ?? "").trim().toLowerCase();
+  if (!x) return "";
+  return options.find((o) => o.toLowerCase() === x) ?? "";
+};
 const listOf = (v: unknown): string[] =>
   Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean)
     : String(v ?? "").trim() ? String(v).split(/[;,/]|\band\b/i).map((x) => x.trim()).filter(Boolean) : [];
@@ -153,14 +164,20 @@ export const piecesIncluded = (p: Product): string[] => {
     return [...out];
   }
   const acc = accessories(p).join(" | ").toLowerCase();
+  // Bathroom Sinks class lists only: Drain Assembly, Faucet, P-Trap, Pedestal, Supply Line.
+  if (isBathSink(p)) {
+    if (/drain/.test(acc)) out.add("Drain Assembly");
+    if (/faucet/.test(acc)) out.add("Faucet");
+    return [...out];
+  }
   if (/cutting board|bamboo board/.test(acc)) out.add("Cutting Board");
-  if (/colander/.test(acc)) out.add("Colander");
+  if (/colander/.test(acc) && !isUtilitySink(p)) out.add("Colander");
   if (/strainer/.test(acc) || attr(p).strainer_model) { out.add("Basket Strainer"); out.add("Drain Assembly"); }
-  if (/grid/.test(acc) || attr(p).includes_grids === true) out.add("Sink Grid");
+  if ((/grid/.test(acc) || attr(p).includes_grids === true) && !isUtilitySink(p)) out.add("Sink Grid");
   if (/faucet/.test(acc)) out.add("Faucet");
-  if (/soap/.test(acc)) out.add("Soap / Lotion Dispenser");
-  if (/template/.test(acc)) out.add("Cut Out Template");
-  if (/hardware|clip/.test(acc) || /under|dual|drop|top ?mount/.test(installText(p))) out.add("Mounting Hardware");
+  if (/soap/.test(acc) && !isUtilitySink(p)) out.add("Soap / Lotion Dispenser");
+  if (/template/.test(acc) && !isUtilitySink(p)) out.add("Cut Out Template");
+  if (!isUtilitySink(p) && (/hardware|clip/.test(acc) || /under|dual|drop|top ?mount/.test(installText(p)))) out.add("Mounting Hardware");
   return [...out];
 };
 const isWorkstation = (p: Product) =>
@@ -320,7 +337,8 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Compatible Cutting Board Part Number": (p) => includedCodes(p, /cutting board|bamboo board/i),
   "Soap / Lotion Dispenser Included": (p) => includedYesNo(p, /soap/i),
   "Number of Soap Dispensers Included": (p) => includedCount(p, /soap/i),
-  "Overflow Hole": (p) => (isSinkCat(p) ? (attr(p).overflow_location ? "Yes" : "No") : ""),
+  "Overflow Hole": (p) => (isSinkCat(p) ? (yesNo(attr(p).overflow) || (attr(p).overflow_location ? "Yes" : "No")) : ""),
+  "Overflow Included": (p) => (isSinkCat(p) ? (yesNo(attr(p).overflow) || (attr(p).overflow_location ? "Yes" : "No")) : ""),
   "Faucet Holes": (p) => (isSinkCat(p) ? (holes(p) > 0 ? "Yes" : "No") : ""),
   "Faucet Included": (p) => (isSinkCat(p) ? (/faucet/i.test(accessories(p).join(" ")) ? "Yes" : "No") : ""),
   "Number of Faucets Included": (p) => sinkDNA(p),
@@ -357,6 +375,109 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Plating Material": (p) => (isFaucetCat(p) ? platingMaterial(p) : ""),
   "Plumbing Fixtures Compliant": (p) => (isFaucetCat(p) ? plumbingFixtures(p) : ""),
   "Title 24 - California Code of Regulations": (p) => title24(p),
+
+  // ---- Added 2026-09-16 ("dale con toda"): kitchen faucets, bathroom sinks,
+  // utility sinks, accessories, and the factual constants of our catalog ----
+
+  // Kitchen faucets (vocabularies from the live items / class 653 questions)
+  "Spray Type": (p) => (isKitchenFaucet(p) ? (dna(attr(p).spray_type) ? "Does Not Apply" : oneOf(attr(p).spray_type, ["Pull Down", "Pull Out", "Pot Filler", "Side Spray", "Pre-Rinse"])) : ""),
+  "Spray Function Activation": (p) => (isKitchenFaucet(p) ? (dna(attr(p).spray_function_activation) ? "Does Not Apply" : oneOf(attr(p).spray_function_activation, ["Spray Head Button", "Lever", "Toggle", "Diverter"])) : ""),
+  "Lock Type": (p) => (isKitchenFaucet(p) ? (dna(attr(p).lock_type) ? "Does Not Apply" : oneOf(attr(p).lock_type, ["Self Retracting", "Magnetic Docking", "Magnetic Holder"])) : ""),
+  "Cartridge Type": (p) => (isFaucetCat(p) ? (/ceramic/i.test(String(attr(p).cartridge_type ?? "")) ? "Ceramic Disc Cartridge" : "") : ""),
+  "Installation Hole Diameter": (p) => (isFaucetCat(p) ? num(attr(p).install_hole_diameter_in) : ""),
+  "Maximum Deck Thickness": (p) => num(attr(p).max_deck_thickness_in),
+  "Connection Size": (p) => (isFaucetCat(p) ? num(attr(p).connection_size) : ""),
+  "Swivel Spout": (p) => (isFaucetCat(p) ? yesNo(attr(p).swivel_spout) : ""),
+  "Spray Included": (p) => (isKitchenFaucet(p) ? yesNo(attr(p).spray_included) : ""),
+  "Lead Free": (p) => (isFaucetCat(p) ? yesNo(attr(p).lead_free) : ""),
+  "Instant Hot and Cold Water Dispenser": (p) => (isKitchenFaucet(p) ? yesNo(attr(p).hot_cold_dispenser) : ""),
+  "Sensor Type": (p) => (isKitchenFaucet(p) ? (/touchless|sensor|motion/i.test(String(attr(p).spray_function_activation ?? "")) ? "Touchless" : "No Sensor") : ""),
+  "California Water Regulation Compliant": (p) => (isFaucetCat(p) ? yesNo(attr(p).title_20_compliant) || (/title 20/i.test(String(attr(p).title_20_compliant ?? "")) ? "Yes" : "") : ""),
+  "Additional Hardware Required (Not Included)": (p) => (isFaucetCat(p) && yesNo(attr(p).handles_included) === "Yes" ? "All Hardware Included" : ""),
+  // Our faucets are manual: no electrics, sensors, tanks, filtration or lights.
+  "Electric": (p) => (isFaucetCat(p) ? "No" : ""),
+  "Plug-In": (p) => (isFaucetCat(p) || isSinkCat(p) ? "No" : ""),
+  "LED Light": (p) => (isFaucetCat(p) ? "No" : ""),
+  "Filtration System Included": (p) => (isFaucetCat(p) ? "No" : ""),
+  "Hot Water Tank Included": (p) => (isFaucetCat(p) ? "No" : ""),
+  "Power Supply Unit Included": (p) => (isFaucetCat(p) ? "No" : ""),
+  "Automatic Shutoff": (p) => (isFaucetCat(p) ? "No" : ""),
+  "Smart Enabled": (p) => (isFaucetCat(p) ? "No" : ""),
+
+  // Bathroom sinks (class 588)
+  "Compatible Faucet Type": (p) => (isBathSink(p) ? oneOf(attr(p).compatible_faucet_type, ["Widespread Faucet", "Single Hole Faucet", "Centerset Faucet", "Vessel Sink Faucet", "Wall Mounted Faucet", "Deck Mounted Faucet", "Minispread"]) || (dna(attr(p).compatible_faucet_type) ? "Does Not Apply" : "") : ""),
+  "Dual Mount Installation Type": (p) => (isBathSink(p) ? mountingInstallation(p).filter((v) => ["Console", "Pedestal", "Drop-In", "Undermount", "Vessel", "Wall Mount"].includes(v)) : []),
+  "Compatible Pedestal Part Number": (p) => (isBathSink(p) ? partList(attr(p).compatible_pedestal) : ""),
+
+  // Utility sinks (class 875)
+  "Location": (p) => (cat(p) === "outdoor_sink" ? "Indoor / Outdoor" : isUtilitySink(p) ? "Indoor" : ""),
+  "Outdoor Use": (p) => (cat(p) === "outdoor_sink" ? "Yes" : isUtilitySink(p) ? "No" : ""),
+  "Faucet Mount Type": (p) => (isUtilitySink(p) ? (holes(p) === 0 ? "Does Not Apply" : holes(p) === 1 ? "Single Hole" : "") : ""),
+  "Gauge": (p) => (isUtilitySink(p) ? num(attr(p).gauge ?? attr(p).material_gauge) : ""),
+  "Basket Strainer Diameter": (p) => (isUtilitySink(p) ? num(attr(p).drain_diameter_in) : ""),
+  "Drain Connection Diameter": (p) => (isUtilitySink(p) ? num(attr(p).drain_diameter_in) : ""),
+  "Handcrafted": (p) => (isUtilitySink(p) ? (/hand/i.test(String(attr(p).construction_method ?? "")) ? "Yes" : "") : ""),
+  // Plain drop-in / undermount utility sinks: none of the cabinet-style extras.
+  "Legs Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Cabinets Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Backsplash Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Drain Board Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Basin Rack Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Faucet Mounting Kit Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Portable": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Pre-Drilled Holes": (p) => (isUtilitySink(p) ? (holes(p) > 0 ? "Yes" : "No") : ""),
+  "Wheels / Casters Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Shelves Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Mirror Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Soap Dish Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Trim Kit Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Washboard Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Pedal Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Removable Legs": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Leg Glides Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Flange/Escutcheon Included": (p) => (isUtilitySink(p) ? "No" : ""),
+  "Pull-Out Faucet Head": (p) => (isUtilitySink(p) ? "No" : ""),
+
+  // Accessories (cutting boards, colanders, racks…)
+  "Carving Board Juice Grooves": (p) => (isAccessory(p) ? yesNo(attr(p).juice_grooves) : ""),
+  "Reversible": (p) => (isAccessory(p) ? yesNo(attr(p).reversible) : ""),
+  "Flexible Cutting Board": (p) => (isAccessory(p) ? yesNo(attr(p).flexible_cutting_board) : ""),
+  "Over The Sink": (p) => (isAccessory(p) ? yesNo(attr(p).over_the_sink) : ""),
+  "BPA Free": (p) => (isAccessory(p) ? yesNoOrDna(attr(p).bpa_free) : ""),
+  "Antimicrobial": (p) => (isAccessory(p) ? yesNo(attr(p).antimicrobial) : ""),
+  "Antibacterial": (p) => (isAccessory(p) ? yesNo(attr(p).antimicrobial) : ""),
+  "Bladed, Sharp or Pointed Knife Included": (p) => (isAccessory(p) ? yesNo(attr(p).knife_included) : ""),
+  "Wood Species": (p) => (isAccessory(p) ? (dna(attr(p).wood_species) ? "Does Not Apply" : "") : ""),
+  "Pattern": (p) => (isAccessory(p) ? (dna(attr(p).pattern) ? "No Pattern" : "") : ""),
+  "Holiday / Occasion": (p) => (isAccessory(p) ? "No Holiday" : ""),
+  "Total Number of Pieces Included": (p) => (isAccessory(p) ? num(attr(p).number_of_pieces) : ""),
+  "Color / Finish": (p) => (isAccessory(p) ? String(p.finish ?? "") : ""),
+
+  // Compliance / catalog-wide facts read from the PIM where it has them
+  "ADA Compliant": (p) => {
+    const v = String(attr(p).ada_compliant ?? "");
+    return !v ? "" : /^ada compliant$|^yes$/i.test(v) ? "Yes" : "No";
+  },
+  "Canada Product Restriction": (p) => {
+    const v = String(attr(p).canada_product_restriction ?? "");
+    return !v ? "" : /^no$/i.test(v) ? "No" : "Yes";
+  },
+  "Reason for Restriction": (p) => (dna(attr(p).reason_for_restriction) || /^no$/i.test(String(attr(p).canada_product_restriction ?? "")) ? "Does Not Apply" : ""),
+  "California Proposition 65 Warning Required": (p) => (yesNo(attr(p).prop65_warning ?? attr(p).prop_65) || "No"),
+  "Supplier Intended and Approved Use": (p) => {
+    const a = String(attr(p).application ?? "").toLowerCase();
+    if (!a) return [];
+    const out: string[] = [];
+    if (/residential/.test(a)) out.push("Residential Use");
+    if (/non residential|commer/.test(a)) out.push("Non Residential Use");
+    return out;
+  },
+  "Commercial Warranty": (p) => (attr(p).commercial_warranty ? "Yes" : ""),
+  "Commercial Warranty Length": (p) => String(attr(p).commercial_warranty ?? ""),
+  "Made to Order": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
+  "Personalization or Monogramming": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
+  "Hazardous Material / Dangerous Goods": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
+  "Battery or Batteries Included": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
 };
 
 // Titles matching EXCLUDE never pattern-match: they describe a DIFFERENT
@@ -385,7 +506,7 @@ export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx
   // Sinks without faucet holes answer Does Not Apply (Wayfair's "Faucet Holes"
   // = No conditionality); faucets and sinks with holes send the number.
   { re: /(number of (faucet |installation |mounting )?holes)/i, value: (p) => {
-    const n = num(attr(p).number_of_installation_holes);
+    const n = (isSinkCat(p) && num(attr(p).number_of_faucet_holes)) || num(attr(p).number_of_installation_holes);
     return isSinkCat(p) && (n === "" || Number(n) === 0) ? (n === "" ? "" : "Does Not Apply") : n;
   } },
   { re: /(countertop|deck) thickness/i, value: (p) => num(attr(p).max_deck_thickness_in) },
