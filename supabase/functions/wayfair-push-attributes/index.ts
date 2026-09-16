@@ -171,6 +171,7 @@ Deno.serve(async (req) => {
     const updates: { attributeId: string; value: string[] }[] = [];
     const diff: Record<string, { current: string[] | null; new: string; changed: boolean }> = {};
     const skipped: Record<string, string> = {};
+    const suggestions: Record<string, { value: string; pim: string; field: string | null }> = {};
     const eq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
     const ctx: RuleCtx = ruleContext(byTitle.keys());
     for (const [title, wf] of byTitle) {
@@ -204,6 +205,9 @@ Deno.serve(async (req) => {
         wf.current[0].length > value.length
       ) {
         skipped[title] = `Wayfair value is more specific ("${wf.current[0]}")`;
+        // Suggest adopting Wayfair's wording in the PIM (user rule 2026-09-16:
+        // when both agree, the more specific value should live in the PIM).
+        suggestions[title] = { value: wf.current[0], pim: value, field: title === "Material" ? "material" : null };
         continue;
       }
       const changed = !(wf.current.length === 1 && eq(wf.current[0], value));
@@ -227,6 +231,7 @@ Deno.serve(async (req) => {
       changedCount: Object.values(diff).filter((d) => d.changed).length,
       diff,
       skipped,
+      suggestions,
     };
 
     // 4. Mutation (unless dryRun)
