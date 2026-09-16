@@ -173,14 +173,31 @@ Deno.serve(async (req) => {
     const skipped: Record<string, string> = {};
     // Wayfair attributes of the item with NO PIM rule (reported, never touched).
     const unmapped: Record<string, string[]> = {};
-    const eq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+    // Case-insensitive; Wayfair spells Centre/Center per locale on the same item.
+    const canon = (v: string) => v.trim().toLowerCase().replace(/\bcentre\b/g, "center");
+    const eq = (a: string, b: string) => canon(a) === canon(b);
+    const sameSet = (a: string[], b: string[]) => {
+      const A = [...new Set(a.map(canon))].sort();
+      const B = [...new Set(b.map(canon))].sort();
+      return A.length === B.length && A.every((x, i) => x === B[i]);
+    };
     const ctx: RuleCtx = ruleContext(byTitle.keys());
     for (const [title, wf] of byTitle) {
       const rule = ruleForTitle(title);
       if (!rule) { unmapped[title] = wf.current; continue; } // no PIM mapping
-      let value = "";
-      try { value = rule(product as Product, ctx).trim(); } catch { value = ""; }
-      if (!value) { skipped[title] = "no PIM value"; continue; }
+      let raw: string | string[] = "";
+      try { raw = rule(product as Product, ctx); } catch { raw = ""; }
+      const values = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? "").trim()).filter(Boolean);
+      if (!values.length) { skipped[title] = "no PIM value"; continue; }
+      // Multi-value attributes (Mounting / Installation, Pieces Included,
+      // Durability…): compare as sets, send the whole set.
+      if (values.length > 1) {
+        const changed = !sameSet(wf.current, values);
+        diff[title] = { current: wf.current.length ? wf.current : null, new: values.join(" | "), changed };
+        updates.push({ attributeId: wf.attributeId, value: values });
+        continue;
+      }
+      let value = values[0];
       // Finish: keep the literal PIM value when Wayfair already holds it
       // (case-insensitive); otherwise snap to Wayfair's canonical option.
       if (title === "Finish" && !(wf.current.length === 1 && eq(wf.current[0], value))) {

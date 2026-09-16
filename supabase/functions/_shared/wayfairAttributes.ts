@@ -52,15 +52,201 @@ export const FINISH_ALIAS: Record<string, string> = {
 // caller only when the literal value isn't already accepted.
 export const finish = (v: unknown): string => (v ? String(v) : "");
 
+// ---- Category / accessory helpers (rules below) ----
+export type RuleValue = string | string[];
+const cat = (p: Product) => String(p.category ?? "");
+export const isSinkCat = (p: Product) => /sink/.test(cat(p));
+export const isFaucetCat = (p: Product) => /faucet/.test(cat(p));
+const isKitchenLike = (p: Product) => /kitchen_sink|bar_prep_sink/.test(cat(p));
+const listOf = (v: unknown): string[] =>
+  Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean)
+    : String(v ?? "").trim() ? String(v).split(/[;,/]|\band\b/i).map((x) => x.trim()).filter(Boolean) : [];
+const accessories = (p: Product): string[] => listOf(attr(p).accessories_included);
+const bullets = (p: Product): string => listOf(attr(p).bullet_points).join(" ");
+// "ST-03 Strainer (x2)" → 2; "A-04 Colander" → 1
+const countIn = (items: string[], re: RegExp): number =>
+  items.filter((a) => re.test(a)).reduce((n, a) => n + (Number(a.match(/\(x\s*(\d+)\)/i)?.[1]) || 1), 0);
+// Model codes in accessory lines ("ST-05 Strainer (x2)" → ST-05; "ST03 Strainer" → ST-03)
+const codesIn = (items: string[], re: RegExp): string[] =>
+  [...new Set(items.filter((a) => re.test(a)).map((a) => a.match(/\b([A-Z]{1,2})-?(\d{2,4}[A-Z]{0,3})\b/)?.slice(1).join("-") ?? "").filter(Boolean))];
+const partList = (v: unknown): string => {
+  const parts = listOf(v).map((x) => x.trim()).filter((x) => x && !/does not app/i.test(x));
+  return parts.length ? parts.join(", ") : /does not app/i.test(String(v ?? "")) ? "Does Not Apply" : "";
+};
+const installText = (p: Product) =>
+  `${attr(p).installation_type ?? ""} ${listOf(attr(p).installation_types).join(" ")} ${p.product_type ?? ""}`.toLowerCase();
+const isFarmhouse = (p: Product) => /farm|apron/.test(installText(p));
+const soundDampened = (p: Product) => /sound|noise|quiet|dampen/i.test(bullets(p)) || /sound|noise|quiet/i.test(String(p.description ?? ""));
+const hasWarranty = (p: Product) => Boolean(attr(p).warranty || attr(p).warranty_length);
+const holes = (p: Product) => Number(num(attr(p).number_of_installation_holes)) || 0;
+const handleCount = (p: Product) => Number(num(attr(p).number_of_handles)) || 0;
+
+// Sinks: "Rectangle" nouns (Wayfair's Overall Shape); faucets: from the PIM's
+// Overall Shape field, else the spout type.
+export const overallShape = (p: Product): string => {
+  if (isFaucetCat(p)) {
+    const explicit = String(attr(p).overall_shape ?? "").trim();
+    if (explicit) return explicit;
+    const spout = String(attr(p).spout_type ?? "").toLowerCase();
+    if (/gooseneck|high arc/.test(spout)) return "Gooseneck / High Arc";
+    if (/rigid|straight|fixed/.test(spout)) return "Straight";
+    if (/low arc|curved/.test(spout)) return "Curved";
+    return "";
+  }
+  const sh = String(p.shape ?? attr(p).sink_shape ?? "").toLowerCase();
+  if (!sh) return "";
+  if (/rect/.test(sh)) return "Rectangle";
+  if (/squar/.test(sh)) return "Square";
+  if (/round|circ/.test(sh)) return "Round";
+  if (/oval/.test(sh)) return "Oval";
+  if (/d-?shap/.test(sh)) return "D-Shape";
+  return "";
+};
+// Wayfair's "Mounting / Installation" (multi). "Mounting / Installation
+// Required" rides along on every item Wayfair holds for us.
+export const mountingInstallation = (p: Product): string[] => {
+  if (isFaucetCat(p)) {
+    const m = `${attr(p).mounting_type ?? ""} ${attr(p).installation_type ?? ""}`.toLowerCase();
+    const out: string[] = [];
+    if (/wall/.test(m)) out.push("Wall");
+    else if (/vessel/.test(m)) out.push("Vessel");
+    else if (/single|one hole|1 hole/.test(m) || holes(p) === 1) out.push("Single-Hole");
+    else if (/widespread/.test(m) || Number(num(attr(p).faucet_centers)) >= 8) out.push("Widespread");
+    else if (/centerset/.test(m) || Number(num(attr(p).faucet_centers)) === 4) out.push("Centerset");
+    return out.length ? [...out, "Mounting / Installation Required"] : [];
+  }
+  const t = installText(p);
+  if (!t.trim()) return [];
+  const out = new Set<string>();
+  if (/dual/.test(t)) { out.add("Drop-In"); out.add("Dual Mount"); out.add("Undermount"); }
+  if (/under/.test(t)) out.add("Undermount");
+  if (/drop|top ?mount/.test(t)) out.add("Drop-In");
+  if (/farm|apron/.test(t)) out.add("Farmhouse / Apron");
+  if (/wall/.test(t)) out.add("Wall");
+  if (/vessel/.test(t)) out.add("Vessel");
+  return out.size ? [...out, "Mounting / Installation Required"] : [];
+};
+export const drainPlacement = (p: Product): string => {
+  const d = String(attr(p).drain_hole_location ?? attr(p).drain_position ?? "").toLowerCase();
+  if (!d) return "";
+  if (/revers/.test(d)) return "Reversible";
+  if (/rear|back/.test(d)) return "Back";
+  if (/front/.test(d)) return "Front";
+  if (/left/.test(d)) return "Left";
+  if (/right/.test(d)) return "Right";
+  if (/cent/.test(d)) return "Centre";
+  return "";
+};
+export const piecesIncluded = (p: Product): string[] => {
+  const out = new Set<string>();
+  if (isFaucetCat(p)) {
+    const a = attr(p);
+    if (yesNo(a.supply_line_included) === "Yes") out.add("Supply Line");
+    if (yesNo(a.aerator_included) === "Yes") out.add("Aerator");
+    if (yesNo(a.valve_included) === "Yes") out.add("Valve");
+    if (yesNo(a.handles_included) === "Yes") out.add("Handle(s)");
+    if (yesNo(a.deck_plate_included) === "Yes") out.add("Deck Plate");
+    if (/drain/i.test(accessories(p).join(" "))) out.add("Drain Assembly");
+    return [...out];
+  }
+  const acc = accessories(p).join(" | ").toLowerCase();
+  if (/cutting board|bamboo board/.test(acc)) out.add("Cutting Board");
+  if (/colander/.test(acc)) out.add("Colander");
+  if (/strainer/.test(acc) || attr(p).strainer_model) { out.add("Basket Strainer"); out.add("Drain Assembly"); }
+  if (/grid/.test(acc) || attr(p).includes_grids === true) out.add("Sink Grid");
+  if (/faucet/.test(acc)) out.add("Faucet");
+  if (/soap/.test(acc)) out.add("Soap / Lotion Dispenser");
+  if (/template/.test(acc)) out.add("Cut Out Template");
+  if (/hardware|clip/.test(acc) || /under|dual|drop|top ?mount/.test(installText(p))) out.add("Mounting Hardware");
+  return [...out];
+};
+const isWorkstation = (p: Product) =>
+  /workstation/i.test(String(p.product_type ?? "")) || attr(p).has_workstation === true ||
+  /cutting board|drying rack|colander|bamboo board/i.test(accessories(p).join(" "));
+export const productType = (p: Product): string => {
+  if (isKitchenLike(p)) {
+    if (isWorkstation(p)) return "Kitchen Sink Workstation";
+    if (/bar|prep/i.test(`${cat(p)} ${p.product_type ?? ""}`)) return "Prep Sink";
+    return "Standard Kitchen Sink";
+  }
+  if (cat(p) === "bathroom_faucet") return handleCount(p) <= 1 ? "Mono Basin Mixer" : "";
+  if (cat(p) === "kitchen_faucet") {
+    const t = `${p.product_type ?? ""} ${attr(p).spout_type ?? ""} ${attr(p).spray_type ?? ""} ${attr(p).general_title_en ?? ""}`;
+    if (/pot ?filler/i.test(t)) return "Pot Filler";
+    if (/\bbar\b|beverage|prep/i.test(t)) return "Bar Faucet";
+    if (/pull.?down/i.test(t)) return "Pull-Down Faucet";
+    if (handleCount(p) >= 2) return "Double Handle Kitchen Facuet";
+    return "Single Handle Kitchen Faucet";
+  }
+  return "";
+};
+// Durability: the PIM tags (already Wayfair wording) or the material's defaults.
+const DURABILITY_OK = /^(stain|scratch|heat|rust|tarnish|corrosion|fade|dent|weather|uv) resistant$|^non-staining$|^antimicrobial$/i;
+export const durability = (p: Product): string[] => {
+  const tags = listOf(attr(p).durability_tags).map((t) => t.replace(/^and\s+/i, "").replace(/\bresistant$/i, "Resistant").trim());
+  const ok = tags.filter((t) => DURABILITY_OK.test(t)).map((t) => t.replace(/\b\w/g, (c) => c.toUpperCase()));
+  if (ok.length) return [...new Set(ok)];
+  const m = String(p.material ?? "").toLowerCase();
+  if (/stainless/.test(m)) return ["Rust Resistant", "Stain Resistant", "Heat Resistant"];
+  if (/quartz|granite|composite/.test(m)) return ["Scratch Resistant", "Stain Resistant", "Heat Resistant"];
+  if (/brass|steel|zinc/.test(m)) return ["Rust Resistant", "Tarnish Resistant", "Corrosion Resistant"];
+  return [];
+};
+// Plating = the coating named by the finish (faucets). Black / gunmetal /
+// graphite finishes are coatings, not platings → Does Not Apply.
+export const platingMaterial = (p: Product): string => {
+  const explicit = String(attr(p).plating_material ?? "").trim();
+  if (explicit) return explicit;
+  const f = String(p.finish ?? "").toLowerCase();
+  if (!f) return "";
+  if (/chrome/.test(f)) return "Chrome";
+  if (/nickel/.test(f)) return "Nickel";
+  if (/stainless/.test(f)) return "Stainless Steel";
+  if (/gold|brass/.test(f)) return "Brass";
+  if (/bronze/.test(f)) return "Bronze";
+  if (/copper/.test(f)) return "Copper";
+  if (/black|gunmetal|graphite|white/.test(f)) return "Does Not Apply";
+  return "";
+};
+export const title24 = (p: Product): string => {
+  const v = String(attr(p).title_24_compliant ?? "").toLowerCase();
+  if (!v || /ask/.test(v)) return "";
+  if (/not|non|\bno\b/.test(v)) return "No";
+  if (/compliant|yes|true/.test(v)) return "Yes";
+  return "";
+};
+// cUPC-certified faucets are tested to ASME A112.18.1 / CSA B125.1.
+export const plumbingFixtures = (p: Product): string => {
+  const asme = String(attr(p).asme_csa_certified ?? "");
+  if (/112\.18\.1/.test(asme)) return "ASME A112.18.1 / CSA B125.1";
+  const cupc = `${attr(p).cupc_certified ?? ""} ${listOf(attr(p).safety_listings).join(" ")}`;
+  if (/yes|cupc|upc/i.test(cupc)) return "ASME A112.18.1 / CSA B125.1";
+  if (/^no$/i.test(String(attr(p).cupc_certified ?? ""))) return "No";
+  return "";
+};
+const strainerCode = (p: Product): string => {
+  const m = String(attr(p).strainer_model ?? "").toUpperCase().match(/^([A-Z]{1,2})-?(\d{2,4}[A-Z]{0,3})$/);
+  if (m) return `${m[1]}-${m[2]}`;
+  return codesIn(accessories(p), /strainer/i)[0] ?? "";
+};
+const includedYesNo = (p: Product, re: RegExp, extra = false) =>
+  isSinkCat(p) ? (extra || accessories(p).some((a) => re.test(a)) ? "Yes" : "No") : "";
+const includedCount = (p: Product, re: RegExp, extra = 0) =>
+  isSinkCat(p) ? String(countIn(accessories(p), re) || extra) : "";
+const includedCodes = (p: Product, re: RegExp, extra = "") =>
+  isSinkCat(p) ? (extra || codesIn(accessories(p), re).join(", ") || "Does Not Apply") : "";
+const sinkDNA = (p: Product, faucetValue: () => string = () => "") => (isSinkCat(p) ? "Does Not Apply" : faucetValue());
+
 // Our stainless sinks are 18/10 steel: the PIM says "Stainless Steel", Wayfair
 // carries "Stainless Steel (18/10)" — the same thing (user rule 2026-09-16).
+// Sinks only: the faucet classes list plain "Stainless Steel".
 export const wayfairMaterial = (p: Product): string => {
   const m = String(p.material ?? "").trim();
-  return /^stainless steel$/i.test(m) ? "Stainless Steel (18/10)" : m;
+  return /^stainless steel$/i.test(m) && /sink/.test(String(p.category ?? "")) ? "Stainless Steel (18/10)" : m;
 };
 
 // ---- Exact-title rules ----
-export const EXACT_RULES: Record<string, (p: Product) => string> = {
+export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Overall Length from End to End": (p) => dim(p, "external_dimensions_in", "length"),
   "Overall Width from Front to Back": (p) => dim(p, "external_dimensions_in", "width"),
   "Overall Height from Top to Bottom": (p) => dim(p, "external_dimensions_in", "depth"),
@@ -91,12 +277,73 @@ export const EXACT_RULES: Record<string, (p: Product) => string> = {
   },
   // Workstation sinks carry over-the-sink accessories (cutting board, drying
   // rack, colander) or say so in the product type. SKU alone isn't reliable.
-  "Kitchen Sink Workstation": (p) => {
-    if (/workstation/i.test(String(p.product_type ?? ""))) return "Yes";
-    const acc = attr(p).accessories_included;
-    const list = Array.isArray(acc) ? acc.join(", ") : String(acc ?? "");
-    return /cutting board|drying rack|colander/i.test(list) ? "Yes" : "No";
-  },
+  "Kitchen Sink Workstation": (p) => (isWorkstation(p) ? "Yes" : "No"),
+
+  // ---- Rules added 2026-09-16 (the "has PIM data, no push rule" group) ----
+  "Mounting / Installation": (p) => mountingInstallation(p),
+  "Mounting / Installation Required": (p) => (isSinkCat(p) || isFaucetCat(p) ? "Yes" : ""),
+  "Product Type": (p) => productType(p),
+  "Overall Shape": (p) => overallShape(p),
+  "Drain Placement": (p) => (isSinkCat(p) ? drainPlacement(p) : ""),
+  "Minimum Base Cabinet Width - Side to Side": (p) => num(attr(p).min_external_cabinet_size_in),
+  "Pieces Included": (p) => piecesIncluded(p),
+  "Durability": (p) => durability(p),
+  "Sound Dampening": (p) => (isSinkCat(p) ? (soundDampened(p) ? "Yes" : "No") : ""),
+  "General Features": (p) => (isSinkCat(p) && soundDampened(p) ? ["Sound Dampening"] : []),
+  "Accessories Included": (p) => (isSinkCat(p) ? (accessories(p).length ? "Yes" : "No") : ""),
+  "Basket Strainer Included": (p) => includedYesNo(p, /strainer/i, Boolean(attr(p).strainer_model)),
+  "Number of Basket Strainers Included": (p) => includedCount(p, /strainer/i, attr(p).strainer_model ? 1 : 0),
+  "Compatible Basket Strainer Part Number": (p) => includedCodes(p, /strainer/i, strainerCode(p)),
+  "Sink Grid Included": (p) => includedYesNo(p, /grid/i, attr(p).includes_grids === true),
+  "Number of Sink Grids Included": (p) =>
+    includedCount(p, /grid/i, attr(p).includes_grids === true ? Number(num(attr(p).number_of_bowls)) || 1 : 0),
+  "Compatible Sink Grid Part Number": (p) =>
+    includedCodes(p, /grid/i, /^[A-Z]-?\d/i.test(String(attr(p).grids_model_code ?? "")) ? String(attr(p).grids_model_code) : ""),
+  "Colander Included": (p) => includedYesNo(p, /colander/i),
+  "Number of Colanders Included": (p) => includedCount(p, /colander/i),
+  "Compatible Colander Part Number": (p) => includedCodes(p, /colander/i),
+  "Cutting Board Included": (p) => includedYesNo(p, /cutting board|bamboo board/i),
+  "Number of Cutting Boards Included": (p) => includedCount(p, /cutting board|bamboo board/i),
+  "Compatible Cutting Board Part Number": (p) => includedCodes(p, /cutting board|bamboo board/i),
+  "Soap / Lotion Dispenser Included": (p) => includedYesNo(p, /soap/i),
+  "Number of Soap Dispensers Included": (p) => includedCount(p, /soap/i),
+  "Overflow Hole": (p) => (isSinkCat(p) ? (attr(p).overflow_location ? "Yes" : "No") : ""),
+  "Faucet Holes": (p) => (isSinkCat(p) ? (holes(p) > 0 ? "Yes" : "No") : ""),
+  "Faucet Included": (p) => (isSinkCat(p) ? (/faucet/i.test(accessories(p).join(" ")) ? "Yes" : "No") : ""),
+  "Number of Faucets Included": (p) => sinkDNA(p),
+  "Faucet Finish": (p) => sinkDNA(p),
+  "Faucet Hole Diameter": (p) => sinkDNA(p),
+  "Faucet Material": (p) => sinkDNA(p),
+  "Faucet Type": (p) => sinkDNA(p),
+  "Faucet Features": (p) => sinkDNA(p),
+  "Side Spray Included": (p) => sinkDNA(p),
+  // Faucet Centers is a number on faucets (0 = one-hole), Does Not Apply on sinks.
+  "Faucet Centers": (p) => sinkDNA(p, () => num(attr(p).faucet_centers) || (holes(p) === 1 ? "0" : "")),
+  "Maximum Thickness - Deck": (p) => sinkDNA(p, () => num(attr(p).max_deck_thickness_in)),
+  "Maximum Flow Rate": (p) => (isFaucetCat(p) ? num(attr(p).max_flow_rate) : ""),
+  "Apron Included": (p) => (isSinkCat(p) ? (isFarmhouse(p) ? "Yes" : "No") : ""),
+  "Mounting Hardware Included": (p) => (isSinkCat(p) ? (piecesIncluded(p).includes("Mounting Hardware") ? "Yes" : "No") : ""),
+  "Drain Included": (p) => (isSinkCat(p) ? (piecesIncluded(p).includes("Basket Strainer") ? "Yes" : "No") : ""),
+  "Drain Assembly Included": (p) => (piecesIncluded(p).includes("Drain Assembly") ? "Yes" : (isSinkCat(p) || isFaucetCat(p) ? "No" : "")),
+  "Sink Basket Strainer - Diameter": (p) => (isSinkCat(p) ? num(attr(p).drain_diameter_in) : ""),
+  "Warranty": (p) => (hasWarranty(p) ? ["Warranty Included", /full/i.test(String(attr(p).warranty ?? "")) ? "Full Warranty" : "Limited Warranty"] : []),
+  "Product Warranty": (p) => (hasWarranty(p) ? "Yes" : ""),
+  // Faucets
+  "Handle Material": (p) => String(attr(p).handle_material ?? ""),
+  "Handle Style": (p) => String(attr(p).handle_style ?? ""),
+  "Spout Type": (p) => (isFaucetCat(p) ? String(attr(p).spout_type ?? "") : ""),
+  "Swivel": (p) => (isFaucetCat(p) ? yesNo(attr(p).swivel_spout) : ""),
+  "Aerator Included": (p) => (isFaucetCat(p) ? yesNo(attr(p).aerator_included) : ""),
+  "Valve Included": (p) => (isFaucetCat(p) ? yesNo(attr(p).valve_included) : ""),
+  "Supply Line Included": (p) => (isFaucetCat(p) ? yesNo(attr(p).supply_line_included) : ""),
+  "Deck Plate Included": (p) => (isFaucetCat(p) ? yesNo(attr(p).deck_plate_included) : ""),
+  "Handle(s) Included": (p) => (isFaucetCat(p) ? yesNo(attr(p).handles_included) : ""),
+  "Compatible Deck Plate Part Number": (p) => (isFaucetCat(p) ? partList(attr(p).compatible_deck_plate) : ""),
+  "Compatible Drain Assembly Part Number": (p) => (isFaucetCat(p) ? partList(attr(p).compatible_drain_assembly) : ""),
+  "Laminar Flow": (p) => (isFaucetCat(p) ? yesNo(attr(p).laminar_flow) : ""),
+  "Plating Material": (p) => (isFaucetCat(p) ? platingMaterial(p) : ""),
+  "Plumbing Fixtures Compliant": (p) => (isFaucetCat(p) ? plumbingFixtures(p) : ""),
+  "Title 24 - California Code of Regulations": (p) => title24(p),
 };
 
 // Titles matching EXCLUDE never pattern-match: they describe a DIFFERENT
@@ -111,7 +358,7 @@ export const EXCLUDE = /apron|basin|interior|cut.?out|base\/stand|stand height|c
 // title is the SHORT axis → PIM width; when the width title is the only
 // horizontal one, side-to-side IS the long axis → PIM length.
 export type RuleCtx = { hasPlainLength: boolean };
-export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx) => string }> = [
+export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx) => RuleValue }> = [
   { re: /including handles/i, value: (p) => num(attr(p).length_with_handles_in) },
   {
     re: /^overall width .*side to side/i,
@@ -138,7 +385,7 @@ export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx
 ];
 
 /** The rule for an attribute title, if the PIM maps it. */
-export function ruleForTitle(title: string): ((p: Product, ctx: RuleCtx) => string) | undefined {
+export function ruleForTitle(title: string): ((p: Product, ctx: RuleCtx) => RuleValue) | undefined {
   return EXACT_RULES[title] ??
     (EXCLUDE.test(title) ? undefined : PATTERN_RULES.find((r) => r.re.test(title))?.value);
 }
