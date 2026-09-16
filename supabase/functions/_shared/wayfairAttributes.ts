@@ -325,8 +325,10 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Number of Basket Strainers Included": (p) => includedCount(p, /strainer/i, attr(p).strainer_model ? 1 : 0),
   "Compatible Basket Strainer Part Number": (p) => includedCodes(p, /strainer/i, strainerCode(p)),
   "Sink Grid Included": (p) => includedYesNo(p, /grid/i, attr(p).includes_grids === true),
+  // Count only when an accessory line states it; a bare includes_grids flag
+  // says nothing about how many (C126L ships 2 with a single bowl).
   "Number of Sink Grids Included": (p) =>
-    includedCount(p, /grid/i, attr(p).includes_grids === true ? Number(num(attr(p).number_of_bowls)) || 1 : 0),
+    (isSinkCat(p) && !accessories(p).some((a) => /grid/i.test(a)) && attr(p).includes_grids === true) ? "" : includedCount(p, /grid/i),
   "Compatible Sink Grid Part Number": (p) =>
     includedCodes(p, /grid/i, /^[A-Z]-?\d/i.test(String(attr(p).grids_model_code ?? "")) ? String(attr(p).grids_model_code) : ""),
   "Colander Included": (p) => includedYesNo(p, /colander/i),
@@ -340,6 +342,11 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Overflow Hole": (p) => (isSinkCat(p) ? (yesNo(attr(p).overflow) || (attr(p).overflow_location ? "Yes" : "No")) : ""),
   "Overflow Included": (p) => (isSinkCat(p) ? (yesNo(attr(p).overflow) || (attr(p).overflow_location ? "Yes" : "No")) : ""),
   "Faucet Holes": (p) => (isSinkCat(p) ? (holes(p) > 0 ? "Yes" : "No") : ""),
+  // Hole-less sinks answer Does Not Apply here (Wayfair's "Faucet Holes" = No conditionality).
+  "Number of Faucet Holes": (p) => {
+    const n = (isSinkCat(p) && num(attr(p).number_of_faucet_holes)) || num(attr(p).number_of_installation_holes);
+    return isSinkCat(p) && n !== "" && Number(n) === 0 ? "Does Not Apply" : n;
+  },
   "Faucet Included": (p) => (isSinkCat(p) ? (/faucet/i.test(accessories(p).join(" ")) ? "Yes" : "No") : ""),
   "Number of Faucets Included": (p) => sinkDNA(p),
   "Faucet Finish": (p) => sinkDNA(p),
@@ -410,8 +417,8 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Compatible Pedestal Part Number": (p) => (isBathSink(p) ? partList(attr(p).compatible_pedestal) : ""),
 
   // Utility sinks (class 875)
-  "Location": (p) => (cat(p) === "outdoor_sink" ? "Indoor / Outdoor" : isUtilitySink(p) ? "Indoor" : ""),
-  "Outdoor Use": (p) => (cat(p) === "outdoor_sink" ? "Yes" : isUtilitySink(p) ? "No" : ""),
+  "Location": (p) => (cat(p) === "outdoor_sink" ? "Indoor / Outdoor" : ""),
+  "Outdoor Use": (p) => (cat(p) === "outdoor_sink" ? "Yes" : ""),
   "Faucet Mount Type": (p) => (isUtilitySink(p) ? (holes(p) === 0 ? "Does Not Apply" : holes(p) === 1 ? "Single Hole" : "") : ""),
   "Gauge": (p) => (isUtilitySink(p) ? num(attr(p).gauge ?? attr(p).material_gauge) : ""),
   "Basket Strainer Diameter": (p) => (isUtilitySink(p) ? num(attr(p).drain_diameter_in) : ""),
@@ -451,7 +458,6 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Pattern": (p) => (isAccessory(p) ? (dna(attr(p).pattern) ? "No Pattern" : "") : ""),
   "Holiday / Occasion": (p) => (isAccessory(p) ? "No Holiday" : ""),
   "Total Number of Pieces Included": (p) => (isAccessory(p) ? num(attr(p).number_of_pieces) : ""),
-  "Color / Finish": (p) => (isAccessory(p) ? String(p.finish ?? "") : ""),
 
   // Compliance / catalog-wide facts read from the PIM where it has them
   "ADA Compliant": (p) => {
@@ -498,7 +504,10 @@ export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx
     re: /^overall width .*side to side/i,
     value: (p, ctx) => dim(p, "external_dimensions_in", ctx.hasPlainLength ? "width" : "length"),
   },
-  { re: /^spout(\/faucet)? height/i, value: (p) => num(attr(p).spout_height_in) },
+  // Bathroom Sink Faucets (655) has no separate overall height: its
+  // "Spout/Faucet Height" is the faucet's overall height (B-112C: 6.25).
+  // Kitchen Faucets keep the spout height (K-107GR: 6.81).
+  { re: /^spout(\/faucet)? height/i, value: (p) => (cat(p) === "bathroom_faucet" ? num(attr(p).faucet_height_in) || num(attr(p).spout_height_in) : num(attr(p).spout_height_in)) },
   { re: /^spout reach/i, value: (p) => num(attr(p).spout_reach_in) },
   { re: /flow rate/i, value: (p) => num(attr(p).max_flow_rate) },
   { re: /number of (faucet )?handles/i, value: (p) => num(attr(p).number_of_handles) },
@@ -507,7 +516,7 @@ export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx
   // = No conditionality); faucets and sinks with holes send the number.
   { re: /(number of (faucet |installation |mounting )?holes)/i, value: (p) => {
     const n = (isSinkCat(p) && num(attr(p).number_of_faucet_holes)) || num(attr(p).number_of_installation_holes);
-    return isSinkCat(p) && (n === "" || Number(n) === 0) ? (n === "" ? "" : "Does Not Apply") : n;
+    return n;
   } },
   { re: /(countertop|deck) thickness/i, value: (p) => num(attr(p).max_deck_thickness_in) },
   { re: /^overall .*(end to end|side to side)/i, value: (p) => dim(p, "external_dimensions_in", "length") },
