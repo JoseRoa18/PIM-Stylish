@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Image as ImageIcon, Film, FileText, Ruler } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
-import { supabase } from '@/lib/supabase';
-import { logActivity } from '@/features/activity/api/activityLog';
 import { planWayfairPush, pushWayfairMedia, pushWayfairAttributes, checkWayfairRequestStatus, setWayfairLeadImage } from '../api/wayfairSync';
 
 const STEP_ICON = { specs: Ruler, images: ImageIcon, videos: Film, documents: FileText };
@@ -47,22 +45,6 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
   const specAll = specs && !specs.error ? Object.entries(specs.diff ?? {}) : [];
   const specSkipped = specs && !specs.error ? Object.entries(specs.skipped ?? {}) : [];
   const [showAllSpecs, setShowAllSpecs] = useState(false);
-  const [applying, setApplying] = useState(null);
-  // Adopt Wayfair's more specific wording in the PIM, then re-plan so the
-  // attribute leaves the "not sent" list.
-  async function applySuggestion(title, sug) {
-    setApplying(title);
-    try {
-      const { error: uErr } = await supabase.from('products').update({ [sug.field]: sug.value }).eq('sku', sku);
-      if (uErr) throw uErr;
-      logActivity({ action: 'update', entityType: 'product', entityId: sku, summary: `Set ${sug.field} to "${sug.value}" (Wayfair's wording, from the push plan)`, metadata: { field: sug.field, value: sug.value, was: sug.pim, title } });
-      setSpecs(await planWayfairPush(sku, { dryRun: true, supplier, market }));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setApplying(null);
-    }
-  }
   const steps = [
     { key: 'specs', label: 'Spec attributes', count: specChanges.length, note: specs?.error ? specs.error : specs ? `${specs.updates} mapped · ${specChanges.length} differ from Wayfair` : 'checking…' },
     ...(plan?.steps ?? []).map((s) => ({ key: s.key, label: s.label, count: s.items.length, note: s.note, items: s.items })),
@@ -193,28 +175,14 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
                               {showAllSpecs && <td className={`py-1 ${v.changed ? 'text-warning font-medium' : 'text-on-surface-variant'}`}>{v.changed ? 'Will change' : 'Same'}</td>}
                             </tr>
                           ))}
-                          {showAllSpecs && specSkipped.map(([title, why]) => {
-                            const sug = specs?.suggestions?.[title];
-                            return (
-                              <tr key={`skip-${title}`} className="border-t border-outline-variant/60 text-on-surface-variant">
-                                <td className="py-1 pr-3">{title}</td>
-                                <td className="py-1 pr-3">{sug ? sug.value : '—'}</td>
-                                <td className="py-1 pr-3">{sug ? sug.pim : '—'}</td>
-                                <td className="py-1">
-                                  {sug ? (
-                                    <span className="inline-flex items-center gap-2 flex-wrap">
-                                      <span>Suggestion: set the PIM to "{sug.value}"</span>
-                                      {sug.field && (
-                                        <button type="button" disabled={applying === title} onClick={() => applySuggestion(title, sug)} className="px-2 py-0.5 rounded-full border border-outline-variant text-label-md text-primary hover:bg-surface-container-low disabled:opacity-40">
-                                          {applying === title ? 'Applying…' : 'Apply to PIM'}
-                                        </button>
-                                      )}
-                                    </span>
-                                  ) : <>Not sent · {why}</>}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {showAllSpecs && specSkipped.map(([title, why]) => (
+                            <tr key={`skip-${title}`} className="border-t border-outline-variant/60 text-on-surface-variant">
+                              <td className="py-1 pr-3">{title}</td>
+                              <td className="py-1 pr-3">—</td>
+                              <td className="py-1 pr-3">—</td>
+                              <td className="py-1">Not sent · {why}</td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     )}

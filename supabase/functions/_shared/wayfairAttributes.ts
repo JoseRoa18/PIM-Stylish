@@ -52,6 +52,13 @@ export const FINISH_ALIAS: Record<string, string> = {
 // caller only when the literal value isn't already accepted.
 export const finish = (v: unknown): string => (v ? String(v) : "");
 
+// Our stainless sinks are 18/10 steel: the PIM says "Stainless Steel", Wayfair
+// carries "Stainless Steel (18/10)" — the same thing (user rule 2026-09-16).
+export const wayfairMaterial = (p: Product): string => {
+  const m = String(p.material ?? "").trim();
+  return /^stainless steel$/i.test(m) ? "Stainless Steel (18/10)" : m;
+};
+
 // ---- Exact-title rules ----
 export const EXACT_RULES: Record<string, (p: Product) => string> = {
   "Overall Length from End to End": (p) => dim(p, "external_dimensions_in", "length"),
@@ -72,7 +79,7 @@ export const EXACT_RULES: Record<string, (p: Product) => string> = {
   // NOTE: the API's "Sink Shape" vocabulary is ADJECTIVAL ("Rectangular") —
   // distinct from "Overall Shape" nouns ("Rectangle"). Push the raw PIM value.
   "Sink Shape": (p) => String(p.shape ?? attr(p).sink_shape ?? ""),
-  "Material": (p) => String(p.material ?? ""),
+  "Material": (p) => wayfairMaterial(p),
   "Finish": (p) => finish(p.finish),
   "Warranty Length": (p) => String(attr(p).warranty_length ?? ""),
   "Full or Limited Warranty": (p) => String(attr(p).warranty ?? ""),
@@ -125,7 +132,7 @@ export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx
   },
   { re: /^overall product weight$/i, value: (p) => num(p.weight_lb ?? attr(p).product_weight_lb) },
   { re: /^warranty length$/i, value: (p) => String(attr(p).warranty_length ?? "") },
-  { re: /^material$/i, value: (p) => String(p.material ?? "") },
+  { re: /^material$/i, value: (p) => wayfairMaterial(p) },
   { re: /^finish$/i, value: (p) => finish(p.finish) },
   { re: /^country of (origin|manufacture)$/i, value: (p) => String(attr(p).country_of_origin ?? "") },
 ];
