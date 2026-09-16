@@ -129,7 +129,10 @@ export const mountingInstallation = (p: Product): string[] => {
 export const drainPlacement = (p: Product): string => {
   const d = String(attr(p).drain_hole_location ?? attr(p).drain_position ?? "").toLowerCase();
   if (!d) return "";
+  // Wayfair's list: Front, Back, Centre, Left, Right, Reversible, Centre-Back, Centre-Front.
   if (/revers/.test(d)) return "Reversible";
+  if (/(rear|back).*cent|cent.*(rear|back)/.test(d)) return "Centre-Back";
+  if (/front.*cent|cent.*front/.test(d)) return "Centre-Front";
   if (/rear|back/.test(d)) return "Back";
   if (/front/.test(d)) return "Front";
   if (/left/.test(d)) return "Left";
@@ -244,10 +247,15 @@ const sinkDNA = (p: Product, faucetValue: () => string = () => "") => (isSinkCat
 
 // Our stainless sinks are 18/10 steel: the PIM says "Stainless Steel", Wayfair
 // carries "Stainless Steel (18/10)" — the same thing (user rule 2026-09-16).
-// Sinks only: the faucet classes list plain "Stainless Steel".
+// Sinks only: the faucet classes list plain "Stainless Steel". Wayfair's
+// "Granite" means natural stone; our composite (80% quartz) sinks are listed
+// as "Quartz" (the value the Product Addition validations accepted).
 export const wayfairMaterial = (p: Product): string => {
   const m = String(p.material ?? "").trim();
-  return /^stainless steel$/i.test(m) && /sink/.test(String(p.category ?? "")) ? "Stainless Steel (18/10)" : m;
+  const sink = /sink/.test(String(p.category ?? ""));
+  if (sink && /^stainless steel$/i.test(m)) return "Stainless Steel (18/10)";
+  if (sink && /quartz|composite/i.test(m)) return "Quartz";
+  return m;
 };
 
 // ---- Exact-title rules ----
