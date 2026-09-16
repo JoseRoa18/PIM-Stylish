@@ -231,8 +231,13 @@ const strainerCode = (p: Product): string => {
 };
 const includedYesNo = (p: Product, re: RegExp, extra = false) =>
   isSinkCat(p) ? (extra || accessories(p).some((a) => re.test(a)) ? "Yes" : "No") : "";
-const includedCount = (p: Product, re: RegExp, extra = 0) =>
-  isSinkCat(p) ? String(countIn(accessories(p), re) || extra) : "";
+// Wayfair's conditionality: a count only exists when the piece is included;
+// otherwise the count must be "Does Not Apply" (a "0" blocks the request).
+const includedCount = (p: Product, re: RegExp, extra = 0) => {
+  if (!isSinkCat(p)) return "";
+  const n = countIn(accessories(p), re) || extra;
+  return n > 0 ? String(n) : "Does Not Apply";
+};
 const includedCodes = (p: Product, re: RegExp, extra = "") =>
   isSinkCat(p) ? (extra || codesIn(accessories(p), re).join(", ") || "Does Not Apply") : "";
 const sinkDNA = (p: Product, faucetValue: () => string = () => "") => (isSinkCat(p) ? "Does Not Apply" : faucetValue());
