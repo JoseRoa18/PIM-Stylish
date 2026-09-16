@@ -382,7 +382,12 @@ export const PATTERN_RULES: Array<{ re: RegExp; value: (p: Product, ctx: RuleCtx
   { re: /flow rate/i, value: (p) => num(attr(p).max_flow_rate) },
   { re: /number of (faucet )?handles/i, value: (p) => num(attr(p).number_of_handles) },
   { re: /^faucet height/i, value: (p) => num(attr(p).faucet_height_in) || dim(p, "external_dimensions_in", "height") },
-  { re: /(number of (faucet |installation |mounting )?holes)/i, value: (p) => num(attr(p).number_of_installation_holes) },
+  // Sinks without faucet holes answer Does Not Apply (Wayfair's "Faucet Holes"
+  // = No conditionality); faucets and sinks with holes send the number.
+  { re: /(number of (faucet |installation |mounting )?holes)/i, value: (p) => {
+    const n = num(attr(p).number_of_installation_holes);
+    return isSinkCat(p) && (n === "" || Number(n) === 0) ? (n === "" ? "" : "Does Not Apply") : n;
+  } },
   { re: /(countertop|deck) thickness/i, value: (p) => num(attr(p).max_deck_thickness_in) },
   { re: /^overall .*(end to end|side to side)/i, value: (p) => dim(p, "external_dimensions_in", "length") },
   { re: /^overall .*front to back/i, value: (p) => dim(p, "external_dimensions_in", "width") },
