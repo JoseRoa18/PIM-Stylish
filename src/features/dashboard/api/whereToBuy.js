@@ -61,6 +61,20 @@ export async function checkWhereToBuy({ onProgress, maxCalls = 40 } = {}) {
   return { checked: total, done: false };
 }
 
+/** Apply a parsed Price2Spy matrix report (see lib/p2sReport.js). */
+export async function importPrice2SpyReport(parsed, fileName) {
+  const r = await invoke({ mode: 'p2s', rows: parsed.rows, reportDate: parsed.reportDate, market: parsed.market });
+  logActivity({
+    action: 'import',
+    entityType: 'channel',
+    entityId: 'where_to_buy',
+    target: 'price2spy',
+    summary: `Price2Spy report ${fileName}: ${r.matched} links matched, ${r.ok} ok, ${r.broken} broken`,
+    metadata: { ...r, file: fileName },
+  });
+  return r;
+}
+
 export async function whereToBuyStatus() {
   return invoke({ mode: 'status' });
 }

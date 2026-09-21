@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, ChevronDown, ExternalLink, RefreshCw, Search } from 'lucide-react';
+import { AlertCircle, ChevronDown, ExternalLink, FileUp, RefreshCw, Search } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
-import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy } from '@/features/dashboard/api/whereToBuy';
+import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy, importPrice2SpyReport } from '@/features/dashboard/api/whereToBuy';
+import { parsePrice2SpyReport } from '@/features/dashboard/lib/p2sReport';
 import {
   WTB_SITES,
   WTB_RETAILERS,
@@ -68,7 +69,8 @@ export default function WhereToBuyPanel() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(null); // 'scan' | 'check' | null
+  const [busy, setBusy] = useState(null); // 'scan' | 'check' | 'p2s' | null
+  const [notice, setNotice] = useState(null);
   const [progress, setProgress] = useState(null);
   const [search, setSearch] = useState('');
   const [onlyProblems, setOnlyProblems] = useState(true);
@@ -107,6 +109,20 @@ export default function WhereToBuyPanel() {
     setBusy('scan');
     setError(null);
     try { await scanWhereToBuy(); await reload(); } catch (e) { setError(e); } finally { setBusy(null); }
+  };
+  // Price2Spy's daily matrix report settles the links the server cannot open
+  // (the retailers that block robots): a price seen = the page opens.
+  const runP2s = async (file) => {
+    if (!file) return;
+    setBusy('p2s');
+    setError(null);
+    setNotice(null);
+    try {
+      const parsed = await parsePrice2SpyReport(file);
+      const r = await importPrice2SpyReport(parsed, file.name);
+      setNotice(`${file.name}: ${r.reportRows} monitored links in the report · ${r.matched} matched our pages · ${r.ok} now OK · ${r.broken} broken${r.keptFresher ? ` · ${r.keptFresher} kept a newer HTTP result` : ''}`);
+      await reload();
+    } catch (e) { setError(e); } finally { setBusy(null); }
   };
   const runCheck = async () => {
     setBusy('check');
@@ -175,6 +191,14 @@ export default function WhereToBuyPanel() {
                 >
                   {busy === 'check' ? `Checking · ${progress?.checked ?? 0}` : 'Check links'}
                 </button>
+                <label
+                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container cursor-pointer ${busy ? 'opacity-40 pointer-events-none' : ''}`}
+                  title="Import the daily Price2Spy matrix report (usa- or canada-p2s-pricing-report .xlsx): the retailers it reaches settle the pending links"
+                >
+                  <FileUp className="w-4 h-4" />
+                  {busy === 'p2s' ? 'Importing report' : 'Price2Spy report'}
+                  <input type="file" accept=".xlsx" className="hidden" onChange={(e) => { runP2s(e.target.files?.[0]); e.target.value = ''; }} />
+                </label>
               </>
             )}
           </div>
@@ -191,6 +215,9 @@ export default function WhereToBuyPanel() {
         </div>
       </div>
 
+      {notice && (
+        <div className="rounded-xl bg-success-container text-on-success-container px-4 py-3 text-body-sm">{notice}</div>
+      )}
       {error && (
         <div className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />

@@ -12,6 +12,13 @@
 //                links are retried once an hour until the site answers.
 //                Called hourly by cron (each call chains the next batch
 //                until nothing is due) and in a loop from the UI.
+// mode "p2s"   — applies a Price2Spy matrix report (parsed in the browser:
+//                one row per SKU × site with the URL Price2Spy monitors and
+//                its status). Price2Spy visits the retailers with residential
+//                IPs, so it settles the links the server cannot open: a price
+//                seen or a page without price → ok, an inactive URL → broken.
+//                Only rows still pending, or last checked before the report
+//                date, are touched.
 // mode "status"— count of rows due for a probe.
 //
 // Only FOUR verdicts (user rule, 2026-09-15):
@@ -407,6 +414,75 @@ function chainNext(chain: number) {
   if (rt?.waitUntil) rt.waitUntil(p);
 }
 
+// ---------------------------------------------------------------- price2spy
+// Same page? Compare host (no www) + path (no trailing slash, lower-case);
+// when paths differ, the same numeric id (6+ digits), ASIN, or Wix product slug
+// on the same host also counts (retailers rewrite the slug part of the URL).
+function urlKeyParts(u: string): { host: string; path: string; id: string | null } | null {
+  try {
+    const x = new URL(u.replace(/ /g, "%20"));
+    const host = x.hostname.toLowerCase().replace(/^www\./, "");
+    const path = x.pathname.toLowerCase().replace(/\/+$/, "");
+    const id = path.match(/\/dp\/([a-z0-9]{10})(?:[/?#]|$)/)?.[1]
+      ?? path.match(/\/product-page\/([^/?#]+)/)?.[1]
+      ?? path.match(/(\d{6,})(?!.*\d{6,})/)?.[1]
+      ?? x.searchParams.get("redir")?.toLowerCase()
+      ?? null;
+    return { host, path, id };
+  } catch { return null; }
+}
+
+async function applyPrice2Spy(body: { rows: Array<{ sku: string; site: string; url: string; price: number | null; status: string }>; reportDate?: string | null; market?: string | null }) {
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if (!rows.length) throw new Error("No rows in the report");
+  const reportDate = body.reportDate && /^\d{4}-\d{2}-\d{2}$/.test(body.reportDate) ? body.reportDate : new Date().toISOString().slice(0, 10);
+  const checkedAt = `${reportDate}T12:00:00.000Z`;
+  // Index the report by exact key and by host+id
+  const exact = new Map<string, typeof rows[number]>();
+  const byHostId = new Map<string, typeof rows[number]>();
+  for (const r of rows) {
+    const k = urlKeyParts(r.url);
+    if (!k) continue;
+    exact.set(`${k.host}${k.path}`, r);
+    if (k.id) byHostId.set(`${k.host}|${k.id}`, r);
+  }
+  // Candidate PIM links: every link with a URL (both sites)
+  const links = await restAll<{ id: string; sku: string; url: string; verdict: string; checked_at: string | null }>(
+    `where_to_buy_links?select=id,sku,url,verdict,checked_at&url=not.is.null`,
+  );
+  const updates = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
+  let matched = 0, skippedFresh = 0;
+  const counts: Record<string, number> = { ok: 0, broken: 0 };
+  for (const l of links) {
+    const k = urlKeyParts(l.url);
+    if (!k) continue;
+    const hit = exact.get(`${k.host}${k.path}`) ?? (k.id ? byHostId.get(`${k.host}|${k.id}`) : undefined);
+    if (!hit) continue;
+    matched += 1;
+    // Keep an HTTP verdict that is newer than the report.
+    if (l.verdict !== "pending" && l.checked_at && l.checked_at > checkedAt) { skippedFresh += 1; continue; }
+    let verdict: "ok" | "broken";
+    let note: string;
+    if (hit.status === "inactive") { verdict = "broken"; note = `Price2Spy ${reportDate}: inactive URL (the page is gone)`; }
+    else if (hit.status === "zero") { verdict = "ok"; note = `Price2Spy ${reportDate}: page opens, no price shown`; }
+    else if (hit.status === "price") { verdict = "ok"; note = `Price2Spy ${reportDate}: price seen ${hit.price}`; }
+    else continue;
+    counts[verdict] += 1;
+    const patch = { verdict, note, http_status: null, final_url: null, checked_at: checkedAt };
+    const key = JSON.stringify(patch);
+    if (!updates.has(key)) updates.set(key, { patch, ids: [] });
+    updates.get(key)!.ids.push(l.id);
+  }
+  let updated = 0;
+  for (const g of updates.values()) {
+    for (const ids of chunk(g.ids, 200)) {
+      await rest(`where_to_buy_links?id=in.(${ids.join(",")})`, { method: "PATCH", body: JSON.stringify(g.patch) });
+      updated += ids.length;
+    }
+  }
+  return { reportDate, market: body.market ?? null, reportRows: rows.length, matched, updated, keptFresher: skippedFresh, ...counts };
+}
+
 // ---------------------------------------------------------------- auth
 async function authorized(req: Request): Promise<boolean> {
   if (CRON_SECRET && req.headers.get("x-cron-secret") === CRON_SECRET) return true;
@@ -430,6 +506,7 @@ Deno.serve(async (req) => {
       for (const s of sites) out.push(await scanSite(s, now));
       return json({ ok: true, scanned_at: now, sites: out });
     }
+    if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
     if (mode === "check") {
       const result = await check(body.budgetMs ?? 35000, body.limit ?? 400);
       if (typeof body.chain === "number" && result.morePending && result.checked > 0) chainNext(body.chain);
