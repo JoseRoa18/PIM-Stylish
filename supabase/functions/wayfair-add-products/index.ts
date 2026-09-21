@@ -23,6 +23,9 @@
 //   validateOnly?: boolean = true,
 //   sandbox?: boolean = false,     // hit the sandbox with the *_SANDBOX_* app
 //   force?: boolean = false,       // also submit SKUs already in the catalog
+//   preview?: boolean = false,     // build only: returns every mapped attribute
+//                                  // (title, value) per SKU, listed or not,
+//                                  // and never calls submitV2
 //   classId?: string,              // override the class for every SKU
 //   includeDocuments?: boolean = true,
 //   status?: string,               // poll mode: productAdditionRequestId
@@ -540,6 +543,31 @@ function buildProduct(
   return { attrs, images: images.length, documents, missingRequired, unmapped, notes };
 }
 
+// Every attribute row of a built product as { id, title, value, group } —
+// what the PIM shows as "all mapped attributes". Values of one attribute
+// (bullets, images, multi-choice) are joined; media shows the file name.
+const GROUP_OF: [RegExp, string][] = [
+  [/^core::|^variantGrouping::/, "Listing"],
+  [/^featureDescription::/, "Copy"],
+  [/^media::/, "Media"],
+  [/^price::/, "Pricing"],
+  [/^shippingAndFulfillment::|^propSixtyFive::/, "Shipping & compliance"],
+];
+function describeAttrs(attrs: Attr[], questions: Question[]) {
+  const title = new Map<string, string>();
+  const walk = (q: Question) => { title.set(String(q.id), q.displayName); for (const c of q.childQuestions ?? []) walk(c); };
+  for (const q of questions) walk(q);
+  title.set("core::manufacturerId", "Manufacturer (Wayfair id)");
+  const rows = new Map<string, { id: string; title: string; value: string[]; group: string }>();
+  for (const a of attrs) {
+    const value = /^media::(image|document|video)Value$/.test(a.attributeId) ? a.value.split("/").pop()!.split("?")[0] : a.value;
+    const row = rows.get(a.attributeId) ?? { id: a.attributeId, title: title.get(a.attributeId) ?? a.attributeId, value: [], group: GROUP_OF.find(([re]) => re.test(a.attributeId))?.[1] ?? "Specifications" };
+    row.value.push(value);
+    rows.set(a.attributeId, row);
+  }
+  return [...rows.values()].map((r) => ({ ...r, value: r.value.join(" | ") }));
+}
+
 const QUESTIONS_Q = `query questions($request: GetProductAdditionQuestionsRequest!) {
   productAddition {
     questions(request: $request) {
@@ -617,6 +645,7 @@ Deno.serve(async (req) => {
     const sandbox = body.sandbox === true || (Deno.env.get("WAYFAIR_ENV") ?? "sandbox") !== "production";
     const validateOnly = body.validateOnly !== false;
     const includeDocuments = body.includeDocuments !== false;
+    const preview = body.preview === true;
 
     const CLIENT_ID = Deno.env.get(sandbox ? `${cfg.prefix}_SANDBOX_CLIENT_ID` : `${cfg.prefix}_CLIENT_ID`);
     const CLIENT_SECRET = Deno.env.get(sandbox ? `${cfg.prefix}_SANDBOX_CLIENT_SECRET` : `${cfg.prefix}_CLIENT_SECRET`);
@@ -773,7 +802,7 @@ Deno.serve(async (req) => {
     const report: Record<string, unknown>[] = [];
     for (const p of (products ?? []) as Product[]) {
       const sku = String(p.sku);
-      if (existing.has(sku) && !body.force) {
+      if (existing.has(sku) && !body.force && !preview) {
         skipped.push({ sku, reason: `already in the Wayfair ${supplier} catalog — use Push, not Product Addition` });
         continue;
       }
@@ -812,6 +841,8 @@ Deno.serve(async (req) => {
         className: cls.className,
         manufacturer: manufacturer.name,
         attributes: built.attrs.length,
+        listed: existing.has(sku),
+        mapped: describeAttrs(built.attrs, questions),
         variant: group
           ? `${group.primary ? "primary" : "non-primary"} variant, new group ${group.referenceId}`
           : existingGroup
@@ -828,6 +859,10 @@ Deno.serve(async (req) => {
     }
 
     if (!proposed.length) return json({ ok: false, env, supplier, error: "nothing to submit", skipped }, 400);
+
+    if (preview) {
+      return json({ ok: true, env, supplier, market: cfg.market.country, preview: true, validateOnly: true, requestId: null, requests: [], products: report.map((row) => ({ ...row, status: "PREVIEW", errors: [], warnings: [] })), skipped });
+    }
 
     // Wayfair validates a V2 request against ONE class: a mixed batch gets
     // every product judged by the first product's class (seen 2026-09-02).

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, ShieldCheck, PlusCircle, RefreshCw } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, ShieldCheck, PlusCircle, RefreshCw, ListChecks } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { submitWayfairAdditions, checkWayfairAdditionStatus } from '../api/wayfairSync';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -15,21 +15,25 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
   const { canEdit } = useAuth();
   const hasSandbox = supplier !== 'CAN';
   const [sandbox, setSandbox] = useState(hasSandbox);
-  const [busy, setBusy] = useState(null); // 'validate' | 'create' | 'status' | null
+  const [busy, setBusy] = useState(null); // 'validate' | 'create' | 'status' | 'mapping' | null
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState(null);
 
   const row = result?.products?.[0];
   const skipped = result?.skipped?.[0];
-  const clean = !!row && !row.errors?.length && !row.missingRequired?.length && !row.unmapped?.length;
+  // A preview only lists the mapping; it never unlocks Create.
+  const clean = !!row && !result?.preview && !row.errors?.length && !row.missingRequired?.length && !row.unmapped?.length;
 
-  async function run(validateOnly) {
-    if (!validateOnly && !sandbox && !window.confirm(`Create ${product.sku} as a NEW Wayfair ${SUPPLIER_LABEL[supplier] ?? supplier} listing? This is the real catalog.`)) return;
-    setBusy(validateOnly ? 'validate' : 'create');
+  // mode: 'validate' | 'create' | 'mapping' (build only — every attribute the
+  // PIM would send, with Wayfair's title; works for listed products too)
+  async function run(mode) {
+    const validateOnly = mode !== 'create';
+    if (mode === 'create' && !sandbox && !window.confirm(`Create ${product.sku} as a NEW Wayfair ${SUPPLIER_LABEL[supplier] ?? supplier} listing? This is the real catalog.`)) return;
+    setBusy(mode);
     setResult(null);
     setStatus(null);
     try {
-      const data = await submitWayfairAdditions([product.sku], { supplier, validateOnly, sandbox });
+      const data = await submitWayfairAdditions([product.sku], { supplier, validateOnly, sandbox, preview: mode === 'mapping' });
       setResult(data);
     } catch (err) {
       setResult({ error: err.message });
@@ -77,7 +81,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
-              onClick={() => run(true)}
+              onClick={() => run('validate')}
               disabled={!!busy}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
             >
@@ -86,13 +90,23 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
             </button>
             <button
               type="button"
-              onClick={() => run(false)}
+              onClick={() => run('create')}
               disabled={!!busy || !clean}
               title={clean ? undefined : 'Validate first — fix every issue before creating'}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
             >
               {busy === 'create' ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
               {sandbox ? 'Create (sandbox)' : 'Create listing'}
+            </button>
+            <button
+              type="button"
+              onClick={() => run('mapping')}
+              disabled={!!busy}
+              title="Every attribute the PIM maps for this product, with Wayfair's title and the value it would send. Nothing is sent."
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+            >
+              {busy === 'mapping' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
+              Mapped attributes
             </button>
             {result?.requestId && !result.validateOnly && (
               <button
@@ -129,6 +143,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
               <span className="min-w-0 break-words">
                 <span className="text-on-surface-variant">{result.env} · </span>
                 {row.className} (class {row.classId}) · {row.attributes} attributes · {row.images} images · {row.documents} documents
+                {row.listed ? ' · already on Wayfair' : ''}
                 {row.variant ? ` · ${row.variant}` : ''}
                 {row.status ? ` · ${row.status}` : ''}
                 {result.requestId && !result.validateOnly ? ` · request ${result.requestId}` : ''}
@@ -139,6 +154,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
             <IssueList label="Wayfair errors" items={row.errors?.map((e) => `${e.attributeId}: ${e.flaw}`)} tone="error" />
             <IssueList label="Wayfair warnings" items={row.warnings?.map((e) => `${e.attributeId}: ${e.flaw}`)} tone="muted" />
             <IssueList label="Notes" items={row.notes} tone="muted" />
+            <MappedTable rows={row.mapped} />
           </div>
         )}
 
@@ -171,6 +187,37 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
         )}
       </div>
     </section>
+  );
+}
+
+// Every attribute the PIM maps for the product (the rows of the Wayfair
+// request), grouped by section; blank rows never appear here — see the
+// "Missing in PIM" list for those.
+const GROUP_ORDER = ['Listing', 'Copy', 'Specifications', 'Media', 'Pricing', 'Shipping & compliance'];
+function MappedTable({ rows }) {
+  if (!rows?.length) return null;
+  const groups = GROUP_ORDER.filter((g) => rows.some((r) => r.group === g));
+  return (
+    <details className="px-3 py-2">
+      <summary className="cursor-pointer text-label-sm text-primary hover:underline">Show all {rows.length} mapped attributes</summary>
+      <div className="mt-2 space-y-3">
+        {groups.map((g) => (
+          <div key={g}>
+            <div className="text-label-sm text-on-surface-variant mb-1">{g} · {rows.filter((r) => r.group === g).length}</div>
+            <table className="w-full text-body-sm">
+              <tbody className="divide-y divide-outline-variant/60">
+                {rows.filter((r) => r.group === g).map((r) => (
+                  <tr key={r.id} className="align-top">
+                    <td className="py-1 pr-3 w-[40%] text-on-surface-variant break-words" title={r.id}>{r.title}</td>
+                    <td className="py-1 text-on-surface break-words">{r.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 

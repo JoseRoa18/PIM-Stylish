@@ -200,8 +200,8 @@ export async function setWayfairItemGroupId(sku, itemGroupId, supplier = 'CAN') 
  * @param {boolean} [opts.force=false]     also submit SKUs already in the catalog
  */
 export async function submitWayfairAdditions(skus, opts = {}) {
-  const { supplier = 'USA', validateOnly = true, sandbox = false, force = false, classId } = opts;
-  const data = await invokeWayfair('wayfair-add-products', { skus, supplier, validateOnly, sandbox, force, classId });
+  const { supplier = 'USA', validateOnly = true, sandbox = false, force = false, classId, preview = false } = opts;
+  const data = await invokeWayfair('wayfair-add-products', { skus, supplier, validateOnly, sandbox, force, classId, preview });
   if (!validateOnly && !sandbox) {
     for (const p of data?.products ?? []) {
       logActivity({
