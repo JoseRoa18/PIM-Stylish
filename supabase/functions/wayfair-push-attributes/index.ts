@@ -166,6 +166,45 @@ Deno.serve(async (req) => {
       });
     }
 
+    // 2b. Attributes the item has BLANK on Wayfair are not returned above, so
+    // they could never be filled (B-112B: Spout Type, Handle Material…).
+    // Read the class's questions (Product Addition vocabulary) and add every
+    // question with a PIM rule that the item does not expose yet, with its
+    // allowed answers so we never send a value outside Wayfair's list.
+    // The CAN supplier answers questions only under the US market context.
+    const allowed = new Map<string, string[]>(); // title → possibleAnswers
+    const classNotes: string[] = [];
+    if (item.class?.classId) {
+      const qr = await call(
+        `query questions($request: GetProductAdditionQuestionsRequest!) {
+          productAddition { questions(request: $request) {
+            id displayName answerType possibleAnswers { value }
+            childQuestions { id displayName answerType possibleAnswers { value } }
+          } }
+        }`,
+        { request: { classId: Number(item.class.classId), marketContext: { locale: "en-US", country: "UNITED_STATES", brand: "WAYFAIR" } } },
+      );
+      if (qr.errors) classNotes.push(`class questions unavailable: ${qr.errors[0]?.message ?? "error"}`);
+      type Q = { id: string; displayName: string; answerType: string | null; possibleAnswers?: { value: string }[]; childQuestions?: Q[] };
+      const flat: Q[] = [];
+      for (const q of (qr.data?.productAddition?.questions ?? []) as Q[]) { flat.push(q); for (const c of q.childQuestions ?? []) flat.push(c); }
+      // Safety: question ids must be the same numbering as the item's attributeIds.
+      const numeric = (q: Q) => /^\d+$/.test(String(q.id)); // core::/media:: ids are not catalog attributes
+      const mismatch = flat.find((q) => numeric(q) && byTitle.has(q.displayName) && byTitle.get(q.displayName)!.attributeId !== String(q.id));
+      if (mismatch) classNotes.push(`question ids differ from item attribute ids ("${mismatch.displayName}") — blanks not filled`);
+      else {
+        let added = 0;
+        for (const q of flat) {
+          if (!q.answerType || !numeric(q) || byTitle.has(q.displayName)) continue;
+          if (!ruleForTitle(q.displayName)) continue;
+          byTitle.set(q.displayName, { attributeId: String(q.id), current: [] });
+          if (q.possibleAnswers?.length) allowed.set(q.displayName, q.possibleAnswers.map((a) => a.value));
+          added += 1;
+        }
+        if (added) classNotes.push(`${added} attribute(s) blank on Wayfair added from the class vocabulary`);
+      }
+    }
+
     // 3. Compute updates + diff — walk the item's own attribute titles so any
     // class maps exactly what it carries (exact rules first, then patterns).
     const updates: { attributeId: string; value: string[] }[] = [];
@@ -192,8 +231,16 @@ Deno.serve(async (req) => {
       if (!rule) { unmapped[title] = wf.current; continue; } // no PIM mapping
       let raw: string | string[] = "";
       try { raw = rule(product as Product, ctx); } catch { raw = ""; }
-      const values = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? "").trim()).filter(Boolean);
+      let values = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? "").trim()).filter(Boolean);
       if (!values.length) { skipped[title] = "no PIM value"; continue; }
+      // Blank-on-Wayfair attributes: only values from Wayfair's own list.
+      const list = allowed.get(title);
+      if (list) {
+        const snapped = values.map((v) => list.find((o) => canon(o) === canon(v)) ?? null);
+        const bad = values.filter((_, i) => snapped[i] == null);
+        if (bad.length) { skipped[title] = `"${bad.join(", ")}" is not in Wayfair's list (${list.slice(0, 8).join(", ")}${list.length > 8 ? "…" : ""})`; continue; }
+        values = snapped as string[];
+      }
       // Multi-value attributes (Mounting / Installation, Pieces Included,
       // Durability…): compare as sets, send the whole set.
       if (values.length > 1) {
@@ -252,6 +299,7 @@ Deno.serve(async (req) => {
       diff,
       skipped,
       unmapped,
+      notes: classNotes,
     };
 
     // 4. Mutation (unless dryRun)
