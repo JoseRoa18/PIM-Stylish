@@ -483,7 +483,8 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Made to Order": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
   "Personalization or Monogramming": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
   "Hazardous Material / Dangerous Goods": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
-  "Battery or Batteries Included": (p) => (isSinkCat(p) || isFaucetCat(p) || isAccessory(p) ? "No" : ""),
+  // Nothing in the catalog ships with batteries — "No" for EVERY product (rule 2026-09-21).
+  "Battery or Batteries Included": () => "No",
 };
 
 // Titles matching EXCLUDE never pattern-match: they describe a DIFFERENT

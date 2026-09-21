@@ -126,6 +126,10 @@ const FAUCET_SHAPE_OPTIONS = [
   'Flat', 'Elongated', 'Random', 'Crescent', 'Unique', 'Rounded Back', 'Can', 'P-Shaped', 'Unavailable',
 ];
 
+// Wayfair's "Spout Type" vocabulary (Kitchen Faucets 653 requires it, Bathroom
+// Sink Faucets 655 recommends it; read 2026-09-21). Same six values in both.
+const SPOUT_TYPE_OPTIONS = ['Gooseneck / High Arc', 'Low Arc', 'Rigid / Fixed', 'Swivel', 'Swing', 'Spring Neck'];
+
 // Attribute keys that must be coerced to numbers on save.
 const NUMBER_ATTRS = new Set([
   'number_of_bowls', 'sink_radius_mm', 'drain_diameter_in', 'product_weight_lb', 'left_bowl_depth_in', 'right_bowl_depth_in',
@@ -1268,7 +1272,7 @@ function SpecsTab({ product, edit }) {
         <>
           <Section title="Faucet Configuration">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="Spout Type" attrKey="spout_type" suggest product={product} edit={edit} />
+              <AttrField label="Spout Type" attrKey="spout_type" type="select" options={SPOUT_TYPE_OPTIONS} help="Wayfair's Spout Type list. Required for kitchen faucets, recommended for bathroom faucets." product={product} edit={edit} />
               <AttrField label="Overall Shape" attrKey="overall_shape" type="select" options={FAUCET_SHAPE_OPTIONS} help="Wayfair's Overall Shape list for faucets. Falls back to Spout Type when empty." product={product} edit={edit} />
               <AttrField label="Swivel Spout" attrKey="swivel_spout" product={product} edit={edit} />
               <AttrField label="Spout Rotation (Degrees)" attrKey="spout_rotation_degrees" type="number" help="How far the spout swivels, in degrees (e.g. 360)." product={product} edit={edit} />
@@ -2086,7 +2090,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
         <span className="text-label-md text-on-surface-variant">{label}</span>
         <select value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} className={inputBase}>
           <option value="">—</option>
-          {options.map((o) => (<option key={o} value={o}>{o}</option>))}
+          {(value && !options.includes(value) ? [value, ...options] : options).map((o) => (<option key={o} value={o}>{o}</option>))}
         </select>
       </div>
     );
