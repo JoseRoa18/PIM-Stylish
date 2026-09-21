@@ -605,6 +605,7 @@ Deno.serve(async (req) => {
     if (!WIX_API_KEY) return json({ error: "Missing WIX_API_KEY secret." }, 500);
     const body = await req.json().catch(() => ({}));
     const mode = body.mode ?? "status";
+    if (kind === "p2s" && mode !== "p2s-file") return json({ error: "This key may only post Price2Spy reports" }, 403);
     if (mode === "scan") {
       const now = new Date().toISOString();
       const sites = Array.isArray(body.sites) && body.sites.length ? body.sites.filter((s: string) => SITES.includes(s)) : SITES;
@@ -612,7 +613,6 @@ Deno.serve(async (req) => {
       for (const s of sites) out.push(await scanSite(s, now));
       return json({ ok: true, scanned_at: now, sites: out });
     }
-    if (kind === "p2s" && mode !== "p2s-file") return json({ error: "This key may only post Price2Spy reports" }, 403);
     if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
     if (mode === "p2s-file") {
       // body: { files: [{ name, base64 }] } (or a single { name, base64 })
