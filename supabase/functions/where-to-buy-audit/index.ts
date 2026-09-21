@@ -428,7 +428,13 @@ function urlKeyParts(u: string): { host: string; path: string; id: string | null
     const x = new URL(u.replace(/ /g, "%20"));
     const host = x.hostname.toLowerCase().replace(/^www\./, "");
     const path = x.pathname.toLowerCase().replace(/\/+$/, "");
-    const id = path.match(/\/dp\/([a-z0-9]{10})(?:[/?#]|$)/)?.[1]
+    // Wayfair: the product sku at the end of the path (…-tkjs5945.html) or in
+    // ?redir=/?piid= identifies the listing whatever category path the link uses.
+    const wayfairSku = /(?:^|\.)wayfair\.(?:ca|com)$/.test(host)
+      ? (path.match(/-([a-z]{1,4}\d{4,10})(?:\.html|$)/)?.[1] ?? (x.searchParams.get("redir") ?? x.searchParams.get("piid") ?? "").toLowerCase().match(/^[a-z]{1,4}\d{4,10}$/)?.[0] ?? null)
+      : null;
+    const id = wayfairSku
+      ?? path.match(/\/dp\/([a-z0-9]{10})(?:[/?#]|$)/)?.[1]
       ?? path.match(/\/product-page\/([^/?#]+)/)?.[1]
       ?? path.match(/(\d{6,})(?!.*\d{6,})/)?.[1]
       ?? x.searchParams.get("redir")?.toLowerCase()
