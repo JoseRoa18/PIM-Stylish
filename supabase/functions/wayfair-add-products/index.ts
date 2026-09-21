@@ -374,7 +374,7 @@ function formatByType(q: Question, value: string): string {
   return value;
 }
 
-type Attr = { attributeId: string; value: string; rank: number; parentRank: number; attributeInstance?: number };
+type Attr = { attributeId: string; value: string; rank: number; parentRank: number; attributeInstance: number };
 type MediaRow = {
   storage_path: string;
   media_type: string;
@@ -402,10 +402,15 @@ function buildProduct(
   const missingRequired: string[] = [];
   const unmapped: { title: string; value: string; options?: string[] }[] = [];
   const notes: string[] = [];
-  const add = (id: string, value: string, rank = 1, parentRank = 1, instance?: number) => {
+  // Wayfair's AttributeInput (schema descriptions, 2026-09-21):
+  //   rank        = n-th VALUE of one MULTI_CHOICE answer (Durability: Rust, Stain…)
+  //   parentRank  = n-th ANSWER of a multi-valued attribute (isMultiValue: each
+  //                 image, each document, each feature bullet)
+  //   attributeInstance = multi-instance groups such as cartons (carton 1, 2…)
+  // Images sent as ranks of one answer left Wayfair with a single image (B-112B).
+  const add = (id: string, value: string, rank = 1, parentRank = 1, instance = 1) => {
     if (value === "" || value == null) return;
-    const row: Attr = { attributeId: id, value: String(value), rank, parentRank };
-    if (instance != null) row.attributeInstance = instance;
+    const row: Attr = { attributeId: id, value: String(value), rank, parentRank, attributeInstance: instance };
     attrs.push(row);
     answered.add(id);
   };
@@ -447,7 +452,7 @@ function buildProduct(
     return true;
   });
   if (bullets.length > 8) notes.push(`${bullets.length} bullets in the PIM — only the first 8 are sent`);
-  bullets.slice(0, 8).forEach((b, i) => add("featureDescription::genericFeatures", b, i + 1));
+  bullets.slice(0, 8).forEach((b, i) => add("featureDescription::genericFeatures", b, 1, i + 1));
   if (!bullets.length) notes.push("no bullet points");
 
   // Media: white-background images (gray SinksDirect hero stays off Wayfair),
@@ -456,7 +461,7 @@ function buildProduct(
     .filter((m) => m.media_type === "image" && /^https?:\/\//i.test(m.storage_path ?? "") && m.image_role !== "sinksdirect_main")
     .sort((x, y) => Number(y.is_primary) - Number(x.is_primary) || (x.display_order ?? 0) - (y.display_order ?? 0))
     .slice(0, 16);
-  images.forEach((m, i) => add("media::imageValue", m.storage_path, i + 1));
+  images.forEach((m, i) => add("media::imageValue", m.storage_path, 1, i + 1));
   if (!images.length) notes.push("no images");
   let documents = 0;
   if (opts.includeDocuments) {
@@ -464,9 +469,9 @@ function buildProduct(
       const type = DOC_TYPES[m.document_type ?? ""];
       if (m.media_type !== "document" || !type || m.language === "fr" || !/\.pdf(\?|$)/i.test(m.storage_path ?? "")) continue;
       documents += 1;
-      add("media::documentValue", m.storage_path, documents, 1, documents);
-      add("media::documentType", type, documents, 1, documents);
-      add("media::regionType", opts.region, documents, 1, documents);
+      add("media::documentValue", m.storage_path, 1, documents);
+      add("media::documentType", type, 1, documents);
+      add("media::regionType", opts.region, 1, documents);
     }
   }
 
