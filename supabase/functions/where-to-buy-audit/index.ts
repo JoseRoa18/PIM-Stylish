@@ -19,6 +19,10 @@
 //                seen or a page without price → ok, an inactive URL → broken.
 //                Only rows still pending, or last checked before the report
 //                date, are touched.
+// mode "p2s-file" — same as "p2s" but receives the xlsx itself (base64) and
+//                parses it here: the Gmail Apps Script posts the daily
+//                Price2Spy attachments this way, authenticated with the
+//                P2S_INBOUND_SECRET header (x-p2s-secret).
 // mode "status"— count of rows due for a probe.
 //
 // Only FOUR verdicts (user rule, 2026-09-15):
@@ -49,6 +53,7 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const WIX_API_KEY = Deno.env.get("WIX_API_KEY") ?? "";
 const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
+const P2S_INBOUND_SECRET = Deno.env.get("P2S_INBOUND_SECRET") ?? "";
 
 const SITES = ["stylish_ca", "stylish_us"];
 const KEEP_DAYS = 7;        // ok / broken results stand for a week
@@ -483,19 +488,120 @@ async function applyPrice2Spy(body: { rows: Array<{ sku: string; site: string; u
   return { reportDate, market: body.market ?? null, reportRows: rows.length, matched, updated, keptFresher: skippedFresh, ...counts };
 }
 
+// ---------------------------------------------------------------- price2spy xlsx (server side)
+// Mirror of src/features/dashboard/lib/p2sReport.js for Deno: the matrix
+// report is a plain OOXML workbook, so regex over the sheet XML is enough
+// (no DOM here). Cell value + style fill + hyperlink target per cell.
+import JSZip from "https://esm.sh/jszip@3.10.1";
+
+const P2S_NOT_SITES = new Set(["product name", "map", "promo price", "targeted price", "sku", "internal id", "category", "brand", "supplier", "my own price is..."]);
+const xmlAttr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] ?? null;
+const unesc = (t: string) => t.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+const colIdx = (letters: string) => { let n = 0; for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
+
+async function parseP2sWorkbook(bytes: Uint8Array, fileName: string) {
+  const zip = await JSZip.loadAsync(bytes);
+  const read = async (p: string) => (zip.file(p) ? await zip.file(p)!.async("string") : "");
+  // shared strings
+  const ss: string[] = [];
+  for (const si of (await read("xl/sharedStrings.xml")).matchAll(/<si>([\s\S]*?)<\/si>/g)) {
+    ss.push(unesc([...si[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((m) => m[1]).join("")));
+  }
+  // styles → fill rgb per cellXfs index
+  const styles = await read("xl/styles.xml");
+  const fills: (string | null)[] = [];
+  for (const f of (styles.match(/<fills[^>]*>([\s\S]*?)<\/fills>/)?.[1] ?? "").matchAll(/<fill>([\s\S]*?)<\/fill>/g)) {
+    const rgb = f[1].match(/<fgColor[^>]*rgb="([0-9A-Fa-f]+)"/)?.[1];
+    fills.push(rgb ? rgb.slice(-6).toUpperCase() : null);
+  }
+  const fillOfStyle: (string | null)[] = [];
+  for (const xf of (styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)?.[1] ?? "").matchAll(/<xf\b[^>]*>/g)) {
+    fillOfStyle.push(fills[Number(xmlAttr(xf[0], "fillId") ?? 0)] ?? null);
+  }
+  // first sheet + its rels
+  const wb = await read("xl/workbook.xml");
+  const rId = wb.match(/<sheet\b[^>]*\br:id="([^"]+)"/)?.[1];
+  const wbRels = await read("xl/_rels/workbook.xml.rels");
+  let sheetPath = "xl/worksheets/sheet1.xml";
+  if (rId) {
+    const t = wbRels.match(new RegExp(`<Relationship\\b[^>]*Id="${rId}"[^>]*Target="([^"]+)"`))?.[1] ?? wbRels.match(new RegExp(`<Relationship\\b[^>]*Target="([^"]+)"[^>]*Id="${rId}"`))?.[1];
+    if (t) sheetPath = t.startsWith("/") ? t.slice(1) : `xl/${t}`;
+  }
+  const sheet = await read(sheetPath);
+  const rels = await read(sheetPath.replace(/worksheets\/([^/]+)$/, "worksheets/_rels/$1.rels"));
+  const relTarget: Record<string, string> = {};
+  for (const r of rels.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = xmlAttr(r[0], "Id"); const target = xmlAttr(r[0], "Target");
+    if (id && target) relTarget[id] = unesc(target);
+  }
+  const linkOfRef: Record<string, string> = {};
+  for (const h of sheet.matchAll(/<hyperlink\b[^>]*>/g)) {
+    const ref = xmlAttr(h[0], "ref"); const id = xmlAttr(h[0], "r:id");
+    if (ref && id && relTarget[id]) linkOfRef[ref] = relTarget[id];
+  }
+  // grid
+  const grid: Array<Array<{ value: string; fill: string | null; link: string | null } | undefined>> = [];
+  for (const row of sheet.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    const arr: Array<{ value: string; fill: string | null; link: string | null } | undefined> = [];
+    for (const c of row[1].matchAll(/<c\b([^>]*)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const attrs = c[1]; const inner = c[2] ?? "";
+      const ref = xmlAttr(attrs, "r") ?? ""; const m = ref.match(/^([A-Z]+)\d+$/);
+      if (!m) continue;
+      const type = xmlAttr(attrs, "t") ?? "";
+      const v = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? "";
+      const value = type === "s" ? (ss[Number(v)] ?? "") : type === "inlineStr" ? unesc(inner.match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1] ?? "") : v;
+      const style = Number(xmlAttr(attrs, "s") ?? -1);
+      arr[colIdx(m[1])] = { value, fill: style >= 0 ? fillOfStyle[style] ?? null : null, link: linkOfRef[ref] ?? null };
+    }
+    grid.push(arr);
+  }
+  const headerIdx = grid.findIndex((r) => r.some((c) => c && c.value.trim().toLowerCase() === "product name"));
+  if (headerIdx === -1) throw new Error(`${fileName}: header "Product name" not found — not a Price2Spy matrix report`);
+  const headers = grid[headerIdx].map((c) => (c?.value ?? "").trim());
+  const siteCols = headers.map((h, i) => ({ h, i })).filter(({ h, i }) => i > 0 && h && !P2S_NOT_SITES.has(h.toLowerCase()));
+  const rows: Array<{ sku: string; site: string; url: string; price: number | null; status: string }> = [];
+  for (let r = headerIdx + 1; r < grid.length; r++) {
+    const sku = (grid[r]?.[0]?.value ?? "").trim();
+    if (!sku) continue;
+    for (const { h, i } of siteCols) {
+      const cell = grid[r][i];
+      if (!cell?.link) continue;
+      const price = Number(cell.value);
+      const status = cell.fill === "DFDFDF" ? "inactive" : cell.fill === "F7FAAC" || (Number.isFinite(price) && price === 0) ? "zero" : Number.isFinite(price) && price > 0 ? "price" : "unknown";
+      rows.push({ sku, site: h, url: cell.link, price: Number.isFinite(price) ? price : null, status });
+    }
+  }
+  const market = /^canada/i.test(fileName) ? "ca" : /^usa/i.test(fileName) ? "us" : null;
+  const reportDate = fileName.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+  return { market, reportDate, sites: siteCols.map((s) => s.h), rows };
+}
+
+async function logImport(summary: string, metadata: Record<string, unknown>) {
+  try {
+    await rest("audit_log", { method: "POST", body: JSON.stringify({ actor_id: null, actor_email: null, actor_name: "Price2Spy (Gmail)", action: "import", entity_type: "channel", entity_id: "where_to_buy", target: "price2spy", summary, metadata }) });
+  } catch (e) { console.warn("[where-to-buy] audit log failed:", (e as Error).message); }
+}
+
 // ---------------------------------------------------------------- auth
-async function authorized(req: Request): Promise<boolean> {
-  if (CRON_SECRET && req.headers.get("x-cron-secret") === CRON_SECRET) return true;
+// How the caller is authorized: the cron secret, a signed-in user's JWT, or
+// the Gmail script's report key (which may only post reports — the gateway
+// adds an anon Authorization header, so the JWT check must really pass).
+async function authKind(req: Request): Promise<"cron" | "user" | "p2s" | null> {
+  if (CRON_SECRET && req.headers.get("x-cron-secret") === CRON_SECRET) return "cron";
   const auth = req.headers.get("authorization") ?? "";
-  if (!auth.startsWith("Bearer ")) return false;
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: auth } });
-  return r.ok;
+  if (auth.startsWith("Bearer ")) {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: auth } });
+    if (r.ok) return "user";
+  }
+  if (P2S_INBOUND_SECRET && req.headers.get("x-p2s-secret") === P2S_INBOUND_SECRET) return "p2s";
+  return null;
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    if (!(await authorized(req))) return json({ error: "Unauthorized" }, 401);
+    const kind = await authKind(req);
+    if (!kind) return json({ error: "Unauthorized" }, 401);
     if (!WIX_API_KEY) return json({ error: "Missing WIX_API_KEY secret." }, 500);
     const body = await req.json().catch(() => ({}));
     const mode = body.mode ?? "status";
@@ -506,7 +612,26 @@ Deno.serve(async (req) => {
       for (const s of sites) out.push(await scanSite(s, now));
       return json({ ok: true, scanned_at: now, sites: out });
     }
+    if (kind === "p2s" && mode !== "p2s-file") return json({ error: "This key may only post Price2Spy reports" }, 403);
     if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
+    if (mode === "p2s-file") {
+      // body: { files: [{ name, base64 }] } (or a single { name, base64 })
+      const files: Array<{ name: string; base64: string }> = Array.isArray(body.files) ? body.files : body.name && body.base64 ? [{ name: body.name, base64: body.base64 }] : [];
+      if (!files.length) return json({ error: "files[] with { name, base64 } is required" }, 400);
+      const results = [];
+      for (const f of files) {
+        try {
+          const bytes = Uint8Array.from(atob(String(f.base64).replace(/\s+/g, "")), (c) => c.charCodeAt(0));
+          const parsed = await parseP2sWorkbook(bytes, String(f.name ?? ""));
+          const r = await applyPrice2Spy({ rows: parsed.rows, reportDate: parsed.reportDate, market: parsed.market });
+          await logImport(`Price2Spy report ${f.name}: ${r.matched} links matched, ${r.ok} ok, ${r.broken} broken`, { ...r, file: f.name, via: "gmail" });
+          results.push({ file: f.name, ...r });
+        } catch (e) {
+          results.push({ file: f.name, error: (e as Error).message });
+        }
+      }
+      return json({ ok: true, results });
+    }
     if (mode === "check") {
       const result = await check(body.budgetMs ?? 35000, body.limit ?? 400);
       if (typeof body.chain === "number" && result.morePending && result.checked > 0) chainNext(body.chain);
