@@ -3,8 +3,9 @@
  *
  * Runs inside the Gmail account that receives the daily Price2Spy matrix
  * reports (usa-p2s-pricing-report-YYYY-MM-DD.xlsx / canada-…). Once a day it
- * finds the newest unprocessed report emails, posts the xlsx attachments to
- * the PIM, and labels the emails so they are never sent twice.
+ * finds the unprocessed report emails, posts ONLY the newest report per
+ * market (usa / canada) to the PIM, and labels the emails so they are never
+ * sent twice.
  *
  * Setup (5 minutes, done once by the mailbox owner):
  *   1. script.google.com → New project → paste this file → set PIM_SECRET below.
@@ -28,25 +29,33 @@ function sendPrice2SpyReports() {
   const query = `has:attachment filename:xlsx newer_than:${LOOKBACK_DAYS}d -label:${LABEL_DONE.replace('/', '-')} (filename:p2s-pricing-report OR subject:price2spy)`;
   const threads = GmailApp.search(query, 0, 20);
   Logger.log(`${threads.length} thread(s) to check`);
+
+  // Collect every report attachment, then keep only the NEWEST per market
+  // (usa / canada) by the date in the file name. Older ones are labeled as
+  // done without being sent — the PIM would ignore them anyway.
+  const newest = {};
   for (const thread of threads) {
-    const files = [];
     for (const message of thread.getMessages()) {
       for (const att of message.getAttachments()) {
         const name = att.getName();
-        if (!/p2s-pricing-report.*\.xlsx$/i.test(name)) continue;
-        files.push({ name, base64: Utilities.base64Encode(att.getBytes()) });
+        const m = name.match(/^(usa|canada)-p2s-pricing-report-(\d{4}-\d{2}-\d{2})/i);
+        if (!m || !/\.xlsx$/i.test(name)) continue;
+        const market = m[1].toLowerCase();
+        if (!newest[market] || m[2] > newest[market].date) newest[market] = { date: m[2], name, att };
       }
     }
-    if (!files.length) continue;
-    const res = UrlFetchApp.fetch(PIM_ENDPOINT, {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { apikey: PIM_ANON_KEY, 'x-p2s-secret': PIM_SECRET },
-      payload: JSON.stringify({ mode: 'p2s-file', files }),
-      muteHttpExceptions: true,
-    });
-    const code = res.getResponseCode();
-    Logger.log(`${files.map((f) => f.name).join(', ')} → HTTP ${code}: ${res.getContentText().slice(0, 300)}`);
-    if (code === 200) thread.addLabel(label);
   }
+  const files = Object.values(newest).map((f) => ({ name: f.name, base64: Utilities.base64Encode(f.att.getBytes()) }));
+  if (!files.length) { Logger.log('No new Price2Spy reports'); return; }
+
+  const res = UrlFetchApp.fetch(PIM_ENDPOINT, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { apikey: PIM_ANON_KEY, 'x-p2s-secret': PIM_SECRET },
+    payload: JSON.stringify({ mode: 'p2s-file', files }),
+    muteHttpExceptions: true,
+  });
+  const code = res.getResponseCode();
+  Logger.log(`${files.map((f) => f.name).join(', ')} -> HTTP ${code}: ${res.getContentText().slice(0, 400)}`);
+  if (code === 200) for (const thread of threads) thread.addLabel(label);
 }
