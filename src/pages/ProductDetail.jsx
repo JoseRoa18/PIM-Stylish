@@ -27,6 +27,7 @@ import {
   Download,
   UploadCloud,
   Fingerprint,
+  ExternalLink,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
@@ -1053,7 +1054,7 @@ function OverviewTab({ product, edit, documents = [], onProductChanged, onUnify 
           <AttrField label="HS Code" attrKey="hs_code" product={product} edit={edit} mono />
           <AttrField label="Warranty" attrKey="warranty" product={product} edit={edit} />
           <AttrField label="Warranty Length" attrKey="warranty_length" type="select" options={WARRANTY_LENGTH_OPTIONS} product={product} edit={edit} />
-          <AttrField label="Warranty URL" attrKey="warranty_url" help="Public warranty page sent to marketplaces (Walmart warrantyURL). Same address for every product." product={product} edit={edit} mono />
+          <AttrField label="Warranty URL" attrKey="warranty_url" type="url" help="Public warranty page sent to marketplaces (Walmart warrantyURL). Same address for every product." product={product} edit={edit} />
           <div className="col-span-2 sm:col-span-3">
             <AttrField label="Warranty Text" attrKey="warranty_text" type="textarea" help="Full warranty terms sent to marketplaces that ask for written warranty text (Walmart has_written_warranty = Yes - Warranty Text)." product={product} edit={edit} />
           </div>
@@ -2059,12 +2060,25 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
       );
     }
     if (type === 'number') return <Field label={label} value={val != null ? String(val) : null} mono={mono} />;
+    if (type === 'url') {
+      if (!val) return <Field label={label} value={null} />;
+      const pretty = String(val).replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+      return (
+        <div className="flex flex-col gap-1">
+          <span className="text-label-md text-on-surface-variant">{label}</span>
+          <a href={val} target="_blank" rel="noopener noreferrer" title={val} className="inline-flex items-center gap-1.5 text-body-md text-primary hover:underline w-fit">
+            {pretty}
+            <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
+          </a>
+        </div>
+      );
+    }
     if (type === 'textarea') {
       if (!val) return <Field label={label} value={null} />;
       return (
         <div className="flex flex-col gap-1">
           <span className="text-label-md text-on-surface-variant">{label}</span>
-          <p className="text-body-md text-on-surface whitespace-pre-wrap">{val}</p>
+          <p className="text-body-sm leading-relaxed text-on-surface-variant whitespace-pre-wrap rounded-lg bg-surface-container-low px-4 py-3 max-w-3xl">{val}</p>
         </div>
       );
     }
