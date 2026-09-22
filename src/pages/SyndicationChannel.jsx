@@ -4,6 +4,7 @@ import WixConnectorCard from '@/features/syndication/components/WixConnectorCard
 import WayfairConnectorCard from '@/features/syndication/components/WayfairConnectorCard';
 import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import ReadOnlyChannelCard from '@/features/syndication/components/ReadOnlyChannelCard';
+import WalmartBulkAdditionCard from '@/features/syndication/components/WalmartBulkAdditionCard';
 import BestBuyCatalogAuditCard from '@/features/syndication/components/BestBuyCatalogAuditCard';
 import BestBuyContentPushCard from '@/features/syndication/components/BestBuyContentPushCard';
 import { LIVE_CHANNELS } from '@/features/syndication/lib/channels';
@@ -31,7 +32,12 @@ const WORKSPACES = {
   wix: WixConnectorCard,
   wayfair: WayfairWorkspace,
   bestbuy: BestBuyWorkspace,
-  walmart_us: () => <ReadOnlyChannelCard channel="walmart_us" />,
+  walmart_us: () => (
+    <>
+      <ReadOnlyChannelCard channel="walmart_us" />
+      <WalmartBulkAdditionCard />
+    </>
+  ),
   walmart_ca: () => <ReadOnlyChannelCard channel="walmart_ca" />,
 };
 

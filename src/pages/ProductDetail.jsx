@@ -50,6 +50,7 @@ import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/featur
 import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
 import AliasesTab from '@/features/products/components/AliasesTab';
 import WalmartProductCard from '@/features/syndication/components/WalmartProductCard';
+import WalmartAdditionCard from '@/features/syndication/components/WalmartAdditionCard';
 import { latestSnapshot } from '@/features/syndication/lib/channels';
 import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
@@ -1787,7 +1788,12 @@ function MarketplacesTab({ product, media, onUpdate }) {
       )}
       {selected === 'wayfair_us' && <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />}
       {selected === 'walmart_ca' && <WalmartProductCard market="ca" product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
-      {selected === 'walmart_us' && <WalmartProductCard market="us" product={product} row={wmUs ?? null} loading={wmUs === undefined} />}
+      {selected === 'walmart_us' && (
+        <>
+          <WalmartProductCard market="us" product={product} row={wmUs ?? null} loading={wmUs === undefined} />
+          <WalmartAdditionCard product={product} />
+        </>
+      )}
       {selected === 'templates' && <ExportTemplatesCard product={product} media={media} />}
     </div>
   );
