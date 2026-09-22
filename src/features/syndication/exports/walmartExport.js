@@ -24,8 +24,9 @@ import {
 //   Closed-list values live on the companion "Hidden_*" sheet; rules emit the
 //   exact list wording ("UPC", "lb", "Does Not Contain a Battery"…).
 //
-// French columns are left blank on purpose: the PIM has no French content yet,
-// and every _fr column in the spec is [Optional].
+// French columns come from the PIM's French content (title, description,
+// bullets, keywords — filled on ~98% of the catalog since 2026-09); every _fr
+// column in the spec is [Optional], so a missing translation just stays blank.
 
 const WALMART_DOC_TYPES = {
   spec_sheet: 'spec_sheet',
@@ -83,15 +84,20 @@ export const WALMART_RULES = {
   productIdType: (p) => (attr(p).upc ? 'UPC' : ''),
   productId: (p) => attr(p).upc || '',
   productName_en: (p) => attr(p).general_title_en || p.model_name || p.sku,
+  productName_fr: (p) => attr(p).general_title_fr || '',
   brand_en: (p) => brandMap(p.brand),
+  brand_fr: (p) => brandMap(p.brand),
   // Manufacturer = legal entity per brand (Stylish → the Inc., Azuni → Azuni).
   manufacturer_en: (p) => (/azuni/i.test(p.brand || '') ? 'Azuni' : 'Stylish International Inc.'),
+  manufacturer_fr: (p) => (/azuni/i.test(p.brand || '') ? 'Azuni' : 'Stylish International Inc.'),
   manufacturerPartNumber: (p) => p.sku,
   modelNumber: (p) => p.sku,
 
-  // Walmart CA sells in CAD, so PIM CAD pricing maps directly.
-  price: (p) => num(p.msrp_cad),
+  // Walmart CA sells at the PIM's MAP CAD (verified 2026-09-13: S-612WN 628,
+  // S-406TG 357, A-02 82); MSRP is the list price shown struck through.
+  price: (p) => num(p.map_cad),
   msrp: (p) => num(p.msrp_cad),
+  MinimumAdvertisedPrice: (p) => num(p.map_cad),
 
   countryOfOriginAssembly: (p) =>
     /china|cn/i.test(attr(p).country_of_origin || 'China') ? 'CN - China' : '',
@@ -103,8 +109,11 @@ export const WALMART_RULES = {
   unit: (p) => (num(p.shipping_weight_lb) ? 'lb' : ''),
 
   shortDescription_en: (p) => stripHtml(p.description),
+  shortDescription_fr: (p) => stripHtml(attr(p).description_fr),
   keyFeatures_en: (p) => list(attr(p).bullet_points).slice(0, 3),
+  keyFeatures_fr: (p) => list(attr(p).bullet_points_fr).slice(0, 3),
   features_en: (p) => list(attr(p).bullet_points).slice(3).join(' | '),
+  features_fr: (p) => list(attr(p).bullet_points_fr).slice(3).join(' | '),
   // Curated keywords when the product has them; otherwise fall back to the
   // structured fields, which is all this had before the field existed.
   keywords_en: (p) => {
@@ -112,15 +121,18 @@ export const WALMART_RULES = {
     if (curated.length) return curated.join(', ');
     return [p.category, p.product_type, p.finish, p.brand].filter(Boolean).join(', ');
   },
+  keywords_fr: (p) => list(attr(p).keywords_fr).join(', '),
 
   mainImageUrl: (p) => (p._images ?? [])[0] ?? '',
   productSecondaryImageURL: (p) => (p._images ?? []).slice(1, 5),
 
+  // Warranty per market (fields added 2026-09-22): the Canadian text and page.
   warrantyText_en: (p) => {
+    if (attr(p).warranty_text_ca) return attr(p).warranty_text_ca;
     const parts = [attr(p).warranty_length, attr(p).warranty].filter(Boolean);
     return parts.length ? `${parts.join(' ')} warranty`.replace(/\s+/g, ' ') : '';
   },
-  warrantyURL: (p) => docUrl(p, 'warranty_file'),
+  warrantyURL: (p) => attr(p).warranty_url_ca || docUrl(p, 'warranty_file'),
 
   // Compliance — constants confirmed for our catalog (no electronics/chemicals).
   electronicsIndicator: () => 'No',
@@ -131,7 +143,7 @@ export const WALMART_RULES = {
   batteryTechnologyType: () => 'Does Not Contain a Battery',
   smallPartsWarnings: () => '0 - No warning applicable',
 
-  color_en: (p) => p.finish || '',
+  color_en: (p) => p.color || p.finish || '',
   colorCategory: (p) => colorCategory(p.finish),
   material_en: (p) => list(attr(p).material ?? p.material).join(', '),
   finish_en: (p) => p.finish || '',
