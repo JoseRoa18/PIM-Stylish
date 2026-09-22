@@ -180,16 +180,11 @@ function buildEditForm(product) {
     cost_usd_lowes_sod_bbb: product.cost_usd_lowes_sod_bbb ?? '',
     cost_usd_wayfair: product.cost_usd_wayfair ?? '',
     cost_usd_menards: product.cost_usd_menards ?? '',
-    sale_price_cad: product.sale_price_cad ?? '',
-    on_sale: product.on_sale ?? false,
     shipping_weight_lb: product.shipping_weight_lb ?? '',
     description: product.description ?? '',
     quickbooks_description: product.quickbooks_description ?? '',
     notes: product.notes ?? '',
     ribbon: product.ribbon ?? '',
-    visible_online: product.visible_online ?? true,
-    visible_pos: product.visible_pos ?? true,
-    pre_order: product.pre_order ?? false,
     standards_compliance: product.standards_compliance ?? '',
 
     // From attributes JSONB
@@ -254,7 +249,7 @@ function buildEditForm(product) {
 const NUMBER_COLUMNS = new Set([
   'family_number', 'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
   'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
-  'sale_price_cad', 'shipping_weight_lb',
+  'shipping_weight_lb',
 ]);
 
 function cleanDims(dims) {
@@ -1494,10 +1489,6 @@ function ContentTab({ product, edit, onGenerated }) {
         <AttrListField label="Keywords (FR)" attrKey="keywords_fr" product={product} edit={edit}
           hint="Separate terms with ; — French search terms, not a translation of the English list" />
       </Section>
-
-      <Section title="Notes" defaultOpen={false}>
-        <EditableField label="Internal Notes" fieldKey="notes" type="textarea" product={product} edit={edit} />
-      </Section>
     </div>
   );
 }
@@ -1551,23 +1542,6 @@ function PricingTab({ product, edit, onAddPricing }) {
           </Section>
         </>
       )}
-      <Section title="Sale Pricing">
-        <div className="space-y-4">
-          <EditableField label="On Sale" fieldKey="on_sale" type="boolean" product={product} edit={edit} />
-          {(edit.isEditing ? edit.form.on_sale : product.on_sale) && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <EditableField label="Sale Price (CAD)" fieldKey="sale_price_cad" type="currency" product={product} edit={edit} />
-            </div>
-          )}
-        </div>
-      </Section>
-      <Section title="Visibility" defaultOpen={false}>
-        <div className="space-y-3">
-          <EditableField label="Show in online store" fieldKey="visible_online" type="boolean" product={product} edit={edit} />
-          <EditableField label="Show in Point of Sale" fieldKey="visible_pos" type="boolean" product={product} edit={edit} />
-          <EditableField label="Available for pre-order" fieldKey="pre_order" type="boolean" product={product} edit={edit} />
-        </div>
-      </Section>
     </div>
   );
 }
