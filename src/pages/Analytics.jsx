@@ -9,7 +9,6 @@ import WeekSummary from '@/features/analytics/components/WeekSummary';
 import HeadlineKpis from '@/features/analytics/components/HeadlineKpis';
 import CategoryProgress from '@/features/analytics/components/CategoryProgress';
 import GapAging from '@/features/analytics/components/GapAging';
-import LaunchFunnel from '@/features/analytics/components/LaunchFunnel';
 import ChannelCoverage from '@/features/analytics/components/ChannelCoverage';
 import PromoStatus from '@/features/analytics/components/PromoStatus';
 import TeamActivity from '@/features/analytics/components/TeamActivity';
@@ -27,7 +26,6 @@ import { formatTimeAgo } from '@/lib/format';
 const SECTIONS = [
   { id: 'overview', label: 'Overview' },
   { id: 'quality', label: 'Data quality' },
-  { id: 'launches', label: 'Launches' },
   { id: 'channels', label: 'Channels' },
   { id: 'promotions', label: 'Promotions' },
   { id: 'team', label: 'Team' },
@@ -38,7 +36,7 @@ export default function Analytics() {
   const [weekKey, setWeekKey] = useState(null);
   const {
     weeks, week, index, snapshots, targets, setTargets, auditRows, activity, prevActivity, activityTrend,
-    launches, promotions, screen, prevScreen, screenTrend, loading, error, reloadSnapshots,
+    products, promotions, screen, prevScreen, screenTrend, loading, error, reloadSnapshots,
   } = useKpi(weekKey);
   const [snapping, setSnapping] = useState(false);
   const [snapMsg, setSnapMsg] = useState(null);
@@ -55,7 +53,7 @@ export default function Analytics() {
     return fromSnaps.length ? fromSnaps : Object.keys(CATEGORY_LABEL);
   }, [index]);
   const latestTaken = snapshots.length ? snapshots.reduce((a, r) => (r.taken_at > a ? r.taken_at : a), '') : null;
-  const names = useMemo(() => new Map(launches.map((p) => [p.sku, p.model_name])), [launches]);
+  const names = useMemo(() => new Map(products.map((p) => [p.sku, p.model_name])), [products]);
   const weekRows = useMemo(() => {
     if (!auditRows) return [];
     const end = new Date(week.end.getTime() + 86399999);
@@ -145,7 +143,7 @@ export default function Analytics() {
     <div className="max-w-7xl mx-auto">
       <header className="mb-4">
         <h1 className="text-display-lg text-on-surface">Analytics</h1>
-        <p className="text-body-md text-on-surface-variant mt-1">Weekly progress of the catalog's data, launches, channels, promotions and the team's work.</p>
+        <p className="text-body-md text-on-surface-variant mt-1">Weekly progress of the catalog's data, channels, promotions and the team's work.</p>
       </header>
 
       {/* Pinned: week switcher, section index, actions */}
@@ -234,10 +232,6 @@ export default function Analytics() {
           <Section id="quality" title="Data quality" blurb="Completeness by category against its target, and how long the gaps have been open.">
             <CategoryProgress index={index} week={week} targets={targets} canEditTargets={role === 'admin'} onEditTargets={() => setEditingTargets(true)} />
             <GapAging index={index} />
-          </Section>
-
-          <Section id="launches" title="Launches" blurb="The workflow funnel and the products that were created or reached Ready to sell this week.">
-            <LaunchFunnel launches={launches} auditRows={auditRows} index={index} week={week} />
           </Section>
 
           <Section id="channels" title="Channels" blurb="Coverage, listing scores, price alignment and spec sync per marketplace.">

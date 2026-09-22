@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { loadSnapshots, loadActivityRows, aggregateActivity, loadTargets, loadLaunches, loadPromotions, loadScreenTime } from '../api/kpi';
+import { loadSnapshots, loadActivityRows, aggregateActivity, loadTargets, loadProductNames, loadPromotions, loadScreenTime } from '../api/kpi';
 import { indexSnapshots, recentWeeks, weekBuckets, addDays, weekStart, toDateKey, weekTag, formatShort } from '../lib/weekly';
 
 // Everything the Analytics page needs: the snapshot index (now vs week
 // start, trends, aging), 12 weeks of audit rows (bucketed for the team trend
-// and sliced for the selected week), launches and promotions.
+// and sliced for the selected week), product names and promotions.
 export function useKpi(weekKey) {
   const weeks = useMemo(() => recentWeeks(8), []);
   const week = weeks.find((w) => w.key === weekKey) ?? weeks[0];
   const [snapshots, setSnapshots] = useState([]);
   const [targets, setTargets] = useState({ global: null, categories: {} });
   const [auditRows, setAuditRows] = useState(null);
-  const [launches, setLaunches] = useState([]);
+  const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState(null);
   const [screenRows, setScreenRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ export function useKpi(weekKey) {
           loadSnapshots(),
           loadTargets(),
           loadActivityRows(from, new Date()),
-          loadLaunches(),
+          loadProductNames(),
           loadPromotions(),
           loadScreenTime(from, new Date()).catch(() => []),
         ]);
@@ -38,7 +38,7 @@ export function useKpi(weekKey) {
         setSnapshots(snaps);
         setTargets(tg);
         setAuditRows(rows);
-        setLaunches(ln);
+        setProducts(ln);
         setPromotions(pr);
         setScreenRows(st);
       } catch (err) {
@@ -89,5 +89,5 @@ export function useKpi(weekKey) {
     return out;
   }, [screenRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { weeks, week, index, snapshots, targets, setTargets, auditRows, activity, prevActivity, activityTrend, launches, promotions, screen, prevScreen, screenTrend, loading, error, reloadSnapshots };
+  return { weeks, week, index, snapshots, targets, setTargets, auditRows, activity, prevActivity, activityTrend, products, promotions, screen, prevScreen, screenTrend, loading, error, reloadSnapshots };
 }

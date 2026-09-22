@@ -181,12 +181,9 @@ export async function loadScreenTime(start, end) {
   return rows.map((r) => ({ ...r, email: people.get(r.user_id)?.email ?? r.user_id, name: people.get(r.user_id)?.name ?? null }));
 }
 
-/** Launch funnel: workflow status now, plus creations and Ready-to-sell dates. */
-export async function loadLaunches() {
-  const { data, error } = await supabase
-    .from('products')
-    .select('sku, model_name, category, workflow_status, created_at, ready_to_sell_date')
-    .neq('workflow_status', 'archived');
+/** Product names (sku → model_name) for the activity and completeness details. */
+export async function loadProductNames() {
+  const { data, error } = await supabase.from('products').select('sku, model_name');
   if (error) throw error;
   return data ?? [];
 }
