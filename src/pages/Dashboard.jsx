@@ -4,7 +4,6 @@ import ActionNeededCard from '@/features/dashboard/components/ActionNeededCard';
 import MarketplaceHealthGrid from '@/features/dashboard/components/MarketplaceHealthGrid';
 import CatalogStatusCard from '@/features/dashboard/components/CatalogStatusCard';
 import ContentGapsCard from '@/features/dashboard/components/ContentGapsCard';
-import LaunchPipelineCard from '@/features/dashboard/components/LaunchPipelineCard';
 import RecentActivityCard from '@/features/dashboard/components/RecentActivityCard';
 
 export default function Dashboard() {
@@ -40,10 +39,7 @@ export default function Dashboard() {
             refreshing={data.healthRefreshing}
           />
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <CatalogStatusCard data={data} />
-            <LaunchPipelineCard data={data} />
-          </div>
+          <CatalogStatusCard data={data} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ContentGapsCard

@@ -165,7 +165,7 @@ function buildActions({ channelSnapshots, unlinkedWix }) {
 
 /**
  * Everything the Dashboard needs in one parallel round of lightweight reads:
- * a slim product list (status / launch dates / links) plus the persisted
+ * a slim product list (status / links) plus the persisted
  * channel + listing-health snapshots. No full-catalog scoring here.
  */
 export function useDashboardData() {
@@ -182,7 +182,7 @@ export function useDashboardData() {
           supabase
             .from('products')
             .select(
-              'sku, model_name, workflow_status, category, wix_product_id, wix_synced_at, ready_to_sell_date, created_at',
+              'sku, model_name, workflow_status, category, wix_product_id, wix_synced_at, created_at',
             ),
           latestHealthSummaries(),
           ...SYNC_CHANNELS.map((c) => latestSnapshotLite(c)),
@@ -194,11 +194,6 @@ export function useDashboardData() {
           SYNC_CHANNELS.map((c, i) => [c, snapshots[i]]),
         );
 
-        const today = new Date();
-        const thirtyDaysAgo = new Date(today);
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-        const thirtyDaysAhead = new Date(today);
-        thirtyDaysAhead.setDate(today.getDate() + 30);
 
         const byStatus = {};
         const byCategory = {};
@@ -209,24 +204,6 @@ export function useDashboardData() {
           if (p.category) byCategory[p.category] = (byCategory[p.category] ?? 0) + 1;
           if (p.wix_product_id) linkedWix++;
         }
-
-        const upcomingLaunches = list
-          .filter((p) => {
-            if (!p.ready_to_sell_date) return false;
-            const d = new Date(p.ready_to_sell_date);
-            return d >= today && d <= thirtyDaysAhead && p.workflow_status !== 'ready_to_sell';
-          })
-          .sort((a, b) => new Date(a.ready_to_sell_date) - new Date(b.ready_to_sell_date));
-
-        const overdueLaunches = list.filter((p) => {
-          if (!p.ready_to_sell_date) return false;
-          const d = new Date(p.ready_to_sell_date);
-          return d < today && p.workflow_status !== 'ready_to_sell' && p.workflow_status !== 'archived';
-        });
-
-        const stalled = list.filter(
-          (p) => p.created_at && new Date(p.created_at) < thirtyDaysAgo && p.workflow_status === 'new',
-        );
 
         // Fallback feed for RecentActivityCard when the audit log is empty
         // or RLS hides it from the current role.
@@ -251,9 +228,6 @@ export function useDashboardData() {
             healthSummaries,
             healthRefreshing: stale,
             contentGaps: buildContentGaps(healthSummaries),
-            upcomingLaunches,
-            overdueLaunches,
-            stalled,
             recentCreated,
             recentPushed,
           });
