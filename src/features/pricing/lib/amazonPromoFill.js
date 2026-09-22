@@ -29,7 +29,22 @@ import { marketWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const HEADER_SCAN_ROWS = 12;
-const FULFILLMENT_VALUE = 'Fulfillment by Merchant (Default)';
+// The merchant-fulfilled option as each template spells it: Amazon.com says
+// "Fulfillment by Merchant (Default)", Amazon.ca "Fulfilment by Merchant
+// (Default)". Read from the file's own Valid Values sheet; the US spelling is
+// the fallback when the sheet is missing.
+const FULFILLMENT_FALLBACK = 'Fulfillment by Merchant (Default)';
+async function merchantFulfillmentValue(zip, shared) {
+  const path = await sheetPathByName(zip, 'Valid Values');
+  if (!path) return FULFILLMENT_FALLBACK;
+  const grid = sheetToGrid(await zip.file(path).async('string'), shared);
+  for (const row of grid) {
+    if (!row.some((c) => /fulfil+ment channel code/i.test(text(c)))) continue;
+    const hit = row.find((c) => /fulfil+ment by merchant/i.test(text(c)));
+    if (hit) return text(hit);
+  }
+  return FULFILLMENT_FALLBACK;
+}
 const text = (v) => String(v ?? '').trim();
 const lower = (v) => text(v).toLowerCase();
 
@@ -73,6 +88,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   }
 
   const market = channel.market;
+  const fulfillmentValue = await merchantFulfillmentValue(zip, shared);
   const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const prices = await getPromotionPrices(promotion.id);
   const members = prices.filter((r) => r[priceKey] != null);
@@ -107,7 +123,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   const { sku: skuCol, price: priceCol, start: startCol, end: endCol, fulfillment: fulfillCol } = loc.cols;
   const cellsFor = (rn, o) => new Map([
     [skuCol + 1, buildCell(`${indexToCol(skuCol + 1)}${rn}`, o.seller)],
-    ...(fulfillCol >= 0 ? [[fulfillCol + 1, buildCell(`${indexToCol(fulfillCol + 1)}${rn}`, FULFILLMENT_VALUE)]] : []),
+    ...(fulfillCol >= 0 ? [[fulfillCol + 1, buildCell(`${indexToCol(fulfillCol + 1)}${rn}`, fulfillmentValue)]] : []),
     [priceCol + 1, buildCell(`${indexToCol(priceCol + 1)}${rn}`, Number(o.price))],
     [startCol + 1, buildCell(`${indexToCol(startCol + 1)}${rn}`, window.start)],
     [endCol + 1, buildCell(`${indexToCol(endCol + 1)}${rn}`, window.end)],
@@ -150,6 +166,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
     appended: toAppend.length,
     noOffer,
     window,
+    fulfillmentValue,
     columns: { sku: indexToCol(skuCol + 1), fulfillment: fulfillCol >= 0 ? indexToCol(fulfillCol + 1) : null, price: indexToCol(priceCol + 1), start: indexToCol(startCol + 1), end: indexToCol(endCol + 1) },
   };
   logActivity({
