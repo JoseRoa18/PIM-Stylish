@@ -61,7 +61,7 @@ async function getToken(base: string, cid: string, sec: string): Promise<string>
 
 // ---------------------------------------------------------------- PIM helpers
 type Product = Record<string, unknown> & { sku: string; attributes?: Record<string, unknown> | null };
-type MediaRow = { sku: string; storage_path: string; media_type: string; is_primary: boolean; display_order: number | null; image_role: string | null };
+type MediaRow = { sku: string; storage_path: string; media_type: string; is_primary: boolean; display_order: number | null; image_role: string | null; language?: string | null };
 
 const attr = (p: Product) => (p.attributes ?? {}) as Record<string, unknown>;
 const text = (v: unknown) => (v == null ? "" : String(v).trim());
@@ -205,15 +205,26 @@ function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: 
   if (bullets.length && bullets.length < 4) warnings.push(`${bullets.length} bullets — Walmart wants at least 4`);
   set(vis, "keyFeatures", bullets, "Content", bullets.join(" | "), true);
 
-  // ---- Visible: media (white images only; the gray SinksDirect hero stays off)
+  // ---- Visible: media. White images only (the gray SinksDirect hero stays
+  // off). Main = the language-neutral primary. Secondary = ONE language set,
+  // the same rule the Wix US pushes use: the EN set when the product has one,
+  // else the non-French artwork (EN/ES + untagged), else the EN/FR set rather
+  // than no photos. Sets never mix — the EN/FR and EN/ES copies are duplicates.
   const images = media
     .filter((m) => m.media_type === "image" && /^https?:\/\//i.test(m.storage_path ?? "") && m.image_role !== "sinksdirect_main")
     .sort((x, y) => Number(y.is_primary) - Number(x.is_primary) || (x.display_order ?? 0) - (y.display_order ?? 0));
   const main = images.find((m) => m.is_primary) ?? images[0];
   set(vis, "mainImageUrl", main?.storage_path ?? "", "Media", main ? main.storage_path.split("/").pop() : undefined, true);
-  const secondary = images.filter((m) => m !== main).map((m) => m.storage_path);
-  if (secondary.length >= 3) set(vis, "productSecondaryImageURL", secondary, "Media", secondary.map((u) => u.split("/").pop()).join(" | "));
-  else if (secondary.length) warnings.push(`${secondary.length} secondary image(s) — Walmart wants at least 3, none sent`);
+  const others = images.filter((m) => m !== main);
+  const lang = (m: MediaRow) => (m as MediaRow & { language?: string | null }).language ?? null;
+  let chosen = others.filter((m) => lang(m) === "en");
+  let setName = "EN set";
+  if (!chosen.length) { chosen = others.filter((m) => lang(m) !== "en_fr" && lang(m) !== "fr"); setName = "EN/ES + untagged set"; }
+  if (!chosen.length) { chosen = others.filter((m) => lang(m) === "en_fr"); setName = "EN/FR set (no US artwork)"; }
+  const secondary = chosen.map((m) => m.storage_path);
+  if (secondary.length >= 3) set(vis, "productSecondaryImageURL", secondary, "Media", `${setName} · ${secondary.map((u) => u.split("/").pop()).join(" | ")}`);
+  else if (secondary.length) warnings.push(`${secondary.length} secondary image(s) in the ${setName} — Walmart wants at least 3, none sent`);
+  if (chosen.length && others.length > chosen.length) warnings.push(`${others.length - chosen.length} image(s) of the other language set not sent (sets never mix)`);
 
   // ---- Visible: compliance & warranty
   set(vis, "isProp65WarningRequired", "No", "Compliance", undefined, true);
@@ -328,7 +339,7 @@ Deno.serve(async (req) => {
     if (skus.length > 200) return json({ error: "At most 200 SKUs per feed." }, 400);
     const { data: products, error: pErr } = await admin.from("products").select("*").in("sku", skus);
     if (pErr) return json({ error: `PIM read failed: ${pErr.message}` }, 500);
-    const { data: mediaRows } = await admin.from("product_media").select("sku, storage_path, media_type, is_primary, display_order, image_role").in("sku", skus);
+    const { data: mediaRows } = await admin.from("product_media").select("sku, storage_path, media_type, is_primary, display_order, image_role, language").in("sku", skus);
     const mediaBySku = new Map<string, MediaRow[]>();
     for (const m of (mediaRows ?? []) as MediaRow[]) mediaBySku.set(m.sku, [...(mediaBySku.get(m.sku) ?? []), m]);
 
