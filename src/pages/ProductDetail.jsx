@@ -190,9 +190,6 @@ function buildEditForm(product) {
     visible_online: product.visible_online ?? true,
     visible_pos: product.visible_pos ?? true,
     pre_order: product.pre_order ?? false,
-    sample_available_date: product.sample_available_date ?? '',
-    ready_to_sell_date: product.ready_to_sell_date ?? '',
-    launch_lead: product.launch_lead ?? '',
     standards_compliance: product.standards_compliance ?? '',
     spec_sheet_needs_update: product.spec_sheet_needs_update ?? false,
     installation_sheet_needs_update: product.installation_sheet_needs_update ?? false,
@@ -1070,14 +1067,6 @@ function OverviewTab({ product, edit, documents = [], onProductChanged, onUnify 
         </div>
       </Section>
 
-      <Section title="Important Dates">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-          <EditableField label="Sample Available" fieldKey="sample_available_date" type="date" product={product} edit={edit} />
-          <EditableField label="Ready to Sell" fieldKey="ready_to_sell_date" type="date" product={product} edit={edit} />
-          <EditableField label="Launch Lead" fieldKey="launch_lead" type="date" product={product} edit={edit} />
-          <Field label="Created" value={formatDate(product.created_at)} />
-        </div>
-      </Section>
 
       <Section title="Documentation" defaultOpen={false}>
         <div className="space-y-3">

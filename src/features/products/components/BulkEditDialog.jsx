@@ -33,7 +33,6 @@ const EDITABLE_FIELDS = [
   { key: 'manufacturer', label: 'Manufacturer' },
   { key: 'country_of_origin', label: 'Country of origin' },
   { key: 'warranty', label: 'Warranty' },
-  { key: 'launch_lead', label: 'Launch lead' },
 ];
 
 let rowSeq = 0;
