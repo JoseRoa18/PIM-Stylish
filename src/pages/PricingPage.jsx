@@ -36,6 +36,7 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
+import { PROMOTION_KINDS } from '@/features/pricing/api/promotions';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
@@ -81,7 +82,9 @@ function monthLabel(period) {
 export default function PricingPage() {
   const { canEdit } = useAuth();
   const confirm = useConfirm();
-  const [tab, setTab] = useState('promotions'); // 'promotions' | 'alignment'
+  // 'monthly' | 'flash' | 'special' — one section per promotion kind — and 'alignment'.
+  const [tab, setTab] = useState('monthly');
+  const kindTab = tab !== 'alignment';
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
@@ -100,13 +103,15 @@ export default function PricingPage() {
       <div>
         <h1 className="text-headline-md text-on-surface font-semibold">Pricing</h1>
         <p className="text-body-md text-on-surface-variant mt-1">
-          Monthly promotions for all marketplaces. Promo prices come from the official
-          lists — paste them per month; marketplace promo templates will generate from here.
+          {tab === 'monthly' && 'Monthly promotions for all marketplaces: the market calendar drives them and the boundaries run on their own.'}
+          {tab === 'flash' && 'Flash deals: short promotions on their own dates, pushed and exported by hand from here.'}
+          {tab === 'special' && 'Special events: promotions on their own dates for a sale event, pushed and exported by hand from here.'}
+          {tab === 'alignment' && 'What each marketplace shows against the PIM price, promo aware.'}
         </p>
       </div>
 
       <div className="inline-flex rounded-full bg-surface-container p-1">
-        {[['promotions', 'Promotions'], ['alignment', 'Price Alignment']].map(([key, label]) => (
+        {[['monthly', 'Monthly Promotions'], ['flash', 'Flash Deals'], ['special', 'Special Events'], ['alignment', 'Price Alignment']].map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -128,7 +133,7 @@ export default function PricingPage() {
 
       {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} />}
 
-      {tab === 'promotions' && canEdit && (
+      {kindTab && canEdit && (
         <div>
           <button
             type="button"
@@ -136,43 +141,45 @@ export default function PricingPage() {
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
           >
             <Plus className="w-4 h-4" />
-            New promotion
+            New {PROMOTION_KINDS[tab].toLowerCase()}
           </button>
         </div>
       )}
 
-      {tab === 'promotions' && showNew && (
+      {kindTab && showNew && (
         <NewPromotionForm
+          key={tab}
+          kind={tab}
           onClose={() => setShowNew(false)}
           onCreated={(promo) => {
             setShowNew(false);
             reload();
-            // Fire-and-forget: schedule the month's discounts on Best Buy
-            // (honors the /settings switches). The card's chip appears on the
-            // reload that follows.
-            if (promo) autoScheduleBestBuyPromo(promo).then(reload).catch(() => {});
+            // Fire-and-forget for the MONTHLY promotion only: schedule the
+            // month's discounts on Best Buy (honors the /settings switches).
+            // Flash deals and special events are scheduled by hand.
+            if (promo && promo.kind === 'monthly') autoScheduleBestBuyPromo(promo).then(reload).catch(() => {});
           }}
         />
       )}
 
-      {tab !== 'promotions' ? null : promotions === null ? (
+      {!kindTab ? null : promotions === null ? (
         <div className="rounded-2xl bg-surface p-8 text-center text-on-surface-variant text-body-md">
           <Loader2 className="w-5 h-5 animate-spin inline-block mr-2 align-middle" />
           Loading promotions…
         </div>
-      ) : promotions.length === 0 && !showNew ? (
+      ) : promotions.filter((p) => (p.kind ?? 'monthly') === tab).length === 0 && !showNew ? (
         <div className="rounded-2xl bg-surface px-6 py-12 text-center">
           <div className="inline-flex w-12 h-12 items-center justify-center rounded-xl bg-surface-container mb-3">
             <Tag className="w-6 h-6 text-on-surface-variant" strokeWidth={1.5} />
           </div>
-          <p className="text-title-md text-on-surface font-medium">No promotions yet</p>
+          <p className="text-title-md text-on-surface font-medium">No {PROMOTION_KINDS[tab].toLowerCase()}s yet</p>
           <p className="text-body-md text-on-surface-variant mt-1 max-w-md mx-auto">
-            Create the month's promotion and paste its price list — SKU and promo price, one per line.
+            {tab === 'monthly' ? "Create the month's promotion and paste its price list — SKU and promo price, one per line." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates and price list, then generate the files or schedule it per marketplace.`}
           </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {promotions.map((promo) => (
+          {promotions.filter((p) => (p.kind ?? 'monthly') === tab).map((promo) => (
             <PromotionCard
               key={promo.id}
               promo={promo}
@@ -573,13 +580,15 @@ function PriceAlignmentCard({ canEdit, confirm }) {
 
 // ============================== New promotion ==============================
 
-function NewPromotionForm({ onClose, onCreated }) {
+function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const now = new Date();
   const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthly = kind === 'monthly';
   const [name, setName] = useState('');
   const [month, setMonth] = useState(defaultPeriod);
-  // Dates: the market calendar of the month (default) or custom first/last days.
-  const [customDates, setCustomDates] = useState(false);
+  // Dates: the market calendar of the month (monthly default) or custom
+  // first/last days — always custom for flash deals and special events.
+  const [customDates, setCustomDates] = useState(!monthly);
   const [startsOn, setStartsOn] = useState('');
   const [endsOn, setEndsOn] = useState('');
   const [mode, setMode] = useState('file'); // 'file' | 'paste'
@@ -629,9 +638,12 @@ function NewPromotionForm({ onClose, onCreated }) {
     try {
       if (customDates && (!startsOn || !endsOn)) throw new Error('Pick both the first and the last day, or switch back to the month calendar.');
       if (customDates && endsOn < startsOn) throw new Error('The end date is before the start date.');
+      // Flash deals and special events belong to the month they start in.
+      const period = monthly ? `${month}-01` : `${startsOn.slice(0, 7)}-01`;
       const payload = {
-        name: name.trim() || `${monthLabel(month)} promotion`,
-        period: `${month}-01`,
+        kind,
+        name: name.trim() || (monthly ? `${monthLabel(month)} promotion` : `${PROMOTION_KINDS[kind]} ${startsOn}`),
+        period,
         starts_on: customDates ? startsOn : null,
         ends_on: customDates ? endsOn : null,
       };
@@ -653,7 +665,7 @@ function NewPromotionForm({ onClose, onCreated }) {
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
       <div className="flex items-center justify-between">
-        <h2 className="text-title-md text-on-surface font-semibold">New promotion</h2>
+        <h2 className="text-title-md text-on-surface font-semibold">New {PROMOTION_KINDS[kind].toLowerCase()}</h2>
         <button type="button" onClick={onClose} className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant">
           <X className="w-4 h-4" />
         </button>
@@ -665,22 +677,26 @@ function NewPromotionForm({ onClose, onCreated }) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={`${monthLabel(month)} promotion`}
+            placeholder={monthly ? `${monthLabel(month)} promotion` : `${PROMOTION_KINDS[kind]} ${startsOn || 'dates'}`}
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </label>
         <div className="block">
-          <span className="text-label-lg text-on-surface-variant">Month</span>
-          <input
-            type="month"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-          />
+          <span className="text-label-lg text-on-surface-variant">{monthly ? 'Month' : 'Dates'}</span>
+          {monthly && (
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          )}
+          {monthly && (
           <label className="mt-2 inline-flex items-center gap-2 text-label-md text-on-surface-variant cursor-pointer" title="By default the promotion follows the market calendar: USA the 1st to month end, Canada first Thursday to the day before the next. Custom dates apply to every market and channel.">
             <input type="checkbox" checked={customDates} onChange={(e) => setCustomDates(e.target.checked)} className="accent-primary" />
             Custom dates
           </label>
+          )}
           {customDates && (
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="block">
@@ -1273,7 +1289,7 @@ function PromoDates({ promo, canEdit, onChanged }) {
     <div className="flex items-center gap-3 flex-wrap text-body-sm">
       <span className="text-on-surface-variant">Runs</span>
       {custom ? (
-        <span className="text-on-surface">{fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">· custom dates, every market</span></span>
+        <span className="text-on-surface">{fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">· {(promo.kind ?? 'monthly') === 'monthly' ? 'custom dates, every market' : 'every market'}</span></span>
       ) : (
         <span className="text-on-surface">USA {fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">·</span> Canada {fmt(ca.start)} to {fmt(ca.end)} <span className="text-on-surface-variant">· market calendar</span></span>
       )}
@@ -1288,7 +1304,7 @@ function PromoDates({ promo, canEdit, onChanged }) {
           <span className="text-on-surface-variant">to</span>
           <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className={input} aria-label="Last day" />
           <button type="button" onClick={() => save(false)} disabled={busy || !startsOn || !endsOn} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">Save</button>
-          {custom && <button type="button" onClick={() => save(true)} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Back to calendar</button>}
+          {custom && (promo.kind ?? 'monthly') === 'monthly' && <button type="button" onClick={() => save(true)} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Back to calendar</button>}
           <button type="button" onClick={() => { setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
         </span>
       )}

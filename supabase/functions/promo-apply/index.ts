@@ -300,7 +300,8 @@ async function run(dryRun: boolean, reconcile: boolean) {
 
   // -- 1. promos on the board ------------------------------------------------
   const promos = await restGet<PromoRow[]>(
-    "promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at&status=in.(draft,active)&order=id.desc",
+    // Only the MONTHLY promotions are automated; flash deals and special events run by hand.
+    "promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at&status=in.(draft,active)&kind=eq.monthly&order=id.desc",
   );
   // The promotion whose window on a market contains a day — custom dates
   // when the promotion carries them, else its month's market calendar.

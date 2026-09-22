@@ -376,6 +376,7 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
       .from('promotions')
       .select(`period, starts_on, ends_on, promotion_prices(sku, ${promoField})`)
       .eq('status', 'active')
+      .eq('kind', 'monthly')
       .order('period', { ascending: true });
     if (promoErr) throw promoErr;
     // Market calendar (or the promotion's own dates): USA runs the 1st →

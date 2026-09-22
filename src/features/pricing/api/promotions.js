@@ -22,7 +22,7 @@ import { getAppSetting } from '@/features/settings/api/appSettings';
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, starts_on, ends_on, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
+    .select('id, name, period, status, kind, starts_on, ends_on, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
     .order('period', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((p) => ({
@@ -92,7 +92,16 @@ export function parsePriceList(text) {
  * the pasted prices fill ('cad' | 'usd'). SKUs missing from the PIM are
  * returned, never inserted (FK would reject them anyway).
  */
-export async function createPromotion({ name, period, currency, rows, starts_on = null, ends_on = null }) {
+// Promotion kinds: 'monthly' follows the market calendar and is automated on
+// its boundaries; 'flash' (flash deal) and 'special' (special event) always run
+// on their own dates and are pushed / exported by hand from their sections.
+export const PROMOTION_KINDS = { monthly: 'Monthly promotion', flash: 'Flash deal', special: 'Special event' };
+function assertKindDates(kind, starts_on, ends_on) {
+  if (kind !== 'monthly' && !(starts_on && ends_on)) throw new Error(`A ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} needs a first and a last day.`);
+}
+
+export async function createPromotion({ name, period, currency, rows, kind = 'monthly', starts_on = null, ends_on = null }) {
+  assertKindDates(kind, starts_on, ends_on);
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
@@ -103,7 +112,7 @@ export async function createPromotion({ name, period, currency, rows, starts_on 
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', starts_on, ends_on })
+    .insert({ name, period, status: 'draft', kind, starts_on, ends_on })
     .select()
     .single();
   if (error) throw error;
@@ -129,7 +138,8 @@ export async function createPromotion({ name, period, currency, rows, starts_on 
  * Create a promotion from full row objects (the file-import path):
  *   [{ sku, promo_price_cad, promo_price_usd, promo_costs }]
  */
-export async function createPromotionFromFile({ name, period, rows, starts_on = null, ends_on = null }) {
+export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null }) {
+  assertKindDates(kind, starts_on, ends_on);
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
@@ -140,7 +150,7 @@ export async function createPromotionFromFile({ name, period, rows, starts_on = 
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', starts_on, ends_on })
+    .insert({ name, period, status: 'draft', kind, starts_on, ends_on })
     .select()
     .single();
   if (error) throw error;

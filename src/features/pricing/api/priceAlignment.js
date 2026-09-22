@@ -162,6 +162,7 @@ async function loadOfferAlignment(cfg) {
     .from('promotions')
     .select(`period, starts_on, ends_on, promotion_prices(sku, ${promoField})`)
     .eq('status', 'active')
+    .eq('kind', 'monthly') // flash deals and special events are not the store's expected price
     .order('period', { ascending: true });
   if (promoErr) throw promoErr;
   // Market calendar: USA runs the 1st → month end; Canada runs first
