@@ -23,11 +23,12 @@ const CHANNELS = {
   walmart_us: {
     healthTab: 'walmart_us',
     refresh: () => refreshWalmartItems('us'),
+    shield: 'Items and publish status are read from the API. New listings are created only from the card below, after validation and confirmation.',
     counters: (s) => [
       { icon: CheckCircle2, tone: 'text-success', label: `${s.in_sync} published` },
       { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} unpublished` },
     ],
-    note: 'Items and publish status are pulled from the Marketplace API of the new US seller account (reconnected 2026-09-22; the catalog is being rebuilt). Prices are USD. Nothing is written to Walmart from here.',
+    note: 'New US seller account (reconnected 2026-09-22): the catalog is being rebuilt from the PIM. Prices are USD. Content and prices of existing items are never pushed from here.',
   },
   walmart_ca: {
     healthTab: 'walmart_ca',

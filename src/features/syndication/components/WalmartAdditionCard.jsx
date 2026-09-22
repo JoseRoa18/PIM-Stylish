@@ -115,7 +115,7 @@ export default function WalmartAdditionCard({ product }) {
             <div className="flex items-start gap-2 px-3 py-2">
               {row.ready ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />}
               <span className="min-w-0 break-words">
-                <span className="text-on-surface-variant">{result.env} · </span>
+                <span className="text-on-surface-variant">{result.preview ? 'preview' : result.env} · </span>
                 {row.productType} · {row.fields} fields
                 {result.validation ? (result.validation.valid ? ' · spec OK' : ' · spec errors') : ''}
                 {result.feedId ? ` · feed ${result.feedId}` : ''}

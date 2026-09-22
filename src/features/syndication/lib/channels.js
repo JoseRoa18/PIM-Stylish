@@ -62,13 +62,13 @@ export const LIVE_CHANNELS = [
   {
     id: 'walmart_us',
     name: 'Walmart US',
-    tagline: 'Marketplace items & publish status',
+    tagline: 'Marketplace items, publish status & new listings',
     letter: 'W',
     logo: '/brand/channels/walmart.svg',
     avatarClass: 'bg-brand-walmart/10 text-brand-walmart',
     env: 'Production',
     envClass: 'bg-success-container text-on-success-container',
-    mode: 'Read-only',
+    mode: 'Items via API',
     modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
       const snap = await latestSnapshot('walmart_us');

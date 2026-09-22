@@ -9,7 +9,7 @@ import { ShieldCheck } from 'lucide-react';
 //        seller account was reopened on 2026-09-22 with an empty catalog.
 const MARKETS = {
   ca: { title: 'Walmart Canada', currency: 'C$', mapField: 'map_cad', mapLabel: 'PIM MAP CAD', shield: 'Promos via API' },
-  us: { title: 'Walmart USA', currency: 'US$', mapField: 'map_usd', mapLabel: 'PIM MAP USD', shield: 'Read-only' },
+  us: { title: 'Walmart USA', currency: 'US$', mapField: 'map_usd', mapLabel: 'PIM MAP USD', shield: 'Items via API' },
 };
 
 const money = (cur, v) => (v != null && v !== '' ? `${cur}${Number(v).toFixed(2)}` : '—');
@@ -58,7 +58,7 @@ export default function WalmartProductCard({ product, row, loading, market = 'ca
         )}
         {!row && !loading && !isCa && (
           <p className="text-body-sm text-on-surface-variant">
-            The US seller account is new and its catalog is being rebuilt. Listing from the PIM by API is in preparation; until then, items are set up in Seller Center.
+            The US seller account is new and its catalog is being rebuilt. Create this product on Walmart from the New listing card below.
           </p>
         )}
         <p className="text-body-sm text-on-surface-variant">
