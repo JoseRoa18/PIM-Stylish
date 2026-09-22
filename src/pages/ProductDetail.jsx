@@ -400,7 +400,7 @@ export default function ProductDetail() {
   const confirm = useConfirm();
   const navigate = useNavigate();
   const { product, loading, error, notFound, mergeProduct, refetch } = useProduct(sku);
-  const { primary, media, documents } = useProductMedia(sku);
+  const { primary, media } = useProductMedia(sku);
   // Family siblings for the quick-switch list under the floating tab rail.
   const { variants: familyVariants } = useVariants(sku, product?.family_number ?? null);
 
