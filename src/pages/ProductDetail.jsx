@@ -191,8 +191,6 @@ function buildEditForm(product) {
     visible_pos: product.visible_pos ?? true,
     pre_order: product.pre_order ?? false,
     standards_compliance: product.standards_compliance ?? '',
-    spec_sheet_needs_update: product.spec_sheet_needs_update ?? false,
-    installation_sheet_needs_update: product.installation_sheet_needs_update ?? false,
 
     // From attributes JSONB
     _upc: a.upc ?? '',
@@ -1067,25 +1065,6 @@ function OverviewTab({ product, edit, documents = [], onProductChanged, onUnify 
         </div>
       </Section>
 
-
-      <Section title="Documentation" defaultOpen={false}>
-        <div className="space-y-3">
-          <EditableDocFlag
-            label="Spec Sheet"
-            fieldKey="spec_sheet_needs_update"
-            hasFile={documents.some((d) => d.document_type === 'spec_sheet')}
-            product={product}
-            edit={edit}
-          />
-          <EditableDocFlag
-            label="Installation Sheet"
-            fieldKey="installation_sheet_needs_update"
-            hasFile={documents.some((d) => /^installation_/.test(d.document_type ?? ''))}
-            product={product}
-            edit={edit}
-          />
-        </div>
-      </Section>
     </div>
   );
 }
@@ -2422,43 +2401,6 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
   );
 }
 
-function EditableDocFlag({ label, fieldKey, product, edit, hasFile = true }) {
-  const { isEditing, form, setField } = edit;
-  const needsUpdate = isEditing ? form[fieldKey] : product[fieldKey];
-  if (isEditing) {
-    return (
-      <div className="flex items-center justify-between">
-        <span className="text-body-md text-on-surface">{label}</span>
-        <button type="button" role="switch" aria-checked={!!needsUpdate} onClick={() => setField(fieldKey, !needsUpdate)}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${needsUpdate ? 'bg-warning' : 'bg-success'}`}>
-          <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${needsUpdate ? 'translate-x-6' : 'translate-x-1'}`} />
-        </button>
-      </div>
-    );
-  }
-  // Without a file in the Media tab, "Up to date" would misread as "the file
-  // is current" — show a neutral third state instead of the green flag.
-  if (!needsUpdate && !hasFile) {
-    return (
-      <div className="flex items-center justify-between">
-        <span className="text-body-md text-on-surface">{label}</span>
-        <span className="flex items-center gap-1.5 text-body-sm text-on-surface-variant">
-          <span className="w-2 h-2 rounded-full bg-outline-variant" />
-          No file linked
-        </span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-body-md text-on-surface">{label}</span>
-      <span className={`flex items-center gap-1.5 text-body-sm ${needsUpdate ? 'text-on-warning-container' : 'text-success'}`}>
-        <span className={`w-2 h-2 rounded-full ${needsUpdate ? 'bg-warning' : 'bg-success'}`} />
-        {needsUpdate ? 'Needs update' : 'Up to date'}
-      </span>
-    </div>
-  );
-}
 
 // ===================== Read-only field =====================
 

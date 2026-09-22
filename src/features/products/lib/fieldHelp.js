@@ -199,6 +199,4 @@ export const FIELD_HELP = {
   launch_lead: 'Date the launch process starts for this product.',
   sample_available_date: 'When a physical sample is available.',
   ready_to_sell_date: 'When the product is ready to be sold across channels.',
-  spec_sheet_needs_update: 'Flags that the spec sheet PDF is outdated.',
-  installation_sheet_needs_update: 'Flags that the installation guide PDF is outdated.',
 };
