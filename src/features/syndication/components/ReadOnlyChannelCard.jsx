@@ -27,7 +27,7 @@ const CHANNELS = {
       { icon: CheckCircle2, tone: 'text-success', label: `${s.in_sync} published` },
       { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} unpublished` },
     ],
-    note: 'Items and publish status are pulled from the Marketplace API. Prices are USD (not compared to CAD MSRPs). Nothing is ever written to Walmart.',
+    note: 'Items and publish status are pulled from the Marketplace API of the new US seller account (reconnected 2026-09-22; the catalog is being rebuilt). Prices are USD. Nothing is written to Walmart from here.',
   },
   walmart_ca: {
     healthTab: 'walmart_ca',

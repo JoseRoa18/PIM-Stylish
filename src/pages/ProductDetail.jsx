@@ -49,7 +49,7 @@ import WixSyndicationCard from '@/features/syndication/components/WixSyndication
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
 import AliasesTab from '@/features/products/components/AliasesTab';
-import WalmartCaProductCard from '@/features/syndication/components/WalmartCaProductCard';
+import WalmartProductCard from '@/features/syndication/components/WalmartProductCard';
 import { latestSnapshot } from '@/features/syndication/lib/channels';
 import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
@@ -1564,13 +1564,17 @@ function MarketplacesTab({ product, media, onUpdate }) {
   // (own catalog, own price rule); keying the card by site remounts it.
   const [selected, setSelected] = useState(null);
   const wixSite = selected && WIX_SITES[selected] ? selected : null;
-  // Walmart Canada: this product's row in the latest snapshot (undefined = loading, null = absent).
+  // Walmart Canada / USA: this product's row in each latest snapshot
+  // (undefined = loading, null = absent).
   const [wmCa, setWmCa] = useState(undefined);
+  const [wmUs, setWmUs] = useState(undefined);
   useEffect(() => {
     let active = true;
     latestSnapshot('walmart_ca').then((snap) => {
-      if (!active) return;
-      setWmCa((snap?.results ?? []).find((r) => r.sku === product.sku) ?? null);
+      if (active) setWmCa((snap?.results ?? []).find((r) => r.sku === product.sku) ?? null);
+    });
+    latestSnapshot('walmart_us').then((snap) => {
+      if (active) setWmUs((snap?.results ?? []).find((r) => r.sku === product.sku) ?? null);
     });
     return () => { active = false; };
   }, [product.sku]);
@@ -1683,6 +1687,16 @@ function MarketplacesTab({ product, media, onUpdate }) {
           onClick={() => pick('walmart_ca')}
         />
         <ChannelTile
+          label="Walmart USA"
+          avatar="WM"
+          avatarClass="bg-brand-walmart/10 text-brand-walmart"
+          active={selected === 'walmart_us'}
+          linked={wmUs === undefined ? null : Boolean(wmUs)}
+          linkedText="Listed"
+          notLinkedText="Not listed"
+          onClick={() => pick('walmart_us')}
+        />
+        <ChannelTile
           label="Templates"
           avatar={<FileText className="w-4 h-4" />}
           avatarClass="bg-surface-container-highest text-on-surface-variant"
@@ -1772,7 +1786,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
         </>
       )}
       {selected === 'wayfair_us' && <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />}
-      {selected === 'walmart_ca' && <WalmartCaProductCard product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
+      {selected === 'walmart_ca' && <WalmartProductCard market="ca" product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
+      {selected === 'walmart_us' && <WalmartProductCard market="us" product={product} row={wmUs ?? null} loading={wmUs === undefined} />}
       {selected === 'templates' && <ExportTemplatesCard product={product} media={media} />}
     </div>
   );
