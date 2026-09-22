@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { etToday, marketWindow } from '../lib/promoCalendar';
+import { etToday, promoWindow } from '../lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix } from '@/features/syndication/api/wixSync';
 import { pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
@@ -22,7 +22,7 @@ import { getAppSetting } from '@/features/settings/api/appSettings';
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
+    .select('id, name, period, status, starts_on, ends_on, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
     .order('period', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((p) => ({
@@ -66,7 +66,7 @@ export function parsePriceList(text) {
  * the pasted prices fill ('cad' | 'usd'). SKUs missing from the PIM are
  * returned, never inserted (FK would reject them anyway).
  */
-export async function createPromotion({ name, period, currency, rows }) {
+export async function createPromotion({ name, period, currency, rows, starts_on = null, ends_on = null }) {
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
@@ -77,7 +77,7 @@ export async function createPromotion({ name, period, currency, rows }) {
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft' })
+    .insert({ name, period, status: 'draft', starts_on, ends_on })
     .select()
     .single();
   if (error) throw error;
@@ -103,7 +103,7 @@ export async function createPromotion({ name, period, currency, rows }) {
  * Create a promotion from full row objects (the file-import path):
  *   [{ sku, promo_price_cad, promo_price_usd, promo_costs }]
  */
-export async function createPromotionFromFile({ name, period, rows }) {
+export async function createPromotionFromFile({ name, period, rows, starts_on = null, ends_on = null }) {
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
@@ -114,7 +114,7 @@ export async function createPromotionFromFile({ name, period, rows }) {
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft' })
+    .insert({ name, period, status: 'draft', starts_on, ends_on })
     .select()
     .single();
   if (error) throw error;
@@ -187,6 +187,30 @@ export async function addFileToPromotion(promotion, rows) {
  * Mark a draft promotion as active WITHOUT touching store pricing — for
  * promotions that were already uploaded to the marketplaces outside the PIM.
  */
+/**
+ * Custom dates for a promotion (both or none). They replace the market
+ * calendar on every channel: files, Wix pricing, Best Buy, Walmart and the
+ * activation cron. Pass nulls to go back to the calendar.
+ */
+export async function updatePromotionDates(promotion, { starts_on, ends_on }) {
+  const both = Boolean(starts_on) && Boolean(ends_on);
+  if ((starts_on || ends_on) && !both) throw new Error('Set both dates, or clear both to use the market calendar.');
+  if (both && ends_on < starts_on) throw new Error('The end date is before the start date.');
+  const { error } = await supabase
+    .from('promotions')
+    .update({ starts_on: both ? starts_on : null, ends_on: both ? ends_on : null })
+    .eq('id', promotion.id);
+  if (error) throw error;
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    target: 'pim',
+    summary: both ? `"${promotion.name}" runs on custom dates ${starts_on} to ${ends_on}` : `"${promotion.name}" back on the market calendar`,
+    metadata: { starts_on: both ? starts_on : null, ends_on: both ? ends_on : null },
+  });
+}
+
 export async function markPromotionActive(promotion) {
   const { error } = await supabase
     .from('promotions')
@@ -312,7 +336,7 @@ export async function autoScheduleBestBuyPromo(promotion) {
   const settings = await getAppSetting('promo_automation', {});
   if (settings.enabled === false || settings.bestbuy === false) return { skipped: 'automation off' };
 
-  const window = marketWindow(promotion.period, 'ca');
+  const window = promoWindow(promotion, 'ca');
   if (window.end < etToday()) return { skipped: 'past promotion' };
 
   const prices = await getPromotionPrices(promotion.id);

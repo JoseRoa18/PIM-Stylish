@@ -24,7 +24,7 @@ import {
   norm,
 } from '@/features/syndication/exports/templateFiller';
 import { getPromotionPrices } from '@/features/pricing/api/promotions';
-import { marketWindow } from '@/features/pricing/lib/promoCalendar';
+import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const HEADER_SCAN_ROWS = 15;
@@ -111,7 +111,7 @@ export async function fillPromoTemplate(template, promotion, channel) {
       for (const p of data ?? []) mapBySku.set(p.sku, p.map);
     }
   }
-  const window = marketWindow(promotion.period, channel.market);
+  const window = promoWindow(promotion, channel.market);
   const dateStyle = channel.dateStyle ?? 'iso';
 
   const cellsFor = (rowNum, m) => {

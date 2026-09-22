@@ -33,7 +33,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { getPromotionPrices } from '@/features/pricing/api/promotions';
-import { marketWindow } from '@/features/pricing/lib/promoCalendar';
+import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const norm = (v) => String(v ?? '').trim().toLowerCase();
@@ -122,7 +122,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     }
   }
 
-  const window = marketWindow(promotion.period, market);
+  const window = promoWindow(promotion, market);
   const { cols } = hit;
   const lines = [];
   const noRegular = [];

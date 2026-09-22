@@ -29,6 +29,7 @@ import {
   autoScheduleBestBuyPromo,
   scheduleWalmartCaPromo,
   markPromotionActive,
+  updatePromotionDates,
   deletePromotion,
   applyPromotion,
   endPromotion,
@@ -42,7 +43,7 @@ import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { fillBBBPromoFile } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor } from '@/features/pricing/lib/promoChannels';
-import { marketWindow } from '@/features/pricing/lib/promoCalendar';
+import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
@@ -577,6 +578,10 @@ function NewPromotionForm({ onClose, onCreated }) {
   const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const [name, setName] = useState('');
   const [month, setMonth] = useState(defaultPeriod);
+  // Dates: the market calendar of the month (default) or custom first/last days.
+  const [customDates, setCustomDates] = useState(false);
+  const [startsOn, setStartsOn] = useState('');
+  const [endsOn, setEndsOn] = useState('');
   const [mode, setMode] = useState('file'); // 'file' | 'paste'
   const [currency, setCurrency] = useState('cad');
   const [text, setText] = useState('');
@@ -622,9 +627,13 @@ function NewPromotionForm({ onClose, onCreated }) {
     setBusy(true);
     setError(null);
     try {
+      if (customDates && (!startsOn || !endsOn)) throw new Error('Pick both the first and the last day, or switch back to the month calendar.');
+      if (customDates && endsOn < startsOn) throw new Error('The end date is before the start date.');
       const payload = {
         name: name.trim() || `${monthLabel(month)} promotion`,
         period: `${month}-01`,
+        starts_on: customDates ? startsOn : null,
+        ends_on: customDates ? endsOn : null,
       };
       const res = mode === 'file'
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
@@ -660,7 +669,7 @@ function NewPromotionForm({ onClose, onCreated }) {
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </label>
-        <label className="block">
+        <div className="block">
           <span className="text-label-lg text-on-surface-variant">Month</span>
           <input
             type="month"
@@ -668,7 +677,23 @@ function NewPromotionForm({ onClose, onCreated }) {
             onChange={(e) => setMonth(e.target.value)}
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
-        </label>
+          <label className="mt-2 inline-flex items-center gap-2 text-label-md text-on-surface-variant cursor-pointer" title="By default the promotion follows the market calendar: USA the 1st to month end, Canada first Thursday to the day before the next. Custom dates apply to every market and channel.">
+            <input type="checkbox" checked={customDates} onChange={(e) => setCustomDates(e.target.checked)} className="accent-primary" />
+            Custom dates
+          </label>
+          {customDates && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-label-md text-on-surface-variant">First day</span>
+                <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              </label>
+              <label className="block">
+                <span className="text-label-md text-on-surface-variant">Last day</span>
+                <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              </label>
+            </div>
+          )}
+        </div>
         <div className="block">
           <span className="text-label-lg text-on-surface-variant">Source</span>
           <div className="mt-1 inline-flex w-full rounded-lg bg-surface-container p-1">
@@ -865,6 +890,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             </div>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
               {monthLabel(promo.period)} · {promo.sku_count} SKU{promo.sku_count === 1 ? '' : 's'}
+              {promo.starts_on && promo.ends_on ? ` · custom dates ${promo.starts_on} to ${promo.ends_on}` : ''}
             </p>
           </div>
         </div>
@@ -874,6 +900,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
       {open && (
         <div className="px-5 pb-5 space-y-4">
           <div className="mx-0 border-t border-outline-variant/60" />
+
+          <PromoDates promo={promo} canEdit={canEdit && promo.status !== 'ended'} onChanged={onChanged} />
 
           {canEdit && (
             <div className="flex items-center gap-2 flex-wrap">
@@ -1213,6 +1241,62 @@ const FILE_FILLERS = {
 
 // One line per channel: name, a status chip, and the one action that applies.
 // The long explanation of how each channel gets the promo lives on hover.
+// The days the promotion runs on each market, and the switch between the
+// market calendar and custom dates (which apply to every market and channel).
+function PromoDates({ promo, canEdit, onChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [startsOn, setStartsOn] = useState(promo.starts_on ?? '');
+  const [endsOn, setEndsOn] = useState(promo.ends_on ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const custom = Boolean(promo.starts_on && promo.ends_on);
+  const us = promoWindow(promo, 'us');
+  const ca = promoWindow(promo, 'ca');
+  const fmt = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+
+  async function save(clear = false) {
+    setBusy(true);
+    setError(null);
+    try {
+      await updatePromotionDates(promo, clear ? { starts_on: null, ends_on: null } : { starts_on: startsOn, ends_on: endsOn });
+      setEditing(false);
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const input = 'px-2.5 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40';
+  return (
+    <div className="flex items-center gap-3 flex-wrap text-body-sm">
+      <span className="text-on-surface-variant">Runs</span>
+      {custom ? (
+        <span className="text-on-surface">{fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">· custom dates, every market</span></span>
+      ) : (
+        <span className="text-on-surface">USA {fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">·</span> Canada {fmt(ca.start)} to {fmt(ca.end)} <span className="text-on-surface-variant">· market calendar</span></span>
+      )}
+      {canEdit && !editing && (
+        <button type="button" onClick={() => setEditing(true)} className="text-label-md font-medium text-primary hover:underline">
+          {custom ? 'Change dates' : 'Set custom dates'}
+        </button>
+      )}
+      {editing && (
+        <span className="inline-flex items-center gap-2 flex-wrap">
+          <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} className={input} aria-label="First day" />
+          <span className="text-on-surface-variant">to</span>
+          <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className={input} aria-label="Last day" />
+          <button type="button" onClick={() => save(false)} disabled={busy || !startsOn || !endsOn} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">Save</button>
+          {custom && <button type="button" onClick={() => save(true)} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Back to calendar</button>}
+          <button type="button" onClick={() => { setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
+        </span>
+      )}
+      {error && <span className="text-error">{error}</span>}
+    </div>
+  );
+}
+
 function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged }) {
   const { templates } = useTemplates();
   const [history, setHistory] = useState({}); // audit target → last export time
@@ -1296,7 +1380,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged }) {
           status = 'Ended';
           tone = 'muted';
         } else {
-          status = `Starts ${dayOf(marketWindow(promo.period, ch.market).start)}`;
+          status = `Starts ${dayOf(promoWindow(promo, ch.market).start)}`;
           tone = 'muted';
         }
       } else if (history[ch.auditTarget ?? ch.key]) {

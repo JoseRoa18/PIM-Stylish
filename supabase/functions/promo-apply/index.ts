@@ -40,7 +40,8 @@ import {
   etToday,
   marketWindow,
   periodOfDay,
-  prevPeriod,
+  promoWindow,
+  windowContains,
 } from "../_shared/promoCalendar.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -125,6 +126,8 @@ interface PromoRow {
   name: string;
   period: string;
   status: string;
+  starts_on: string | null;
+  ends_on: string | null;
   us_applied_at: string | null;
   ca_applied_at: string | null;
   bb_scheduled_at: string | null;
@@ -276,33 +279,37 @@ async function run(dryRun: boolean, reconcile: boolean) {
 
   // -- 1. promos on the board ------------------------------------------------
   const promos = await restGet<PromoRow[]>(
-    "promotions?select=id,name,period,status,us_applied_at,ca_applied_at,bb_scheduled_at&status=in.(draft,active)&order=id.desc",
+    "promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at&status=in.(draft,active)&order=id.desc",
   );
-  const pick = (period: string | null): PromoRow | null => {
-    if (!period) return null;
-    const c = promos.filter((p) => p.period === period);
+  // The promotion whose window on a market contains a day — custom dates
+  // when the promotion carries them, else its month's market calendar.
+  // Active promotions win over drafts of the same day.
+  const win = (p: PromoRow, m: "us" | "ca") => promoWindow(p, m);
+  const liveOn = (m: "us" | "ca", day: string): PromoRow | null => {
+    const c = promos.filter((p) => windowContains(win(p, m), day));
     return c.find((p) => p.status === "active") ?? c[0] ?? null;
   };
 
-  const usPeriod = activePeriodFor("us", today); // always the current month
-  const caPeriod = activePeriodFor("ca", today); // current month, or previous before its 1st Thursday
-  const usTarget = pick(usPeriod);
-  const caTarget = pick(caPeriod);
+  const usTarget = liveOn("us", today);
+  const caTarget = liveOn("ca", today);
+  const usPeriod = usTarget?.period ?? activePeriodFor("us", today);
+  const caPeriod = caTarget?.period ?? activePeriodFor("ca", today);
   report.periods = { us: usPeriod, ca: caPeriod };
   report.target = { us: usTarget?.name ?? null, ca: caTarget?.name ?? null };
 
   // -- 2. which passes fire today -------------------------------------------
-  const usStartsToday = today === periodOfDay(today); // the 1st
-  const caStartsToday = caPeriod != null && today === marketWindow(caPeriod, "ca").start;
-  const prepPeriod = marketWindow(periodOfDay(tomorrow), "ca").start === tomorrow
-    ? periodOfDay(tomorrow)
-    : null;
+  // A pass fires when a promotion's window opens today (custom or calendar),
+  // and on the calendar boundary itself even with no promotion (prices go
+  // back to regular).
+  const usStartsToday = (usTarget ? win(usTarget, "us").start === today : today === periodOfDay(today));
+  const caStartsToday = (caTarget ? win(caTarget, "ca").start === today : caPeriod != null && today === marketWindow(caPeriod, "ca").start);
+  // Best Buy is scheduled the day before Canada's window opens.
+  const prepTarget = promos.find((p) => win(p, "ca").start === tomorrow) ?? null;
 
   const doUS = reconcile || (usStartsToday && !usTarget?.us_applied_at);
   const doCA = reconcile || (caStartsToday && !caTarget?.ca_applied_at);
   // The prep pass always (re)schedules — it overwrites idempotently, and an
   // earlier schedule may carry an outdated window (e.g. pre-calendar-change).
-  const prepTarget = pick(prepPeriod);
   const doPrep = prepTarget != null;
 
   if (!doUS && !doCA && !doPrep) {
@@ -312,8 +319,10 @@ async function run(dryRun: boolean, reconcile: boolean) {
   // -- 3. US pass: SinksDirect US to this month's promo USD ------------------
   if (doUS && settings.wix !== false) {
     const targetRows = usTarget ? await promoPrices(usTarget.id) : [];
-    const prevPromo = pick(prevPeriod(usPeriod ?? periodOfDay(today)));
-    const prevRows = prevPromo ? await promoPrices(prevPromo.id) : [];
+    // Members of the promotions whose US window is over leave the sale
+    // (unless carried into the new list).
+    const prevRows: { sku: string }[] = [];
+    for (const p of promos.filter((p) => p.id !== usTarget?.id && win(p, "us").end < today)) prevRows.push(...await promoPrices(p.id));
     const promoUsd = new Map(targetRows.filter((r) => r.promo_price_usd != null).map((r) => [r.sku, r.promo_price_usd]));
     const affected = [...new Set([...promoUsd.keys(), ...prevRows.map((r) => r.sku)])];
 
@@ -354,7 +363,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
     // Previous promos whose Canada window is over: their members leave the
     // sale (unless carried into the new list), and the promo ends.
     const toEnd = promos.filter((p) =>
-      p.status === "active" && p.id !== caTarget?.id && marketWindow(p.period, "ca").end < today
+      p.status === "active" && p.id !== caTarget?.id && win(p, "ca").end < today
     );
     const endSkus = new Set<string>();
     for (const p of toEnd) {
@@ -426,7 +435,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
     // Mirakl drops start dates that are not in the future.
     if (settings.bestbuy !== false && caTarget && cadRows.length && !caTarget.bb_scheduled_at) {
       try {
-        const w = marketWindow(caTarget.period, "ca");
+        const w = win(caTarget, "ca");
         const start = w.start > today ? w.start : tomorrow;
         report.bestbuy = await scheduleBestBuy(cadRows, start, w.end, dryRun);
         if (!dryRun) await restPatch(`promotions?id=eq.${caTarget.id}`, { bb_scheduled_at: nowIso });
@@ -448,7 +457,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
     try {
       const rows = (await promoPrices(prepTarget.id)).filter((r) => r.promo_price_cad != null);
       if (rows.length) {
-        const w = marketWindow(prepTarget.period, "ca");
+        const w = win(prepTarget, "ca");
         report.prep = await scheduleBestBuy(rows, w.start, w.end, dryRun);
         if (!dryRun) await restPatch(`promotions?id=eq.${prepTarget.id}`, { bb_scheduled_at: nowIso });
       }

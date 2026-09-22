@@ -53,6 +53,16 @@ export function marketWindow(period: string, market: Market): Window {
 
 export const windowContains = (w: Window, day: string): boolean => day >= w.start && day <= w.end;
 
+export interface PromoLike { period: string; starts_on?: string | null; ends_on?: string | null }
+
+/** A promotion's live days on a market: its custom dates when set, else the market calendar. */
+export function promoWindow(promo: PromoLike, market: Market): Window & { custom: boolean } {
+  const s = promo.starts_on ? String(promo.starts_on).slice(0, 10) : null;
+  const e = promo.ends_on ? String(promo.ends_on).slice(0, 10) : null;
+  if (s && e) return { start: s, end: e, custom: true };
+  return { ...marketWindow(promo.period, market), custom: false };
+}
+
 export function activePeriodFor(market: Market, day = etToday()): string | null {
   for (const p of [periodOfDay(day), prevPeriod(periodOfDay(day))]) {
     if (windowContains(marketWindow(p, market), day)) return p;

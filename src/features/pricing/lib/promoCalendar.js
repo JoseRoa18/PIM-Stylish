@@ -58,6 +58,19 @@ export function marketWindow(period, market) {
 export const windowContains = (w, day) => day >= w.start && day <= w.end;
 
 /**
+ * The days a PROMOTION is live on a market: its custom dates when the
+ * promotion carries them (starts_on / ends_on, set at creation or edited
+ * later — they apply to every market and channel), otherwise the market
+ * calendar of its period.
+ */
+export function promoWindow(promo, market) {
+  const s = promo?.starts_on ? String(promo.starts_on).slice(0, 10) : null;
+  const e = promo?.ends_on ? String(promo.ends_on).slice(0, 10) : null;
+  if (s && e) return { start: s, end: e, custom: true };
+  return { ...marketWindow(promo.period, market), custom: false };
+}
+
+/**
  * The promo period whose window for `market` contains `day` — the current
  * month's, or (before Canada's first Thursday) still the previous month's.
  */

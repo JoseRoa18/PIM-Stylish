@@ -18,7 +18,7 @@
 // Caller: authenticated admin/editor, or the service-role key (automation).
 // Secrets: WALMART_CA_CLIENT_ID, WALMART_CA_CLIENT_SECRET.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { marketWindow } from "../_shared/promoCalendar.ts";
+import { promoWindow } from "../_shared/promoCalendar.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
     const dryRun = body.dryRun === true;
     const only: string[] | null = Array.isArray(body.skus) && body.skus.length ? body.skus : null;
 
-    const { data: promo, error: pErr } = await admin.from("promotions").select("id, name, period, status").eq("id", promotionId).maybeSingle();
+    const { data: promo, error: pErr } = await admin.from("promotions").select("id, name, period, status, starts_on, ends_on").eq("id", promotionId).maybeSingle();
     if (pErr) throw pErr;
     if (!promo) return json({ error: `Promotion ${promotionId} not found.` }, 404);
     const { data: prices, error: prErr } = await admin.from("promotion_prices").select("sku, promo_price_cad").eq("promotion_id", promotionId).not("promo_price_cad", "is", null);
@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
     const { data: aliasRows } = await admin.from("product_aliases").select("alias, sku").eq("marketplace", "Walmart CA").in("sku", skus);
     const walmartSku = new Map<string, string>((aliasRows ?? []).map((r: { alias: string; sku: string }) => [r.sku, r.alias]));
 
-    const window = marketWindow(promo.period, "ca");
+    const window = promoWindow(promo, "ca");
     let start = etInstant(window.start, "00:00:00");
     const end = etInstant(window.end, "23:59:59");
     const nowIso = new Date(Date.now() + 5 * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");

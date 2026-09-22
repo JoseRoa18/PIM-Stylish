@@ -25,7 +25,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { getPromotionPrices } from '@/features/pricing/api/promotions';
-import { marketWindow } from '@/features/pricing/lib/promoCalendar';
+import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const HEADER_SCAN_ROWS = 12;
@@ -119,7 +119,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   }
   offers.sort((a, b) => a.seller.localeCompare(b.seller));
 
-  const window = marketWindow(promotion.period, market);
+  const window = promoWindow(promotion, market);
   const { sku: skuCol, price: priceCol, start: startCol, end: endCol, fulfillment: fulfillCol } = loc.cols;
   const cellsFor = (rn, o) => new Map([
     [skuCol + 1, buildCell(`${indexToCol(skuCol + 1)}${rn}`, o.seller)],

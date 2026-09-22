@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { etToday, marketWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
+import { etToday, promoWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells } from '../lib/wixSites';
 import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
@@ -369,15 +369,15 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
   if (cfg.promoAware) {
     const { data: activePromos, error: promoErr } = await supabase
       .from('promotions')
-      .select(`period, promotion_prices(sku, ${promoField})`)
+      .select(`period, starts_on, ends_on, promotion_prices(sku, ${promoField})`)
       .eq('status', 'active')
       .order('period', { ascending: true });
     if (promoErr) throw promoErr;
-    // Market calendar: USA runs the 1st → month end; Canada runs first
-    // Thursday → the day before the next first Thursday.
+    // Market calendar (or the promotion's own dates): USA runs the 1st →
+    // month end; Canada runs first Thursday → the day before the next.
     const day = etToday();
     for (const promo of activePromos ?? []) {
-      if (!windowContains(marketWindow(promo.period, cfg.market), day)) continue;
+      if (!windowContains(promoWindow(promo, cfg.market), day)) continue;
       for (const row of promo.promotion_prices ?? []) {
         if (row[promoField] != null) promoBySku.set(row.sku, row[promoField]);
       }

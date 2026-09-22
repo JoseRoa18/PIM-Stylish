@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { etToday, marketWindow, windowContains } from '../lib/promoCalendar';
+import { etToday, promoWindow, windowContains } from '../lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers, pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
@@ -160,7 +160,7 @@ async function loadOfferAlignment(cfg) {
   const promoField = cfg.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const { data: activePromos, error: promoErr } = await supabase
     .from('promotions')
-    .select(`period, promotion_prices(sku, ${promoField})`)
+    .select(`period, starts_on, ends_on, promotion_prices(sku, ${promoField})`)
     .eq('status', 'active')
     .order('period', { ascending: true });
   if (promoErr) throw promoErr;
@@ -170,12 +170,12 @@ async function loadOfferAlignment(cfg) {
   const promoBySku = new Map();
   const todayET = etToday();
   for (const promo of activePromos ?? []) {
-    const w = marketWindow(promo.period, cfg.market);
+    const w = promoWindow(promo, cfg.market);
     if (!windowContains(w, todayET)) continue;
     for (const row of promo.promotion_prices ?? []) {
       // The period + window ride along so a promo fix can be pushed as a
       // SCHEDULED discount covering exactly the market window (Best Buy).
-      if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period, windowStart: w.start });
+      if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period, windowStart: w.start, windowEnd: w.end });
     }
   }
 
@@ -211,6 +211,7 @@ async function loadOfferAlignment(cfg) {
       expected_source: promo != null ? 'promo' : 'map',
       map: base,
       promo_period: promo?.period ?? null,
+      promo_window: promo ? { start: promo.windowStart, end: promo.windowEnd } : null,
       price_diff: expected != null && price != null && Math.abs(price - expected) > 0.01,
     });
   }
@@ -260,7 +261,7 @@ function buildBestBuyUpdate(p) {
     // next first Thursday). Mirakl drops a discount whose start date is not
     // in the future, so a window that already began is scheduled from
     // tomorrow.
-    const w = marketWindow(p.promo_period, 'ca');
+    const w = p.promo_window ?? promoWindow({ period: p.promo_period }, 'ca');
     return {
       sku: p.sku,
       ...(p.map != null ? { price: p.map } : {}),
