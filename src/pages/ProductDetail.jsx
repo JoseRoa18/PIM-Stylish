@@ -28,6 +28,7 @@ import {
   UploadCloud,
   Fingerprint,
   ExternalLink,
+  Ban,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
@@ -51,6 +52,8 @@ import WayfairProductCard from '@/features/syndication/components/WayfairProduct
 import AliasesTab from '@/features/products/components/AliasesTab';
 import WalmartProductCard from '@/features/syndication/components/WalmartProductCard';
 import WalmartAdditionCard from '@/features/syndication/components/WalmartAdditionCard';
+import ChannelExclusionsCard from '@/features/syndication/components/ChannelExclusionsCard';
+import { isExcluded, wixExclusionKey, marketplaceLabel, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
 import { latestSnapshot } from '@/features/syndication/lib/channels';
 import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
 import RichTextEditor from '@/components/ui/RichTextEditor';
@@ -1651,8 +1654,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
             avatar="W"
             avatarClass="bg-brand-wix/15 text-brand-wix"
             active={selected === key}
-            linked={wixStatus(key)}
-            linkedText="Listed"
+            linked={isExcluded(product, wixExclusionKey(key)) ? undefined : wixStatus(key)}
+            linkedText={isExcluded(product, wixExclusionKey(key)) ? 'Excluded' : 'Listed'}
             notLinkedText="Not listed"
             onClick={() => pick(key)}
           />
@@ -1662,8 +1665,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
           avatar="WF"
           avatarClass="bg-brand-wayfair/15 text-brand-wayfair"
           active={selected === 'wayfair_ca'}
-          linked={Boolean(product.wayfair_item_group_id)}
-          linkedText="Connected"
+          linked={isExcluded(product, 'wayfair_ca') ? undefined : Boolean(product.wayfair_item_group_id)}
+          linkedText={isExcluded(product, 'wayfair_ca') ? 'Excluded' : 'Connected'}
           notLinkedText="Not listed"
           onClick={() => pick('wayfair_ca')}
         />
@@ -1672,8 +1675,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
           avatar="WF"
           avatarClass="bg-brand-wayfair/15 text-brand-wayfair"
           active={selected === 'wayfair_us'}
-          linked={Boolean(product.wayfair_usa_item_group_id)}
-          linkedText="Connected"
+          linked={isExcluded(product, 'wayfair_us') ? undefined : Boolean(product.wayfair_usa_item_group_id)}
+          linkedText={isExcluded(product, 'wayfair_us') ? 'Excluded' : 'Connected'}
           notLinkedText="Not listed"
           onClick={() => pick('wayfair_us')}
         />
@@ -1682,8 +1685,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
           avatar="WM"
           avatarClass="bg-brand-walmart/10 text-brand-walmart"
           active={selected === 'walmart_ca'}
-          linked={wmCa === undefined ? null : Boolean(wmCa)}
-          linkedText="In feed"
+          linked={isExcluded(product, 'walmart_ca') ? undefined : wmCa === undefined ? null : Boolean(wmCa)}
+          linkedText={isExcluded(product, 'walmart_ca') ? 'Excluded' : 'In feed'}
           notLinkedText="Not in feed"
           onClick={() => pick('walmart_ca')}
         />
@@ -1692,8 +1695,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
           avatar="WM"
           avatarClass="bg-brand-walmart/10 text-brand-walmart"
           active={selected === 'walmart_us'}
-          linked={wmUs === undefined ? null : Boolean(wmUs)}
-          linkedText="Listed"
+          linked={isExcluded(product, 'walmart_us') ? undefined : wmUs === undefined ? null : Boolean(wmUs)}
+          linkedText={isExcluded(product, 'walmart_us') ? 'Excluded' : 'Listed'}
           notLinkedText="Not listed"
           onClick={() => pick('walmart_us')}
         />
@@ -1748,7 +1751,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
             <span className="text-body-sm text-error">{pushAll.message}</span>
           ) : (
             <span className="text-body-sm text-on-surface-variant">
-              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? (r.media === 'ok' ? 'ok' : 'content ok, media failed') : 'failed'}`).join(' · ')}
+              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? (r.media === 'ok' ? 'ok' : 'content ok, media failed') : r.skipped === 'excluded' ? 'excluded, not sent' : 'failed'}`).join(' · ')}
             </span>
           )
         )}
@@ -1769,16 +1772,22 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
       {/* The chosen marketplace's options — nothing else. */}
       {selected == null && (
-        <p className="text-body-sm text-on-surface-variant">Pick a marketplace above to see its listing, pushes and files.</p>
+        <>
+          <p className="text-body-sm text-on-surface-variant">Pick a marketplace above to see its listing, pushes and files.</p>
+          <ChannelExclusionsCard product={product} onUpdate={onUpdate} />
+        </>
       )}
-      {wixSite && (
+      {selected && selected !== 'templates' && isExcluded(product, WIX_SITES[selected] ? wixExclusionKey(selected) : selected) && (
+        <ExcludedNotice product={product} label={WIX_SITES[selected]?.label ?? marketplaceLabel(selected)} onBack={() => setSelected(null)} />
+      )}
+      {wixSite && !isExcluded(product, wixExclusionKey(wixSite)) && (
         wixSiteSells(wixSite, product) ? (
           <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
         ) : (
           <p className="text-body-sm text-on-surface-variant">{product.brand} products are not sold on {WIX_SITES[wixSite].label}.</p>
         )
       )}
-      {selected === 'wayfair_ca' && (
+      {selected === 'wayfair_ca' && !isExcluded(product, 'wayfair_ca') && (
         <>
           <WayfairProductCard product={product} onUpdate={onUpdate} />
           {/* New listings go to Wayfair CANADA only — Wayfair mirrors them to USA
@@ -1786,9 +1795,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
           <WayfairAdditionCard product={product} supplier="CAN" />
         </>
       )}
-      {selected === 'wayfair_us' && <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />}
-      {selected === 'walmart_ca' && <WalmartProductCard market="ca" product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
-      {selected === 'walmart_us' && (
+      {selected === 'wayfair_us' && !isExcluded(product, 'wayfair_us') && <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />}
+      {selected === 'walmart_ca' && !isExcluded(product, 'walmart_ca') && <WalmartProductCard market="ca" product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
+      {selected === 'walmart_us' && !isExcluded(product, 'walmart_us') && (
         <>
           <WalmartProductCard market="us" product={product} row={wmUs ?? null} loading={wmUs === undefined} />
           <WalmartAdditionCard product={product} />
@@ -1801,6 +1810,19 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
 // Compact channel tile: brand avatar, name, link-status dot. `active` marks
 // the Wix site whose card is currently shown below.
+// What an excluded marketplace shows instead of its tools.
+function ExcludedNotice({ product, label, onBack }) {
+  return (
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-8 py-5 flex items-start gap-3">
+      <Ban className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />
+      <div className="text-body-sm">
+        <p className="text-on-surface">{product.sku} is excluded from {label}. Nothing is pushed, listed, exported or promoted there.</p>
+        <button type="button" onClick={onBack} className="mt-1 text-primary hover:underline">Change exclusions</button>
+      </div>
+    </section>
+  );
+}
+
 function ChannelTile({ label, avatar, avatarClass, active = false, linked, linkedText = 'Linked', notLinkedText = 'Not linked', onClick }) {
   const status = linked === undefined
     ? { dot: null, text: linkedText }
@@ -1847,6 +1869,9 @@ function ExportTemplatesCard({ product, media }) {
     const byMarket = new Map();
     for (const t of templates) {
       if (!templateMatchesProduct(t, product)) continue;
+      // Marketplace exclusion (rule 2026-09-22): no file for a switched-off marketplace.
+      const key = templateMarketplaceKey(t.marketplace);
+      if (key && isExcluded(product, key)) continue;
       if (!byMarket.has(t.marketplace)) byMarket.set(t.marketplace, []);
       byMarket.get(t.marketplace).push(t);
     }

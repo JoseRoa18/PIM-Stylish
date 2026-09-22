@@ -34,6 +34,7 @@
 // setup on Walmart (only children's-product certificate references).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import Ajv from "https://esm.sh/ajv@8.17.1";
+import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -366,6 +367,7 @@ Deno.serve(async (req) => {
     for (const sku of skus) {
       const p = ((products ?? []) as Product[]).find((x) => x.sku === sku);
       if (!p) { skipped.push({ sku, reason: "not in the PIM" }); continue; }
+      if (isExcluded(p, "walmart_us")) { skipped.push({ sku, reason: excludedMessage(sku, "walmart_us") }); continue; }
       const type = productTypeFor(p);
       if (!type) { skipped.push({ sku, reason: `no Walmart mapping yet for category "${text(p.category)}" (Sinks only for now)` }); continue; }
       let group: { id: string; primary: boolean } | null = null;

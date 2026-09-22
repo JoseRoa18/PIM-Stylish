@@ -26,6 +26,7 @@
 //   WIX_SITE_ID   — SinksDirect Canada site UUID
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 import { formatDescription } from "../_shared/aiFormat.ts";
 import { resolveWixSite, siteSells } from "../_shared/wixSites.ts";
 
@@ -223,7 +224,7 @@ Deno.serve(async (req) => {
     const { data: pimRow, error: loadErr } = await supabase
       .from("products")
       .select(
-        "sku, model_name, brand, description, ribbon, map_cad, map_usd, msrp_cad, msrp_usd, sale_price_cad, on_sale, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id",
+        "sku, model_name, brand, description, ribbon, map_cad, map_usd, msrp_cad, msrp_usd, sale_price_cad, on_sale, shipping_weight_lb, visible_online, additional_info_sections, wix_collection_ids, wix_product_id, channel_exclusions",
       )
       .eq("sku", sku)
       .maybeSingle<PimRow>();
@@ -239,6 +240,10 @@ Deno.serve(async (req) => {
     }
 
     // Brand rule (2026-09-09): Azuni is never sold on the Stylish stores.
+    // Marketplace exclusion (rule 2026-09-22): nothing travels to a store the product is switched off for.
+    if (isExcluded(pimRow as { channel_exclusions?: string[] | null }, `wix_${site.key}`)) {
+      return new Response(JSON.stringify({ error: excludedMessage(sku, `wix_${site.key}`) }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     if (!siteSells(site, pimRow.brand)) {
       return new Response(
         JSON.stringify({ error: `${sku} is ${pimRow.brand} — ${pimRow.brand} products are not sold on ${site.label}.` }),

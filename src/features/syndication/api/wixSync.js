@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { etToday, promoWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
+import { isExcluded, wixExclusionKey } from '../lib/marketplaces';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells } from '../lib/wixSites';
 import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
@@ -149,9 +150,13 @@ export async function pushProductToAllWixSites(sku, brand = null) {
   // Brand split (rule 2026-08-31): pushes run per brand — 'sinksdirect'
   // covers CA + US, 'stylish' covers CA + US.
   if (brand) sites = new Set([...sites].filter((k) => k.startsWith(brand)));
-  if (!sites.size) throw new Error(brand ? `Not linked on any ${brand === 'stylish' ? 'Stylish' : 'SinksDirect'} store yet.` : 'Not linked on any Wix store yet.');
-
+  // Marketplace exclusion (rule 2026-09-22): switched-off stores get nothing.
   const results = {};
+  for (const k of [...sites]) {
+    if (isExcluded(p, wixExclusionKey(k))) { sites.delete(k); results[k] = { ok: false, skipped: 'excluded' }; }
+  }
+  if (!sites.size) throw new Error(Object.keys(results).length ? `${sku} is excluded from every ${brand ? (brand === 'stylish' ? 'Stylish' : 'SinksDirect') : 'linked'} store.` : (brand ? `Not linked on any ${brand === 'stylish' ? 'Stylish' : 'SinksDirect'} store yet.` : 'Not linked on any Wix store yet.'));
+
   for (const site of sites) {
     // Accordion sections travel too (rule 2026-08-31): rebuilt from the PIM
     // (Dimensions from measurements, Features from bullets, document links

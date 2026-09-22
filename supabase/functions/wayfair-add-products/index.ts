@@ -35,6 +35,7 @@
 // Secrets: WAYFAIR_USA_CLIENT_ID/SECRET/SUPPLIER_ID (+ WAYFAIR_USA_SANDBOX_CLIENT_ID/SECRET),
 //          WAYFAIR_CLIENT_ID/SECRET/SUPPLIER_ID for CAN, WAYFAIR_ENV.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 import { attr, FINISH_ALIAS, num, type Product, ruleContext, ruleForTitle } from "../_shared/wayfairAttributes.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -802,6 +803,8 @@ Deno.serve(async (req) => {
     const report: Record<string, unknown>[] = [];
     for (const p of (products ?? []) as Product[]) {
       const sku = String(p.sku);
+      const exclusionKey = supplier === "USA" ? "wayfair_us" : "wayfair_ca";
+      if (isExcluded(p, exclusionKey)) { skipped.push({ sku, reason: excludedMessage(sku, exclusionKey) }); continue; }
       if (existing.has(sku) && !body.force && !preview) {
         skipped.push({ sku, reason: `already in the Wayfair ${supplier} catalog — use Push, not Product Addition` });
         continue;

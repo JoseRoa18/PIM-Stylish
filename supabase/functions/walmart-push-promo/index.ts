@@ -127,7 +127,14 @@ Deno.serve(async (req) => {
     if (prErr) throw prErr;
     let members = (prices ?? []) as { sku: string; promo_price_cad: number }[];
     if (only) members = members.filter((m) => only.includes(m.sku));
-    if (!members.length) return json({ error: "No Canada promo prices to send." }, 400);
+    // Products switched off for Walmart Canada stay out (products.channel_exclusions).
+    const excluded: string[] = [];
+    for (let i = 0; i < members.length; i += 200) {
+      const { data: ex } = await admin.from("products").select("sku").contains("channel_exclusions", ["walmart_ca"]).in("sku", members.slice(i, i + 200).map((m) => m.sku));
+      for (const p of ex ?? []) excluded.push(p.sku);
+    }
+    if (excluded.length) members = members.filter((m) => !excluded.includes(m.sku));
+    if (!members.length) return json({ error: excluded.length ? "Every member is excluded from Walmart Canada." : "No Canada promo prices to send." }, 400);
 
     const skus = members.map((m) => m.sku);
     const pim = new Map<string, { map_cad: number | null; msrp_cad: number | null }>();
@@ -191,7 +198,7 @@ Deno.serve(async (req) => {
     };
     const report: Record<string, unknown> = {
       promotion: promo.name, period: promo.period, window: { start, end },
-      attempted: lines.length, sent_under_alias: aliased, not_listed: notListed.length, no_map: noMap, at_or_above_map: atOrAboveMap,
+      attempted: lines.length, sent_under_alias: aliased, not_listed: notListed.length, no_map: noMap, at_or_above_map: atOrAboveMap, excluded: excluded.length,
     };
     if (dryRun) return json({ ok: true, dryRun: true, ...report, listed_known: listed != null, payload });
     if (!lines.length) return json({ error: "Nothing to send: no member is listed on Walmart Canada with a promo price below its MAP.", ...report }, 400);

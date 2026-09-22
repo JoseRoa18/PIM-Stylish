@@ -24,7 +24,7 @@ import {
   templateExt,
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
-import { getPromotionPrices } from '@/features/pricing/api/promotions';
+import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -90,7 +90,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   const market = channel.market;
   const fulfillmentValue = await merchantFulfillmentValue(zip, shared);
   const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
-  const prices = await getPromotionPrices(promotion.id);
+  const { rows: prices, excluded } = await promotionMembersFor(promotion, channel.key);
   const members = prices.filter((r) => r[priceKey] != null);
   if (!members.length) throw new Error(`This promotion has no ${market === 'us' ? 'USD' : 'CAD'} promo prices loaded.`);
   const priceBySku = new Map(members.map((r) => [r.sku, r[priceKey]]));
@@ -165,6 +165,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
     filled: cellsByRow.size,
     appended: toAppend.length,
     noOffer,
+    excluded,
     window,
     fulfillmentValue,
     columns: { sku: indexToCol(skuCol + 1), fulfillment: fulfillCol >= 0 ? indexToCol(fulfillCol + 1) : null, price: indexToCol(priceCol + 1), start: indexToCol(startCol + 1), end: indexToCol(endCol + 1) },
@@ -184,5 +185,6 @@ export function summarizeAmazonFill(channel, r) {
   const parts = [`${channel.label} file ready. ${r.offers} offers for ${r.products} products, ${r.window.start} to ${r.window.end} · columns ${r.columns.sku}${r.columns.fulfillment ? `+${r.columns.fulfillment}` : ''}, ${r.columns.price}, ${r.columns.start}, ${r.columns.end}`];
   if (r.filled) parts.push(`${r.filled} rows filled in place, ${r.appended} added`);
   if (r.noOffer.length) parts.push(`no Amazon seller SKU on file: ${r.noOffer.slice(0, 10).join(', ')}${r.noOffer.length > 10 ? ` and ${r.noOffer.length - 10} more` : ''}`);
+  if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${r.excluded.slice(0, 10).join(', ')}${r.excluded.length > 10 ? ` and ${r.excluded.length - 10} more` : ''}`);
   return parts.join(' · ');
 }

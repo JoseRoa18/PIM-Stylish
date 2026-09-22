@@ -27,6 +27,7 @@
 // Required secrets: BESTBUY_API_KEY
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { excludedSet } from "../_shared/exclusions.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -84,7 +85,12 @@ Deno.serve(async (req) => {
 
     // --- Validate the rows ---------------------------------------------------
     const body = await req.json().catch(() => ({}));
-    const rows: Record<string, string>[] = Array.isArray(body.rows) ? body.rows : [];
+    let rows: Record<string, string>[] = Array.isArray(body.rows) ? body.rows : [];
+    // Marketplace exclusion (rule 2026-09-22): products switched off for Best Buy are left out.
+    const rowSku = (r: Record<string, string>) => String(r.sku ?? r.SKU ?? r["Seller SKU"] ?? r.seller_sku ?? "");
+    const excludedBb = await excludedSet(admin, rows.map(rowSku).filter(Boolean), "bestbuy");
+    const excluded = [...excludedBb].sort();
+    if (excludedBb.size) rows = rows.filter((r) => !excludedBb.has(rowSku(r)));
     if (!rows.length) return json({ error: "rows is required." }, 400);
     if (rows.length > MAX_ROWS) return json({ error: `Max ${MAX_ROWS} rows per call.` }, 400);
     for (const r of rows) {

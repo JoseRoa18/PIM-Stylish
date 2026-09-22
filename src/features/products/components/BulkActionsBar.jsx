@@ -31,6 +31,7 @@ import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind, pu
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import { listMedia } from '@/features/media/api/media';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { isExcluded, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
 import { useAuth } from '@/features/auth/AuthContext';
 
 const WORKFLOW_OPTIONS = [
@@ -400,9 +401,13 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const skus = [...selectedSkus];
       const byTemplate = new Map(); // template.id → { tmpl, label, products }
       const noTemplate = [];
+      const excludedSkus = [];
+      const exclusionKey = templateMarketplaceKey(marketplace);
       for (const sku of skus) {
         const p = await getProduct(sku);
         if (!p) continue;
+        // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the file.
+        if (exclusionKey && isExcluded(p, exclusionKey)) { excludedSkus.push(sku); continue; }
         const tmpl = templateForProduct(mkTemplates, p);
         if (!tmpl) {
           const label = p.category === 'accessory' ? `accessory (${accessoryKind(p) ?? p.sku})` : p.category;
@@ -415,7 +420,9 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         }
         byTemplate.get(tmpl.id).products.push(p);
       }
-      if (!byTemplate.size && !noTemplate.length) throw new Error('Could not load product data.');
+      if (!byTemplate.size && !noTemplate.length) {
+        throw new Error(excludedSkus.length ? `Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.` : 'Could not load product data.');
+      }
 
       const parts = [];
       const reports = [];
@@ -433,6 +440,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       }
       let message = `Exported ${parts.length} file(s) — ${parts.join(' · ')}.`;
       if (noTemplate.length) message += ` ⚠ Skipped (no template): ${noTemplate.join(', ')}.`;
+      if (excludedSkus.length) message += ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.`;
       if (warnings) message += ` ⚠ ${warnings} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`;
       setResult({ type: noTemplate.length || warnings ? 'error' : 'success', message });
     } catch (err) {

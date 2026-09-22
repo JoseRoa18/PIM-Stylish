@@ -28,7 +28,7 @@ import {
   injectRows,
   downloadZip,
 } from '@/features/syndication/exports/templateFiller';
-import { getPromotionPrices } from '@/features/pricing/api/promotions';
+import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const HEADER_ROW = 2; // technical names: SupplierPartNumber, ..., PromotionalDiscountPercent
@@ -56,7 +56,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     throw new Error('Unexpected column layout — this doesn\'t look like Wayfair\'s promotions template.');
   }
 
-  const prices = await getPromotionPrices(promotion.id);
+  const { rows: prices, excluded } = await promotionMembersFor(promotion, usa ? 'wayfair_us' : 'wayfair_ca');
   const costBySku = new Map(
     prices
       .filter((r) => r.promo_costs?.[costSlug] != null)
@@ -155,5 +155,5 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     },
   });
 
-  return { filled, appended: toAppend, templateRows: templateSkus.size, notOnWayfair };
+  return { filled, appended: toAppend, templateRows: templateSkus.size, notOnWayfair, excluded };
 }

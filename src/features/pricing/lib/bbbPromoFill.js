@@ -27,7 +27,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { parseCsvText } from '@/features/import/lib/parseSpreadsheet';
-import { getPromotionPrices } from '@/features/pricing/api/promotions';
+import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const HEADER_SCAN_ROWS = 10;
@@ -105,7 +105,7 @@ function downloadCsv(name, text) {
 }
 
 export async function fillBBBPromoFile(file, promotion) {
-  const prices = await getPromotionPrices(promotion.id);
+  const { rows: prices, excluded } = await promotionMembersFor(promotion, 'bbb');
   const bySku = new Map(
     prices
       .filter((r) => r.promo_price_usd != null || r.promo_costs?.lowes_sod_bbb_usd != null)
@@ -193,6 +193,7 @@ export async function fillBBBPromoFile(file, promotion) {
   });
 
   return {
+    excluded,
     filled,
     fileRows: plan.fileSkus.size,
     notInPromo: plan.notInPromo,

@@ -27,6 +27,7 @@
 // Caller must be an authenticated admin or editor.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { excludedSet } from "../_shared/exclusions.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -112,9 +113,14 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const updates: PriceUpdate[] = Array.isArray(body.updates) ? body.updates : [];
+    let updates: PriceUpdate[] = Array.isArray(body.updates) ? body.updates : [];
     const dryRun = body.dryRun === true;
     if (!updates.length) return json({ error: "updates[] is required." }, 400);
+    // Marketplace exclusion (rule 2026-09-22): products switched off for Best Buy are left out.
+    const excludedBb = await excludedSet(admin, updates.map((u) => u.sku), "bestbuy");
+    const excluded = [...excludedBb].sort();
+    if (excludedBb.size) updates = updates.filter((u) => !excludedBb.has(u.sku));
+    if (!updates.length) return json({ error: `Every line is excluded from Best Buy Canada: ${excluded.join(", ")}` }, 409);
     if (updates.length > 500) return json({ error: "Too many updates in one push (max 500)." }, 400);
 
     // --- merge the LIVE offer into each line -------------------------------

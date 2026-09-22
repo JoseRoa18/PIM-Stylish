@@ -140,13 +140,34 @@ async function promoPrices(promoId: number): Promise<PriceRow[]> {
   );
 }
 
+// Rows minus the products switched off for a marketplace (products.channel_exclusions).
+async function withoutExcluded<T extends { sku: string }>(rows: T[], channelKey: string): Promise<T[]> {
+  if (!rows.length) return rows;
+  const ex = new Set<string>();
+  for (const part of chunk(rows.map((r) => r.sku), 100)) {
+    const hit = await restGet<{ sku: string }[]>(`products?select=sku&channel_exclusions=cs.{${channelKey}}&sku=${inList(part)}`);
+    hit.forEach((p) => ex.add(p.sku));
+  }
+  return ex.size ? rows.filter((r) => !ex.has(r.sku)) : rows;
+}
+
 // ---------- Wix push helper -------------------------------------------------
 
 interface WixJob { sku: string; site: string; only: string[]; fields?: Record<string, unknown> }
 
-async function pushWixJobs(jobs: WixJob[], dryRun: boolean, errors: string[]) {
-  const out: Record<string, { pushed: number; failed: number }> = {};
-  for (const j of jobs) out[j.site] = out[j.site] ?? { pushed: 0, failed: 0 };
+async function pushWixJobs(allJobs: WixJob[], dryRun: boolean, errors: string[]) {
+  // Marketplace exclusion (rule 2026-09-22): a product switched off for a
+  // store gets no job there, not even a price change.
+  const jobs: WixJob[] = [];
+  const bySite = new Map<string, WixJob[]>();
+  for (const j of allJobs) bySite.set(j.site, [...(bySite.get(j.site) ?? []), j]);
+  for (const [site, list] of bySite) {
+    const kept = await withoutExcluded(list, `wix_${site}`);
+    jobs.push(...kept);
+  }
+  const out: Record<string, { pushed: number; failed: number; excluded?: number }> = {};
+  for (const j of allJobs) out[j.site] = out[j.site] ?? { pushed: 0, failed: 0 };
+  if (allJobs.length !== jobs.length) for (const [site, list] of bySite) out[site].excluded = list.length - jobs.filter((j) => j.site === site).length;
   if (dryRun || !jobs.length) return out;
   const results = await mapLimit(jobs, 5, async (job) => {
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/wix-push-product`, {
@@ -437,7 +458,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
       try {
         const w = win(caTarget, "ca");
         const start = w.start > today ? w.start : tomorrow;
-        report.bestbuy = await scheduleBestBuy(cadRows, start, w.end, dryRun);
+        report.bestbuy = await scheduleBestBuy(await withoutExcluded(cadRows, "bestbuy"), start, w.end, dryRun);
         if (!dryRun) await restPatch(`promotions?id=eq.${caTarget.id}`, { bb_scheduled_at: nowIso });
       } catch (err) {
         errors.push(`bestbuy: ${(err as Error).message}`);
@@ -455,7 +476,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
   // -- 5. prep pass: tomorrow is Canada's first Thursday ---------------------
   if (doPrep && settings.bestbuy !== false && prepTarget) {
     try {
-      const rows = (await promoPrices(prepTarget.id)).filter((r) => r.promo_price_cad != null);
+      const rows = await withoutExcluded((await promoPrices(prepTarget.id)).filter((r) => r.promo_price_cad != null), "bestbuy");
       if (rows.length) {
         const w = win(prepTarget, "ca");
         report.prep = await scheduleBestBuy(rows, w.start, w.end, dryRun);

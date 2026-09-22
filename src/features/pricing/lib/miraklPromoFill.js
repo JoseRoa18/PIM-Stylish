@@ -32,7 +32,7 @@ import {
   templateExt,
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
-import { getPromotionPrices } from '@/features/pricing/api/promotions';
+import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -103,7 +103,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
 
   const market = channel.market;
   const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
-  const prices = await getPromotionPrices(promotion.id);
+  const { rows: prices, excluded } = await promotionMembersFor(promotion, channel.key);
   const members = prices.filter((r) => r[priceKey] != null);
   if (!members.length) throw new Error(`This promotion has no ${market === 'us' ? 'USD' : 'CAD'} promo prices loaded.`);
   const skus = members.map((r) => r.sku);
@@ -178,7 +178,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
 
   const noPromoCost = lines.filter((l) => l.promoCost == null).length;
   const noBaseCost = channel.costField ? lines.filter((l) => l.baseCost == null).length : 0;
-  const report = { rows: lines.length, aliased, noAlias, noRegular, atOrAbove, noPromoCost, noBaseCost, window, sheet: hit.name };
+  const report = { rows: lines.length, aliased, noAlias, noRegular, atOrAbove, noPromoCost, noBaseCost, excluded, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
@@ -197,5 +197,6 @@ export function summarizeMiraklFill(channel, r) {
   if (r.noAlias.length) parts.push(`no ${channel.label} id on file, left out: ${r.noAlias.slice(0, 8).join(', ')}${r.noAlias.length > 8 ? ` and ${r.noAlias.length - 8} more` : ''}`);
   if (r.noRegular.length) parts.push(`no regular price in the PIM, left out: ${r.noRegular.slice(0, 8).join(', ')}${r.noRegular.length > 8 ? ` and ${r.noRegular.length - 8} more` : ''}`);
   if (r.atOrAbove.length) parts.push(`promo not below the regular price, left out: ${r.atOrAbove.slice(0, 8).join(', ')}`);
+  if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${r.excluded.slice(0, 8).join(', ')}${r.excluded.length > 8 ? ` and ${r.excluded.length - 8} more` : ''}`);
   return parts.join(' · ');
 }

@@ -20,6 +20,7 @@
 //         mode?: "plan"|"push", steps?: { images?, videos?, documents? },
 //         validateOnly?: boolean (push mode; default false), statusRequestId? }
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -179,9 +180,11 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { data: product, error: pErr } = await supabase.from("products").select("sku, model_name, wayfair_item_group_id").eq("sku", sku).maybeSingle();
+    const { data: product, error: pErr } = await supabase.from("products").select("sku, model_name, wayfair_item_group_id, channel_exclusions").eq("sku", sku).maybeSingle();
     if (pErr) return json({ error: `PIM read failed: ${pErr.message}` }, 500);
     if (!product) return json({ error: `Product ${sku} not found in PIM` }, 404);
+    const exclusionKey = supplier === "USA" ? "wayfair_us" : "wayfair_ca";
+    if (isExcluded(product, exclusionKey)) return json({ error: excludedMessage(sku, exclusionKey) }, 409);
     const { data: media, error: mErr } = await supabase
       .from("product_media")
       .select("id, storage_path, media_type, is_primary, display_order, image_role, language, document_type, file_name")

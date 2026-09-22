@@ -42,6 +42,32 @@ export async function getPromotionPrices(promotionId) {
 }
 
 /**
+ * SKUs (among `skus`) switched off for a marketplace — products.channel_exclusions
+ * carries the promo channel keys a product must stay out of (rule 2026-09-22).
+ */
+export async function excludedSkus(channelKey, skus) {
+  const out = new Set();
+  const list = [...new Set(skus)];
+  for (let i = 0; i < list.length; i += 200) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('sku')
+      .contains('channel_exclusions', [channelKey])
+      .in('sku', list.slice(i, i + 200));
+    if (error) throw error;
+    for (const p of data ?? []) out.add(p.sku);
+  }
+  return out;
+}
+
+/** The promotion's price rows minus the products excluded on `channelKey`. */
+export async function promotionMembersFor(promotion, channelKey) {
+  const prices = await getPromotionPrices(promotion.id);
+  const ex = channelKey ? await excludedSkus(channelKey, prices.map((r) => r.sku)) : new Set();
+  return { rows: prices.filter((r) => !ex.has(r.sku)), excluded: [...ex].sort() };
+}
+
+/**
  * Parse a pasted price list ("SKU<tab or spaces>price" per line; $ and
  * thousands commas tolerated). Returns { rows, skipped } — rows are NOT
  * validated against the PIM here; createPromotion does that.
@@ -339,9 +365,9 @@ export async function autoScheduleBestBuyPromo(promotion) {
   const window = promoWindow(promotion, 'ca');
   if (window.end < etToday()) return { skipped: 'past promotion' };
 
-  const prices = await getPromotionPrices(promotion.id);
+  const { rows: prices, excluded } = await promotionMembersFor(promotion, 'bestbuy');
   const members = prices.filter((r) => r.promo_price_cad != null);
-  if (!members.length) return { skipped: 'no CAD prices yet' };
+  if (!members.length) return { skipped: excluded.length ? 'every member is excluded from Best Buy' : 'no CAD prices yet' };
 
   const { data: snap, error: snapErr } = await supabase
     .from('channel_health')

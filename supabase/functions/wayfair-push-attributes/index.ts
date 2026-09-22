@@ -23,6 +23,7 @@
 // Required secrets: WAYFAIR_CLIENT_ID, WAYFAIR_CLIENT_SECRET,
 //                   WAYFAIR_SUPPLIER_ID, WAYFAIR_ENV
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 import {
   FINISH_ALIAS,
   type Product,
@@ -113,6 +114,8 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (pErr) return json({ error: `PIM read failed: ${pErr.message}` }, 500);
     if (!product) return json({ error: `Product ${sku} not found in PIM` }, 404);
+    const exclusionKey = supplier === "USA" ? "wayfair_us" : "wayfair_ca";
+    if (isExcluded(product, exclusionKey)) return json({ error: excludedMessage(sku, exclusionKey) }, 409);
 
     const endpoint = ENV === "production"
       ? "https://api.wayfair.io/v1/product-catalog-api/graphql"

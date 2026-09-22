@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { isExcluded } from '../lib/marketplaces';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 // Best Buy Canada (Mirakl). Reads pull the seller's offers; writes are
@@ -135,7 +136,7 @@ export async function loadBestBuyPushCandidates() {
   const [{ data: prods, error: prodErr }, { data: media, error: mediaErr }] = await Promise.all([
     supabase
       .from('products')
-      .select('sku, brand, description, attributes')
+      .select('sku, brand, description, attributes, channel_exclusions')
       .in('sku', skus),
     supabase
       .from('product_media')
@@ -162,6 +163,8 @@ export async function loadBestBuyPushCandidates() {
     if (!pim) continue; // Best Buy-only offers (open box etc.) are not ours to push
     const skip = (reason) => excluded.push({ sku: offer.sku, reason });
 
+    // Marketplace exclusion (rule 2026-09-22): switched-off products are never pushed.
+    if (isExcluded(pim, 'bestbuy')) { skip('excluded from Best Buy Canada (product switch)'); continue; }
     if (!CONDITION_ONLY_CATS.has(offer.category_code)) {
       skip('accessory category — needs manual attributes (not in v1)');
       continue;

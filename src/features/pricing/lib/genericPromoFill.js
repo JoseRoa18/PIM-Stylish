@@ -23,7 +23,7 @@ import {
   indexToCol,
   norm,
 } from '@/features/syndication/exports/templateFiller';
-import { getPromotionPrices } from '@/features/pricing/api/promotions';
+import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -94,7 +94,7 @@ export async function fillPromoTemplate(template, promotion, channel) {
 
   const priceKey = channel.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const mapKey = channel.market === 'us' ? 'map_usd' : 'map_cad';
-  const prices = await getPromotionPrices(promotion.id);
+  const { rows: prices, excluded } = await promotionMembersFor(promotion, channel.key);
   const members = prices
     .map((r) => ({ sku: r.sku, price: r[priceKey] ?? null, cost: channel.costSlug ? r.promo_costs?.[channel.costSlug] ?? null : null }))
     .filter((m) => m.price != null || m.cost != null);
@@ -165,7 +165,7 @@ export async function fillPromoTemplate(template, promotion, channel) {
   const columns = Object.fromEntries(Object.entries(hit.cols).map(([role, c]) => [role, indexToCol(c + 1)]));
   const wanted = ['promoPrice', ...(channel.costSlug ? ['cost'] : []), 'start', 'end'];
   const missing = wanted.filter((role) => hit.cols[role] == null);
-  const report = { sheet: hit.name, columns, missing, filled: cellsByRow.size, appended: toAppend.length, fileRows: fileSkus.size };
+  const report = { sheet: hit.name, columns, missing, filled: cellsByRow.size, appended: toAppend.length, fileRows: fileSkus.size, excluded };
 
   logActivity({
     action: 'export',
@@ -184,5 +184,6 @@ export function summarizePromoFill(channel, r) {
   const names = { promoPrice: 'promo price', cost: 'promo cost', start: 'start date', end: 'end date', map: 'regular MAP', sku: 'SKU' };
   parts.push('columns: ' + Object.entries(r.columns).map(([role, col]) => `${names[role]} ${col}`).join(', '));
   if (r.missing.length) parts.push(`not found in the template: ${r.missing.map((m) => names[m]).join(', ')}`);
+  if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${r.excluded.slice(0, 10).join(', ')}${r.excluded.length > 10 ? ` and ${r.excluded.length - 10} more` : ''}`);
   return parts.join(' · ');
 }
