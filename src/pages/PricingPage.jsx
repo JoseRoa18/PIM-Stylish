@@ -697,7 +697,16 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             Custom dates
           </label>
           )}
-          {customDates && (
+          {!monthly && (
+            // Flash deals and special events: the two dates sit on the same
+            // line as Name and Source, no sub-labels.
+            <div className="mt-1 flex items-center gap-2">
+              <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} aria-label="First day" title="First day" className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              <span className="text-body-sm text-on-surface-variant">to</span>
+              <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} aria-label="Last day" title="Last day" className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            </div>
+          )}
+          {monthly && customDates && (
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="text-label-md text-on-surface-variant">First day</span>
