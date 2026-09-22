@@ -1385,7 +1385,7 @@ function SpecsTab({ product, edit }) {
 
       {!isFaucet && (
         <Section title="Accessories" defaultOpen={false}>
-          <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} hint="Separate items with ;" />
+          <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} hint="Separate items with ;" linkSkus />
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
             <AttrField label="Number of Pieces Included" attrKey="number_of_pieces" type="number" product={product} edit={edit} />
             <AttrField label="Grids Model Code" attrKey="grids_model_code" product={product} edit={edit} />
@@ -2172,7 +2172,60 @@ function AttrDimensionsField({ label, attrKey, keys, labels, product, edit, unit
 
 // ===================== AttrListField — for arrays of strings in attributes =====================
 
-function AttrListField({ label, attrKey, product, edit, hint }) {
+// Free-text items such as "A-902DG Drying Rack" or "Pop-up Drain (D-701H)"
+// carry a SKU: when that SKU is a product in the PIM the chip links to it.
+// Exact SKU match only — "A906" and "A-906" are different brands, never the same product.
+const SKU_TOKEN_RE = /\b[A-Z]{1,3}-?\d{2,4}[A-Z]{0,3}\b/gi;
+function useLinkedSkus(items) {
+  const candidates = useMemo(() => {
+    const set = new Set();
+    for (const item of items) for (const m of String(item).match(SKU_TOKEN_RE) ?? []) set.add(m.toUpperCase());
+    return [...set];
+  }, [items]);
+  const key = candidates.join('|');
+  const [known, setKnown] = useState({});
+  useEffect(() => {
+    if (!candidates.length) { setKnown({}); return; }
+    let alive = true;
+    supabase.from('products').select('sku, model_name').in('sku', candidates).then(({ data }) => {
+      if (alive) setKnown(Object.fromEntries((data ?? []).map((p) => [p.sku.toUpperCase(), p])));
+    });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return (item) => {
+    for (const m of String(item).match(SKU_TOKEN_RE) ?? []) {
+      const p = known[m.toUpperCase()];
+      if (p) return p;
+    }
+    return null;
+  };
+}
+
+function LinkedChips({ items }) {
+  const linked = useLinkedSkus(items);
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.map((item, i) => {
+        const p = linked(item);
+        if (!p) return <span key={i} className="px-3 py-1 rounded-full bg-surface-container text-body-sm text-on-surface">{String(item)}</span>;
+        return (
+          <Link
+            key={i}
+            to={`/catalog/${encodeURIComponent(p.sku)}`}
+            title={`Open ${p.sku}${p.model_name ? ` · ${p.model_name}` : ''}`}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary-container/40 text-body-sm text-primary hover:bg-primary-container transition-colors"
+          >
+            {String(item)}
+            <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function AttrListField({ label, attrKey, product, edit, hint, linkSkus = false }) {
   const { isEditing, form, setField } = edit;
 
   if (!isEditing) {
@@ -2182,11 +2235,13 @@ function AttrListField({ label, attrKey, product, edit, hint }) {
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <div className="flex flex-wrap gap-2">
-          {items.map((item, i) => (
-            <span key={i} className="px-3 py-1 rounded-full bg-surface-container text-body-sm text-on-surface">{String(item)}</span>
-          ))}
-        </div>
+        {linkSkus ? <LinkedChips items={items} /> : (
+          <div className="flex flex-wrap gap-2">
+            {items.map((item, i) => (
+              <span key={i} className="px-3 py-1 rounded-full bg-surface-container text-body-sm text-on-surface">{String(item)}</span>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
