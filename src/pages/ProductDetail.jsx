@@ -631,7 +631,6 @@ export default function ProductDetail() {
           <OverviewTab
             product={product}
             edit={editCtx}
-            documents={documents}
             onProductChanged={refetch}
             onUnify={(driftFields) =>
               setPropagation({
@@ -1025,7 +1024,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
 
 // ===================== Overview Tab =====================
 
-function OverviewTab({ product, edit, documents = [], onProductChanged, onUnify }) {
+function OverviewTab({ product, edit, onProductChanged, onUnify }) {
   return (
     <div className="space-y-6">
       <Section title="Identification">
