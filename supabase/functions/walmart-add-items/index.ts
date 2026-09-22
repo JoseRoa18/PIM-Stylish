@@ -126,15 +126,24 @@ function sinkFeatures(p: Product): string[] {
   return out;
 }
 
-// sink_type from the bowl configuration (user rule): single → Single Basin
-// Sink, double → Double Bowl Sink. Farmhouse / drainboard / corner add their own.
+// The PIM's installation type: "Undermount", "Dual Mount", "Top Mount", "Drop-In".
+const installation = (p: Product) => (text(p.installation_type) || text(attr(p).installation_type)).toLowerCase();
+
+// sink_type (multi-value): the bowl configuration (user rule: single → Single
+// Basin Sink, double → Double Bowl Sink) PLUS the installation (Undermount Sink /
+// Drop-In Sink; Dual Mount = both, since it installs either way). Farmhouse /
+// drainboard / corner add their own.
 function sinkType(p: Product): string[] {
   const cfg = `${text(p.bowl_configuration)} ${text(attr(p).bowl_configuration)}`.toLowerCase();
   const bowls = num(p.number_of_bowls) ?? num(attr(p).number_of_bowls);
-  const inst = `${text(p.installation_type)} ${text(attr(p).installation_type)} ${text(attr(p).general_title_en)}`.toLowerCase();
+  const inst = `${installation(p)} ${text(attr(p).general_title_en)}`.toLowerCase();
   const out: string[] = [];
   if (/double|2 bowl|60\/40|50\/50|70\/30/.test(cfg) || bowls === 2) out.push("Double Bowl Sink");
   else if (/single|1 bowl/.test(cfg) || bowls === 1) out.push("Single Basin Sink");
+  const how = installation(p);
+  if (/dual/.test(how)) out.push("Undermount Sink", "Drop-In Sink");
+  else if (/under/.test(how)) out.push("Undermount Sink");
+  else if (/drop|top/.test(how)) out.push("Drop-In Sink");
   if (/farmhouse|apron/.test(inst)) out.push("Farmhouse Sink");
   if (/drainboard/.test(inst)) out.push("Drainboard Sink");
   if (/corner/.test(inst)) out.push("Corner Sink");
@@ -240,6 +249,9 @@ function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: 
   set(vis, "color", text(p.color) || text(p.finish), "Specifications");
   set(vis, "colorCategory", colorCategory(p), "Specifications");
   set(vis, "sink_type", sinkType(p), "Specifications", undefined, true);
+  // mountType (user rule 2026-09-22): "Drop-in" only for Drop-In / Top Mount sinks;
+  // Undermount and Dual Mount send nothing (Walmart's list has no such value).
+  if (/drop|top/.test(installation(p))) set(vis, "mountType", ["Drop-in"], "Specifications");
   set(vis, "shape", text(p.shape) || text(a.sink_shape), "Specifications");
   const ext = (a.external_dimensions_in ?? {}) as Record<string, unknown>;
   const L = num(ext.length), W = num(ext.width), D = num(ext.depth);
