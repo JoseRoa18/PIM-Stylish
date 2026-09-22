@@ -1053,6 +1053,10 @@ function OverviewTab({ product, edit, documents = [], onProductChanged, onUnify 
           <AttrField label="HS Code" attrKey="hs_code" product={product} edit={edit} mono />
           <AttrField label="Warranty" attrKey="warranty" product={product} edit={edit} />
           <AttrField label="Warranty Length" attrKey="warranty_length" type="select" options={WARRANTY_LENGTH_OPTIONS} product={product} edit={edit} />
+          <AttrField label="Warranty URL" attrKey="warranty_url" help="Public warranty page sent to marketplaces (Walmart warrantyURL). Same address for every product." product={product} edit={edit} mono />
+          <div className="col-span-2 sm:col-span-3">
+            <AttrField label="Warranty Text" attrKey="warranty_text" type="textarea" help="Full warranty terms sent to marketplaces that ask for written warranty text (Walmart has_written_warranty = Yes - Warranty Text)." product={product} edit={edit} />
+          </div>
           <EditableField label="Standards" fieldKey="standards_compliance" product={product} edit={edit} />
           <AttrField label="Safety Listing(s)" attrKey="safety_listings" product={product} edit={edit} />
           <AttrField label="SCC Compliant" attrKey="scc_compliant" product={product} edit={edit} />
