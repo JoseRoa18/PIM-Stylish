@@ -374,7 +374,10 @@ export const VALUE_CANONICALS = {
   finish: {
     'brushed stainless steel': 'Brushed Stainless Steel',
     'brushed': 'Brushed Stainless Steel',
-    'gray': 'Grey',
+    // Colour spelling standard (2026-09-22): always "Gray", never "Grey".
+    'grey': 'Gray',
+    'dark grey': 'Dark Gray',
+    'light grey': 'Light Gray',
   },
   gauge: {
     'no': null,
