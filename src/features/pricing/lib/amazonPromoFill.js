@@ -7,8 +7,10 @@
 // Amazon does not know our SKUs: column A takes the SELLER SKU of the offer
 // (S-300XG-CAN, 3P-LVMJ-40J0…), stored per marketplace in amazon_links. One
 // product can have several offers (FBA + FBM, legacy codes) — every offer
-// gets the promo. Filled per row: seller SKU, sale price in the market's
-// currency, sale start and sale end = the market's promo window.
+// gets the promo. Filled per row: seller SKU, fulfillment channel
+// ("Fulfillment by Merchant (Default)" — user rule 2026-09-22, we ship
+// ourselves), sale price in the market's currency, sale start and sale end
+// = the market's promo window.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -27,6 +29,7 @@ import { marketWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const HEADER_SCAN_ROWS = 12;
+const FULFILLMENT_VALUE = 'Fulfillment by Merchant (Default)';
 const text = (v) => String(v ?? '').trim();
 const lower = (v) => text(v).toLowerCase();
 
@@ -40,13 +43,14 @@ function locate(grid) {
     const start = row.findIndex((h) => /sale (start|from) date/.test(h));
     const end = row.findIndex((h) => /sale end date/.test(h));
     const skuIdx = row.findIndex((h) => /^(seller )?sku$/.test(h) || /^sku \(/.test(h));
+    const fulfillment = row.findIndex((h) => /fulfillment channel/.test(h));
     // Row under the display names: Amazon's technical field names
     // (contribution_sku#1.value, purchasable_offer[...]...). Then Amazon's
     // example row ("ABC123"), which stays exactly as it is (rule 2026-09-13):
     // our rows go below it.
     const next = (grid[r + 1] ?? []).map(lower);
     const technical = next.some((h) => /^(item_sku|sku|sale_price|sale_from_date)$|contribution_sku|purchasable_offer|#1\.value$/.test(h));
-    return { headerRow: r, dataStart: r + (technical ? 2 : 1), cols: { sku: skuIdx === -1 ? 0 : skuIdx, price, start, end } };
+    return { headerRow: r, dataStart: r + (technical ? 2 : 1), cols: { sku: skuIdx === -1 ? 0 : skuIdx, price, start, end, fulfillment } };
   }
   return null;
 }
@@ -100,9 +104,10 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   offers.sort((a, b) => a.seller.localeCompare(b.seller));
 
   const window = marketWindow(promotion.period, market);
-  const { sku: skuCol, price: priceCol, start: startCol, end: endCol } = loc.cols;
+  const { sku: skuCol, price: priceCol, start: startCol, end: endCol, fulfillment: fulfillCol } = loc.cols;
   const cellsFor = (rn, o) => new Map([
     [skuCol + 1, buildCell(`${indexToCol(skuCol + 1)}${rn}`, o.seller)],
+    ...(fulfillCol >= 0 ? [[fulfillCol + 1, buildCell(`${indexToCol(fulfillCol + 1)}${rn}`, FULFILLMENT_VALUE)]] : []),
     [priceCol + 1, buildCell(`${indexToCol(priceCol + 1)}${rn}`, Number(o.price))],
     [startCol + 1, buildCell(`${indexToCol(startCol + 1)}${rn}`, window.start)],
     [endCol + 1, buildCell(`${indexToCol(endCol + 1)}${rn}`, window.end)],
@@ -145,7 +150,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
     appended: toAppend.length,
     noOffer,
     window,
-    columns: { sku: indexToCol(skuCol + 1), price: indexToCol(priceCol + 1), start: indexToCol(startCol + 1), end: indexToCol(endCol + 1) },
+    columns: { sku: indexToCol(skuCol + 1), fulfillment: fulfillCol >= 0 ? indexToCol(fulfillCol + 1) : null, price: indexToCol(priceCol + 1), start: indexToCol(startCol + 1), end: indexToCol(endCol + 1) },
   };
   logActivity({
     action: 'export',
@@ -159,7 +164,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
 }
 
 export function summarizeAmazonFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.offers} offers for ${r.products} products, ${r.window.start} to ${r.window.end}`];
+  const parts = [`${channel.label} file ready. ${r.offers} offers for ${r.products} products, ${r.window.start} to ${r.window.end} · columns ${r.columns.sku}${r.columns.fulfillment ? `+${r.columns.fulfillment}` : ''}, ${r.columns.price}, ${r.columns.start}, ${r.columns.end}`];
   if (r.filled) parts.push(`${r.filled} rows filled in place, ${r.appended} added`);
   if (r.noOffer.length) parts.push(`no Amazon seller SKU on file: ${r.noOffer.slice(0, 10).join(', ')}${r.noOffer.length > 10 ? ` and ${r.noOffer.length - 10} more` : ''}`);
   return parts.join(' · ');
