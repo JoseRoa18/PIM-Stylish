@@ -211,7 +211,12 @@ Deno.serve(async (req) => {
         headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": access_token }),
       });
       if (!res.ok) {
-        return json({ error: `Walmart items ${res.status}: ${await res.text()}` }, 502);
+        const body = await res.text();
+        // A seller with nothing listed yet gets 404 CONTENT_NOT_FOUND, not an
+        // empty page (new Walmart US account, 2026-09-22): that is a catalog
+        // of zero items, so the snapshot must say so instead of failing.
+        if (res.status === 404 && /CONTENT_NOT_FOUND|No Items found/i.test(body)) break;
+        return json({ error: `Walmart items ${res.status}: ${body}` }, 502);
       }
       const data = await res.json();
       total = data.totalItems ?? 0;
