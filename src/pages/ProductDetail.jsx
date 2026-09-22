@@ -1559,12 +1559,11 @@ function MediaTab({ sku, category, familyNumber, installationType }) {
 
 function MarketplacesTab({ product, media, onUpdate }) {
   const confirm = useConfirm();
-  // One Wix card at a time — each site is its own store (own catalog, own
-  // price rule); keying by site remounts the card so it reads that site live.
-  const [wixSite, setWixSite] = useState(DEFAULT_WIX_SITE);
-  const wayfairRef = useRef(null);
-  const wayfairUsaRef = useRef(null);
-  const walmartRef = useRef(null);
+  // One marketplace at a time: the tiles are the menu, the panel below shows
+  // only the chosen marketplace's options. Wix sites are separate stores
+  // (own catalog, own price rule); keying the card by site remounts it.
+  const [selected, setSelected] = useState(null);
+  const wixSite = selected && WIX_SITES[selected] ? selected : null;
   // Walmart Canada: this product's row in the latest snapshot (undefined = loading, null = absent).
   const [wmCa, setWmCa] = useState(undefined);
   useEffect(() => {
@@ -1635,52 +1634,67 @@ function MarketplacesTab({ product, media, onUpdate }) {
     return wixLinks.has(key) || (key === DEFAULT_WIX_SITE && Boolean(product.wix_product_id));
   }
 
+  const pick = (key) => setSelected(selected === key ? null : key);
   return (
     <div className="space-y-6">
-      {/* Channel overview — one tile per connection; Wix tiles switch the card below. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
+      {/* Marketplace menu — one tile per store or channel. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
         {wixSitesFor(product).map((key) => (
           <ChannelTile
             key={key}
-            label={WIX_SITES[key].short}
+            label={WIX_SITES[key].label}
             avatar="W"
             avatarClass="bg-brand-wix/15 text-brand-wix"
-            active={wixSite === key}
+            active={selected === key}
             linked={wixStatus(key)}
-            onClick={() => setWixSite(key)}
+            linkedText="Listed"
+            notLinkedText="Not listed"
+            onClick={() => pick(key)}
           />
         ))}
         <ChannelTile
           label="Wayfair Canada"
           avatar="WF"
           avatarClass="bg-brand-wayfair/15 text-brand-wayfair"
+          active={selected === 'wayfair_ca'}
           linked={Boolean(product.wayfair_item_group_id)}
           linkedText="Connected"
-          notLinkedText="No group id"
-          onClick={() => wayfairRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          notLinkedText="Not listed"
+          onClick={() => pick('wayfair_ca')}
         />
         <ChannelTile
           label="Wayfair USA"
           avatar="WF"
           avatarClass="bg-brand-wayfair/15 text-brand-wayfair"
+          active={selected === 'wayfair_us'}
           linked={Boolean(product.wayfair_usa_item_group_id)}
           linkedText="Connected"
-          notLinkedText="No listing id"
-          onClick={() => wayfairUsaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          notLinkedText="Not listed"
+          onClick={() => pick('wayfair_us')}
         />
         <ChannelTile
           label="Walmart Canada"
           avatar="WM"
           avatarClass="bg-brand-walmart/10 text-brand-walmart"
+          active={selected === 'walmart_ca'}
           linked={wmCa === undefined ? null : Boolean(wmCa)}
           linkedText="In feed"
           notLinkedText="Not in feed"
-          onClick={() => walmartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          onClick={() => pick('walmart_ca')}
+        />
+        <ChannelTile
+          label="Templates"
+          avatar={<FileText className="w-4 h-4" />}
+          avatarClass="bg-surface-container-highest text-on-surface-variant"
+          active={selected === 'templates'}
+          linked={undefined}
+          linkedText="Marketplace files"
+          onClick={() => pick('templates')}
         />
       </div>
 
-      {/* The create/import flows run this automatically; the button re-runs it
-          when the product has since appeared on a channel. */}
+      {/* Cross-channel actions. The create/import flows run auto-link on their own;
+          the button re-runs it when the product has since appeared on a channel. */}
       <div className="flex items-center gap-3 flex-wrap -mt-2">
         <button
           type="button"
@@ -1738,24 +1752,28 @@ function MarketplacesTab({ product, media, onUpdate }) {
         )}
       </div>
 
-      {wixSiteSells(wixSite, product) ? (
-        <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
-      ) : (
-        <p className="text-body-sm text-on-surface-variant">{product.brand} products are not sold on {WIX_SITES[wixSite].label}.</p>
+      {/* The chosen marketplace's options — nothing else. */}
+      {selected == null && (
+        <p className="text-body-sm text-on-surface-variant">Pick a marketplace above to see its listing, pushes and files.</p>
       )}
-      <div ref={wayfairRef} className="scroll-mt-24">
-        <WayfairProductCard product={product} onUpdate={onUpdate} />
-      </div>
-      <div ref={wayfairUsaRef} className="scroll-mt-24">
-        <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />
-      </div>
-      <div ref={walmartRef} className="scroll-mt-24">
-        <WalmartCaProductCard product={product} row={wmCa ?? null} loading={wmCa === undefined} />
-      </div>
-      {/* New listings go to Wayfair CANADA only — Wayfair mirrors them to USA
-          (user rule, 2026-09-15). */}
-      <WayfairAdditionCard product={product} supplier="CAN" />
-      <ExportTemplatesCard product={product} media={media} />
+      {wixSite && (
+        wixSiteSells(wixSite, product) ? (
+          <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
+        ) : (
+          <p className="text-body-sm text-on-surface-variant">{product.brand} products are not sold on {WIX_SITES[wixSite].label}.</p>
+        )
+      )}
+      {selected === 'wayfair_ca' && (
+        <>
+          <WayfairProductCard product={product} onUpdate={onUpdate} />
+          {/* New listings go to Wayfair CANADA only — Wayfair mirrors them to USA
+              (user rule, 2026-09-15). */}
+          <WayfairAdditionCard product={product} supplier="CAN" />
+        </>
+      )}
+      {selected === 'wayfair_us' && <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />}
+      {selected === 'walmart_ca' && <WalmartCaProductCard product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
+      {selected === 'templates' && <ExportTemplatesCard product={product} media={media} />}
     </div>
   );
 }
@@ -1763,11 +1781,13 @@ function MarketplacesTab({ product, media, onUpdate }) {
 // Compact channel tile: brand avatar, name, link-status dot. `active` marks
 // the Wix site whose card is currently shown below.
 function ChannelTile({ label, avatar, avatarClass, active = false, linked, linkedText = 'Linked', notLinkedText = 'Not linked', onClick }) {
-  const status = linked === null
-    ? { dot: 'bg-on-surface-variant/30 animate-pulse', text: 'Checking…' }
-    : linked
-      ? { dot: 'bg-tertiary', text: linkedText }
-      : { dot: 'bg-on-surface-variant/40', text: notLinkedText };
+  const status = linked === undefined
+    ? { dot: null, text: linkedText }
+    : linked === null
+      ? { dot: 'bg-on-surface-variant/30 animate-pulse', text: 'Checking…' }
+      : linked
+        ? { dot: 'bg-tertiary', text: linkedText }
+        : { dot: 'bg-on-surface-variant/40', text: notLinkedText };
   return (
     <button
       type="button"
@@ -1785,7 +1805,7 @@ function ChannelTile({ label, avatar, avatarClass, active = false, linked, linke
       <span className="min-w-0">
         <span className="block text-label-lg font-medium text-on-surface truncate">{label}</span>
         <span className="flex items-center gap-1.5 text-label-md text-on-surface-variant">
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.dot}`} />
+          {status.dot && <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.dot}`} />}
           {status.text}
         </span>
       </span>
