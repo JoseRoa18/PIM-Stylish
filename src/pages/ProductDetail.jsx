@@ -185,6 +185,16 @@ function buildEditForm(product) {
     map_orange_usd: product.map_orange_usd ?? '',
     map_purple_cad: product.map_purple_cad ?? '',
     map_purple_usd: product.map_purple_usd ?? '',
+    cost_cad_rona_hd_orange: product.cost_cad_rona_hd_orange ?? '',
+    cost_cad_rona_hd_purple: product.cost_cad_rona_hd_purple ?? '',
+    cost_cad_wayfair_sod_orange: product.cost_cad_wayfair_sod_orange ?? '',
+    cost_cad_wayfair_sod_purple: product.cost_cad_wayfair_sod_purple ?? '',
+    cost_usd_lowes_sod_bbb_orange: product.cost_usd_lowes_sod_bbb_orange ?? '',
+    cost_usd_lowes_sod_bbb_purple: product.cost_usd_lowes_sod_bbb_purple ?? '',
+    cost_usd_wayfair_orange: product.cost_usd_wayfair_orange ?? '',
+    cost_usd_wayfair_purple: product.cost_usd_wayfair_purple ?? '',
+    cost_usd_menards_orange: product.cost_usd_menards_orange ?? '',
+    cost_usd_menards_purple: product.cost_usd_menards_purple ?? '',
     cost_usd_lowes_sod_bbb: product.cost_usd_lowes_sod_bbb ?? '',
     cost_usd_wayfair: product.cost_usd_wayfair ?? '',
     cost_usd_menards: product.cost_usd_menards ?? '',
@@ -258,6 +268,7 @@ const NUMBER_COLUMNS = new Set([
   'family_number', 'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
   'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
   'map_orange_cad', 'map_orange_usd', 'map_purple_cad', 'map_purple_usd',
+  'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards_orange', 'cost_usd_menards_purple',
   'shipping_weight_lb',
 ]);
 
@@ -1509,6 +1520,7 @@ function PricingTab({ product, edit, onAddPricing }) {
     'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
     'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
   'map_orange_cad', 'map_orange_usd', 'map_purple_cad', 'map_purple_usd',
+  'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards_orange', 'cost_usd_menards_purple',
   ];
   const noPricing = !edit.isEditing && PRICE_KEYS.every((k) => product[k] == null);
   return (
@@ -1532,27 +1544,29 @@ function PricingTab({ product, edit, onAddPricing }) {
       ) : (
         <>
           <Section title="Canada Pricing (CAD)">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <EditableField label="MSRP" fieldKey="msrp_cad" type="currency" product={product} edit={edit} />
-              <DerivedCost label="B&M Cost" baseKey="msrp_cad" factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
-              <EditableField label="MAP — all marketplaces" fieldKey="map_cad" type="currency" product={product} edit={edit} help="Blue: the base MAP." />
-              <EditableField label="MAP Orange" fieldKey="map_orange_cad" type="currency" product={product} edit={edit} help="Monthly-promotion price level (pricing strategy)." />
-              <EditableField label="MAP Purple" fieldKey="map_purple_cad" type="currency" product={product} edit={edit} help="Flash deal / special event price level (pricing strategy)." />
-              <EditableField label="Cost — Rona / Home Depot" fieldKey="cost_cad_rona_hd" type="currency" product={product} edit={edit} />
-              <EditableField label="Cost — Wayfair / Small Online" fieldKey="cost_cad_wayfair_sod" type="currency" product={product} edit={edit} />
-            </div>
+            <PriceTierTable
+              product={product}
+              edit={edit}
+              msrpKey="msrp_cad"
+              columns={[
+                { label: 'MAP', help: 'All marketplaces. Blue is the base MAP; Orange the monthly-promotion level; Purple the flash deal / special event level.', keys: ['map_cad', 'map_orange_cad', 'map_purple_cad'] },
+                { label: 'WC · Rona / Home Depot', keys: ['cost_cad_rona_hd', 'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple'] },
+                { label: 'WC · Wayfair / Small Online', keys: ['cost_cad_wayfair_sod', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple'] },
+              ]}
+            />
           </Section>
           <Section title="USA Pricing (USD)">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <EditableField label="MSRP" fieldKey="msrp_usd" type="currency" product={product} edit={edit} />
-              <DerivedCost label="B&M Cost" baseKey="msrp_usd" factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
-              <EditableField label="MAP" fieldKey="map_usd" type="currency" product={product} edit={edit} help="Blue: the base MAP." />
-              <EditableField label="MAP Orange" fieldKey="map_orange_usd" type="currency" product={product} edit={edit} help="Monthly-promotion price level (pricing strategy)." />
-              <EditableField label="MAP Purple" fieldKey="map_purple_usd" type="currency" product={product} edit={edit} help="Flash deal / special event price level (pricing strategy)." />
-              <EditableField label="Cost — Lowes / Home Depot USA / Small Online / BB&B" fieldKey="cost_usd_lowes_sod_bbb" type="currency" product={product} edit={edit} />
-              <EditableField label="Cost — Wayfair" fieldKey="cost_usd_wayfair" type="currency" product={product} edit={edit} />
-              <EditableField label="Cost — Menards" fieldKey="cost_usd_menards" type="currency" product={product} edit={edit} />
-            </div>
+            <PriceTierTable
+              product={product}
+              edit={edit}
+              msrpKey="msrp_usd"
+              columns={[
+                { label: 'MAP', help: 'Blue is the base MAP; Orange the monthly-promotion level; Purple the flash deal / special event level.', keys: ['map_usd', 'map_orange_usd', 'map_purple_usd'] },
+                { label: "WC · Lowe's / HD USA / Small Online / BB&B", keys: ['cost_usd_lowes_sod_bbb', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple'] },
+                { label: 'WC · Wayfair', keys: ['cost_usd_wayfair', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple'] },
+                { label: 'WC · Menards', keys: ['cost_usd_menards', 'cost_usd_menards_orange', 'cost_usd_menards_purple'] },
+              ]}
+            />
           </Section>
         </>
       )}
@@ -2376,6 +2390,74 @@ function BulletPointsEditor({ product, edit, attrKey = 'bullet_points' }) {
 // Derived pricing (rule 2026-09-01): B&M (Brick & Mortar) Cost = MSRP x 0.30
 // per market.
 // Computed on the fly — never stored, so it can't go stale.
+// One market's pricing as a table: MSRP and the derived B&M cost on top,
+// then a row per price level (Blue base / Orange monthly promotion / Purple
+// flash deal or special event) across MAP and each channel cost. Cells edit
+// in place when the page is in edit mode.
+const PRICE_TIERS = [
+  { key: 'blue', label: 'Blue', hint: 'Base', dot: 'bg-[#4a8ee6]' },
+  { key: 'orange', label: 'Orange', hint: 'Monthly promotion', dot: 'bg-[#f0b27a]' },
+  { key: 'purple', label: 'Purple', hint: 'Flash deal / special event', dot: 'bg-[#7e3fbd]' },
+];
+function PriceTierTable({ product, edit, msrpKey, columns }) {
+  const { isEditing, form, setField } = edit;
+  const cell = (key) => {
+    if (!isEditing) {
+      const v = product[key];
+      return <span className={v == null || v === '' ? 'text-on-surface-variant' : 'text-on-surface'}>{v == null || v === '' ? '—' : formatCAD(v)}</span>;
+    }
+    return (
+      <input
+        type="number"
+        step="0.01"
+        value={form[key] ?? ''}
+        onChange={(e) => setField(key, e.target.value)}
+        placeholder="—"
+        aria-label={key}
+        className="w-24 px-2 py-1 rounded-md border border-outline-variant bg-surface text-body-sm text-on-surface text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+      />
+    );
+  };
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+        <EditableField label="MSRP" fieldKey={msrpKey} type="currency" product={product} edit={edit} />
+        <DerivedCost label="B&M Cost" baseKey={msrpKey} factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-body-sm">
+          <thead>
+            <tr className="text-label-sm text-on-surface-variant">
+              <th className="text-left font-medium pb-2 pr-4 w-56">Level<HelpTip text="WC = wholesale cost per channel. Blue is the base level; Orange the monthly promotion; Purple flash deals and special events." /></th>
+              {columns.map((c) => (
+                <th key={c.label} className="text-right font-medium pb-2 pl-4 whitespace-nowrap">
+                  {c.label}{c.help ? <HelpTip text={c.help} /> : null}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-outline-variant/60">
+            {PRICE_TIERS.map((tier, i) => (
+              <tr key={tier.key} className="align-middle">
+                <td className="py-2 pr-4">
+                  <span className="inline-flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${tier.dot}`} />
+                    <span className="text-on-surface font-medium">{tier.label}</span>
+                    <span className="text-on-surface-variant whitespace-nowrap">{tier.hint}</span>
+                  </span>
+                </td>
+                {columns.map((c) => (
+                  <td key={c.label} className="py-2 pl-4 text-right tabular-nums">{cell(c.keys[i])}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function DerivedCost({ label, baseKey, factor, product, edit, help }) {
   const base = edit.isEditing ? edit.form[baseKey] : product[baseKey];
   const value = base != null && base !== '' ? Number(base) * factor : null;
