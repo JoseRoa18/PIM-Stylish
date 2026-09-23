@@ -8,7 +8,7 @@
 //   C Rona product #                the product's Rona alias
 //   D Vendor part #                 our SKU, as is
 //   E UPC                           the product's UPC
-//   F SUPPLIER_NAME                 always "Stylish International Inc"
+//   F SUPPLIER_NAME                 always "STYLISH INTERNATIONAL INC(OE)"
 //   G SUPPLIER_ID                   always 550562
 //   H Brand                         the product's brand (Stylish or Azuni)
 //   I Product Description           the name on the alias (Rona's own title)
@@ -48,7 +48,7 @@ import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
-export const RONA_SUPPLIER = { name: 'Stylish International Inc', id: '550562' };
+export const RONA_SUPPLIER = { name: 'STYLISH INTERNATIONAL INC(OE)', id: '550562' };
 
 const HEADERS = {
   start: /^beginningdate|^startdate/,
@@ -176,9 +176,14 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   const styles = new Map();
   const modelRow = hit.xml.match(new RegExp(`<row r="${hit.headerRow + 2}"[^>]*>[\\s\\S]*?</row>`))?.[0] ?? '';
   for (const m of modelRow.matchAll(/<c r="([A-Z]+)\d+"[^>]*?\ss="(\d+)"/g)) styles.set(m[1], m[2]);
-  if (cols.regularCost != null && cols.promoCost != null && !styles.has(indexToCol(cols.regularCost + 1))) {
-    const promoStyle = styles.get(indexToCol(cols.promoCost + 1));
-    if (promoStyle) styles.set(indexToCol(cols.regularCost + 1), promoStyle);
+  // Regular and promo columns of a pair share one format when only one has it
+  // (the monthly file formats M, the flash file formats L).
+  for (const [a, b] of [[cols.regularCost, cols.promoCost], [cols.regularMap, cols.promoMap]]) {
+    if (a == null || b == null) continue;
+    const ca = indexToCol(a + 1);
+    const cb = indexToCol(b + 1);
+    if (styles.has(ca) && !styles.has(cb)) styles.set(cb, styles.get(ca));
+    else if (styles.has(cb) && !styles.has(ca)) styles.set(ca, styles.get(cb));
   }
 
   const cellsByRow = new Map();
