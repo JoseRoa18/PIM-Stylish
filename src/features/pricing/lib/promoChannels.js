@@ -34,7 +34,9 @@ export const PROMO_CHANNELS = [
   { key: 'bbb', label: 'BB&B / Overstock', monogram: 'BO', market: 'us', kind: 'portal_file', filler: 'bbb', auditTarget: 'bbb',
     how: 'Upload the portal promo CSV. PROMO_MAP and PROMO_COST are filled on matching part numbers.' },
   { key: 'homedepot_ca', label: 'Home Depot Canada', monogram: 'HD', market: 'ca', kind: 'template', marketplace: /home ?depot.*(\bca\b|canada)/i, costSlug: 'rona_hd_cad' },
-  { key: 'rona', label: 'Rona', monogram: 'RO', market: 'ca', kind: 'template', marketplace: /rona/i, costSlug: 'rona_hd_cad' },
+  // Rona's own file: Rona id + name from Aliases, WC Blue as regular cost,
+  // WC Orange (monthly) / Purple (flash, event) as promo cost, MAP Blue kept.
+  { key: 'rona', label: 'Rona', monogram: 'RO', market: 'ca', kind: 'template', marketplace: /rona/i, costSlug: 'rona_hd_cad', fill: 'rona', aliasMarketplace: 'Rona' },
   { key: 'amazon_ca', label: 'Amazon Canada', monogram: 'AM', market: 'ca', kind: 'template', marketplace: /amazon.*(\bca\b|canada)/i, costSlug: null, fill: 'amazon' },
   { key: 'walmart_ca', label: 'Walmart Canada', monogram: 'WM', market: 'ca', kind: 'api', stamp: 'wm_ca_scheduled_at', schedule: 'walmart_ca',
     how: 'Promotional prices sent through the Walmart API for the Canada window. Walmart turns them on and off by itself.' },

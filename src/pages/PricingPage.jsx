@@ -48,6 +48,7 @@ import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
+import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link } from 'react-router-dom';
 
@@ -1387,7 +1388,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged }) {
         ? summarizeAmazonFill(channel, await fillAmazonPromoTemplate(template, promo, channel))
         : channel.fill === 'mirakl'
           ? summarizeMiraklFill(channel, await fillMiraklPromoTemplate(template, promo, channel))
-          : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
+          : channel.fill === 'rona'
+            ? summarizeRonaFill(channel, await fillRonaPromoTemplate(template, promo, channel))
+            : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
       onMsg({ tone: 'success', text });
     } catch (err) {

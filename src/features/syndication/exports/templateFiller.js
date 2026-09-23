@@ -21,10 +21,23 @@ export const escapeXml = (s) =>
 export const colToIndex = (col) => { let n = 0; for (const ch of col) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
 export const indexToCol = (n) => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
 
-export function buildCell(ref, value) {
+export function buildCell(ref, value, style = null) {
   if (value === '' || value == null) return '';
-  if (typeof value === 'number') return `<c r="${ref}"><v>${value}</v></c>`;
-  return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
+  const s = style ? ` s="${style}"` : '';
+  if (typeof value === 'number') return `<c r="${ref}"${s}><v>${value}</v></c>`;
+  return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
+}
+
+// A formula cell (no cached value: Excel computes it on open).
+export function buildFormulaCell(ref, formula, style = null) {
+  const s = style ? ` s="${style}"` : '';
+  return `<c r="${ref}"${s}><f>${escapeXml(formula)}</f></c>`;
+}
+
+// Excel serial number for a calendar day "YYYY-MM-DD" (1900 date system).
+export function excelSerial(day) {
+  const [y, m, d] = String(day).slice(0, 10).split('-').map(Number);
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000);
 }
 
 export function parse(xml) {
@@ -153,14 +166,24 @@ export async function openTemplate(templateStoragePath) {
 // originals at the same ref, everything else (styles, defaults, formulas) is
 // kept, and the result stays in column order as OOXML requires. Keys of
 // newCellsByCol are 1-based column indexes (same as colToIndex).
-export function mergeRowXml(rowXml, newCellsByCol) {
+// With keepStyle, a new cell that carries no style takes the style (s="…")
+// of the cell it replaces, so a template's pre-formatted empty rows keep
+// their date and currency formats.
+export function mergeRowXml(rowXml, newCellsByCol, keepStyle = false) {
   const open = rowXml.match(/^<row ([^>]*?)\/?>/);
   const attrs = open[1].replace(/\/\s*$/, '').trim();
   const cells = new Map();
   for (const m of rowXml.matchAll(/<c r="([A-Z]+)\d+"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)) {
     cells.set(colToIndex(m[1]), m[0]);
   }
-  for (const [ci, xml] of newCellsByCol) cells.set(ci, xml);
+  for (const [ci, xml] of newCellsByCol) {
+    let cell = xml;
+    if (keepStyle && !/^<c [^>]*\ss="/.test(cell)) {
+      const style = cells.get(ci)?.match(/^<c [^>]*\ss="(\d+)"/)?.[1];
+      if (style) cell = cell.replace(/^<c r="([A-Z]+\d+)"/, `<c r="$1" s="${style}"`);
+    }
+    cells.set(ci, cell);
+  }
   const body = [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('');
   return `<row ${attrs}>${body}</row>`;
 }
@@ -168,7 +191,7 @@ export function mergeRowXml(rowXml, newCellsByCol) {
 // Walk a sheet's XML once, splicing merged rows in ascending order. For
 // templates that ship with every data row already present (Lowe's, Home Depot
 // Canada) — injecting rows there would duplicate row numbers.
-export function mergeRows(sheetXml, cellsByRow) {
+export function mergeRows(sheetXml, cellsByRow, keepStyle = false) {
   let out = '';
   let cursor = 0;
   for (const rn of [...cellsByRow.keys()].sort((a, b) => a - b)) {
@@ -176,7 +199,7 @@ export function mergeRows(sheetXml, cellsByRow) {
     if (start === -1) continue;
     const tagClose = sheetXml.indexOf('>', start);
     const end = sheetXml[tagClose - 1] === '/' ? tagClose + 1 : sheetXml.indexOf('</row>', tagClose) + '</row>'.length;
-    out += sheetXml.slice(cursor, start) + mergeRowXml(sheetXml.slice(start, end), cellsByRow.get(rn));
+    out += sheetXml.slice(cursor, start) + mergeRowXml(sheetXml.slice(start, end), cellsByRow.get(rn), keepStyle);
     cursor = end;
   }
   return out + sheetXml.slice(cursor);
