@@ -57,7 +57,7 @@ export async function loadAliases(product) {
     rows.push({ id: `amazon:${a.marketplace}:${a.seller_sku}`, marketplace: a.marketplace === 'us' ? 'Amazon USA' : 'Amazon Canada', alias: a.seller_sku, kind: 'Seller SKU', source: 'amazon', amazonMarketplace: a.marketplace, note: [a.asin ? `ASIN ${a.asin}` : null, a.fulfillment].filter(Boolean).join(' · ') || null });
   }
   for (const a of manual ?? []) {
-    rows.push({ id: a.id, marketplace: a.marketplace, alias: a.alias, kind: ALIAS_KINDS.find((k) => k.value === a.kind)?.label ?? a.kind, kindValue: a.kind, source: 'manual', note: a.note });
+    rows.push({ id: a.id, marketplace: a.marketplace, alias: a.alias, kind: ALIAS_KINDS.find((k) => k.value === a.kind)?.label ?? a.kind, kindValue: a.kind, source: 'manual', note: a.note, listingTitle: a.listing_title ?? null });
   }
   return rows;
 }
@@ -90,6 +90,60 @@ export async function addAlias(sku, { marketplace, alias, kind = 'sku', note = n
     if (error) throw new Error(/duplicate|unique/i.test(error.message) ? `${value} is already an alias of another product on ${marketplace}.` : error.message);
   }
   logActivity({ action: 'update', entityType: 'product', entityId: sku, target: 'pim', summary: `Added alias ${value} (${marketplace}) to ${sku}`, metadata: { marketplace, alias: value, kind } });
+}
+
+/**
+ * The name the marketplace lists the product under (Rona's "Product
+ * Description"). It lives on the alias row, so files that carry both the
+ * marketplace SKU and its name read them together. Empty clears it.
+ */
+export async function setAliasTitle(sku, row, title) {
+  if (row.source !== 'manual') throw new Error('Only marketplace aliases carry a listing name.');
+  const value = String(title ?? '').replace(/\s+/g, ' ').trim() || null;
+  const { error } = await supabase.from('product_aliases').update({ listing_title: value }).eq('id', row.id);
+  if (error) throw error;
+  logActivity({ action: 'update', entityType: 'product', entityId: sku, target: 'pim', summary: `${value ? 'Set' : 'Cleared'} the ${row.marketplace} listing name of ${sku}`, metadata: { marketplace: row.marketplace, alias: row.alias, listing_title: value } });
+}
+
+/**
+ * Paste "SKU<TAB>name" lines for one marketplace: each product's listing
+ * name goes on its alias row. Products without an alias there yet are
+ * reported (add the alias first), as are SKUs not in the PIM.
+ */
+export async function importAliasTitles(marketplace, text) {
+  const pairs = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(\S+)\t+(.+)$/) ?? line.match(/^(\S+)\s{2,}(.+)$/);
+    if (!m || /^(your sku|sku)\b/i.test(m[1])) continue;
+    pairs.push({ sku: m[1].trim(), title: m[2].replace(/\s+/g, ' ').trim() });
+  }
+  if (!pairs.length) throw new Error('No "SKU<tab>name" lines found. One product per line, the PIM SKU first.');
+  const skus = [...new Set(pairs.map((p) => p.sku))];
+  const known = new Set();
+  const withAlias = new Map();
+  for (let i = 0; i < skus.length; i += 200) {
+    const chunk = skus.slice(i, i + 200);
+    const [{ data: prods }, { data: aliases }] = await Promise.all([
+      supabase.from('products').select('sku').in('sku', chunk),
+      supabase.from('product_aliases').select('id, sku').eq('marketplace', marketplace).in('sku', chunk),
+    ]);
+    for (const p of prods ?? []) known.add(p.sku);
+    for (const a of aliases ?? []) withAlias.set(a.sku, a.id);
+  }
+  const notInPim = skus.filter((s) => !known.has(s));
+  const noAlias = skus.filter((s) => known.has(s) && !withAlias.has(s));
+  let written = 0;
+  for (const p of pairs) {
+    const id = withAlias.get(p.sku);
+    if (!id) continue;
+    const { error } = await supabase.from('product_aliases').update({ listing_title: p.title }).eq('id', id);
+    if (error) throw error;
+    written += 1;
+  }
+  logActivity({ action: 'import', entityType: 'product', entityId: `${written} listing names`, target: 'pim', summary: `Imported ${written} ${marketplace} listing names${noAlias.length ? ` · ${noAlias.length} products have no ${marketplace} alias yet` : ''}${notInPim.length ? ` · ${notInPim.length} SKUs not in the PIM` : ''}`, metadata: { marketplace, written, noAlias: noAlias.slice(0, 50), notInPim: notInPim.slice(0, 50) } });
+  return { written, noAlias, notInPim };
 }
 
 export async function removeAlias(sku, row) {

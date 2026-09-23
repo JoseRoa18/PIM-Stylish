@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Plus, Trash2, Lock, Upload } from 'lucide-react';
+import { Loader2, Plus, Trash2, Lock, Upload, Pencil, Check, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { loadAliases, addAlias, removeAlias, importAliasList, ALIAS_MARKETPLACES, ALIAS_KINDS } from '../api/aliases';
+import { loadAliases, addAlias, removeAlias, importAliasList, importAliasTitles, setAliasTitle, ALIAS_MARKETPLACES, ALIAS_KINDS } from '../api/aliases';
 
 // Amazon USA lists products under the PIM SKU itself, so only Canada takes aliases.
 const AMAZON = ['Amazon Canada'];
@@ -57,7 +57,7 @@ export default function AliasesTab({ product }) {
       <header className="px-8 py-5 border-b border-outline-variant flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-title-lg text-on-surface leading-tight">Aliases</h2>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">How {product.sku} is identified on each marketplace. Files and promotions use these instead of the PIM SKU.</p>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">How {product.sku} is identified on each marketplace, and the name it is listed under there. Files and promotions use these instead of the PIM SKU and name.</p>
         </div>
         {canEdit && (
           <div className="flex items-center gap-2">
@@ -79,12 +79,13 @@ export default function AliasesTab({ product }) {
           <p className="text-body-md text-on-surface-variant">No aliases yet. Add the marketplace's item number or seller SKU, or import a list.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px]">
+            <table className="w-full min-w-[840px]">
               <thead>
                 <tr className="text-label-md text-on-surface-variant border-b border-outline-variant">
                   <th className="text-left font-medium py-2 pr-4">Marketplace</th>
                   <th className="text-left font-medium py-2 pr-4">Alias</th>
                   <th className="text-left font-medium py-2 pr-4">Type</th>
+                  <th className="text-left font-medium py-2 pr-4">Name on the marketplace</th>
                   <th className="text-left font-medium py-2 pr-4">Notes</th>
                   <th className="py-2"></th>
                 </tr>
@@ -95,6 +96,13 @@ export default function AliasesTab({ product }) {
                     <td className="py-2.5 pr-4 text-body-md text-on-surface whitespace-nowrap">{r.marketplace}</td>
                     <td className="py-2.5 pr-4 text-body-md text-on-surface font-mono">{r.alias}</td>
                     <td className="py-2.5 pr-4 text-body-sm text-on-surface-variant whitespace-nowrap">{r.kind}</td>
+                    <td className="py-2.5 pr-4 text-body-sm text-on-surface min-w-[220px]">
+                      {r.source === 'manual' ? (
+                        <ListingTitleCell key={r.listingTitle ?? ''} sku={product.sku} row={r} canEdit={canEdit} onSaved={reload} onError={setError} />
+                      ) : (
+                        <span className="text-on-surface-variant">{r.listingTitle ?? ''}</span>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-4 text-body-sm text-on-surface-variant">{r.note ?? ''}</td>
                     <td className="py-2.5 text-right whitespace-nowrap">
                       {r.locked ? (
@@ -116,6 +124,63 @@ export default function AliasesTab({ product }) {
       {adding && <AddAliasDialog sku={product.sku} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); reload(); }} />}
       {importing && <ImportAliasesDialog onClose={() => setImporting(false)} onImported={() => { setImporting(false); reload(); }} />}
     </section>
+  );
+}
+
+/** The marketplace's own product name, edited in place (Rona's "Product Description", for instance). */
+function ListingTitleCell({ sku, row, canEdit, onSaved, onError }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(row.listingTitle ?? '');
+  const [busy, setBusy] = useState(false);
+
+  function cancel() {
+    setValue(row.listingTitle ?? '');
+    setEditing(false);
+  }
+
+  async function save() {
+    if ((value.trim() || null) === (row.listingTitle ?? null)) { setEditing(false); return; }
+    setBusy(true);
+    try {
+      await setAliasTitle(sku, row, value);
+      setEditing(false);
+      await onSaved();
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <span className="flex items-center gap-1.5">
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') cancel(); }}
+          autoFocus
+          placeholder="Name as the marketplace lists it"
+          className={`flex-1 min-w-[200px] py-1 ${inputCls}`}
+        />
+        <button type="button" onClick={save} disabled={busy} className="p-1.5 rounded-full text-primary hover:bg-primary-container/40 transition-colors disabled:opacity-50" title="Save">
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+        </button>
+        <button type="button" onClick={cancel} disabled={busy} className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors" title="Cancel">
+          <X className="w-4 h-4" />
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="group inline-flex items-start gap-1.5 max-w-[420px]">
+      <span className={row.listingTitle ? '' : 'text-on-surface-variant'}>{row.listingTitle ?? (canEdit ? 'Add name' : '')}</span>
+      {canEdit && (
+        <button type="button" onClick={() => setEditing(true)} className="p-1 rounded-full text-on-surface-variant opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-surface-container-low transition-opacity" title="Edit the name on the marketplace">
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -181,6 +246,7 @@ function AddAliasDialog({ sku, onClose, onAdded }) {
 }
 
 function ImportAliasesDialog({ onClose, onImported }) {
+  const [mode, setMode] = useState('aliases'); // 'aliases' | 'names'
   const [marketplace, setMarketplace] = useState('Amazon Canada');
   const [kind, setKind] = useState('sku');
   const [text, setText] = useState('');
@@ -194,7 +260,7 @@ function ImportAliasesDialog({ onClose, onImported }) {
     setBusy(true);
     setError(null);
     try {
-      setResult(await importAliasList(marketplace, text, kind));
+      setResult(mode === 'names' ? await importAliasTitles(marketplace, text) : await importAliasList(marketplace, text, kind));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -203,16 +269,23 @@ function ImportAliasesDialog({ onClose, onImported }) {
   }
 
   return (
-    <Dialog onClose={onClose} title="Import aliases" subtitle="One line per product: the marketplace's alias, then the PIM SKU. Tab or comma between them. One alias per product." maxWidth="max-w-lg">
+    <Dialog onClose={onClose} title={mode === 'names' ? 'Import listing names' : 'Import aliases'} subtitle={mode === 'names' ? 'One line per product: the PIM SKU, a tab, then the name the marketplace lists it under. The product needs its alias there first.' : "One line per product: the marketplace's alias, then the PIM SKU. Tab or comma between them. One alias per product."} maxWidth="max-w-lg">
       <form onSubmit={submit} className="space-y-3">
+        <div className="inline-flex rounded-full border border-outline-variant p-0.5">
+          {[['aliases', 'Aliases'], ['names', 'Names on the marketplace']].map(([key, label]) => (
+            <button key={key} type="button" onClick={() => { setMode(key); setResult(null); if (key === 'names' && AMAZON.includes(marketplace)) setMarketplace(ALIAS_MARKETPLACES[0]); }} className={`px-3.5 py-1.5 rounded-full text-label-md transition-colors ${mode === key ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-surface-container-low'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
             <span className="text-label-md text-on-surface-variant">Marketplace</span>
             <select value={marketplace} onChange={(e) => setMarketplace(e.target.value)} className={`mt-1 w-full ${inputCls}`}>
-              {[...AMAZON, ...ALIAS_MARKETPLACES].map((m) => <option key={m} value={m}>{m}</option>)}
+              {[...(mode === 'names' ? [] : AMAZON), ...ALIAS_MARKETPLACES].map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </label>
-          {!amazon && (
+          {!amazon && mode !== 'names' && (
             <label className="block">
               <span className="text-label-md text-on-surface-variant">Type</span>
               <select value={kind} onChange={(e) => setKind(e.target.value)} className={`mt-1 w-full ${inputCls}`}>
@@ -226,12 +299,15 @@ function ImportAliasesDialog({ onClose, onImported }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={10}
-          placeholder={'S-300XG-CAN\tS-300XG\n3P-LVMJ-40J0\tA-802N'}
+          placeholder={mode === 'names' ? 'S-300XG\tSTYLISH 28 inch Double Bowl Undermount Stainless Steel Kitchen Sink\nA-802N\tSingle Hole 9.75-inch Kitchen Faucet Plate in Matte Black' : 'S-300XG-CAN\tS-300XG\n3P-LVMJ-40J0\tA-802N'}
           className={`w-full font-mono text-body-sm ${inputCls}`}
         />
         {result && (
           <div className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant space-y-1">
-            <p>{result.written} aliases saved.{result.notInPim.length ? ` Not in the PIM, skipped: ${result.notInPim.slice(0, 12).join(', ')}${result.notInPim.length > 12 ? ` and ${result.notInPim.length - 12} more` : ''}.` : ''}</p>
+            <p>{result.written} {mode === 'names' ? 'names' : 'aliases'} saved.{result.notInPim.length ? ` Not in the PIM, skipped: ${result.notInPim.slice(0, 12).join(', ')}${result.notInPim.length > 12 ? ` and ${result.notInPim.length - 12} more` : ''}.` : ''}</p>
+            {result.noAlias?.length > 0 && (
+              <p>No {marketplace} alias yet, add it first: {result.noAlias.slice(0, 12).join(', ')}{result.noAlias.length > 12 ? ` and ${result.noAlias.length - 12} more` : ''}.</p>
+            )}
             {result.review?.length > 0 && (
               <p>Several aliases for one product, pick one by hand: {result.review.slice(0, 10).map((r) => `${r.sku} (${r.aliases.join(' / ')})`).join('; ')}{result.review.length > 10 ? ` and ${result.review.length - 10} more` : ''}.</p>
             )}
