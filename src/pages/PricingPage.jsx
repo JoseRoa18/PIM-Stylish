@@ -516,7 +516,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
             })}
           </div>
           <p className="text-body-sm text-on-surface-variant">
-            {result.total} linked products · report from {new Date(result.ranAt).toLocaleString()}
+            {result.total} products on the store · live prices pulled {new Date(result.ranAt).toLocaleString()} · expected prices as the PIM has them now{result.notOnStore ? ` · ${result.notOnStore} not on the store, left out` : ''}
           </p>
 
           {result.problems.length === 0 ? (

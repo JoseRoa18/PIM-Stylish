@@ -101,17 +101,16 @@ function classifySnapshot(snapshot, outOfScope = null) {
   const counts = { promo_ok: 0, map_ok: 0, promo_missing: 0, misaligned: 0, no_map: 0, missing: 0 };
   const problems = [];
   let total = 0;
+  let notOnStore = 0;
   let legacy = false;
 
   for (const r of snapshot.results ?? []) {
     if (r.state === 'not_in_pim') continue; // Wix orphans — out of scope
     if (outOfScope?.has(r.sku)) continue; // brand the store never carries
+    // Rule (user, 2026-09-23): a product the store does not carry is not a
+    // price problem — it stays out of the report and its score.
+    if (r.state === 'missing') { notOnStore += 1; continue; }
     total += 1;
-    if (r.state === 'missing') {
-      counts.missing += 1;
-      problems.push({ sku: r.sku, status: 'missing', live: null, expected: null, source: null });
-      continue;
-    }
     // Snapshots older than the expected-price rollout can't be classified.
     if (!('expected' in r)) { legacy = true; continue; }
 
@@ -130,7 +129,7 @@ function classifySnapshot(snapshot, outOfScope = null) {
   }
 
   problems.sort((a, b) => a.sku.localeCompare(b.sku));
-  return { ranAt: snapshot.run_at, total, counts, problems, legacy };
+  return { ranAt: snapshot.run_at, total, counts, problems, legacy, notOnStore };
 }
 
 /**
@@ -140,23 +139,23 @@ function classifySnapshot(snapshot, outOfScope = null) {
  * the PIM are out of scope (source-of-truth rule), mirroring the Wix orphan
  * handling.
  */
-async function loadOfferAlignment(cfg) {
-  const { data, error } = await supabase
-    .from('channel_health')
-    .select('run_at, results')
-    .eq('channel', cfg.channel)
-    .order('run_at', { ascending: false })
-    .limit(1);
-  if (error) throw error;
-  if (!data?.length) return null;
-  const snapshot = data[0];
-
+/**
+ * What every product SHOULD sell at on a target, read from the PIM right
+ * now: the target's regular price field, and the market's active monthly
+ * promo price for members when the target follows promotions. Reading it
+ * live means a price edited in the PIM shows in the report at once, without
+ * pulling the channel again (the pull only refreshes the LIVE prices).
+ */
+async function loadExpectedPrices(cfg) {
   const { data: prods, error: prodErr } = await supabase
     .from('products')
-    .select(`sku, base:${cfg.priceField}`);
+    .select(`sku, base:${cfg.priceField}`)
+    .range(0, 4999);
   if (prodErr) throw prodErr;
   const baseBySku = new Map((prods ?? []).map((p) => [p.sku, p.base]));
 
+  const promoBySku = new Map();
+  if (cfg.promoAware === false) return { baseBySku, promoBySku };
   const promoField = cfg.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const { data: activePromos, error: promoErr } = await supabase
     .from('promotions')
@@ -168,7 +167,6 @@ async function loadOfferAlignment(cfg) {
   // Market calendar: USA runs the 1st → month end; Canada runs first
   // Thursday → the day before the next first Thursday. Only the promo whose
   // window is open today sets the expected price.
-  const promoBySku = new Map();
   const todayET = etToday();
   for (const promo of activePromos ?? []) {
     const w = promoWindow(promo, cfg.market);
@@ -179,6 +177,20 @@ async function loadOfferAlignment(cfg) {
       if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period, windowStart: w.start, windowEnd: w.end });
     }
   }
+  return { baseBySku, promoBySku };
+}
+
+async function loadOfferAlignment(cfg) {
+  const { data, error } = await supabase
+    .from('channel_health')
+    .select('run_at, results')
+    .eq('channel', cfg.channel)
+    .order('run_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  if (!data?.length) return null;
+  const snapshot = data[0];
+  const { baseBySku, promoBySku } = await loadExpectedPrices(cfg);
 
   // Mirakl keeps the promo as a discount next to the regular price: the live
   // selling price is the discount while its window is open, and a discount
@@ -239,7 +251,25 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
     if (prodErr) throw prodErr;
     outOfScope = new Set((prods ?? []).filter((p) => !wixSiteSells(cfg, p)).map((p) => p.sku));
   }
-  return classifySnapshot(data[0], outOfScope);
+  // The snapshot's expected prices are as old as the pull; the PIM's are
+  // read now, so a price changed today is judged today. Live prices stay
+  // as pulled.
+  const { baseBySku, promoBySku } = await loadExpectedPrices(cfg);
+  const results = (data[0].results ?? []).map((r) => {
+    if (r.state !== 'live' || !baseBySku.has(r.sku)) return r;
+    const base = baseBySku.get(r.sku) ?? null;
+    const promo = promoBySku.get(r.sku);
+    const expected = promo?.price ?? base;
+    return {
+      ...r,
+      expected: expected ?? null,
+      expected_source: promo != null ? 'promo' : 'map',
+      map: base,
+      promo_period: promo?.period ?? null,
+      price_diff: expected != null && r.price != null && Math.abs(r.price - expected) > 0.01,
+    };
+  });
+  return classifySnapshot({ run_at: data[0].run_at, results }, outOfScope);
 }
 
 /** Fresh live analysis — pulls the channel now and PERSISTS the snapshot. */
