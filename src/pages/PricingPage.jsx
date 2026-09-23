@@ -3,6 +3,7 @@ import {
   Tag,
   Plus,
   ChevronDown,
+  ChevronRight,
   Trash2,
   Send,
   Play,
@@ -1577,17 +1578,30 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
             ))}
           </ul>
           {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="space-y-2">
+            <p className="text-label-md text-on-surface-variant">What should their rows get?</p>
+            {[
+              { key: 'blank', label: 'Continue, leave them blank', hint: 'Their rows stay in the file with F, G and H empty.' },
+              { key: 'blue', label: 'Continue, put Blue prices', hint: 'Their rows get the Blue MAP and WC Menards. Rows with no Blue price either stay empty.' },
+              { key: 'remove', label: 'Take them out of the file', hint: 'Their rows are removed and the rows below move up.' },
+            ].map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => finish(file, { plan, missing: opt.key })}
+                disabled={busy}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-outline-variant bg-surface text-left hover:bg-surface-container-low hover:border-primary/60 transition-colors disabled:opacity-50"
+              >
+                <span className="min-w-0">
+                  <span className="block text-label-lg font-medium text-on-surface">{opt.label}</span>
+                  <span className="block text-body-sm text-on-surface-variant">{opt.hint}</span>
+                </span>
+                {busy ? <Loader2 className="w-4 h-4 animate-spin ml-auto flex-shrink-0 text-on-surface-variant" /> : <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0 text-on-surface-variant" />}
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-end">
             <button type="button" onClick={() => setPending(null)} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
-            <button type="button" onClick={() => finish(file, { plan, missing: 'blank' })} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50" title="Their rows stay in the file with F, G and H empty">
-              Continue, leave them blank
-            </button>
-            <button type="button" onClick={() => finish(file, { plan, missing: 'blue' })} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50" title="Their rows get the Blue MAP and WC Menards (rows without Blue prices stay empty)">
-              Continue, put Blue prices
-            </button>
-            <button type="button" onClick={() => finish(file, { plan, missing: 'remove' })} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50" title="Their rows are taken out of the returned file">
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Take them out of the file
-            </button>
           </div>
         </div>
       </Dialog>
