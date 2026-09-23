@@ -205,6 +205,26 @@ export function mergeRows(sheetXml, cellsByRow, keepStyle = false) {
   return out + sheetXml.slice(cursor);
 }
 
+// Take rows out of a sheet and close the gaps: every row below a removed one
+// moves up (its r attribute and its cells' refs are renumbered), and the
+// dimension shrinks. Formulas or merged ranges pointing at moved rows are
+// not rewritten — meant for plain list files (marketplace promo files).
+export function removeRows(sheetXml, rowNums) {
+  const gone = new Set(rowNums.map(Number));
+  if (!gone.size) return sheetXml;
+  let shift = 0;
+  const out = sheetXml.replace(/<row r="(\d+)"([^>]*?)(\/>|>[\s\S]*?<\/row>)/g, (whole, r, attrs, rest) => {
+    const rn = Number(r);
+    if (gone.has(rn)) { shift += 1; return ''; }
+    if (!shift) return whole;
+    const nn = rn - shift;
+    const body = rest.replace(/<c r="([A-Z]+)\d+"/g, `<c r="$1${nn}"`);
+    return `<row r="${nn}"${attrs}${body}`;
+  });
+  const last = [...out.matchAll(/<row r="(\d+)"/g)].reduce((m, x) => Math.max(m, Number(x[1])), 1);
+  return out.replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)\d+("\s*\/>)/, `$1${last}$2`);
+}
+
 // Inject prebuilt <row> XML before </sheetData> and bump the sheet dimension.
 export function injectRows(sheetXml, rowsXml, lastRowNum) {
   let newXml = sheetXml.replace('</sheetData>', `${rowsXml}</sheetData>`);

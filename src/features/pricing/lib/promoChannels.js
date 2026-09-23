@@ -44,7 +44,10 @@ export const PROMO_CHANNELS = [
   // (sku, price, msrp, discount-price + dates). Regular = MAP USD.
   { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null, fill: 'mirakl', priceField: 'map_usd', costField: 'cost_usd_lowes_sod_bbb', promoCostSlug: 'lowes_sod_bbb_usd', aliasMarketplace: 'Home Depot US' }, // HD USA: base cost and promo cost = the Lowe's / SOD / BB&B group
   { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us', kind: 'template', marketplace: /lowe.*\bus(a)?\b/i, costSlug: 'lowes_sod_bbb_usd' },
-  { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'template', marketplace: /menards/i, costSlug: 'menards_usd' },
+  // Menards sends its own file: the PIM fills columns F, G, H (MAP and WC
+  // Menards of the promo level) on the rows carrying our SKUs and hands it back.
+  { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'portal_file', filler: 'menards', costSlug: 'menards_usd',
+    how: "Upload the file Menards sent. The PIM fills F, G and H with the level's MAP and WC Menards and asks about products without a level price." },
   { key: 'amazon_us', label: 'Amazon USA', monogram: 'AM', market: 'us', kind: 'template', marketplace: /amazon.*\bus(a)?\b/i, costSlug: null, fill: 'amazon', sellerSku: 'pim' }, // Amazon.com lists our products under the PIM SKU itself
   { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us', kind: 'template', marketplace: /walmart.*\bus(a)?\b/i, costSlug: null },
 ];

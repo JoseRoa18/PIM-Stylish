@@ -49,6 +49,7 @@ import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/ge
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
 import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
+import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill } from '@/features/pricing/lib/menardsPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link } from 'react-router-dom';
 
@@ -1278,6 +1279,18 @@ const FILE_FILLERS = {
       return parts.join(' · ');
     },
   },
+  // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
+  // products without a level price can be kept blank or taken out.
+  menards: {
+    label: 'Menards',
+    monogram: 'ME',
+    monogramCls: 'bg-surface-container-high text-on-surface-variant',
+    hint: 'The promotion file Menards sent — columns F, G and H are filled with the MAP and WC Menards of the promo level (Orange monthly, Purple flash / event) on the rows carrying our SKUs. Rows are never added.',
+    accept: '.xlsx,.xlsm',
+    analyze: analyzeMenardsPromoFile,
+    fill: (file, promo, opts) => fillMenardsPromoFile(file, promo, opts),
+    summarize: summarizeMenardsFill,
+  },
 };
 
 // ============================ Marketplace channels ============================
@@ -1516,19 +1529,69 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
   const [marketplace, setMarketplace] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // A filler with `analyze` pauses here when some rows cannot be priced:
+  // { file, plan } until the person picks what to do with them.
+  const [pending, setPending] = useState(null);
   const def = marketplace ? FILE_FILLERS[marketplace] : null;
 
-  async function handleUpload(file) {
-    if (!file || !def) return;
+  async function finish(file, opts) {
     setBusy(true);
     setError(null);
     try {
-      const r = await def.fill(file, promo);
+      const r = await def.fill(file, promo, opts);
       onDone({ tone: 'success', text: def.summarize(r) });
     } catch (err) {
       setError(err.message);
       setBusy(false);
+      setPending(null);
     }
+  }
+
+  async function handleUpload(file) {
+    if (!file || !def) return;
+    if (!def.analyze) return finish(file);
+    setBusy(true);
+    setError(null);
+    try {
+      const plan = await def.analyze(file, promo);
+      if (plan.missing.length) { setPending({ file, plan }); setBusy(false); return; }
+      await finish(file, { plan });
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  if (pending) {
+    const { file, plan } = pending;
+    return (
+      <Dialog onClose={onClose} title={`${plan.missing.length} products have no ${plan.tierLabel} price`} subtitle={`${plan.fills.size} rows of ${file.name} can be filled. These cannot: decide what happens to their rows before the file is written.`} maxWidth="max-w-lg">
+        <div className="space-y-4">
+          <ul className="max-h-64 overflow-y-auto rounded-xl border border-outline-variant divide-y divide-outline-variant/60 text-body-sm">
+            {plan.missing.map((m) => (
+              <li key={m.sku} className="flex items-center gap-3 px-3 py-2">
+                <span className="font-mono text-on-surface">{m.sku}</span>
+                <span className="text-on-surface-variant">{m.reason}{m.blue ? '' : ', no Blue price either'}</span>
+                <span className="ml-auto text-label-sm text-on-surface-variant whitespace-nowrap">row {m.row}</span>
+              </li>
+            ))}
+          </ul>
+          {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={() => setPending(null)} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
+            <button type="button" onClick={() => finish(file, { plan, missing: 'blank' })} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50" title="Their rows stay in the file with F, G and H empty">
+              Continue, leave them blank
+            </button>
+            <button type="button" onClick={() => finish(file, { plan, missing: 'blue' })} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50" title="Their rows get the Blue MAP and WC Menards (rows without Blue prices stay empty)">
+              Continue, put Blue prices
+            </button>
+            <button type="button" onClick={() => finish(file, { plan, missing: 'remove' })} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50" title="Their rows are taken out of the returned file">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Take them out of the file
+            </button>
+          </div>
+        </div>
+      </Dialog>
+    );
   }
 
   return (
