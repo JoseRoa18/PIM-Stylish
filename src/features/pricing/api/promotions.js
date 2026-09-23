@@ -191,6 +191,22 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
   return { promotion: promo, added: valid.length, notInPim, noLevel };
 }
 
+/** Change the portals a flash deal / special event goes to (at least one). */
+export async function updatePromotionMarketplaces(promotion, marketplaces) {
+  const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
+  if ((promotion.kind ?? 'monthly') !== 'monthly' && !portals.length) throw new Error('Keep at least one portal.');
+  const { error } = await supabase.from('promotions').update({ marketplaces: portals.length ? portals : null }).eq('id', promotion.id);
+  if (error) throw error;
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    summary: `Portals of "${promotion.name}" set to ${portals.join(', ') || 'every marketplace'}`,
+    metadata: { before: promotion.marketplaces ?? [], after: portals },
+  });
+  return portals;
+}
+
 // Promotion kinds: 'monthly' follows the market calendar and is automated on
 // its boundaries; 'flash' (flash deal) and 'special' (special event) always run
 // on their own dates and are pushed / exported by hand from their sections.

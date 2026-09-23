@@ -28,6 +28,7 @@ import {
   createPromotion,
   createPromotionFromFile,
   createPromotionFromLevels,
+  updatePromotionMarketplaces,
   addFileToPromotion,
   autoScheduleBestBuyPromo,
   scheduleWalmartCaPromo,
@@ -605,6 +606,84 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   );
 }
 
+// ============================== Portals ==============================
+
+// The marketplaces a flash deal / special event goes to: one chip per
+// channel, a row per market. Used by the new-promotion form and by the card
+// to change them later.
+function PortalPicker({ value, onChange }) {
+  return (
+    <div className="space-y-2">
+      {['ca', 'us'].map((m) => (
+        <div key={m} className="flex items-center gap-1.5 flex-wrap">
+          <span className="w-14 text-label-md text-on-surface-variant">{m === 'ca' ? 'Canada' : 'USA'}</span>
+          {PROMO_CHANNELS.filter((ch) => ch.market === m).map((ch) => {
+            const on = value.includes(ch.key);
+            return (
+              <button
+                key={ch.key}
+                type="button"
+                aria-pressed={on}
+                onClick={() => onChange(on ? value.filter((k) => k !== ch.key) : [...value, ch.key])}
+                className={`px-3 py-1 rounded-full text-label-md border transition-colors ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-outline-variant text-on-surface hover:bg-surface-container-low'}`}
+              >
+                {ch.label}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// On the card: the portals a flash deal / special event goes to, editable
+// after creation (to add a marketplace later, for instance).
+function PromoPortals({ promo, canEdit, onChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(promo.marketplaces ?? []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const label = (key) => PROMO_CHANNELS.find((ch) => ch.key === key)?.label ?? key;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await updatePromotionMarketplaces(promo, value);
+      setEditing(false);
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="space-y-2 text-body-sm">
+        <span className="text-label-lg text-on-surface-variant">Portals</span>
+        <PortalPicker value={value} onChange={setValue} />
+        <span className="inline-flex items-center gap-3">
+          <button type="button" onClick={save} disabled={busy || !value.length} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
+          <button type="button" onClick={() => { setValue(promo.marketplaces ?? []); setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
+          {error && <span className="text-error">{error}</span>}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-body-sm">
+      <span className="text-label-lg text-on-surface-variant">Portals</span>
+      {(promo.marketplaces ?? []).map((key) => (
+        <span key={key} className="px-2 py-0.5 rounded-full bg-surface-container text-on-surface">{label(key)}</span>
+      ))}
+      {canEdit && <button type="button" onClick={() => setEditing(true)} className="text-label-md font-medium text-primary hover:underline">Change portals</button>}
+    </div>
+  );
+}
+
 // ============================== New promotion ==============================
 
 function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
@@ -769,26 +848,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         <div className="block sm:col-span-3">
           <span className="text-label-lg text-on-surface-variant">Portals</span>
           <p className="text-body-sm text-on-surface-variant mt-0.5">Where this {PROMOTION_KINDS[kind].toLowerCase()} goes. Pick one or several.</p>
-          <div className="mt-2 space-y-2">
-            {['ca', 'us'].map((m) => (
-              <div key={m} className="flex items-center gap-1.5 flex-wrap">
-                <span className="w-14 text-label-md text-on-surface-variant">{m === 'ca' ? 'Canada' : 'USA'}</span>
-                {PROMO_CHANNELS.filter((ch) => ch.market === m).map((ch) => {
-                  const on = portals.includes(ch.key);
-                  return (
-                    <button
-                      key={ch.key}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => setPortals((p) => (on ? p.filter((k) => k !== ch.key) : [...p, ch.key]))}
-                      className={`px-3 py-1 rounded-full text-label-md border transition-colors ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-outline-variant text-on-surface hover:bg-surface-container-low'}`}
-                    >
-                      {ch.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
+          <div className="mt-2">
+            <PortalPicker value={portals} onChange={setPortals} />
           </div>
         </div>
         )}
@@ -1026,6 +1087,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
           <div className="mx-0 border-t border-outline-variant/60" />
 
           <PromoDates promo={promo} canEdit={canEdit && promo.status !== 'ended'} onChanged={onChanged} />
+          {(promo.kind ?? 'monthly') !== 'monthly' && (
+            <PromoPortals key={(promo.marketplaces ?? []).join(',')} promo={promo} canEdit={canEdit && promo.status !== 'ended'} onChanged={onChanged} />
+          )}
 
           {canEdit && (
             <div className="flex items-center gap-2 flex-wrap">
