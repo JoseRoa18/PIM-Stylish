@@ -1560,7 +1560,7 @@ const FILE_FILLERS = {
     label: 'Menards',
     monogram: 'ME',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
-    hint: 'The promotion file Menards sent — columns F, G and H are filled with the MAP and WC Menards of the promo level (Orange monthly, Purple flash / event) on the rows carrying our SKUs. Rows are never added.',
+    hint: 'The promotion file Menards sent — columns F, G and H are filled on every row: the promo level (Orange monthly, Purple flash / event) for the promotion\'s products, Blue for the rest. Rows are never added or removed.',
     accept: '.xlsx,.xlsm',
     analyze: analyzeMenardsPromoFile,
     fill: (file, promo, opts) => fillMenardsPromoFile(file, promo, opts),
@@ -1847,7 +1847,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
       <Dialog
         onClose={onClose}
         title={plan.missing.length ? `${plan.missing.length} products have no ${plan.tierLabel} price` : `${plan.notInFile.length} products of the promotion are not in the file`}
-        subtitle={`${plan.fills.size} rows of ${file.name} can be filled${plan.notInPromo?.length ? `, ${plan.notInPromo.length} rows of other products will be taken out` : ''}.${plan.missing.length ? ' These cannot: decide what happens to their rows before the file is written.' : ''}`}
+        subtitle={`${plan.fills.size} rows of ${file.name} get the ${plan.tierLabel} prices${plan.notInPromo?.length ? `, ${plan.notInPromo.length} rows of other products get the Blue prices` : ''}.${plan.missing.length ? ' These cannot: decide what happens to their rows before the file is written.' : ''}`}
         maxWidth="max-w-lg"
       >
         <div className="space-y-4">
@@ -1881,7 +1881,6 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
             {[
               { key: 'blank', label: 'Continue, leave them blank', hint: 'Their rows stay in the file with F, G and H empty.' },
               { key: 'blue', label: 'Continue, put Blue prices', hint: 'Their rows get the Blue MAP and WC Menards. Rows with no Blue price either stay empty.' },
-              { key: 'remove', label: 'Take them out of the file', hint: 'Their rows are removed and the rows below move up.' },
             ].map((opt) => (
               <button
                 key={opt.key}

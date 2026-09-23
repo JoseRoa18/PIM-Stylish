@@ -11,10 +11,10 @@
 // A promo price / promo cost typed on the promotion's own list
 // (promo_price_usd, promo_costs.menards_usd) wins over the product's level.
 //
-// The returned file carries ONLY the promotion's products (rule of the user
-// 2026-09-23): rows of products outside the promotion are taken out, promotion
-// members missing from the file are reported, and F/G/H are overwritten
-// whatever they held. Before anything is written, the file is analyzed: rows
+// Every row of the file stays (rule of the user 2026-09-23): products in the
+// promotion get the level's prices, products OUTSIDE the promotion get the
+// Blue prices (map_usd, cost_usd_menards), promotion members missing from
+// the file are reported, and F/G/H are overwritten whatever they held. Before anything is written, the file is analyzed: rows
 // whose product has no MAP (or no WC) of that level are listed, and the person
 // decides what their rows get: nothing (left as they came), the Blue prices
 // (map_usd and cost_usd_menards), or taken out of the returned file. Rows are
@@ -82,12 +82,12 @@ export async function analyzeMenardsPromoFile(file, promotion) {
   if (!members.length) throw new Error('This promotion has no products.');
   const bySku = new Map(members.map((m) => [m.sku, m]));
 
-  const { data: prods, error } = await supabase.from('products').select(`sku, map_usd, cost_usd_menards, ${mapField}, ${costField}`).in('sku', members.map((m) => m.sku));
+  // Every product's Blue and level prices: rows outside the promotion need
+  // Blue too, so the whole catalog is read (a few hundred rows).
+  const { data: prods, error } = await supabase.from('products').select(`sku, map_usd, cost_usd_menards, ${mapField}, ${costField}`).range(0, 4999);
   if (error) throw error;
   const pim = new Map((prods ?? []).map((p) => [p.sku, p]));
-  const { data: all, error: allErr } = await supabase.from('products').select('sku');
-  if (allErr) throw allErr;
-  const pimSkus = new Set((all ?? []).map((p) => p.sku));
+  const pimSkus = new Set(pim.keys());
 
   const { zip, shared } = await openFile(file);
   const hit = await locateSkuColumn(zip, shared, pimSkus);
@@ -95,7 +95,7 @@ export async function analyzeMenardsPromoFile(file, promotion) {
 
   const fills = new Map(); // 1-based row number → { map, cost }
   const missing = []; // { sku, row, reason }
-  const notInPromo = []; // { sku, row } — taken out of the file
+  const notInPromo = []; // { sku, row, blue } — get the Blue prices
   const fileSkus = new Set();
   let fromList = 0;
   hit.grid.forEach((row, i) => {
@@ -104,8 +104,12 @@ export async function analyzeMenardsPromoFile(file, promotion) {
     const rn = i + 1;
     fileSkus.add(sku);
     const m = bySku.get(sku);
-    if (!m) { notInPromo.push({ sku, row: rn }); return; }
     const p = pim.get(sku) ?? {};
+    if (!m) {
+      const blue = p.map_usd != null && p.cost_usd_menards != null ? { map: Number(p.map_usd), cost: Number(p.cost_usd_menards) } : null;
+      notInPromo.push({ sku, row: rn, blue });
+      return;
+    }
     const map = m.promo_price_usd != null ? Number(m.promo_price_usd) : p[mapField] != null ? Number(p[mapField]) : null;
     const listedCost = m.promo_costs?.menards_usd;
     const cost = listedCost != null ? Number(listedCost) : p[costField] != null ? Number(p[costField]) : null;
@@ -146,22 +150,26 @@ export async function fillMenardsPromoFile(file, promotion, { plan = null, missi
       if (m.blue) { write(m.row, m.blue); withBlue.push(m.sku); } else noBlue.push(m.sku);
     }
   }
+  // Rows outside the promotion keep their place and get the Blue prices.
+  const othersBlue = [];
+  const othersNoBlue = [];
+  for (const r of p.notInPromo) {
+    if (r.blue) { write(r.row, r.blue); othersBlue.push(r.sku); } else othersNoBlue.push(r.sku);
+  }
   let xml = mergeRows(p.xml, cellsByRow, true);
-  // Only the promotion's products stay: rows of other products always go,
-  // rows without a level price go when asked.
-  const removed = [...p.notInPromo.map((r) => r.row), ...(missing === 'remove' ? p.missing.map((m) => m.row) : [])];
+  const removed = missing === 'remove' ? p.missing.map((m) => m.row) : [];
   if (removed.length) xml = removeRows(xml, removed);
   zip.file(p.path, xml);
   await downloadZip(zip, `Menards_Promo_${String(promotion.period).slice(0, 7)}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
 
-  const report = { ...p, filled: p.fills.size, removed: missing === 'remove' ? p.missing.length : 0, removedOthers: p.notInPromo.length, withBlue, noBlue, leftBlank: missing === 'blank' ? p.missing.length : 0 };
+  const report = { ...p, filled: p.fills.size, removed: removed.length, othersBlue, othersNoBlue, withBlue, noBlue, leftBlank: missing === 'blank' ? p.missing.length : 0 };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: 'menards',
     summary: `Filled Menards promotion file for "${promotion.name}" (${report.filled} rows, ${p.tierLabel} level)`,
-    metadata: { file: file.name, filled: report.filled, tier: p.tier, missing, removed: report.removed, with_blue: withBlue.length, left_blank: report.leftBlank, not_in_promo: p.notInPromo.length, not_in_file: p.notInFile.length },
+    metadata: { file: file.name, filled: report.filled, tier: p.tier, missing, removed: report.removed, with_blue: withBlue.length, left_blank: report.leftBlank, others_blue: othersBlue.length, others_no_blue: othersNoBlue.length, not_in_file: p.notInFile.length },
   });
   return report;
 }
@@ -174,7 +182,8 @@ export function summarizeMenardsFill(r) {
   if (r.noBlue?.length) parts.push(`${r.noBlue.length} rows with no ${r.tierLabel} price and no Blue price either, left as they came: ${few(r.noBlue)}`);
   if (r.removed) parts.push(`${r.removed} rows with no ${r.tierLabel} price taken out: ${few(r.missing.map((m) => m.sku))}`);
   if (r.leftBlank) parts.push(`${r.leftBlank} rows with no ${r.tierLabel} price left as they came: ${few(r.missing.map((m) => m.sku))}`);
-  if (r.removedOthers) parts.push(`${r.removedOthers} rows of products outside this promotion taken out: ${few(r.notInPromo.map((x) => x.sku))}`);
+  if (r.othersBlue?.length) parts.push(`${r.othersBlue.length} rows of products outside this promotion got the Blue prices: ${few(r.othersBlue)}`);
+  if (r.othersNoBlue?.length) parts.push(`${r.othersNoBlue.length} rows outside this promotion have no Blue price in the PIM, left as they came: ${few(r.othersNoBlue)}`);
   if (r.notInFile.length) parts.push(`MISSING from the file, ${r.notInFile.length} products of the promotion: ${few(r.notInFile, 12)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from Menards, untouched: ${few(r.excluded)}`);
   return parts.join(' · ');
