@@ -14,12 +14,10 @@
 // Every row of the file stays (rule of the user 2026-09-23): products in the
 // promotion get the level's prices, products OUTSIDE the promotion get the
 // Blue prices (map_usd, cost_usd_menards), promotion members missing from
-// the file are reported, and F/G/H are overwritten whatever they held. Before anything is written, the file is analyzed: rows
-// whose product has no MAP (or no WC) of that level are listed, and the person
-// decides what their rows get: nothing (left as they came), the Blue prices
-// (map_usd and cost_usd_menards), or taken out of the returned file. Rows are
-// matched on the column that holds our SKUs (found by content, not by
-// header), so the layout can change.
+// the file are reported (and confirmed before writing), F/G/H are overwritten
+// whatever they held, and promotion products with no price on the level are
+// simply left as they came. Rows are matched on the column that holds our
+// SKUs (found by content, not by header), so the layout can change.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -30,7 +28,6 @@ import {
   sheetToGrid,
   buildCell,
   mergeRows,
-  removeRows,
   downloadZip,
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
@@ -128,10 +125,9 @@ export async function analyzeMenardsPromoFile(file, promotion) {
 }
 
 /**
- * Write F/G/H on the planned rows and download the file. `missing` says
- * what the rows without a level price get: 'blank' (left as they came),
- * 'blue' (the Blue MAP and WC Menards; rows without Blue stay blank) or
- * 'remove' (taken out of the file).
+ * Write F/G/H on the planned rows and download the file. Promotion products
+ * without a level price are left as they came (`missing` = 'blank', the
+ * default; 'blue' would give them the Blue prices instead).
  */
 export async function fillMenardsPromoFile(file, promotion, { plan = null, missing = 'blank' } = {}) {
   const p = plan ?? (await analyzeMenardsPromoFile(file, promotion));
@@ -156,20 +152,17 @@ export async function fillMenardsPromoFile(file, promotion, { plan = null, missi
   for (const r of p.notInPromo) {
     if (r.blue) { write(r.row, r.blue); othersBlue.push(r.sku); } else othersNoBlue.push(r.sku);
   }
-  let xml = mergeRows(p.xml, cellsByRow, true);
-  const removed = missing === 'remove' ? p.missing.map((m) => m.row) : [];
-  if (removed.length) xml = removeRows(xml, removed);
-  zip.file(p.path, xml);
+  zip.file(p.path, mergeRows(p.xml, cellsByRow, true));
   await downloadZip(zip, `Menards_Promo_${String(promotion.period).slice(0, 7)}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
 
-  const report = { ...p, filled: p.fills.size, removed: removed.length, othersBlue, othersNoBlue, withBlue, noBlue, leftBlank: missing === 'blank' ? p.missing.length : 0 };
+  const report = { ...p, filled: p.fills.size, othersBlue, othersNoBlue, withBlue, noBlue, leftBlank: missing === 'blank' ? p.missing.length : 0 };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: 'menards',
     summary: `Filled Menards promotion file for "${promotion.name}" (${report.filled} rows, ${p.tierLabel} level)`,
-    metadata: { file: file.name, filled: report.filled, tier: p.tier, missing, removed: report.removed, with_blue: withBlue.length, left_blank: report.leftBlank, others_blue: othersBlue.length, others_no_blue: othersNoBlue.length, not_in_file: p.notInFile.length },
+    metadata: { file: file.name, filled: report.filled, tier: p.tier, missing, with_blue: withBlue.length, left_blank: report.leftBlank, others_blue: othersBlue.length, others_no_blue: othersNoBlue.length, not_in_file: p.notInFile.length },
   });
   return report;
 }
@@ -180,8 +173,7 @@ export function summarizeMenardsFill(r) {
   const parts = [`Menards file ready. ${r.filled} of ${r.fileRows} rows filled with MAP ${r.tierLabel} and WC Menards ${r.tierLabel} (columns F, G, H)${r.fromList ? `, ${r.fromList} from the promotion's own list` : ''}`];
   if (r.withBlue?.length) parts.push(`${r.withBlue.length} rows with no ${r.tierLabel} price got the Blue prices: ${few(r.withBlue)}`);
   if (r.noBlue?.length) parts.push(`${r.noBlue.length} rows with no ${r.tierLabel} price and no Blue price either, left as they came: ${few(r.noBlue)}`);
-  if (r.removed) parts.push(`${r.removed} rows with no ${r.tierLabel} price taken out: ${few(r.missing.map((m) => m.sku))}`);
-  if (r.leftBlank) parts.push(`${r.leftBlank} rows with no ${r.tierLabel} price left as they came: ${few(r.missing.map((m) => m.sku))}`);
+  if (r.leftBlank) parts.push(`${r.leftBlank} promotion products with no ${r.tierLabel} price in the PIM, left as they came: ${few(r.missing.map((m) => m.sku))}`);
   if (r.othersBlue?.length) parts.push(`${r.othersBlue.length} rows of products outside this promotion got the Blue prices: ${few(r.othersBlue)}`);
   if (r.othersNoBlue?.length) parts.push(`${r.othersNoBlue.length} rows outside this promotion have no Blue price in the PIM, left as they came: ${few(r.othersNoBlue)}`);
   if (r.notInFile.length) parts.push(`MISSING from the file, ${r.notInFile.length} products of the promotion: ${few(r.notInFile, 12)}`);

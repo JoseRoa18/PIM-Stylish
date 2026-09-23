@@ -3,7 +3,6 @@ import {
   Tag,
   Plus,
   ChevronDown,
-  ChevronRight,
   Pencil,
   Trash2,
   Send,
@@ -1808,8 +1807,8 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
   const [marketplace, setMarketplace] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  // A filler with `analyze` pauses here when some rows cannot be priced:
-  // { file, plan } until the person picks what to do with them.
+  // A filler with `analyze` pauses here when promotion products are missing
+  // from the file: { file, plan } until the person confirms.
   const [pending, setPending] = useState(null);
   const def = marketplace ? FILE_FILLERS[marketplace] : null;
 
@@ -1833,7 +1832,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
     setError(null);
     try {
       const plan = await def.analyze(file, promo);
-      if (plan.missing.length || plan.notInFile?.length) { setPending({ file, plan }); setBusy(false); return; }
+      if (plan.notInFile?.length) { setPending({ file, plan }); setBusy(false); return; }
       await finish(file, { plan });
     } catch (err) {
       setError(err.message);
@@ -1846,63 +1845,21 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
     return (
       <Dialog
         onClose={onClose}
-        title={plan.missing.length ? `${plan.missing.length} products have no ${plan.tierLabel} price` : `${plan.notInFile.length} products of the promotion are not in the file`}
-        subtitle={`${plan.fills.size} rows of ${file.name} get the ${plan.tierLabel} prices${plan.notInPromo?.length ? `, ${plan.notInPromo.length} rows of other products get the Blue prices` : ''}.${plan.missing.length ? ' These cannot: decide what happens to their rows before the file is written.' : ''}`}
+        title={`${plan.notInFile.length} products of the promotion are not in the file`}
+        subtitle={`${plan.fills.size} rows of ${file.name} get the ${plan.tierLabel} prices${plan.notInPromo?.length ? `, ${plan.notInPromo.length} rows of other products get the Blue prices` : ''}.`}
         maxWidth="max-w-lg"
       >
         <div className="space-y-4">
-          {plan.notInFile?.length > 0 && (
-            <p className="text-body-sm rounded-lg px-3 py-2 bg-tertiary-container/40 text-on-surface">
-              <span className="font-medium">Missing from the file:</span> {plan.notInFile.slice(0, 20).join(', ')}{plan.notInFile.length > 20 ? ` and ${plan.notInFile.length - 20} more` : ''}. Ask Menards to add them, or continue without them.
-            </p>
-          )}
-          {plan.missing.length > 0 && (
-          <ul className="max-h-64 overflow-y-auto rounded-xl border border-outline-variant divide-y divide-outline-variant/60 text-body-sm">
-            {plan.missing.map((m) => (
-              <li key={m.sku} className="flex items-center gap-3 px-3 py-2">
-                <span className="font-mono text-on-surface">{m.sku}</span>
-                <span className="text-on-surface-variant">{m.reason}{m.blue ? '' : ', no Blue price either'}</span>
-                <span className="ml-auto text-label-sm text-on-surface-variant whitespace-nowrap">row {m.row}</span>
-              </li>
-            ))}
-          </ul>
-          )}
+          <p className="text-body-sm rounded-lg px-3 py-2 bg-tertiary-container/40 text-on-surface">
+            <span className="font-medium">Missing from the file:</span> {plan.notInFile.slice(0, 20).join(', ')}{plan.notInFile.length > 20 ? ` and ${plan.notInFile.length - 20} more` : ''}. Ask Menards to add them, or continue without them.
+          </p>
           {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
-          {plan.missing.length === 0 ? (
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setPending(null)} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
-              <button type="button" onClick={() => finish(file, { plan, missing: 'blank' })} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50">
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Continue without them
-              </button>
-            </div>
-          ) : (
-          <div className="space-y-2">
-            <p className="text-label-md text-on-surface-variant">What should their rows get?</p>
-            {[
-              { key: 'blank', label: 'Continue, leave them blank', hint: 'Their rows stay in the file with F, G and H empty.' },
-              { key: 'blue', label: 'Continue, put Blue prices', hint: 'Their rows get the Blue MAP and WC Menards. Rows with no Blue price either stay empty.' },
-            ].map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => finish(file, { plan, missing: opt.key })}
-                disabled={busy}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-outline-variant bg-surface text-left hover:bg-surface-container-low hover:border-primary/60 transition-colors disabled:opacity-50"
-              >
-                <span className="min-w-0">
-                  <span className="block text-label-lg font-medium text-on-surface">{opt.label}</span>
-                  <span className="block text-body-sm text-on-surface-variant">{opt.hint}</span>
-                </span>
-                {busy ? <Loader2 className="w-4 h-4 animate-spin ml-auto flex-shrink-0 text-on-surface-variant" /> : <ChevronRight className="w-4 h-4 ml-auto flex-shrink-0 text-on-surface-variant" />}
-              </button>
-            ))}
-          </div>
-          )}
-          {plan.missing.length > 0 && (
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setPending(null)} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
+            <button type="button" onClick={() => finish(file, { plan })} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Continue without them
+            </button>
           </div>
-          )}
         </div>
       </Dialog>
     );
