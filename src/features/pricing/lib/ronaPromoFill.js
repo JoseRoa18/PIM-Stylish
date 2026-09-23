@@ -22,7 +22,9 @@
 //   N Regular MSRP                  empty
 //   O Regular MAP                   MAP Blue = map_cad
 //   P Promo MSRP                    empty
-//   Q Promo MAP                     MAP Blue = map_cad (Rona keeps the MAP)
+//   Q Promo MAP                     MAP Orange (monthly) / MAP Purple (flash,
+//                                   event); a promo price on the promotion's
+//                                   own list (promo_price_cad) wins
 //   R Var                           formula =M-L
 //   S Var %                         formula =M/L-1
 
@@ -101,6 +103,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
 
   const tier = (promotion.kind ?? 'monthly') === 'monthly' ? 'orange' : 'purple';
   const promoCostField = `cost_cad_rona_hd_${tier}`;
+  const promoMapField = `map_${tier}_cad`;
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel.key);
   if (!members.length) throw new Error('This promotion has no products.');
   const skus = members.map((r) => r.sku);
@@ -110,7 +113,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   for (let i = 0; i < skus.length; i += 100) {
     const chunk = skus.slice(i, i + 100);
     const [{ data: prods, error: pErr }, { data: aliases, error: aErr }] = await Promise.all([
-      supabase.from('products').select(`sku, brand, map_cad, cost_cad_rona_hd, ${promoCostField}, attributes`).in('sku', chunk),
+      supabase.from('products').select(`sku, brand, map_cad, ${promoMapField}, cost_cad_rona_hd, ${promoCostField}, attributes`).in('sku', chunk),
       supabase.from('product_aliases').select('sku, alias, listing_title').eq('marketplace', 'Rona').in('sku', chunk),
     ]);
     if (pErr) throw pErr;
@@ -126,6 +129,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   const noUpc = [];
   const noRegularCost = [];
   const noPromoCost = [];
+  const noPromoMap = [];
   const atOrAbove = [];
   let fromList = 0;
   for (const m of members) {
@@ -139,6 +143,8 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
     if (promoCost == null) { noPromoCost.push(m.sku); continue; }
     if (promoCost >= regularCost) { atOrAbove.push(m.sku); continue; }
     if (listed != null) fromList += 1;
+    const promoMap = m.promo_price_cad != null ? Number(m.promo_price_cad) : p[promoMapField] != null ? Number(p[promoMapField]) : null;
+    if (promoMap == null) noPromoMap.push(m.sku);
     if (!a.listing_title) noName.push(m.sku);
     const upc = String(p.attributes?.upc ?? '').trim();
     if (!upc) noUpc.push(m.sku);
@@ -151,6 +157,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
       regularCost,
       promoCost,
       map: p.map_cad != null ? Number(p.map_cad) : null,
+      promoMap,
     });
   }
   if (!lines.length) throw new Error('Nothing to write: no product has a Rona id with a promo cost below its regular cost.');
@@ -195,7 +202,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
     put(cols.regularCost, l.regularCost);
     put(cols.promoCost, l.promoCost);
     put(cols.regularMap, l.map);
-    put(cols.promoMap, l.map);
+    put(cols.promoMap, l.promoMap);
     if (cols.promoCost != null && cols.regularCost != null) {
       formula(cols.varAmount, `${col(cols.promoCost)}${rn}-${col(cols.regularCost)}${rn}`);
       formula(cols.varPct, `${col(cols.promoCost)}${rn}/${col(cols.regularCost)}${rn}-1`);
@@ -210,14 +217,14 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   const period = String(promotion.period).slice(0, 7);
   await downloadZip(zip, `Rona_Promo_${period}`, templateExt(template.storage_path));
 
-  const report = { rows: lines.length, tier, fromList, noAlias, noName, noUpc, noRegularCost, noPromoCost, atOrAbove, excluded, window, sheet: hit.name };
+  const report = { rows: lines.length, tier, fromList, noAlias, noName, noUpc, noRegularCost, noPromoCost, noPromoMap, atOrAbove, excluded, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: channel.key,
     summary: `Filled Rona promotions file for "${promotion.name}" (${lines.length} products, WC ${tier})`,
-    metadata: { template: template.file_name, rows: lines.length, tier, noAlias: noAlias.length, noName: noName.length, noUpc: noUpc.length, noRegularCost: noRegularCost.length, noPromoCost: noPromoCost.length, atOrAbove: atOrAbove.length, window },
+    metadata: { template: template.file_name, rows: lines.length, tier, noAlias: noAlias.length, noName: noName.length, noUpc: noUpc.length, noRegularCost: noRegularCost.length, noPromoCost: noPromoCost.length, noPromoMap: noPromoMap.length, atOrAbove: atOrAbove.length, window },
   });
   return report;
 }
@@ -225,11 +232,12 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
 const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? ` and ${list.length - n} more` : ''}`;
 
 export function summarizeRonaFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.rows} products, ${r.window.start} to ${r.window.end}, promo cost = WC ${r.tier === 'orange' ? 'Orange' : 'Purple'}${r.fromList ? ` (${r.fromList} from the promotion's own list)` : ''}`];
+  const parts = [`${channel.label} file ready. ${r.rows} products, ${r.window.start} to ${r.window.end}, promo cost = WC ${r.tier === 'orange' ? 'Orange' : 'Purple'}, promo MAP = MAP ${r.tier === 'orange' ? 'Orange' : 'Purple'}${r.fromList ? ` (${r.fromList} costs from the promotion's own list)` : ''}`];
   if (r.noAlias.length) parts.push(`no Rona id in Aliases, left out: ${few(r.noAlias)}`);
   if (r.noRegularCost.length) parts.push(`no WC Rona / Home Depot in the PIM, left out: ${few(r.noRegularCost)}`);
   if (r.noPromoCost.length) parts.push(`no WC ${r.tier === 'orange' ? 'Orange' : 'Purple'} in the PIM, left out: ${few(r.noPromoCost)}`);
   if (r.atOrAbove.length) parts.push(`promo cost not below the regular cost, left out: ${few(r.atOrAbove)}`);
+  if (r.noPromoMap.length) parts.push(`${r.noPromoMap.length} without MAP ${r.tier === 'orange' ? 'Orange' : 'Purple'} (column Q empty): ${few(r.noPromoMap, 5)}`);
   if (r.noName.length) parts.push(`${r.noName.length} without a Rona name (column I empty): ${few(r.noName, 5)}`);
   if (r.noUpc.length) parts.push(`${r.noUpc.length} without UPC (column E empty): ${few(r.noUpc, 5)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${few(r.excluded)}`);
