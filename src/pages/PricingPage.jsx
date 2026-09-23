@@ -53,6 +53,7 @@ import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
 import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
 import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill } from '@/features/pricing/lib/menardsPromoFill';
+import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link } from 'react-router-dom';
 
@@ -1434,7 +1435,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           ? summarizeMiraklFill(channel, await fillMiraklPromoTemplate(template, promo, channel))
           : channel.fill === 'rona'
             ? summarizeRonaFill(channel, await fillRonaPromoTemplate(template, promo, channel))
-            : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
+            : channel.fill === 'walmart_ca'
+              ? summarizeWalmartCaFill(channel, await fillWalmartCaPromoTemplate(template, promo, channel))
+              : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
       onMsg({ tone: 'success', text });
     } catch (err) {
@@ -1538,7 +1541,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
               {canEdit && ch.kind === 'portal_file' && (
                 <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file</button>
               )}
-              {canEdit && ch.kind === 'template' && ch.template && (
+              {canEdit && (ch.kind === 'template' || ch.kind === 'api') && ch.template && (
                 <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className={actionCls}>
                   {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   Generate

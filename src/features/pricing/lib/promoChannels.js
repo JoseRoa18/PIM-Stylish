@@ -38,8 +38,10 @@ export const PROMO_CHANNELS = [
   // WC Orange (monthly) / Purple (flash, event) as promo cost, MAP Blue kept.
   { key: 'rona', label: 'Rona', monogram: 'RO', market: 'ca', kind: 'template', marketplace: /rona/i, costSlug: 'rona_hd_cad', fill: 'rona', aliasMarketplace: 'Rona' },
   { key: 'amazon_ca', label: 'Amazon Canada', monogram: 'AM', market: 'ca', kind: 'template', marketplace: /amazon.*(\bca\b|canada)/i, costSlug: null, fill: 'amazon' },
-  { key: 'walmart_ca', label: 'Walmart Canada', monogram: 'WM', market: 'ca', kind: 'api', stamp: 'wm_ca_scheduled_at', schedule: 'walmart_ca',
-    how: 'Promotional prices sent through the Walmart API for the Canada window. Walmart turns them on and off by itself.' },
+  // Walmart Canada goes by API, and can also produce the Seller Center
+  // price & promotion file when a promotions template is uploaded.
+  { key: 'walmart_ca', label: 'Walmart Canada', monogram: 'WM', market: 'ca', kind: 'api', stamp: 'wm_ca_scheduled_at', schedule: 'walmart_ca', marketplace: /walmart.*(\bca\b|canada)/i, fill: 'walmart_ca',
+    how: 'Promotional prices sent through the Walmart API for the Canada window. Walmart turns them on and off by itself. Generate fills the Seller Center price & promotion file instead.' },
   // Home Depot USA runs on Mirakl: its promotions file is the offers import
   // (sku, price, msrp, discount-price + dates). Regular = MAP USD.
   { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null, fill: 'mirakl', priceField: 'map_usd', costField: 'cost_usd_lowes_sod_bbb', promoCostSlug: 'lowes_sod_bbb_usd', aliasMarketplace: 'Home Depot US' }, // HD USA: base cost and promo cost = the Lowe's / SOD / BB&B group
@@ -59,7 +61,7 @@ export const PROMO_CHANNELS = [
  * otherwise the monthly promotions file serves every kind.
  */
 export function promoTemplateFor(channel, templates, kind = 'monthly') {
-  if (channel.kind !== 'template') return null;
+  if (!channel.marketplace) return null;
   const mine = (templates ?? []).filter((t) => channel.marketplace.test(t.marketplace ?? ''));
   if (kind !== 'monthly') {
     const flash = mine.find((t) => templatePurpose(t) === 'flash_deals');
