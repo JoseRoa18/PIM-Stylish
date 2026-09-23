@@ -22,7 +22,7 @@ import { getAppSetting } from '@/features/settings/api/appSettings';
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, kind, starts_on, ends_on, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
+    .select('id, name, period, status, kind, marketplace, starts_on, ends_on, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
     .order('period', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((p) => ({
@@ -137,8 +137,11 @@ export const LEVEL_FIELDS = {
  * Returns the SKUs not in the PIM and those with no price on that level in
  * either market (added anyway, so the files can report them).
  */
-export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = 'purple' }) {
+// `marketplace` is the PROMO_CHANNELS key the promotion is made for (flash
+// deals and special events go to ONE portal); null means every marketplace.
+export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = 'purple', marketplace = null }) {
   assertKindDates(kind, starts_on, ends_on);
+  if (kind !== 'monthly' && !marketplace) throw new Error(`Pick the portal this ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} is for.`);
   const level = LEVEL_FIELDS[tier];
   if (!level) throw new Error(`Unknown price level "${tier}".`);
   const wanted = [...new Set(skus)];
@@ -156,7 +159,7 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, starts_on, ends_on })
+    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, marketplace })
     .select()
     .single();
   if (error) throw error;
@@ -180,8 +183,8 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
     action: 'create',
     entityType: 'promotion',
     entityId: String(promo.id),
-    summary: `Created ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} "${name}" from the ${tier} level (${valid.length} SKUs)`,
-    metadata: { period, kind, tier, skus: valid.length, not_in_pim: notInPim.length, no_level: noLevel.length },
+    summary: `Created ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} "${name}" from the ${tier} level (${valid.length} SKUs${marketplace ? `, for ${marketplace}` : ''})`,
+    metadata: { period, kind, tier, marketplace, skus: valid.length, not_in_pim: notInPim.length, no_level: noLevel.length },
   });
   return { promotion: promo, added: valid.length, notInPim, noLevel };
 }
