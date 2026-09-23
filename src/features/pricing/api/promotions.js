@@ -247,6 +247,28 @@ export async function updatePromotionDates(promotion, { starts_on, ends_on }) {
   });
 }
 
+/**
+ * Which of `skus` are already in a MONTHLY promotion whose window overlaps
+ * [startsOn, endsOn] on either market. Used to warn before creating a flash
+ * deal or special event (rule 2026-09-22).
+ */
+export async function monthlyOverlap(startsOn, endsOn, skus) {
+  const { data, error } = await supabase
+    .from('promotions')
+    .select('id, name, period, starts_on, ends_on, promotion_prices(sku)')
+    .eq('kind', 'monthly')
+    .in('status', ['draft', 'active']);
+  if (error) throw error;
+  const wanted = new Set(skus);
+  for (const p of data ?? []) {
+    const windows = [promoWindow(p, 'us'), promoWindow(p, 'ca')];
+    if (!windows.some((w) => w.start <= endsOn && w.end >= startsOn)) continue;
+    const hit = (p.promotion_prices ?? []).map((r) => r.sku).filter((s) => wanted.has(s)).sort();
+    if (hit.length) return { promotion: p.name, skus: hit };
+  }
+  return { promotion: null, skus: [] };
+}
+
 export async function markPromotionActive(promotion) {
   const { error } = await supabase
     .from('promotions')

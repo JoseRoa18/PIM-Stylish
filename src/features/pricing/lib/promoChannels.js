@@ -47,8 +47,18 @@ export const PROMO_CHANNELS = [
   { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us', kind: 'template', marketplace: /walmart.*\bus(a)?\b/i, costSlug: null },
 ];
 
-/** The promotions template uploaded for a template-kind channel, if any. */
-export function promoTemplateFor(channel, templates) {
+/**
+ * The promotions template uploaded for a template-kind channel, if any.
+ * Flash deals and special events take the marketplace's "Flash deals & events"
+ * file when one is uploaded (Rona and Walmart Canada use a different layout);
+ * otherwise the monthly promotions file serves every kind.
+ */
+export function promoTemplateFor(channel, templates, kind = 'monthly') {
   if (channel.kind !== 'template') return null;
-  return (templates ?? []).find((t) => templatePurpose(t) === 'promotions' && channel.marketplace.test(t.marketplace ?? '')) ?? null;
+  const mine = (templates ?? []).filter((t) => channel.marketplace.test(t.marketplace ?? ''));
+  if (kind !== 'monthly') {
+    const flash = mine.find((t) => templatePurpose(t) === 'flash_deals');
+    if (flash) return flash;
+  }
+  return mine.find((t) => templatePurpose(t) === 'promotions') ?? null;
 }

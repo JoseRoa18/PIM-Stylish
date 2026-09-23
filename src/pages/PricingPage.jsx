@@ -36,7 +36,7 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
-import { PROMOTION_KINDS } from '@/features/pricing/api/promotions';
+import { PROMOTION_KINDS, monthlyOverlap } from '@/features/pricing/api/promotions';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
@@ -662,6 +662,18 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
 
   const canCreate = mode === 'file' ? mergedFileRows.length > 0 : parsed.rows.length > 0;
 
+  // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
+  // those days makes no sense in a flash deal — warn before creating.
+  const [overlap, setOverlap] = useState(null);
+  useEffect(() => {
+    if (monthly || !startsOn || !endsOn) { setOverlap(null); return; }
+    const skus = (mode === 'file' ? mergedFileRows : parsed.rows).map((r) => r.sku);
+    if (!skus.length) { setOverlap(null); return; }
+    let active = true;
+    monthlyOverlap(startsOn, endsOn, skus).then((r) => { if (active) setOverlap(r); }).catch(() => {});
+    return () => { active = false; };
+  }, [monthly, startsOn, endsOn, mode, mergedFileRows, parsed.rows]);
+
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
       <div className="flex items-center justify-between">
@@ -811,6 +823,11 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           Create promotion
         </button>
       </div>
+      {overlap?.skus?.length > 0 && (
+        <p className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">
+          {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). A {PROMOTION_KINDS[kind].toLowerCase()} adds nothing for them.
+        </p>
+      )}
       {error && <p className="text-body-sm text-on-error-container bg-error-container/60 rounded-lg px-3 py-2">{error}</p>}
     </div>
   );
@@ -1382,7 +1399,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged }) {
 
   const allRows = PROMO_CHANNELS
     .map((ch) => {
-      const template = promoTemplateFor(ch, templates);
+      const template = promoTemplateFor(ch, templates, promo.kind ?? 'monthly');
       let status;
       let tone;
       let detail = ch.how ?? '';
