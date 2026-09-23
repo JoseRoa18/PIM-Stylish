@@ -1833,7 +1833,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
     setError(null);
     try {
       const plan = await def.analyze(file, promo);
-      if (plan.missing.length) { setPending({ file, plan }); setBusy(false); return; }
+      if (plan.missing.length || plan.notInFile?.length) { setPending({ file, plan }); setBusy(false); return; }
       await finish(file, { plan });
     } catch (err) {
       setError(err.message);
@@ -1844,8 +1844,19 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
   if (pending) {
     const { file, plan } = pending;
     return (
-      <Dialog onClose={onClose} title={`${plan.missing.length} products have no ${plan.tierLabel} price`} subtitle={`${plan.fills.size} rows of ${file.name} can be filled. These cannot: decide what happens to their rows before the file is written.`} maxWidth="max-w-lg">
+      <Dialog
+        onClose={onClose}
+        title={plan.missing.length ? `${plan.missing.length} products have no ${plan.tierLabel} price` : `${plan.notInFile.length} products of the promotion are not in the file`}
+        subtitle={`${plan.fills.size} rows of ${file.name} can be filled${plan.notInPromo?.length ? `, ${plan.notInPromo.length} rows of other products will be taken out` : ''}.${plan.missing.length ? ' These cannot: decide what happens to their rows before the file is written.' : ''}`}
+        maxWidth="max-w-lg"
+      >
         <div className="space-y-4">
+          {plan.notInFile?.length > 0 && (
+            <p className="text-body-sm rounded-lg px-3 py-2 bg-tertiary-container/40 text-on-surface">
+              <span className="font-medium">Missing from the file:</span> {plan.notInFile.slice(0, 20).join(', ')}{plan.notInFile.length > 20 ? ` and ${plan.notInFile.length - 20} more` : ''}. Ask Menards to add them, or continue without them.
+            </p>
+          )}
+          {plan.missing.length > 0 && (
           <ul className="max-h-64 overflow-y-auto rounded-xl border border-outline-variant divide-y divide-outline-variant/60 text-body-sm">
             {plan.missing.map((m) => (
               <li key={m.sku} className="flex items-center gap-3 px-3 py-2">
@@ -1855,7 +1866,16 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
               </li>
             ))}
           </ul>
+          )}
           {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
+          {plan.missing.length === 0 ? (
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setPending(null)} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
+              <button type="button" onClick={() => finish(file, { plan, missing: 'blank' })} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Continue without them
+              </button>
+            </div>
+          ) : (
           <div className="space-y-2">
             <p className="text-label-md text-on-surface-variant">What should their rows get?</p>
             {[
@@ -1878,9 +1898,12 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
               </button>
             ))}
           </div>
+          )}
+          {plan.missing.length > 0 && (
           <div className="flex justify-end">
             <button type="button" onClick={() => setPending(null)} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
           </div>
+          )}
         </div>
       </Dialog>
     );

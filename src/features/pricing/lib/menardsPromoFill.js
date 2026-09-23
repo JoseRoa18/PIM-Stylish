@@ -11,11 +11,15 @@
 // A promo price / promo cost typed on the promotion's own list
 // (promo_price_usd, promo_costs.menards_usd) wins over the product's level.
 //
-// Before anything is written, the file is analyzed: rows whose product has
-// no MAP (or no WC) of that level are listed, and the person decides what
-// their rows get: nothing (left as they came), the Blue prices (map_usd and
-// cost_usd_menards), or taken out of the returned file. Rows are matched on the column that holds our
-// SKUs (found by content, not by header), so the layout can change.
+// The returned file carries ONLY the promotion's products (rule of the user
+// 2026-09-23): rows of products outside the promotion are taken out, promotion
+// members missing from the file are reported, and F/G/H are overwritten
+// whatever they held. Before anything is written, the file is analyzed: rows
+// whose product has no MAP (or no WC) of that level are listed, and the person
+// decides what their rows get: nothing (left as they came), the Blue prices
+// (map_usd and cost_usd_menards), or taken out of the returned file. Rows are
+// matched on the column that holds our SKUs (found by content, not by
+// header), so the layout can change.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -91,7 +95,7 @@ export async function analyzeMenardsPromoFile(file, promotion) {
 
   const fills = new Map(); // 1-based row number → { map, cost }
   const missing = []; // { sku, row, reason }
-  const notInPromo = [];
+  const notInPromo = []; // { sku, row } — taken out of the file
   const fileSkus = new Set();
   let fromList = 0;
   hit.grid.forEach((row, i) => {
@@ -100,7 +104,7 @@ export async function analyzeMenardsPromoFile(file, promotion) {
     const rn = i + 1;
     fileSkus.add(sku);
     const m = bySku.get(sku);
-    if (!m) { notInPromo.push(sku); return; }
+    if (!m) { notInPromo.push({ sku, row: rn }); return; }
     const p = pim.get(sku) ?? {};
     const map = m.promo_price_usd != null ? Number(m.promo_price_usd) : p[mapField] != null ? Number(p[mapField]) : null;
     const listedCost = m.promo_costs?.menards_usd;
@@ -143,12 +147,14 @@ export async function fillMenardsPromoFile(file, promotion, { plan = null, missi
     }
   }
   let xml = mergeRows(p.xml, cellsByRow, true);
-  const removed = missing === 'remove' ? p.missing.map((m) => m.row) : [];
+  // Only the promotion's products stay: rows of other products always go,
+  // rows without a level price go when asked.
+  const removed = [...p.notInPromo.map((r) => r.row), ...(missing === 'remove' ? p.missing.map((m) => m.row) : [])];
   if (removed.length) xml = removeRows(xml, removed);
   zip.file(p.path, xml);
   await downloadZip(zip, `Menards_Promo_${String(promotion.period).slice(0, 7)}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
 
-  const report = { ...p, filled: p.fills.size, removed: removed.length, withBlue, noBlue, leftBlank: missing === 'blank' ? p.missing.length : 0 };
+  const report = { ...p, filled: p.fills.size, removed: missing === 'remove' ? p.missing.length : 0, removedOthers: p.notInPromo.length, withBlue, noBlue, leftBlank: missing === 'blank' ? p.missing.length : 0 };
   logActivity({
     action: 'export',
     entityType: 'promotion',
@@ -168,8 +174,8 @@ export function summarizeMenardsFill(r) {
   if (r.noBlue?.length) parts.push(`${r.noBlue.length} rows with no ${r.tierLabel} price and no Blue price either, left as they came: ${few(r.noBlue)}`);
   if (r.removed) parts.push(`${r.removed} rows with no ${r.tierLabel} price taken out: ${few(r.missing.map((m) => m.sku))}`);
   if (r.leftBlank) parts.push(`${r.leftBlank} rows with no ${r.tierLabel} price left as they came: ${few(r.missing.map((m) => m.sku))}`);
-  if (r.notInPromo.length) parts.push(`file rows not in this promotion, untouched: ${few(r.notInPromo)}`);
-  if (r.notInFile.length) parts.push(`promotion members not in the file: ${few(r.notInFile)}`);
+  if (r.removedOthers) parts.push(`${r.removedOthers} rows of products outside this promotion taken out: ${few(r.notInPromo.map((x) => x.sku))}`);
+  if (r.notInFile.length) parts.push(`MISSING from the file, ${r.notInFile.length} products of the promotion: ${few(r.notInFile, 12)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from Menards, untouched: ${few(r.excluded)}`);
   return parts.join(' · ');
 }
