@@ -92,6 +92,100 @@ export function parsePriceList(text) {
  * the pasted prices fill ('cad' | 'usd'). SKUs missing from the PIM are
  * returned, never inserted (FK would reject them anyway).
  */
+/**
+ * Parse a pasted SKU list: one SKU per line (a price after it, if any, is
+ * ignored — prices come from the product's price level). Returns unique
+ * SKUs in order and the lines that held nothing usable.
+ */
+export function parseSkuList(text) {
+  const skus = [];
+  const seen = new Set();
+  const skipped = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)(?:[\s,;].*)?$/);
+    if (!m) { skipped.push(line); continue; }
+    const sku = m[1].toUpperCase();
+    if (seen.has(sku)) continue;
+    seen.add(sku);
+    skus.push(sku);
+  }
+  return { skus, skipped };
+}
+
+// The product columns that hold each price level, keyed like the promotion
+// rows (promo_price_* and the promo_costs slugs), so a promotion built from
+// a level carries the same shape the channels already read.
+export const LEVEL_FIELDS = {
+  orange: {
+    promo_price_cad: 'map_orange_cad',
+    promo_price_usd: 'map_orange_usd',
+    costs: { rona_hd_cad: 'cost_cad_rona_hd_orange', sod_cad: 'cost_cad_wayfair_sod_orange', lowes_sod_bbb_usd: 'cost_usd_lowes_sod_bbb_orange', wayfair_usd: 'cost_usd_wayfair_orange', menards_usd: 'cost_usd_menards_orange' },
+  },
+  purple: {
+    promo_price_cad: 'map_purple_cad',
+    promo_price_usd: 'map_purple_usd',
+    costs: { rona_hd_cad: 'cost_cad_rona_hd_purple', sod_cad: 'cost_cad_wayfair_sod_purple', lowes_sod_bbb_usd: 'cost_usd_lowes_sod_bbb_purple', wayfair_usd: 'cost_usd_wayfair_purple', menards_usd: 'cost_usd_menards_purple' },
+  },
+};
+
+/**
+ * Create a promotion from a SKU list, taking every price from the products'
+ * price level (Purple for flash deals and special events, Orange for a
+ * monthly promotion): promo MAP CAD/USD and the WC of each channel group.
+ * Returns the SKUs not in the PIM and those with no price on that level in
+ * either market (added anyway, so the files can report them).
+ */
+export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = 'purple' }) {
+  assertKindDates(kind, starts_on, ends_on);
+  const level = LEVEL_FIELDS[tier];
+  if (!level) throw new Error(`Unknown price level "${tier}".`);
+  const wanted = [...new Set(skus)];
+  if (!wanted.length) throw new Error('Paste at least one SKU.');
+  const cols = ['sku', level.promo_price_cad, level.promo_price_usd, ...Object.values(level.costs)].join(', ');
+  const found = new Map();
+  for (let i = 0; i < wanted.length; i += 200) {
+    const { data, error } = await supabase.from('products').select(cols).in('sku', wanted.slice(i, i + 200));
+    if (error) throw error;
+    for (const p of data ?? []) found.set(p.sku, p);
+  }
+  const valid = wanted.filter((s) => found.has(s));
+  const notInPim = wanted.filter((s) => !found.has(s));
+  if (!valid.length) throw new Error('None of the SKUs in the list exist in the PIM.');
+
+  const { data: promo, error } = await supabase
+    .from('promotions')
+    .insert({ name, period, status: 'draft', kind, starts_on, ends_on })
+    .select()
+    .single();
+  if (error) throw error;
+
+  const num = (v) => (v == null || v === '' ? null : Number(v));
+  const noLevel = [];
+  const priceRows = valid.map((sku) => {
+    const p = found.get(sku);
+    const costs = {};
+    for (const [slug, col] of Object.entries(level.costs)) if (num(p[col]) != null) costs[slug] = num(p[col]);
+    const row = { promotion_id: promo.id, sku, promo_price_cad: num(p[level.promo_price_cad]), promo_price_usd: num(p[level.promo_price_usd]), promo_costs: costs };
+    if (row.promo_price_cad == null && row.promo_price_usd == null && !Object.keys(costs).length) noLevel.push(sku);
+    return row;
+  });
+  for (let i = 0; i < priceRows.length; i += 200) {
+    const { error: insErr } = await supabase.from('promotion_prices').insert(priceRows.slice(i, i + 200));
+    if (insErr) throw insErr;
+  }
+
+  logActivity({
+    action: 'create',
+    entityType: 'promotion',
+    entityId: String(promo.id),
+    summary: `Created ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} "${name}" from the ${tier} level (${valid.length} SKUs)`,
+    metadata: { period, kind, tier, skus: valid.length, not_in_pim: notInPim.length, no_level: noLevel.length },
+  });
+  return { promotion: promo, added: valid.length, notInPim, noLevel };
+}
+
 // Promotion kinds: 'monthly' follows the market calendar and is automated on
 // its boundaries; 'flash' (flash deal) and 'special' (special event) always run
 // on their own dates and are pushed / exported by hand from their sections.

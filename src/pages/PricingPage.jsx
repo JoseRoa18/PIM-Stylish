@@ -24,8 +24,10 @@ import {
   listPromotions,
   getPromotionPrices,
   parsePriceList,
+  parseSkuList,
   createPromotion,
   createPromotionFromFile,
+  createPromotionFromLevels,
   addFileToPromotion,
   autoScheduleBestBuyPromo,
   scheduleWalmartCaPromo,
@@ -91,6 +93,7 @@ export default function PricingPage() {
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [autoOpenId, setAutoOpenId] = useState(null); // the promotion just created, opened on its Marketplaces panel
 
   async function reload() {
     try {
@@ -156,6 +159,9 @@ export default function PricingPage() {
           onClose={() => setShowNew(false)}
           onCreated={(promo) => {
             setShowNew(false);
+            // A new flash deal or special event opens right away on its
+            // Marketplaces panel: the next step is picking where it goes.
+            if (promo && promo.kind !== 'monthly') setAutoOpenId(promo.id);
             reload();
             // Fire-and-forget for the MONTHLY promotion only: schedule the
             // month's discounts on Best Buy (honors the /settings switches).
@@ -189,6 +195,7 @@ export default function PricingPage() {
               canEdit={canEdit}
               confirm={confirm}
               onChanged={reload}
+              defaultOpen={promo.id === autoOpenId}
             />
           ))}
         </div>
@@ -604,6 +611,9 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [error, setError] = useState(null);
 
   const parsed = useMemo(() => parsePriceList(text), [text]);
+  // Flash deals and special events take a plain SKU list: every price comes
+  // from the product's Purple level, so nothing else is asked.
+  const skuList = useMemo(() => parseSkuList(text), [text]);
 
   async function handleFile(market, file) {
     setError(null);
@@ -650,12 +660,15 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         starts_on: customDates ? startsOn : null,
         ends_on: customDates ? endsOn : null,
       };
-      const res = mode === 'file'
-        ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
-        : await createPromotion({ ...payload, currency, rows: parsed.rows });
-      if (res.notInPim.length) {
-        setError(`Created — ${res.added} SKUs added. Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
-      }
+      const res = !monthly
+        ? await createPromotionFromLevels({ ...payload, skus: skuList.skus, tier: 'purple' })
+        : mode === 'file'
+          ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
+          : await createPromotion({ ...payload, currency, rows: parsed.rows });
+      const notes = [];
+      if (res.notInPim.length) notes.push(`Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
+      if (res.noLevel?.length) notes.push(`No Purple price in the PIM: ${res.noLevel.join(', ')}`);
+      if (notes.length) setError(`Created — ${res.added} SKUs added. ${notes.join(' · ')}`);
       onCreated(res.promotion);
     } catch (err) {
       setError(err.message);
@@ -663,19 +676,19 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
-  const canCreate = mode === 'file' ? mergedFileRows.length > 0 : parsed.rows.length > 0;
+  const canCreate = !monthly ? skuList.skus.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : parsed.rows.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
   // those days makes no sense in a flash deal — warn before creating.
   const [overlap, setOverlap] = useState(null);
   useEffect(() => {
     if (monthly || !startsOn || !endsOn) { setOverlap(null); return; }
-    const skus = (mode === 'file' ? mergedFileRows : parsed.rows).map((r) => r.sku);
+    const skus = skuList.skus;
     if (!skus.length) { setOverlap(null); return; }
     let active = true;
     monthlyOverlap(startsOn, endsOn, skus).then((r) => { if (active) setOverlap(r); }).catch(() => {});
     return () => { active = false; };
-  }, [monthly, startsOn, endsOn, mode, mergedFileRows, parsed.rows]);
+  }, [monthly, startsOn, endsOn, skuList.skus]);
 
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
@@ -734,6 +747,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             </div>
           )}
         </div>
+        {monthly && (
         <div className="block">
           <span className="text-label-lg text-on-surface-variant">Source</span>
           <div className="mt-1 inline-flex w-full rounded-lg bg-surface-container p-1">
@@ -751,9 +765,22 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             ))}
           </div>
         </div>
+        )}
       </div>
 
-      {mode === 'file' ? (
+      {!monthly ? (
+        <label className="block">
+          <span className="text-label-lg text-on-surface-variant">Products — one SKU per line</span>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={8}
+            placeholder={'S-822H\nK-131NR\n…'}
+            className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          <span className="block mt-1 text-body-sm text-on-surface-variant">Prices come from each product's Purple level (MAP and WC per marketplace). Then pick the marketplace and generate its file.</span>
+        </label>
+      ) : mode === 'file' ? (
         <div className="grid sm:grid-cols-2 gap-4">
           {[['ca', 'Canada file', 'Promo MAP CAD + costs Rona/HD · Small Online · Wayfair CA'], ['us', 'USA file', 'Promo MAP USD + costs Lowes/HD USA/SOD/BB&B · Wayfair US · Menards']].map(([market, title, hint]) => (
             <div key={market} className="rounded-xl border border-outline-variant p-4 space-y-2">
@@ -814,7 +841,9 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-body-sm text-on-surface-variant">
-          {mode === 'paste' && `${parsed.rows.length} price${parsed.rows.length === 1 ? '' : 's'} parsed${parsed.skipped.length > 0 ? ` · ${parsed.skipped.length} line${parsed.skipped.length === 1 ? '' : 's'} skipped` : ''}`}
+          {!monthly
+            ? `${skuList.skus.length} SKU${skuList.skus.length === 1 ? '' : 's'}${skuList.skipped.length > 0 ? ` · ${skuList.skipped.length} line${skuList.skipped.length === 1 ? '' : 's'} skipped` : ''}`
+            : mode === 'paste' && `${parsed.rows.length} price${parsed.rows.length === 1 ? '' : 's'} parsed${parsed.skipped.length > 0 ? ` · ${parsed.skipped.length} line${parsed.skipped.length === 1 ? '' : 's'} skipped` : ''}`}
         </p>
         <button
           type="button"
@@ -838,8 +867,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
 
 // ============================== Promotion card ==============================
 
-function PromotionCard({ promo, canEdit, confirm, onChanged }) {
-  const [open, setOpen] = useState(false);
+function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [rows, setRows] = useState(null);
   const [mapBySku, setMapBySku] = useState(null);
   const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete'
@@ -1053,6 +1082,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged }) {
             onFillFile={(key) => setFillModal(key)}
             onMsg={setMsg}
             onChanged={onChanged}
+            defaultOpen={defaultOpen}
           />
 
           {importModal && (
@@ -1354,12 +1384,12 @@ function PromoDates({ promo, canEdit, onChanged }) {
   );
 }
 
-function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged }) {
+function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defaultOpen = false }) {
   const { templates } = useTemplates();
   const [history, setHistory] = useState({}); // audit target → last export time
   const [busy, setBusy] = useState(null);
   const [market, setMarket] = useState('all');
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
 
   useEffect(() => {
     let active = true;
