@@ -192,7 +192,7 @@ export default function PricingPage() {
         <div className="space-y-3">
           {tab !== 'monthly' && (() => {
             const ofKind = promotions.filter((p) => (p.kind ?? 'monthly') === tab);
-            const portals = [...new Set(ofKind.map((p) => p.marketplace).filter(Boolean))];
+            const portals = [...new Set(ofKind.flatMap((p) => p.marketplaces ?? []))];
             if (portals.length < 2 && portalFilter === 'all') return null;
             return (
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -205,7 +205,7 @@ export default function PricingPage() {
               </div>
             );
           })()}
-          {promotions.filter((p) => (p.kind ?? 'monthly') === tab && (tab === 'monthly' || portalFilter === 'all' || p.marketplace === portalFilter)).map((promo) => (
+          {promotions.filter((p) => (p.kind ?? 'monthly') === tab && (tab === 'monthly' || portalFilter === 'all' || (p.marketplaces ?? []).includes(portalFilter))).map((promo) => (
             <PromotionCard
               key={promo.id}
               promo={promo}
@@ -619,7 +619,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [startsOn, setStartsOn] = useState('');
   const [endsOn, setEndsOn] = useState('');
   const [mode, setMode] = useState('file'); // 'file' | 'paste'
-  const [portal, setPortal] = useState(''); // PROMO_CHANNELS key — flash deals and special events go to ONE marketplace
+  const [portals, setPortals] = useState([]); // PROMO_CHANNELS keys — flash deals and special events go to the portals picked here
   const [currency, setCurrency] = useState('cad');
   const [text, setText] = useState('');
   // One file per market — memberships differ, so each market has its own
@@ -679,7 +679,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         ends_on: customDates ? endsOn : null,
       };
       const res = !monthly
-        ? await createPromotionFromLevels({ ...payload, skus: skuList.skus, tier: 'purple', marketplace: portal })
+        ? await createPromotionFromLevels({ ...payload, skus: skuList.skus, tier: 'purple', marketplaces: portals })
         : mode === 'file'
           ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
           : await createPromotion({ ...payload, currency, rows: parsed.rows });
@@ -694,7 +694,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
-  const canCreate = !monthly ? skuList.skus.length > 0 && Boolean(portal) : mode === 'file' ? mergedFileRows.length > 0 : parsed.rows.length > 0;
+  const canCreate = !monthly ? skuList.skus.length > 0 && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : parsed.rows.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
   // those days makes no sense in a flash deal — warn before creating.
@@ -766,21 +766,31 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           )}
         </div>
         {!monthly && (
-        <label className="block">
-          <span className="text-label-lg text-on-surface-variant">Portal</span>
-          <select
-            value={portal}
-            onChange={(e) => setPortal(e.target.value)}
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            <option value="">Pick the marketplace…</option>
+        <div className="block sm:col-span-3">
+          <span className="text-label-lg text-on-surface-variant">Portals</span>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">Where this {PROMOTION_KINDS[kind].toLowerCase()} goes. Pick one or several.</p>
+          <div className="mt-2 space-y-2">
             {['ca', 'us'].map((m) => (
-              <optgroup key={m} label={m === 'ca' ? 'Canada' : 'USA'}>
-                {PROMO_CHANNELS.filter((ch) => ch.market === m).map((ch) => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
-              </optgroup>
+              <div key={m} className="flex items-center gap-1.5 flex-wrap">
+                <span className="w-14 text-label-md text-on-surface-variant">{m === 'ca' ? 'Canada' : 'USA'}</span>
+                {PROMO_CHANNELS.filter((ch) => ch.market === m).map((ch) => {
+                  const on = portals.includes(ch.key);
+                  return (
+                    <button
+                      key={ch.key}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setPortals((p) => (on ? p.filter((k) => k !== ch.key) : [...p, ch.key]))}
+                      className={`px-3 py-1 rounded-full text-label-md border transition-colors ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-outline-variant text-on-surface hover:bg-surface-container-low'}`}
+                    >
+                      {ch.label}
+                    </button>
+                  );
+                })}
+              </div>
             ))}
-          </select>
-        </label>
+          </div>
+        </div>
         )}
         {monthly && (
         <div className="block">
@@ -988,11 +998,11 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-body-md text-on-surface font-medium">{promo.name}</span>
               <span className={`px-2 py-0.5 rounded-full text-label-md font-semibold ${meta.class}`}>{meta.label}</span>
-              {promo.marketplace && (
-                <span className="px-2 py-0.5 rounded-full text-label-md font-medium bg-surface-container text-on-surface-variant" title="The marketplace this promotion is for">
-                  {PROMO_CHANNELS.find((ch) => ch.key === promo.marketplace)?.label ?? promo.marketplace}
+              {(promo.marketplaces ?? []).map((key) => (
+                <span key={key} className="px-2 py-0.5 rounded-full text-label-md font-medium bg-surface-container text-on-surface-variant" title="A marketplace this promotion is for">
+                  {PROMO_CHANNELS.find((ch) => ch.key === key)?.label ?? key}
                 </span>
-              )}
+              ))}
               {promo.bb_schedule && (
                 <span
                   className="px-2 py-0.5 rounded-full text-label-md font-medium bg-surface-container text-on-surface-variant"
@@ -1021,7 +1031,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
             <div className="flex items-center gap-2 flex-wrap">
               {promo.status === 'draft' && (
                 <>
-                  {(!promo.marketplace || promo.marketplace.startsWith('wix_')) && (
+                  {(!promo.marketplaces?.length || promo.marketplaces.some((k) => k.startsWith('wix_'))) && (
                   <ActionButton
                     icon={Play}
                     label="Apply to store pricing"
@@ -1530,9 +1540,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       }
       return { ...ch, template, status, tone, detail };
     });
-  // A promotion made for one marketplace shows that marketplace only.
-  const targeted = Boolean(promo.marketplace);
-  const rows = targeted ? allRows.filter((ch) => ch.key === promo.marketplace) : allRows.filter((ch) => market === 'all' || ch.market === market);
+  // A promotion made for chosen marketplaces shows those only.
+  const targeted = Boolean(promo.marketplaces?.length);
+  const rows = targeted ? allRows.filter((ch) => promo.marketplaces.includes(ch.key)) : allRows.filter((ch) => market === 'all' || ch.market === market);
   const count = (tone) => (targeted ? rows : allRows).filter((r) => r.tone === tone).length;
   const summary = [`${count('ok')} ready`, `${count('muted')} pending`, count('warn') ? `${count('warn')} without template` : null].filter(Boolean).join(' · ');
 
