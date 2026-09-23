@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { etToday, promoWindow } from '../lib/promoCalendar';
-import { logActivity } from '@/features/activity/api/activityLog';
+import { logActivity, getActivityActor } from '@/features/activity/api/activityLog';
 import { pushProductToWix } from '@/features/syndication/api/wixSync';
 import { pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
 import { getAppSetting } from '@/features/settings/api/appSettings';
@@ -22,12 +22,13 @@ import { getAppSetting } from '@/features/settings/api/appSettings';
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, created_at, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count)')
+    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count), creator:profiles(full_name, email)')
     .order('period', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((p) => ({
     ...p,
     sku_count: p.promotion_prices?.[0]?.count ?? 0,
+    created_by_name: p.creator?.full_name || p.creator?.email || null,
   }));
 }
 
@@ -137,17 +138,16 @@ export const LEVEL_FIELDS = {
  * Returns the SKUs not in the PIM and those with no price on that level in
  * either market (added anyway, so the files can report them).
  */
-// `marketplaces` are the PROMO_CHANNELS keys the promotion is made for
-// (flash deals and special events go to the portals picked on creation,
-// one or several); empty/null means every marketplace (monthly).
-export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = 'purple', marketplaces = [] }) {
-  assertKindDates(kind, starts_on, ends_on);
-  const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
-  if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} is for.`);
+/**
+ * The promotion rows a SKU list gets from a price level: promo MAP CAD/USD
+ * and the WC of each channel group, read from the products. SKUs not in the
+ * PIM are reported, and so are those with no price on that level at all
+ * (still returned, so the files can report them).
+ */
+async function levelPriceRows(skus, tier) {
   const level = LEVEL_FIELDS[tier];
   if (!level) throw new Error(`Unknown price level "${tier}".`);
   const wanted = [...new Set(skus)];
-  if (!wanted.length) throw new Error('Paste at least one SKU.');
   const cols = ['sku', level.promo_price_cad, level.promo_price_usd, ...Object.values(level.costs)].join(', ');
   const found = new Map();
   for (let i = 0; i < wanted.length; i += 200) {
@@ -157,25 +157,72 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
   }
   const valid = wanted.filter((s) => found.has(s));
   const notInPim = wanted.filter((s) => !found.has(s));
+  const num = (v) => (v == null || v === '' ? null : Number(v));
+  const noLevel = [];
+  const rows = valid.map((sku) => {
+    const p = found.get(sku);
+    const costs = {};
+    for (const [slug, col] of Object.entries(level.costs)) if (num(p[col]) != null) costs[slug] = num(p[col]);
+    const row = { sku, promo_price_cad: num(p[level.promo_price_cad]), promo_price_usd: num(p[level.promo_price_usd]), promo_costs: costs };
+    if (row.promo_price_cad == null && row.promo_price_usd == null && !Object.keys(costs).length) noLevel.push(sku);
+    return row;
+  });
+  return { rows, valid, notInPim, noLevel };
+}
+
+/**
+ * Replace the SKU list of a flash deal / special event: SKUs added get
+ * their prices from the level, SKUs no longer listed are removed, the rest
+ * keep what they have. Returns what changed.
+ */
+export async function setPromotionSkusFromLevel(promotion, skus, tier = 'purple') {
+  const wanted = [...new Set((skus ?? []).map((s) => String(s).trim().toUpperCase()).filter(Boolean))];
+  if (!wanted.length) throw new Error('Keep at least one SKU.');
+  const current = await getPromotionPrices(promotion.id);
+  const have = new Set(current.map((r) => r.sku));
+  const toAdd = wanted.filter((s) => !have.has(s));
+  const keep = new Set(wanted);
+  const toRemove = current.filter((r) => !keep.has(r.sku));
+  const { rows, valid, notInPim, noLevel } = toAdd.length ? await levelPriceRows(toAdd, tier) : { rows: [], valid: [], notInPim: [], noLevel: [] };
+  if (!valid.length && toRemove.length === current.length) throw new Error('None of the SKUs in the list exist in the PIM.');
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await supabase.from('promotion_prices').insert(rows.slice(i, i + 200).map((r) => ({ promotion_id: promotion.id, ...r })));
+    if (error) throw error;
+  }
+  if (toRemove.length) {
+    const { error } = await supabase.from('promotion_prices').delete().in('id', toRemove.map((r) => r.id));
+    if (error) throw error;
+  }
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    summary: `SKUs of "${promotion.name}" changed: ${valid.length} added, ${toRemove.length} removed (${tier} level)`,
+    metadata: { added: valid.slice(0, 100), removed: toRemove.map((r) => r.sku).slice(0, 100), not_in_pim: notInPim.slice(0, 50), no_level: noLevel.slice(0, 50), tier },
+  });
+  return { added: valid.length, removed: toRemove.length, notInPim, noLevel };
+}
+
+// `marketplaces` are the PROMO_CHANNELS keys the promotion is made for
+// (flash deals and special events go to the portals picked on creation,
+// one or several); empty/null means every marketplace (monthly).
+export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = 'purple', marketplaces = [] }) {
+  assertKindDates(kind, starts_on, ends_on);
+  const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
+  if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} is for.`);
+  const wanted = [...new Set(skus)];
+  if (!wanted.length) throw new Error('Paste at least one SKU.');
+  const { rows, valid, notInPim, noLevel } = await levelPriceRows(wanted, tier);
   if (!valid.length) throw new Error('None of the SKUs in the list exist in the PIM.');
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, marketplaces: portals.length ? portals : null })
+    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, marketplaces: portals.length ? portals : null, created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;
 
-  const num = (v) => (v == null || v === '' ? null : Number(v));
-  const noLevel = [];
-  const priceRows = valid.map((sku) => {
-    const p = found.get(sku);
-    const costs = {};
-    for (const [slug, col] of Object.entries(level.costs)) if (num(p[col]) != null) costs[slug] = num(p[col]);
-    const row = { promotion_id: promo.id, sku, promo_price_cad: num(p[level.promo_price_cad]), promo_price_usd: num(p[level.promo_price_usd]), promo_costs: costs };
-    if (row.promo_price_cad == null && row.promo_price_usd == null && !Object.keys(costs).length) noLevel.push(sku);
-    return row;
-  });
+  const priceRows = rows.map((r) => ({ promotion_id: promo.id, ...r }));
   for (let i = 0; i < priceRows.length; i += 200) {
     const { error: insErr } = await supabase.from('promotion_prices').insert(priceRows.slice(i, i + 200));
     if (insErr) throw insErr;
@@ -227,7 +274,7 @@ export async function createPromotion({ name, period, currency, rows, kind = 'mo
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, starts_on, ends_on })
+    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;
@@ -265,7 +312,7 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, starts_on, ends_on })
+    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;

@@ -16,6 +16,11 @@ let currentActor = null;
  * Tell the logger who is currently acting. Called by AuthContext whenever the
  * session/profile resolves or changes. Pass `null` on sign-out.
  */
+/** The signed-in person as the audit trail knows them ({ id, email, name } | null). */
+export function getActivityActor() {
+  return currentActor;
+}
+
 export function setActivityActor(actor) {
   currentActor = actor; // { id, email, name } | null
 }

@@ -4,6 +4,7 @@ import {
   Plus,
   ChevronDown,
   ChevronRight,
+  Pencil,
   Trash2,
   Send,
   Play,
@@ -29,6 +30,7 @@ import {
   createPromotionFromFile,
   createPromotionFromLevels,
   updatePromotionMarketplaces,
+  setPromotionSkusFromLevel,
   addFileToPromotion,
   autoScheduleBestBuyPromo,
   scheduleWalmartCaPromo,
@@ -97,6 +99,7 @@ export default function PricingPage() {
   const [showNew, setShowNew] = useState(false);
   const [autoOpenId, setAutoOpenId] = useState(null); // the promotion just created, opened on its Marketplaces panel
   const [portalFilter, setPortalFilter] = useState('all'); // flash deals / special events history, by marketplace
+  const [creatorFilter, setCreatorFilter] = useState('all'); // …and by who created them
 
   async function reload() {
     try {
@@ -191,22 +194,17 @@ export default function PricingPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {tab !== 'monthly' && (() => {
-            const ofKind = promotions.filter((p) => (p.kind ?? 'monthly') === tab);
-            const portals = [...new Set(ofKind.flatMap((p) => p.marketplaces ?? []))];
-            if (portals.length < 2 && portalFilter === 'all') return null;
-            return (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-label-md text-on-surface-variant mr-1">History by portal</span>
-                {[['all', 'All'], ...portals.map((k) => [k, PROMO_CHANNELS.find((ch) => ch.key === k)?.label ?? k])].map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => setPortalFilter(key)} className={`px-3 py-1 rounded-full text-label-md transition-colors ${portalFilter === key ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface hover:bg-surface-container-high'}`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
-          {promotions.filter((p) => (p.kind ?? 'monthly') === tab && (tab === 'monthly' || portalFilter === 'all' || (p.marketplaces ?? []).includes(portalFilter))).map((promo) => (
+          {tab !== 'monthly' && (
+            <PromoHistoryFilters
+              kind={tab}
+              promotions={promotions.filter((p) => (p.kind ?? 'monthly') === tab)}
+              portalFilter={portalFilter}
+              onPortal={setPortalFilter}
+              creatorFilter={creatorFilter}
+              onCreator={setCreatorFilter}
+            />
+          )}
+          {promotions.filter((p) => (p.kind ?? 'monthly') === tab && (tab === 'monthly' || ((portalFilter === 'all' || (p.marketplaces ?? []).includes(portalFilter)) && (creatorFilter === 'all' || (p.created_by ?? 'unknown') === creatorFilter)))).map((promo) => (
             <PromotionCard
               key={promo.id}
               promo={promo}
@@ -606,6 +604,89 @@ function PriceAlignmentCard({ canEdit, confirm }) {
   );
 }
 
+// ============================== History filters ==============================
+
+// Flash deals / special events: who ran how many, to which portals, and the
+// two filters (by person, by portal) that narrow the list below.
+function PromoHistoryFilters({ kind, promotions, portalFilter, onPortal, creatorFilter, onCreator }) {
+  const label = (key) => PROMO_CHANNELS.find((ch) => ch.key === key)?.label ?? key;
+  const byCreator = useMemo(() => {
+    const m = new Map();
+    for (const p of promotions) {
+      const id = p.created_by ?? 'unknown';
+      const row = m.get(id) ?? { id, name: p.created_by_name ?? 'Unknown', deals: 0, skus: 0, portals: new Map(), last: null };
+      row.deals += 1;
+      row.skus += p.sku_count ?? 0;
+      for (const k of p.marketplaces ?? []) row.portals.set(k, (row.portals.get(k) ?? 0) + 1);
+      if (!row.last || p.created_at > row.last) row.last = p.created_at;
+      m.set(id, row);
+    }
+    return [...m.values()].sort((a, b) => b.deals - a.deals);
+  }, [promotions]);
+  const portals = useMemo(() => {
+    const m = new Map();
+    for (const p of promotions) for (const k of p.marketplaces ?? []) m.set(k, (m.get(k) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [promotions]);
+  if (!promotions.length) return null;
+  const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '');
+  const pill = (on) => `px-3 py-1 rounded-full text-label-md transition-colors ${on ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface hover:bg-surface-container-high'}`;
+  const noun = PROMOTION_KINDS[kind].toLowerCase();
+
+  return (
+    <section className="rounded-2xl bg-surface border border-outline-variant px-5 py-4 space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="text-title-md text-on-surface font-semibold">Who ran what</h2>
+        <span className="text-body-sm text-on-surface-variant">{promotions.length} {noun}{promotions.length === 1 ? '' : 's'} · {portals.length} portal{portals.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px]">
+          <thead>
+            <tr className="text-label-md text-on-surface-variant border-b border-outline-variant">
+              <th className="text-left font-medium py-1.5 pr-4">Person</th>
+              <th className="text-right font-medium py-1.5 pr-4">{PROMOTION_KINDS[kind]}s</th>
+              <th className="text-right font-medium py-1.5 pr-4">SKUs</th>
+              <th className="text-left font-medium py-1.5 pr-4">Portals</th>
+              <th className="text-right font-medium py-1.5">Last</th>
+            </tr>
+          </thead>
+          <tbody>
+            {byCreator.map((r) => (
+              <tr key={r.id} className="border-b border-outline-variant/60 last:border-b-0">
+                <td className="py-1.5 pr-4 text-body-md text-on-surface">
+                  <button type="button" onClick={() => onCreator(creatorFilter === r.id ? 'all' : r.id)} className={`hover:underline ${creatorFilter === r.id ? 'text-primary font-medium' : ''}`}>{r.name}</button>
+                </td>
+                <td className="py-1.5 pr-4 text-right text-body-md text-on-surface tabular-nums">{r.deals}</td>
+                <td className="py-1.5 pr-4 text-right text-body-md text-on-surface-variant tabular-nums">{r.skus}</td>
+                <td className="py-1.5 pr-4">
+                  <span className="flex items-center gap-1 flex-wrap">
+                    {[...r.portals.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => (
+                      <span key={k} className="px-2 py-0.5 rounded-full text-label-sm bg-surface-container text-on-surface">{label(k)}{n > 1 ? ` · ${n}` : ''}</span>
+                    ))}
+                  </span>
+                </td>
+                <td className="py-1.5 text-right text-body-sm text-on-surface-variant whitespace-nowrap">{day(r.last)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
+        <span className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-label-md text-on-surface-variant mr-1">Person</span>
+          <button type="button" onClick={() => onCreator('all')} className={pill(creatorFilter === 'all')}>All</button>
+          {byCreator.map((r) => <button key={r.id} type="button" onClick={() => onCreator(r.id)} className={pill(creatorFilter === r.id)}>{r.name}</button>)}
+        </span>
+        <span className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-label-md text-on-surface-variant mr-1">Portal</span>
+          <button type="button" onClick={() => onPortal('all')} className={pill(portalFilter === 'all')}>All</button>
+          {portals.map(([k, n]) => <button key={k} type="button" onClick={() => onPortal(k)} className={pill(portalFilter === k)}>{label(k)} · {n}</button>)}
+        </span>
+      </div>
+    </section>
+  );
+}
+
 // ============================== Portals ==============================
 
 // The marketplaces a flash deal / special event goes to: one chip per
@@ -977,6 +1058,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
   const [open, setOpen] = useState(defaultOpen);
   const [rows, setRows] = useState(null);
   const [mapBySku, setMapBySku] = useState(null);
+  // Flash deals / special events: the SKU list can be changed after creation.
+  const [editingSkus, setEditingSkus] = useState(false);
+  const [skuText, setSkuText] = useState('');
   const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete'
   const [msg, setMsg] = useState(null);
   const [progress, setProgress] = useState(null);
@@ -1023,6 +1107,25 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
       });
     });
   }, [rows]);
+
+  async function saveSkus() {
+    setBusy('skus');
+    setMsg(null);
+    try {
+      const r = await setPromotionSkusFromLevel(promo, parseSkuList(skuText).skus, 'purple');
+      const notes = [`${r.added} added, ${r.removed} removed.`];
+      if (r.notInPim.length) notes.push(`Not in the PIM, skipped: ${r.notInPim.join(', ')}.`);
+      if (r.noLevel.length) notes.push(`No Purple price in the PIM: ${r.noLevel.join(', ')}.`);
+      setMsg({ tone: 'success', text: notes.join(' ') });
+      setEditingSkus(false);
+      setRows(null); // reload the list
+      onChanged();
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function run(kind, fn, confirmOpts) {
     if (confirmOpts) {
@@ -1076,6 +1179,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
             <p className="text-body-sm text-on-surface-variant mt-0.5">
               {monthLabel(promo.period)} · {promo.sku_count} SKU{promo.sku_count === 1 ? '' : 's'}
               {promo.starts_on && promo.ends_on ? ` · custom dates ${promo.starts_on} to ${promo.ends_on}` : ''}
+              {promo.created_by_name ? ` · by ${promo.created_by_name}` : ''}
             </p>
           </div>
         </div>
@@ -1280,7 +1384,31 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                   {marketRows.length > 0 && (
                     <CopySkusButton skus={marketRows.map((r) => r.sku)} />
                   )}
+                  {canEdit && (promo.kind ?? 'monthly') !== 'monthly' && promo.status !== 'ended' && !editingSkus && (
+                    <button type="button" onClick={() => { setSkuText(rows.map((r) => r.sku).join('\n')); setEditingSkus(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
+                      <Pencil className="w-3.5 h-3.5" /> Edit SKUs
+                    </button>
+                  )}
                 </div>
+
+                {editingSkus && (
+                  <div className="rounded-xl border border-outline-variant p-4 space-y-2">
+                    <span className="text-label-lg text-on-surface-variant">Products — one SKU per line</span>
+                    <textarea
+                      value={skuText}
+                      onChange={(e) => setSkuText(e.target.value)}
+                      rows={8}
+                      className="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button type="button" onClick={saveSkus} disabled={busy === 'skus'} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">
+                        {busy === 'skus' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save SKUs
+                      </button>
+                      <button type="button" onClick={() => setEditingSkus(false)} disabled={busy === 'skus'} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
+                      <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take their Purple prices, removed ones leave the {PROMOTION_KINDS[promo.kind]?.toLowerCase() ?? 'promotion'}.</span>
+                    </div>
+                  </div>
+                )}
 
                 {marketRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
