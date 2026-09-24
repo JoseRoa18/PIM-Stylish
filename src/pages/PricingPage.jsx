@@ -1061,6 +1061,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
   const [mapBySku, setMapBySku] = useState(null);
   // Flash deals / special events: the SKU list can be changed after creation.
   const [editingSkus, setEditingSkus] = useState(false);
+  const [skuQuery, setSkuQuery] = useState(''); // filters the price table by SKU
   const [skuText, setSkuText] = useState('');
   const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete'
   const [msg, setMsg] = useState(null);
@@ -1352,6 +1353,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
             const priceKey = market === 'ca' ? 'promo_price_cad' : 'promo_price_usd';
             const mapKey = market === 'ca' ? 'map_cad' : 'map_usd';
             const marketRows = rows.filter((r) => r[priceKey] != null || costKeys.some((k) => r.promo_costs?.[k] != null));
+            const q = skuQuery.trim().toUpperCase();
+            const visibleRows = q ? marketRows.filter((r) => r.sku.toUpperCase().includes(q)) : marketRows;
             // Membership per market for the tab labels — same rule as the
             // table: a promo price OR any cost of that market counts.
             const countFor = (m) => rows.filter((r) =>
@@ -1383,6 +1386,16 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                       part numbers to hand back their promo file — one click
                       instead of picking SKUs out of the table by hand. */}
                   {marketRows.length > 0 && (
+                    <input
+                      type="search"
+                      value={skuQuery}
+                      onChange={(e) => setSkuQuery(e.target.value)}
+                      placeholder="Find a SKU"
+                      aria-label="Find a SKU in this promotion"
+                      className="w-44 px-3 py-1.5 rounded-full border border-outline-variant bg-surface text-body-sm font-mono text-on-surface placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                  )}
+                  {marketRows.length > 0 && (
                     <CopySkusButton skus={marketRows.map((r) => r.sku)} />
                   )}
                   {canEdit && (promo.kind ?? 'monthly') !== 'monthly' && promo.status !== 'ended' && !editingSkus && (
@@ -1411,7 +1424,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                   </div>
                 )}
 
-                {marketRows.length === 0 ? (
+                {marketRows.length > 0 && visibleRows.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
+                    <p className="text-body-md text-on-surface font-medium">No SKU matches "{skuQuery.trim()}" in the {market === 'ca' ? 'Canada' : 'USA'} list</p>
+                    <button type="button" onClick={() => setSkuQuery('')} className="mt-1 text-body-sm text-primary hover:underline">Clear the search</button>
+                  </div>
+                ) : marketRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
                     <p className="text-body-md text-on-surface font-medium">No {market === 'ca' ? 'Canadian' : 'US'} promo prices yet</p>
                     <p className="text-body-sm text-on-surface-variant mt-1">
@@ -1444,7 +1462,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                         </tr>
                       </thead>
                       <tbody>
-                        {marketRows.map((r) => {
+                        {visibleRows.map((r) => {
                           const p = mapBySku?.[r.sku];
                           return (
                             <tr key={r.id} className="border-t border-outline-variant/40 odd:bg-surface-container-low/30">
