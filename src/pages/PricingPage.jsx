@@ -47,7 +47,7 @@ import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
-import { fillBBBPromoFile } from '@/features/pricing/lib/bbbPromoFill';
+import { fillBBBPromoFile, fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
@@ -1682,7 +1682,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
               ? summarizeWalmartCaFill(channel, await fillWalmartCaPromoTemplate(template, promo, channel))
               : channel.fill === 'lowes'
                 ? summarizeLowesFill(channel, await fillLowesPromoTemplate(template, promo, channel))
-                : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
+                : channel.fill === 'bbb'
+                  ? summarizeBBBFill(channel, await fillBBBPromoTemplate(template, promo, channel))
+                  : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
       onMsg({ tone: 'success', text });
     } catch (err) {
@@ -1788,7 +1790,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
               {canEdit && ch.kind === 'portal_file' && (
                 <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file</button>
               )}
-              {canEdit && (ch.kind === 'template' || ch.kind === 'api') && ch.template && (
+              {canEdit && ch.template && (
                 <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className={actionCls}>
                   {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   Generate

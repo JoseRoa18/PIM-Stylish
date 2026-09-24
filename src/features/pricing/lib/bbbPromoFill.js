@@ -10,8 +10,14 @@
 // Matching runs on PARTNER_SKU, then on FULL_SKU against the product's
 // BB&B / Overstock alias (Aliases tab) when the part number doesn't match
 // as written; the header row is auto-detected (portal files carry
-// instruction rows above it). Rows are never added or removed — the
-// portal decides which SKUs are eligible; we report mismatches instead.
+// instruction rows above it). Rows are never added.
+//
+// Two ways in (2026-09-24):
+//   fillBBBPromoFile      the file downloaded fresh from the portal for this
+//                         promo — rows are never removed, mismatches reported.
+//   fillBBBPromoTemplate  the full catalog file uploaded once in Templates
+//                         (purpose Promotions) — the promo's rows are filled
+//                         and every other product row is taken out.
 //
 // Portal rules worth pre-checking (from the template's own header text):
 // the promo MAP must be at least 1% below SITE_PRICE — violations are
@@ -25,6 +31,7 @@ import {
   sheetToGrid,
   buildCell,
   mergeRows,
+  removeRows,
   downloadZip,
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
@@ -111,7 +118,7 @@ function planFills(grid, headerRow, bySku, byAlias = new Map()) {
   if (!fills.size) {
     throw new Error('No file rows matched this promotion\'s SKUs — check that the file belongs to this promo.');
   }
-  return { fills, promoMapCol, promoCostCol, fileSkus, notInPromo, missingData, mapViolations };
+  return { fills, skuCol, promoMapCol, promoCostCol, fileSkus, notInPromo, missingData, mapViolations };
 }
 
 const csvQuote = (v) => {
@@ -129,7 +136,14 @@ function downloadCsv(name, text) {
   URL.revokeObjectURL(url);
 }
 
-export async function fillBBBPromoFile(file, promotion) {
+/**
+ * Fill the promotion file the portal handed out for this promo.
+ * `file` is anything with .name, .text() and .arrayBuffer() (a File or a
+ * downloaded template Blob wrapped with its name).
+ * `trim`: take out every product row that is not in the promotion (used
+ * when the file is the full-catalog template, see fillBBBPromoTemplate).
+ */
+export async function fillBBBPromoFile(file, promotion, { trim = false } = {}) {
   const { rows: prices, excluded } = await promotionMembersFor(promotion, 'bbb');
   const bySku = new Map(
     prices
@@ -160,7 +174,9 @@ export async function fillBBBPromoFile(file, promotion) {
       row[plan.promoMapCol] = f.map;
       row[plan.promoCostCol] = f.cost;
     }
-    const out = grid.map((row) => row.map(csvQuote).join(',')).join('\r\n');
+    // Trimming keeps the instruction rows, the header and the promo's rows only.
+    const kept = trim ? grid.filter((_, i) => i <= headerRow || plan.fills.has(i)) : grid;
+    const out = kept.map((row) => row.map(csvQuote).join(',')).join('\r\n');
     downloadCsv(`${baseName}.csv`, (hadBom ? '﻿' : '') + out);
   } else {
     const JSZip = await loadJSZip();
@@ -194,7 +210,15 @@ export async function fillBBBPromoFile(file, promotion) {
         [plan.promoCostCol + 1, buildCell(`${indexToCol(plan.promoCostCol + 1)}${rowNum}`, f.cost)],
       ]));
     }
-    zip.file(path, mergeRows(await zip.file(path).async('string'), cellsByRow));
+    let sheetXml = mergeRows(await zip.file(path).async('string'), cellsByRow);
+    if (trim) {
+      const gone = [];
+      for (let i = headerRow + 1; i < grid.length; i++) {
+        if (String(grid[i]?.[plan.skuCol] ?? '').trim() && !plan.fills.has(i)) gone.push(i + 1);
+      }
+      sheetXml = removeRows(sheetXml, gone);
+    }
+    zip.file(path, sheetXml);
     await downloadZip(zip, baseName, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
   }
 
@@ -206,9 +230,13 @@ export async function fillBBBPromoFile(file, promotion) {
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: 'bbb',
-    summary: `Filled BB&B / Overstock promo template for "${promotion.name}" (${filled} rows)`,
+    summary: trim
+      ? `Generated the BB&B / Overstock promo file for "${promotion.name}" from the catalog template (${filled} rows kept)`
+      : `Filled BB&B / Overstock promo template for "${promotion.name}" (${filled} rows)`,
     metadata: {
       filled,
+      trimmed: trim,
+      removed: trim ? plan.notInPromo.length : 0,
       format: isCsv ? 'csv' : 'xlsx',
       file_rows: plan.fileSkus.size,
       not_in_promo: plan.notInPromo.length,
@@ -221,10 +249,34 @@ export async function fillBBBPromoFile(file, promotion) {
   return {
     excluded,
     filled,
+    trimmed: trim,
     fileRows: plan.fileSkus.size,
     notInPromo: plan.notInPromo,
     notInFile,
     missingData: plan.missingData,
     mapViolations: plan.mapViolations,
   };
+}
+
+/**
+ * Generate the promo file from the full-catalog file uploaded in Templates
+ * (BB&B / Overstock, purpose Promotions): the promotion's rows get
+ * PROMO_MAP / PROMO_COST, every other product row is taken out. The other
+ * columns (SITE_PRICE, FIRST_COST, MAP_PRICE) are whatever the template
+ * carried the day it was uploaded.
+ */
+export async function fillBBBPromoTemplate(template, promotion) {
+  const { data: blob, error } = await supabase.storage.from('templates').download(template.storage_path);
+  if (error) throw new Error(`Failed to download template: ${error.message}`);
+  const file = { name: template.file_name, text: () => blob.text(), arrayBuffer: () => blob.arrayBuffer() };
+  return fillBBBPromoFile(file, promotion, { trim: true });
+}
+
+export function summarizeBBBFill(channel, r) {
+  const parts = [`${channel.label} file ready — ${r.filled} promo rows kept, ${r.notInPromo.length} other products taken out`];
+  if (r.notInFile.length) parts.push(`promo members not in the template: ${r.notInFile.slice(0, 8).join(', ')}${r.notInFile.length > 8 ? '…' : ''}`);
+  if (r.missingData.length) parts.push(`skipped, incomplete promo data: ${r.missingData.join(', ')}`);
+  if (r.mapViolations.length) parts.push(`promo MAP not 1% below the template's site price: ${r.mapViolations.join(', ')}`);
+  if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from BB&B / Overstock`);
+  return parts.join(' · ');
 }
