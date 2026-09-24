@@ -1796,13 +1796,10 @@ function MarketplacesTab({ product, media, onUpdate }) {
 
       {/* The chosen marketplace's options — nothing else. */}
       {selected == null && (
-        <>
-          <p className="text-body-sm text-on-surface-variant">Pick a marketplace above to see its listing, pushes and files.</p>
-          <ChannelExclusionsCard product={product} onUpdate={onUpdate} />
-        </>
+        <p className="text-body-sm text-on-surface-variant">Pick a marketplace above to see its listing, pushes and files.</p>
       )}
       {selected && selected !== 'templates' && isExcluded(product, WIX_SITES[selected] ? wixExclusionKey(selected) : selected) && (
-        <ExcludedNotice product={product} label={WIX_SITES[selected]?.label ?? marketplaceLabel(selected)} onBack={() => setSelected(null)} />
+        <ExcludedNotice product={product} label={WIX_SITES[selected]?.label ?? marketplaceLabel(selected)} />
       )}
       {wixSite && !isExcluded(product, wixExclusionKey(wixSite)) && (
         wixSiteSells(wixSite, product) ? (
@@ -1828,6 +1825,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
         </>
       )}
       {selected === 'templates' && <ExportTemplatesCard product={product} media={media} />}
+      {/* Exclusions stay at the bottom whatever marketplace is open (user
+          request 2026-09-24: they used to vanish once a tile was picked). */}
+      <ChannelExclusionsCard product={product} onUpdate={onUpdate} />
     </div>
   );
 }
@@ -1835,14 +1835,11 @@ function MarketplacesTab({ product, media, onUpdate }) {
 // Compact channel tile: brand avatar, name, link-status dot. `active` marks
 // the Wix site whose card is currently shown below.
 // What an excluded marketplace shows instead of its tools.
-function ExcludedNotice({ product, label, onBack }) {
+function ExcludedNotice({ product, label }) {
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-8 py-5 flex items-start gap-3">
       <Ban className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />
-      <div className="text-body-sm">
-        <p className="text-on-surface">{product.sku} is excluded from {label}. Nothing is pushed, listed, exported or promoted there.</p>
-        <button type="button" onClick={onBack} className="mt-1 text-primary hover:underline">Change exclusions</button>
-      </div>
+      <p className="text-body-sm text-on-surface">{product.sku} is excluded from {label}. Nothing is pushed, listed, exported or promoted there. Switch it back on in Excluded marketplaces below.</p>
     </section>
   );
 }
