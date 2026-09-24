@@ -25,7 +25,8 @@
 //   AD Vendor Sub-Division          the sub-division again
 //   AF Vendor Contact               Jessica Flores
 //   AG Vendor Contract Signer       Jessica Flores
-//   AH Merchant Contract Signer     ann-catherine.begley@lowes.com (for now)
+//   AH Merchant Contract Signer     ann-catherine.begley@lowes.com (for now);
+//                                   bath sinks: mike.norris@lowes.com
 //   AI AJ                           No
 //   AL                              Yes
 //   AO Cost                         WC Lowe's Blue (cost_usd_lowes_sod_bbb)
@@ -78,7 +79,8 @@ const KB = 'KITCHENS.AND.BATH.35';
 const GROUPS = {
   kitchen_sinks: { division: KB, subdivision: 'KITCHEN.SINKS.AND.DISPOSERS.188', label: 'Kitchen Sinks', file: 'Kitchen_Sinks_188' },
   faucets: { division: KB, subdivision: 'FAUCETS.SHOWERHEADS.AND.BATH.DECOR.225', label: 'Faucets', file: 'Faucets_225' },
-  bath_sinks: { division: KB, subdivision: 'TOILETS.AND.BATHING.130', label: 'Bath Sinks', file: 'Bath_Sinks_130' },
+  // Bath sinks have their own Lowe's merchant (user 2026-09-24).
+  bath_sinks: { division: KB, subdivision: 'TOILETS.AND.BATHING.130', label: 'Bath Sinks', file: 'Bath_Sinks_130', merchantSignerEmail: 'mike.norris@lowes.com' },
   drains: { division: 'ROUGH.PLUMBING.22', subdivision: 'PLUMBING.REPAIR.208', label: 'Drains', file: 'Drains_208' },
 };
 export function lowesGroupFor(product) {
@@ -256,7 +258,7 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
       put('vendorSubdivision', group.subdivision);
       put('vendorContact', LOWES_CONSTANTS.vendorContact);
       put('vendorSigner', LOWES_CONSTANTS.vendorSigner);
-      put('merchantSignerEmail', LOWES_CONSTANTS.merchantSignerEmail);
+      put('merchantSignerEmail', group.merchantSignerEmail ?? LOWES_CONSTANTS.merchantSignerEmail);
       put('otherAgreement', LOWES_CONSTANTS.otherAgreement);
       put('contingency', LOWES_CONSTANTS.contingency);
       put('soldDirectly', LOWES_CONSTANTS.soldDirectly);
