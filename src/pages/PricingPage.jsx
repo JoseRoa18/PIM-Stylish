@@ -1538,21 +1538,24 @@ const FILE_FILLERS = {
       return parts.join(' · ');
     },
   },
+  // Bed Bath & Beyond and Overstock: same filler, each portal its own file.
   bbb: {
-    label: 'BB&B / Overstock',
-    monogram: 'BO',
+    label: 'Bed Bath & Beyond',
+    monogram: 'BB',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
     hint: 'Portal promo file, CSV (use Copy SKUs first to request it) — PROMO_MAP and PROMO_COST are filled on matching part numbers; rows are never added.',
     accept: '.csv,.xlsx,.xlsm',
-    fill: fillBBBPromoFile,
-    summarize: (r) => {
-      const parts = [`BB&B / Overstock file ready — ${r.filled} of ${r.fileRows} rows filled`];
-      if (r.notInFile.length) parts.push(`promo members not in the file: ${r.notInFile.slice(0, 8).join(', ')}${r.notInFile.length > 8 ? '…' : ''}`);
-      if (r.notInPromo.length) parts.push(`file rows not in this promo: ${r.notInPromo.slice(0, 8).join(', ')}${r.notInPromo.length > 8 ? '…' : ''}`);
-      if (r.missingData.length) parts.push(`skipped, incomplete promo data: ${r.missingData.join(', ')}`);
-      if (r.mapViolations.length) parts.push(`⚠ promo MAP not 1% below site price: ${r.mapViolations.join(', ')}`);
-      return parts.join(' · ');
-    },
+    fill: (file, promo) => fillBBBPromoFile(file, promo, { portal: 'bbb' }),
+    summarize: (r) => summarizeBBBFill({ label: 'Bed Bath & Beyond' }, r),
+  },
+  overstock: {
+    label: 'Overstock',
+    monogram: 'OS',
+    monogramCls: 'bg-surface-container-high text-on-surface-variant',
+    hint: 'Overstock portal promo file, CSV — same layout as Bed Bath & Beyond; PROMO_MAP and PROMO_COST are filled on matching part numbers; rows are never added.',
+    accept: '.csv,.xlsx,.xlsm',
+    fill: (file, promo) => fillBBBPromoFile(file, promo, { portal: 'overstock' }),
+    summarize: (r) => summarizeBBBFill({ label: 'Overstock' }, r),
   },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
   // products without a level price can be kept blank or taken out.

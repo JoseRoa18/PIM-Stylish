@@ -1,4 +1,8 @@
-// Fill the BB&B / Overstock promotion template from a PIM promotion.
+// Fill the Bed Bath & Beyond / Overstock promotion file from a PIM promotion.
+// Both portals (Beyond Inc.) hand out the same layout with their own catalog,
+// so one filler serves the two rows: `portal` is 'bbb' or 'overstock' and
+// only changes the label, the file name and the audit target. Prices,
+// aliases and the exclusion switch (key 'bbb') are shared.
 //
 // The file is downloaded fresh from their portal (the user pastes the promo's
 // part numbers there first — the Copy SKUs button), so it already carries the
@@ -41,6 +45,10 @@ import { logActivity } from '@/features/activity/api/activityLog';
 import { supabase } from '@/lib/supabase';
 
 const ALIAS_MARKETPLACE = 'BB&B / Overstock';
+export const BEYOND_PORTALS = {
+  bbb: { label: 'Bed Bath & Beyond', file: 'BBB_Promo' },
+  overstock: { label: 'Overstock', file: 'Overstock_Promo' },
+};
 
 /** Overstock SKU → PIM SKU for the promotion's members. */
 async function loadAliasMap(skus) {
@@ -143,7 +151,9 @@ function downloadCsv(name, text) {
  * `trim`: take out every product row that is not in the promotion (used
  * when the file is the full-catalog template, see fillBBBPromoTemplate).
  */
-export async function fillBBBPromoFile(file, promotion, { trim = false } = {}) {
+export async function fillBBBPromoFile(file, promotion, { trim = false, portal = 'bbb' } = {}) {
+  const who = BEYOND_PORTALS[portal] ?? BEYOND_PORTALS.bbb;
+  // Exclusions are one switch for both portals.
   const { rows: prices, excluded } = await promotionMembersFor(promotion, 'bbb');
   const bySku = new Map(
     prices
@@ -156,7 +166,7 @@ export async function fillBBBPromoFile(file, promotion, { trim = false } = {}) {
   const byAlias = await loadAliasMap([...bySku.keys()]);
 
   const isCsv = /\.csv$/i.test(file.name);
-  const baseName = `BBB_Overstock_Promo_${String(promotion.period).slice(0, 7)}`;
+  const baseName = `${who.file}_${String(promotion.period).slice(0, 7)}`;
   let plan;
 
   if (isCsv) {
@@ -229,11 +239,12 @@ export async function fillBBBPromoFile(file, promotion, { trim = false } = {}) {
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
-    target: 'bbb',
+    target: portal,
     summary: trim
-      ? `Generated the BB&B / Overstock promo file for "${promotion.name}" from the catalog template (${filled} rows kept)`
-      : `Filled BB&B / Overstock promo template for "${promotion.name}" (${filled} rows)`,
+      ? `Generated the ${who.label} promo file for "${promotion.name}" from the catalog template (${filled} rows kept)`
+      : `Filled the ${who.label} promo file for "${promotion.name}" (${filled} rows)`,
     metadata: {
+      portal,
       filled,
       trimmed: trim,
       removed: trim ? plan.notInPromo.length : 0,
@@ -265,18 +276,23 @@ export async function fillBBBPromoFile(file, promotion, { trim = false } = {}) {
  * columns (SITE_PRICE, FIRST_COST, MAP_PRICE) are whatever the template
  * carried the day it was uploaded.
  */
-export async function fillBBBPromoTemplate(template, promotion) {
+export async function fillBBBPromoTemplate(template, promotion, channel) {
   const { data: blob, error } = await supabase.storage.from('templates').download(template.storage_path);
   if (error) throw new Error(`Failed to download template: ${error.message}`);
   const file = { name: template.file_name, text: () => blob.text(), arrayBuffer: () => blob.arrayBuffer() };
-  return fillBBBPromoFile(file, promotion, { trim: true });
+  return fillBBBPromoFile(file, promotion, { trim: true, portal: channel?.portal ?? 'bbb' });
 }
 
+/** Message after Generate (template, trimmed) or Fill file (portal file, nothing removed). */
 export function summarizeBBBFill(channel, r) {
-  const parts = [`${channel.label} file ready — ${r.filled} promo rows kept, ${r.notInPromo.length} other products taken out`];
-  if (r.notInFile.length) parts.push(`promo members not in the template: ${r.notInFile.slice(0, 8).join(', ')}${r.notInFile.length > 8 ? '…' : ''}`);
+  const label = channel?.label ?? 'Bed Bath & Beyond';
+  const parts = [r.trimmed
+    ? `${label} file ready — ${r.filled} promo rows kept, ${r.notInPromo.length} other products taken out`
+    : `${label} file ready — ${r.filled} of ${r.fileRows} rows filled`];
+  if (r.notInFile.length) parts.push(`promo members not in the file: ${r.notInFile.slice(0, 8).join(', ')}${r.notInFile.length > 8 ? '…' : ''}`);
+  if (!r.trimmed && r.notInPromo.length) parts.push(`file rows not in this promo: ${r.notInPromo.slice(0, 8).join(', ')}${r.notInPromo.length > 8 ? '…' : ''}`);
   if (r.missingData.length) parts.push(`skipped, incomplete promo data: ${r.missingData.join(', ')}`);
-  if (r.mapViolations.length) parts.push(`promo MAP not 1% below the template's site price: ${r.mapViolations.join(', ')}`);
-  if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from BB&B / Overstock`);
+  if (r.mapViolations.length) parts.push(`promo MAP not 1% below the file's site price: ${r.mapViolations.join(', ')}`);
+  if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from Bed Bath & Beyond / Overstock`);
   return parts.join(' · ');
 }

@@ -23,7 +23,7 @@ export const MARKETPLACES = [
   { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us' },
   { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us' },
   { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us' },
-  { key: 'bbb', label: 'BB&B / Overstock', monogram: 'BO', market: 'us' },
+  { key: 'bbb', label: 'Bed Bath & Beyond / Overstock', monogram: 'BO', market: 'us' }, // one switch for both Beyond portals
 ];
 
 export const marketplaceLabel = (key) => MARKETPLACES.find((m) => m.key === key)?.label ?? key;
