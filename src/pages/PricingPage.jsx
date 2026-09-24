@@ -12,7 +12,9 @@ import {
   Loader2,
   CheckCircle2,
   X,
+  Search,
 } from 'lucide-react';
+import FilterDropdown from '@/features/products/components/FilterDropdown';
 // Icon DATA (vanilla lucide) for MorphIcon — it animates the strokes between
 // the two shapes instead of swapping elements.
 import { MorphIcon } from 'morphicons/react';
@@ -1061,7 +1063,10 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
   const [mapBySku, setMapBySku] = useState(null);
   // Flash deals / special events: the SKU list can be changed after creation.
   const [editingSkus, setEditingSkus] = useState(false);
-  const [skuQuery, setSkuQuery] = useState(''); // filters the price table by SKU
+  // Price-table filters: SKU text, product categories and brands.
+  const [skuQuery, setSkuQuery] = useState('');
+  const [catFilter, setCatFilter] = useState([]);
+  const [brandFilter, setBrandFilter] = useState([]);
   const [skuText, setSkuText] = useState('');
   const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete'
   const [msg, setMsg] = useState(null);
@@ -1082,7 +1087,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
         for (let i = 0; i < skus.length; i += 100) {
           const { data } = await supabase
             .from('products')
-            .select('sku, map_cad, map_usd')
+            .select('sku, map_cad, map_usd, category, brand')
             .in('sku', skus.slice(i, i + 100));
           for (const p of data ?? []) maps[p.sku] = p;
         }
@@ -1354,7 +1359,17 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
             const mapKey = market === 'ca' ? 'map_cad' : 'map_usd';
             const marketRows = rows.filter((r) => r[priceKey] != null || costKeys.some((k) => r.promo_costs?.[k] != null));
             const q = skuQuery.trim().toUpperCase();
-            const visibleRows = q ? marketRows.filter((r) => r.sku.toUpperCase().includes(q)) : marketRows;
+            const catOf = (r) => mapBySku?.[r.sku]?.category ?? null;
+            const brandOf = (r) => mapBySku?.[r.sku]?.brand ?? null;
+            const categories = [...new Set(marketRows.map(catOf).filter(Boolean))].sort();
+            const brands = [...new Set(marketRows.map(brandOf).filter(Boolean))].sort();
+            const visibleRows = marketRows.filter((r) =>
+              (!q || r.sku.toUpperCase().includes(q)) &&
+              (!catFilter.length || catFilter.includes(catOf(r))) &&
+              (!brandFilter.length || brandFilter.includes(brandOf(r))),
+            );
+            const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0;
+            const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); };
             // Membership per market for the tab labels — same rule as the
             // table: a promo price OR any cost of that market counts.
             const countFor = (m) => rows.filter((r) =>
@@ -1386,16 +1401,6 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                       part numbers to hand back their promo file — one click
                       instead of picking SKUs out of the table by hand. */}
                   {marketRows.length > 0 && (
-                    <input
-                      type="search"
-                      value={skuQuery}
-                      onChange={(e) => setSkuQuery(e.target.value)}
-                      placeholder="Find a SKU"
-                      aria-label="Find a SKU in this promotion"
-                      className="w-44 px-3 py-1.5 rounded-full border border-outline-variant bg-surface text-body-sm font-mono text-on-surface placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    />
-                  )}
-                  {marketRows.length > 0 && (
                     <CopySkusButton skus={marketRows.map((r) => r.sku)} />
                   )}
                   {canEdit && (promo.kind ?? 'monthly') !== 'monthly' && promo.status !== 'ended' && !editingSkus && (
@@ -1404,6 +1409,35 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                     </button>
                   )}
                 </div>
+
+                {marketRows.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[14rem]">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" strokeWidth={2} />
+                      <input
+                        type="text"
+                        value={skuQuery}
+                        onChange={(e) => setSkuQuery(e.target.value)}
+                        placeholder="Filter by SKU"
+                        aria-label="Filter the promotion's products by SKU"
+                        className="w-full pl-10 pr-10 py-2 rounded-full bg-surface-container-lowest text-body-md text-on-surface placeholder:text-on-surface-variant border border-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-shadow"
+                      />
+                      {skuQuery && (
+                        <button type="button" onClick={() => setSkuQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors" title="Clear search">
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <FilterDropdown label="Category" options={categories} selected={catFilter} onChange={setCatFilter} />
+                    <FilterDropdown label="Brand" options={brands} selected={brandFilter} onChange={setBrandFilter} />
+                    <span className="text-body-sm text-on-surface-variant tabular-nums whitespace-nowrap">
+                      {filtering ? `${visibleRows.length} of ${marketRows.length}` : `${marketRows.length} products`}
+                      {filtering && (
+                        <button type="button" onClick={clearFilters} className="ml-2 text-primary hover:underline">Clear</button>
+                      )}
+                    </span>
+                  </div>
+                )}
 
                 {editingSkus && (
                   <div className="rounded-xl border border-outline-variant p-4 space-y-2">
@@ -1426,8 +1460,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
 
                 {marketRows.length > 0 && visibleRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
-                    <p className="text-body-md text-on-surface font-medium">No SKU matches "{skuQuery.trim()}" in the {market === 'ca' ? 'Canada' : 'USA'} list</p>
-                    <button type="button" onClick={() => setSkuQuery('')} className="mt-1 text-body-sm text-primary hover:underline">Clear the search</button>
+                    <p className="text-body-md text-on-surface font-medium">No product in the {market === 'ca' ? 'Canada' : 'USA'} list matches these filters</p>
+                    <button type="button" onClick={clearFilters} className="mt-1 text-body-sm text-primary hover:underline">Clear filters</button>
                   </div>
                 ) : marketRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
