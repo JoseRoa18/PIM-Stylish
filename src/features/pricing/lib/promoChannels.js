@@ -45,7 +45,9 @@ export const PROMO_CHANNELS = [
   // Home Depot USA runs on Mirakl: its promotions file is the offers import
   // (sku, price, msrp, discount-price + dates). Regular = MAP USD.
   { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null, fill: 'mirakl', priceField: 'map_usd', costField: 'cost_usd_lowes_sod_bbb', promoCostSlug: 'lowes_sod_bbb_usd', aliasMarketplace: 'Home Depot US' }, // HD USA: base cost and promo cost = the Lowe's / SOD / BB&B group
-  { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us', kind: 'template', marketplace: /lowe.*\bus(a)?\b/i, costSlug: 'lowes_sod_bbb_usd' },
+  // Lowe's Vendor Offer workbook: one file per sub-division (kitchen sinks,
+  // faucets, bath sinks, drains), item number + name from Aliases.
+  { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us', kind: 'template', marketplace: /lowe.*\bus(a)?\b/i, costSlug: 'lowes_sod_bbb_usd', fill: 'lowes', aliasMarketplace: "Lowe's US" },
   // Menards sends its own file: the PIM fills columns F, G, H (MAP and WC
   // Menards of the promo level) on the rows carrying our SKUs and hands it back.
   { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'portal_file', filler: 'menards', costSlug: 'menards_usd',

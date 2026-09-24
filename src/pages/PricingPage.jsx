@@ -56,6 +56,7 @@ import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing
 import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
 import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill } from '@/features/pricing/lib/menardsPromoFill';
 import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
+import { fillLowesPromoTemplate, summarizeLowesFill } from '@/features/pricing/lib/lowesPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link } from 'react-router-dom';
 
@@ -1679,7 +1680,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
             ? summarizeRonaFill(channel, await fillRonaPromoTemplate(template, promo, channel))
             : channel.fill === 'walmart_ca'
               ? summarizeWalmartCaFill(channel, await fillWalmartCaPromoTemplate(template, promo, channel))
-              : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
+              : channel.fill === 'lowes'
+                ? summarizeLowesFill(channel, await fillLowesPromoTemplate(template, promo, channel))
+                : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
       onMsg({ tone: 'success', text });
     } catch (err) {
