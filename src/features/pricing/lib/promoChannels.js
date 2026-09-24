@@ -34,7 +34,7 @@ export const PROMO_CHANNELS = [
   // BB&B / Overstock: either the portal's promo file is uploaded (Fill file)
   // or, when the full-catalog file lives in Templates, Generate fills the
   // promo rows and takes every other product out.
-  { key: 'bbb', label: 'BB&B / Overstock', monogram: 'BO', market: 'us', kind: 'portal_file', filler: 'bbb', auditTarget: 'bbb', marketplace: /b(ed)?\s*b(ath)?\s*(&|and)?\s*b|overstock/i, fill: 'bbb',
+  { key: 'bbb', label: 'BB&B / Overstock', monogram: 'BO', market: 'us', kind: 'portal_file', filler: 'bbb', auditTarget: 'bbb', marketplace: /b(ed)?\s*b(ath)?\s*(&|and)?\s*b/i, fill: 'bbb',
     how: 'Generate builds the file from the catalog template in Templates (promo rows only). Or upload the portal promo CSV and only its rows are filled.' },
   { key: 'homedepot_ca', label: 'Home Depot Canada', monogram: 'HD', market: 'ca', kind: 'template', marketplace: /home ?depot.*(\bca\b|canada)/i, costSlug: 'rona_hd_cad' },
   // Rona's own file: Rona id + name from Aliases, WC Blue as regular cost,

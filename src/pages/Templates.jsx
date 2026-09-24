@@ -32,8 +32,10 @@ const MARKETPLACE_OPTIONS = [
   'Wayfair US',
   'Amazon CA',
   'Amazon US',
-  // Beyond/Overstock has no Canadian platform — US only.
+  // Beyond has no Canadian platform — US only. Bed Bath & Beyond and
+  // Overstock share prices and SKUs but each portal has its own files.
   'BB&B / Overstock US',
+  'Overstock US',
   'Home Depot CA',
   'Home Depot US',
   'Lowe\'s CA',
