@@ -7,7 +7,7 @@
 //   E  Stock or SOS                 SOS
 //   F  Offer Start Date             first day of the promotion (USA window)
 //   G  Offer End Date               last day
-//   H  Offer Name                   "10/1-10/31 October Monthly Promotion Kitchen Sinks"
+//   H  Offer Name                   "10.1-10.31 October Monthly Promotion Kitchen Sinks"
 //                                   (short dates, month, kind, category; 50 chars max)
 //   K  Division                     by category (KITCHENS.AND.BATH.35 …)
 //   M  Sub-Division                 by category (KITCHEN.SINKS.AND.DISPOSERS.188 …)
@@ -148,7 +148,8 @@ function columnStyles(xml) {
   return styles;
 }
 
-const shortDate = (ymd) => { const [, m, d] = ymd.split('-').map(Number); return `${m}/${d}`; };
+// Short dates use a dot, never a slash (user 2026-09-24): "10.1-10.31".
+const shortDate = (ymd) => { const [, m, d] = ymd.split('-').map(Number); return `${m}.${d}`; };
 const monthName = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-US', { month: 'long' });
 
 /**
