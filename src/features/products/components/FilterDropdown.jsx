@@ -1,20 +1,37 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { formatCategory } from '@/lib/format';
 import Checkbox from '@/components/ui/Checkbox';
 
 export default function FilterDropdown({ label, options, selected, onChange }) {
   const [open, setOpen] = useState(false);
+  // The menu is portaled to <body> in fixed position so a card with
+  // overflow-hidden (promotion cards, short tables) can't clip it.
+  const [pos, setPos] = useState(null);
   const ref = useRef(null);
+  const menuRef = useRef(null);
   const triggerRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
+    const place = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 4, left: r.left });
+    };
+    place();
     const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      if (ref.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
   }, [open]);
 
   const close = (returnFocus = false) => {
@@ -70,11 +87,19 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
         />
       </button>
 
-      {open && (
+      {open && pos && createPortal(
         <div
+          ref={menuRef}
           role="group"
           aria-label={`${label} filter options`}
-          className="absolute z-30 mt-1 min-w-[220px] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg overflow-hidden"
+          style={{ position: 'fixed', top: pos.top, left: pos.left }}
+          className="z-50 min-w-[220px] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg overflow-hidden"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.stopPropagation();
+              close(true);
+            }
+          }}
         >
           {options.length === 0 ? (
             <div className="px-3 py-2 text-body-sm text-on-surface-variant">
@@ -108,7 +133,8 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
               })}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
