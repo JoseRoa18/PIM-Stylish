@@ -7,8 +7,10 @@
 // accepted too. Only two columns are ours to fill, from the data rows down:
 //   PROMO_MAP  = the promotion's US promo MAP  (promo_price_usd)
 //   PROMO_COST = the promo first cost           (promo_costs.lowes_sod_bbb_usd)
-// Matching runs on PARTNER_SKU; the header row is auto-detected (portal files
-// carry instruction rows above it). Rows are never added or removed — the
+// Matching runs on PARTNER_SKU, then on FULL_SKU against the product's
+// BB&B / Overstock alias (Aliases tab) when the part number doesn't match
+// as written; the header row is auto-detected (portal files carry
+// instruction rows above it). Rows are never added or removed — the
 // portal decides which SKUs are eligible; we report mismatches instead.
 //
 // Portal rules worth pre-checking (from the template's own header text):
@@ -29,6 +31,24 @@ import {
 import { parseCsvText } from '@/features/import/lib/parseSpreadsheet';
 import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { supabase } from '@/lib/supabase';
+
+const ALIAS_MARKETPLACE = 'BB&B / Overstock';
+
+/** Overstock SKU → PIM SKU for the promotion's members. */
+async function loadAliasMap(skus) {
+  const byAlias = new Map();
+  for (let i = 0; i < skus.length; i += 200) {
+    const { data, error } = await supabase
+      .from('product_aliases')
+      .select('sku, alias')
+      .eq('marketplace', ALIAS_MARKETPLACE)
+      .in('sku', skus.slice(i, i + 200));
+    if (error) throw error;
+    for (const a of data ?? []) if (a.alias) byAlias.set(norm(a.alias), a.sku);
+  }
+  return byAlias;
+}
 
 const HEADER_SCAN_ROWS = 10;
 const norm = (v) => String(v ?? '').trim().toUpperCase();
@@ -46,9 +66,10 @@ function findHeader(grid) {
  * and everything worth reporting. Format-agnostic — the CSV and XLSX writers
  * both consume the returned per-row fills.
  */
-function planFills(grid, headerRow, bySku) {
+function planFills(grid, headerRow, bySku, byAlias = new Map()) {
   const header = (grid[headerRow] ?? []).map(norm);
   const skuCol = header.indexOf('PARTNER_SKU');
+  const fullSkuCol = header.indexOf('FULL_SKU');
   const promoMapCol = header.indexOf('PROMO_MAP');
   const promoCostCol = header.indexOf('PROMO_COST');
   const sitePriceCol = header.indexOf('SITE_PRICE');
@@ -63,12 +84,16 @@ function planFills(grid, headerRow, bySku) {
   const mapViolations = [];
 
   for (let i = headerRow + 1; i < grid.length; i++) {
-    const sku = String(grid[i]?.[skuCol] ?? '').trim();
-    if (!sku) continue;
+    const partner = String(grid[i]?.[skuCol] ?? '').trim();
+    if (!partner) continue;
+    // Part number as written, else the Overstock SKU through the alias
+    // (covers casing/dash differences like A-914Bk or D-701H-2).
+    const viaAlias = fullSkuCol !== -1 ? byAlias.get(norm(grid[i]?.[fullSkuCol])) : undefined;
+    const sku = bySku.has(partner) ? partner : (viaAlias ?? partner);
     fileSkus.add(sku);
     const promo = bySku.get(sku);
     if (!promo) {
-      notInPromo.push(sku);
+      notInPromo.push(partner);
       continue;
     }
     // The portal demands a value in every cell of a submitted row.
@@ -114,6 +139,7 @@ export async function fillBBBPromoFile(file, promotion) {
   if (!bySku.size) {
     throw new Error('This promotion has no US promo MAP or Lowes/SOD/BB&B promo costs loaded.');
   }
+  const byAlias = await loadAliasMap([...bySku.keys()]);
 
   const isCsv = /\.csv$/i.test(file.name);
   const baseName = `BBB_Overstock_Promo_${String(promotion.period).slice(0, 7)}`;
@@ -127,7 +153,7 @@ export async function fillBBBPromoFile(file, promotion) {
     if (headerRow === -1) {
       throw new Error('No PARTNER_SKU / PROMO_MAP header found — upload the promotion file downloaded from the BB&B / Overstock portal.');
     }
-    plan = planFills(grid, headerRow, bySku);
+    plan = planFills(grid, headerRow, bySku, byAlias);
     for (const [rowIdx, f] of plan.fills) {
       const row = grid[rowIdx];
       while (row.length <= Math.max(plan.promoMapCol, plan.promoCostCol)) row.push('');
@@ -159,7 +185,7 @@ export async function fillBBBPromoFile(file, promotion) {
       throw new Error('No PARTNER_SKU / PROMO_MAP header found — upload the promotion file downloaded from the BB&B / Overstock portal.');
     }
 
-    plan = planFills(grid, headerRow, bySku);
+    plan = planFills(grid, headerRow, bySku, byAlias);
     const cellsByRow = new Map();
     for (const [rowIdx, f] of plan.fills) {
       const rowNum = rowIdx + 1; // grid is 0-based; sheet rows and columns are 1-based
