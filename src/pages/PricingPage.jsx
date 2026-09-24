@@ -47,7 +47,7 @@ import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
-import { fillBBBPromoFile, fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
+import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
@@ -1537,25 +1537,6 @@ const FILE_FILLERS = {
       if (r.notOnWayfair.length) parts.push(`skipped, not listed on Wayfair USA: ${r.notOnWayfair.join(', ')}`);
       return parts.join(' · ');
     },
-  },
-  // Bed Bath & Beyond and Overstock: same filler, each portal its own file.
-  bbb: {
-    label: 'Bed Bath & Beyond',
-    monogram: 'BB',
-    monogramCls: 'bg-surface-container-high text-on-surface-variant',
-    hint: 'Portal promo file, CSV (use Copy SKUs first to request it) — PROMO_MAP and PROMO_COST are filled on matching part numbers; rows are never added.',
-    accept: '.csv,.xlsx,.xlsm',
-    fill: (file, promo) => fillBBBPromoFile(file, promo, { portal: 'bbb' }),
-    summarize: (r) => summarizeBBBFill({ label: 'Bed Bath & Beyond' }, r),
-  },
-  overstock: {
-    label: 'Overstock',
-    monogram: 'OS',
-    monogramCls: 'bg-surface-container-high text-on-surface-variant',
-    hint: 'Overstock portal promo file, CSV — same layout as Bed Bath & Beyond; PROMO_MAP and PROMO_COST are filled on matching part numbers; rows are never added.',
-    accept: '.csv,.xlsx,.xlsm',
-    fill: (file, promo) => fillBBBPromoFile(file, promo, { portal: 'overstock' }),
-    summarize: (r) => summarizeBBBFill({ label: 'Overstock' }, r),
   },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
   // products without a level price can be kept blank or taken out.

@@ -33,14 +33,11 @@ export const PROMO_CHANNELS = [
     how: 'Same Partner Home file, USA supplier. The PIM fills base cost and promotional MAP USD.' },
   // Bed Bath & Beyond and Overstock (Beyond Inc.): same prices, aliases and
   // exclusion switch ('bbb'), same file layout, but each portal has its own
-  // catalog file. Generate builds the file from the portal's catalog
-  // template in Templates (promo rows only); Fill file takes the portal's
-  // own promo CSV and fills its rows. Templates: "BB&B / Overstock US" is
-  // Bed Bath & Beyond's, "Overstock US" is Overstock's.
-  { key: 'bbb', label: 'Bed Bath & Beyond', monogram: 'BB', market: 'us', kind: 'portal_file', filler: 'bbb', auditTarget: 'bbb', marketplace: /b(ed)?\s*b(ath)?\s*(&|and)?\s*b/i, fill: 'bbb', portal: 'bbb',
-    how: 'Generate builds the file from the catalog template (promo rows only). Or upload the portal promo CSV and only its rows are filled.' },
-  { key: 'overstock', label: 'Overstock', monogram: 'OS', market: 'us', kind: 'portal_file', filler: 'overstock', auditTarget: 'overstock', marketplace: /^overstock/i, fill: 'bbb', portal: 'overstock', exclusionKey: 'bbb',
-    how: 'Same prices as Bed Bath & Beyond, its own catalog file. Generate builds it from the Overstock template; or upload the portal promo CSV.' },
+  // catalog file uploaded in Templates ("BB&B / Overstock US" is Bed Bath &
+  // Beyond's, "Overstock US" is Overstock's). Generate keeps the promo's
+  // rows only and fills PROMO_MAP / PROMO_COST.
+  { key: 'bbb', label: 'Bed Bath & Beyond', monogram: 'BB', market: 'us', kind: 'template', auditTarget: 'bbb', marketplace: /b(ed)?\s*b(ath)?\s*(&|and)?\s*b/i, fill: 'bbb', portal: 'bbb', costSlug: 'lowes_sod_bbb_usd' },
+  { key: 'overstock', label: 'Overstock', monogram: 'OS', market: 'us', kind: 'template', auditTarget: 'overstock', marketplace: /^overstock/i, fill: 'bbb', portal: 'overstock', exclusionKey: 'bbb', costSlug: 'lowes_sod_bbb_usd' },
   { key: 'homedepot_ca', label: 'Home Depot Canada', monogram: 'HD', market: 'ca', kind: 'template', marketplace: /home ?depot.*(\bca\b|canada)/i, costSlug: 'rona_hd_cad' },
   // Rona's own file: Rona id + name from Aliases, WC Blue as regular cost,
   // WC Orange (monthly) / Purple (flash, event) as promo cost, MAP Blue kept.
