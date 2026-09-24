@@ -644,6 +644,14 @@ export async function autoScheduleBestBuyPromo(promotion) {
  * next one). Walmart turns it on and off by itself. `skus` restricts the
  * push (controlled tests); `dryRun` returns the payload and sends nothing.
  */
+/** What Walmart Canada holds today as the promotion of one SKU (their SKU, i.e. the alias when there is one). Read-only. */
+export async function readWalmartCaPromo(sku) {
+  const { data, error } = await supabase.functions.invoke('walmart-push-promo', { body: { mode: 'promo', sku } });
+  if (error) throw new Error(error.message ?? 'walmart-push-promo failed');
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
 export async function scheduleWalmartCaPromo(promotion, { skus = null, dryRun = false } = {}) {
   const { data, error } = await supabase.functions.invoke('walmart-push-promo', {
     body: { mode: 'push', promotionId: promotion.id, dryRun, ...(skus ? { skus } : {}) },

@@ -33,6 +33,7 @@ import {
   addFileToPromotion,
   autoScheduleBestBuyPromo,
   scheduleWalmartCaPromo,
+  readWalmartCaPromo,
   markPromotionActive,
   updatePromotionDates,
   deletePromotion,
@@ -1640,17 +1641,11 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : null);
   const dayOf = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 
-  async function schedule(channel) {
-    setBusy(channel.key);
-    try {
-      const r = await scheduleWalmartCaPromo(promo);
-      onMsg({ tone: r.itemsFailed ? 'error' : 'success', text: `Walmart Canada: ${Math.max(0, (r.attempted ?? 0) - (r.itemsFailed ?? 0))} promo prices scheduled for ${r.window?.start?.slice(0, 10)} to ${r.window?.end?.slice(0, 10)}` + (r.itemsFailed ? ` · ${r.itemsFailed} rejected: ${(r.failed ?? []).map((f) => f.sku).slice(0, 8).join(', ')}` : '') + (r.not_listed ? ` · ${r.not_listed} not listed on Walmart` : '') });
-      onChanged?.();
-    } catch (err) {
-      onMsg({ tone: 'error', text: err.message });
-    } finally {
-      setBusy(null);
-    }
+  // Walmart Canada: the person picks the SKUs, previews the payload and only
+  // then sends (user rule: pushes are manual and chosen by SKU).
+  const [wmDialog, setWmDialog] = useState(false);
+  function schedule() {
+    setWmDialog(true);
   }
 
   async function generate(channel, template) {
@@ -1788,7 +1783,185 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
         ))}
       </ul>
       )}
+      {wmDialog && (
+        <WalmartCaSendDialog
+          promo={promo}
+          onClose={() => setWmDialog(false)}
+          onSent={(text) => { onMsg({ tone: 'success', text }); onChanged?.(); }}
+        />
+      )}
     </section>
+  );
+}
+
+// ======================= Walmart Canada send dialog =======================
+
+// Preview first (the function builds the feed and posts nothing), then send
+// the previewed lines. A subset of SKUs does not stamp the promotion as
+// scheduled — that is what a one-product test is for.
+function WalmartCaSendDialog({ promo, onClose, onSent }) {
+  const [text, setText] = useState('');
+  const [preview, setPreview] = useState(null); // dry-run report for the current SKU text
+  const [result, setResult] = useState(null);   // real send outcome
+  const [live, setLive] = useState({});         // walmart sku → live promo read
+  const [busy, setBusy] = useState(null);       // 'preview' | 'send' | 'read'
+  const [error, setError] = useState(null);
+
+  const { skus } = parseSkuList(text);
+  const subset = skus.length ? skus : null;
+  const lines = (preview?.payload?.MPItem ?? []).map((it) => it.Price);
+  const day = (iso) => (iso ? String(iso).replace('T', ' ').replace(/Z$/, ' UTC') : '');
+
+  async function runPreview() {
+    setBusy('preview'); setError(null); setResult(null); setLive({});
+    try {
+      setPreview(await scheduleWalmartCaPromo(promo, { skus: subset, dryRun: true }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function send() {
+    setBusy('send'); setError(null);
+    try {
+      const r = await scheduleWalmartCaPromo(promo, { skus: subset });
+      setResult(r);
+      const sent = Math.max(0, (r.attempted ?? 0) - (r.itemsFailed ?? 0));
+      onSent(`Walmart Canada: ${sent} promo price${sent === 1 ? '' : 's'} scheduled for ${r.window?.start?.slice(0, 10)} to ${r.window?.end?.slice(0, 10)} (feed ${r.feedId ?? '?'}, ${r.feedStatus ?? 'status pending'})` + (r.itemsFailed ? ` · ${r.itemsFailed} rejected` : ''));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function readLive(wsku) {
+    setBusy('read'); setError(null);
+    try {
+      setLive((m) => ({ ...m, [wsku]: null }));
+      const r = await readWalmartCaPromo(wsku);
+      setLive((m) => ({ ...m, [wsku]: r }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const skipped = preview ? [
+    preview.not_listed ? `${preview.not_listed} not listed on Walmart Canada` : null,
+    preview.no_map?.length ? `no MAP CAD: ${preview.no_map.slice(0, 8).join(', ')}` : null,
+    preview.at_or_above_map?.length ? `promo price at or above MAP: ${preview.at_or_above_map.slice(0, 8).join(', ')}` : null,
+    preview.excluded ? `${preview.excluded} excluded from Walmart Canada` : null,
+  ].filter(Boolean) : [];
+
+  return (
+    <Dialog
+      onClose={onClose}
+      title="Send promo prices to Walmart Canada"
+      subtitle="Preview builds the feed without sending. Send posts the previewed lines; Walmart turns the promo on and off by itself."
+      maxWidth="max-w-2xl"
+      footer={(
+        <>
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-full text-label-lg text-on-surface-variant hover:bg-surface-container-low">Close</button>
+          <button type="button" onClick={runPreview} disabled={busy != null} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant text-label-lg text-on-surface hover:bg-surface-container-low disabled:opacity-50">
+            {busy === 'preview' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Preview
+          </button>
+          <button type="button" onClick={send} disabled={busy != null || !preview || !lines.length || result} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-50">
+            {busy === 'send' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {lines.length ? `Send ${lines.length} to Walmart` : 'Send to Walmart'}
+          </button>
+        </>
+      )}
+    >
+      <div className="space-y-4">
+        <label className="block">
+          <span className="text-label-md text-on-surface-variant">SKUs to send, one per line — leave empty for every product of the promotion</span>
+          <textarea
+            value={text}
+            onChange={(e) => { setText(e.target.value); setPreview(null); setResult(null); setLive({}); }}
+            rows={3}
+            placeholder="B-101N"
+            className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-body-md font-mono focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+        </label>
+
+        {preview && (
+          <div className="space-y-2">
+            <p className="text-body-sm text-on-surface">
+              {lines.length} line{lines.length === 1 ? '' : 's'} ready · window {preview.window?.start?.slice(0, 10)} to {preview.window?.end?.slice(0, 10)} (ET)
+              {preview.listed_known === false ? ' · no Walmart listing snapshot yet, every member goes' : ''}
+            </p>
+            {lines.length > 0 && (
+              <div className="overflow-x-auto rounded-xl border border-outline-variant">
+                <table className="w-full text-body-sm">
+                  <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                    <tr>
+                      <th className="text-left px-3 py-1.5">Walmart SKU</th>
+                      <th className="text-right px-3 py-1.5">Regular</th>
+                      <th className="text-right px-3 py-1.5">MSRP</th>
+                      <th className="text-right px-3 py-1.5">Promo</th>
+                      <th className="text-left px-3 py-1.5">Start</th>
+                      <th className="text-left px-3 py-1.5">End</th>
+                      <th className="px-3 py-1.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.slice(0, 50).map((l) => (
+                      <tr key={l.sku} className="border-t border-outline-variant/60">
+                        <td className="px-3 py-1.5 font-mono">{l.sku}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{l.price}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{l.msrp ?? ''}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{l.promotionInformation?.promotionPrice}</td>
+                        <td className="px-3 py-1.5 whitespace-nowrap">{day(l.promotionInformation?.promotionPriceStartDateTime)}</td>
+                        <td className="px-3 py-1.5 whitespace-nowrap">{day(l.promotionInformation?.promotionPriceEndDateTime)}</td>
+                        <td className="px-3 py-1.5 text-right">
+                          <button type="button" onClick={() => readLive(l.sku)} disabled={busy != null} className="text-label-md text-primary hover:underline disabled:opacity-50" title="Read what Walmart holds for this SKU right now">
+                            {live[l.sku] === null ? 'Reading…' : 'Read live'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {lines.length > 50 && <p className="px-3 py-1.5 text-label-md text-on-surface-variant">and {lines.length - 50} more</p>}
+              </div>
+            )}
+            {skipped.length > 0 && (
+              <p className="text-body-sm text-on-surface-variant">Skipped: {skipped.join(' · ')}</p>
+            )}
+          </div>
+        )}
+
+        {Object.entries(live).filter(([, v]) => v).map(([wsku, v]) => (
+          <div key={wsku} className="rounded-xl border border-outline-variant bg-surface-container-lowest px-3 py-2">
+            <p className="text-label-md text-on-surface-variant">Walmart holds for {wsku} (HTTP {v.status ?? '?'})</p>
+            <pre className="mt-1 max-h-48 overflow-auto text-[11px] leading-snug text-on-surface whitespace-pre-wrap">{JSON.stringify(v.data ?? v, null, 1)}</pre>
+          </div>
+        ))}
+
+        {result && (
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-3 py-2 text-body-sm">
+            <p className="text-on-surface">Feed {result.feedId ?? '?'} · {result.feedStatus ?? 'status pending'} · received {result.itemsReceived ?? '?'}, succeeded {result.itemsSucceeded ?? '?'}, failed {result.itemsFailed ?? 0}{result.itemsProcessing ? `, processing ${result.itemsProcessing}` : ''}</p>
+            {result.failed?.length > 0 && (
+              <ul className="mt-1 space-y-0.5 text-on-surface-variant">
+                {result.failed.map((f, i) => (
+                  <li key={i} className="font-mono text-[11px]">{f.sku ?? '?'}: {(f.ingestionErrors?.ingestionError ?? []).map((e) => e.description ?? e.code).join('; ') || f.ingestionStatus}</li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-1 text-on-surface-variant">Walmart applies the promo at the start date-time. Read live on a sent SKU to confirm it took.</p>
+          </div>
+        )}
+
+        {error && (
+          <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
+        )}
+      </div>
+    </Dialog>
   );
 }
 
