@@ -165,6 +165,10 @@ function buildActions({ channelSnapshots, unlinkedWix, inventoryReport }) {
   // their stock shows up on the next pull (seconds later). One row per
   // market (USA = ShipStation, Canada = the inventory file).
   for (const r of Object.values(inventoryReport?.markets ?? {})) {
+    // The Canada inventory file lists far more than the PIM's catalog
+    // (packaging codes, other brands — ~700 part numbers), so "not in the
+    // PIM" is not actionable there; Settings → Stock still shows the count.
+    if (r?.market === 'ca') continue;
     const missing = r?.ok ? r.unmatched ?? [] : [];
     if (missing.length === 0) continue;
     actions.push({
