@@ -225,6 +225,21 @@ export function removeRows(sheetXml, rowNums) {
   return out.replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)\d+("\s*\/>)/, `$1${last}$2`);
 }
 
+// Make Excel recalculate every formula when the file is opened. Formula cells
+// we write (or a template's pre-formatted formula rows) carry no cached
+// value, and Excel shows them blank until something triggers a recalc —
+// fullCalcOnLoad on the workbook's calcPr is that trigger.
+export async function recalcOnOpen(zip) {
+  const file = zip.file('xl/workbook.xml');
+  if (!file) return;
+  let xml = await file.async('string');
+  if (/<calcPr\b[^>]*\bfullCalcOnLoad="1"/.test(xml)) return;
+  xml = /<calcPr\b/.test(xml)
+    ? xml.replace(/<calcPr\b([^>]*?)\s*\/?>/, (m, attrs) => `<calcPr${attrs.replace(/\s*fullCalcOnLoad="[^"]*"/, '')} fullCalcOnLoad="1"/>`)
+    : xml.replace(/<\/workbook>\s*$/, '<calcPr fullCalcOnLoad="1"/></workbook>');
+  zip.file('xl/workbook.xml', xml);
+}
+
 // Inject prebuilt <row> XML before </sheetData> and bump the sheet dimension.
 export function injectRows(sheetXml, rowsXml, lastRowNum) {
   let newXml = sheetXml.replace('</sheetData>', `${rowsXml}</sheetData>`);

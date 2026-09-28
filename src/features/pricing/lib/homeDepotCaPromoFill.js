@@ -31,8 +31,12 @@
 // take the sheet's column styles (<cols>) so the formats survive. Members
 // outside the template's categories (marketplace_templates.categories) are
 // left out and reported, as are those without a Home Depot Canada id or
-// without a promo price below MAP. The dropdown values are the sheet's own
-// (EA / Yes / ALL / 30 Days / Cost Reduction).
+// without any promo MAP to write; everything else goes in (user rule
+// 2026-09-28: every promo member with an Article # is submitted — a promo
+// MAP not below MAP or a missing WAS price is reported, not dropped). The
+// dropdown values are the sheet's own (EA / Yes / ALL / 30 Days / Cost
+// Reduction). J (Price Change %) is the template's formula; the workbook is
+// flagged to recalculate on open so it shows up filled.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -43,6 +47,7 @@ import {
   buildCell,
   mergeRows,
   injectRows,
+  recalcOnOpen,
   downloadZip,
   templateExt,
   indexToCol,
@@ -164,7 +169,6 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
   const noMap = [];
   const noPromoMap = [];
   const atOrAbove = [];
-  const under5 = [];
   const noCost = [];
   const noPromoCost = [];
   const noStock = [];
@@ -174,14 +178,15 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
     if (categories.size && !categories.has(p.category)) { otherCategory.push(m.sku); continue; }
     const a = alias.get(m.sku);
     if (!a) { noAlias.push(m.sku); continue; }
-    const map = p.map_cad != null ? Number(p.map_cad) : null;
-    if (map == null) { noMap.push(m.sku); continue; }
     const listed = m.promo_price_cad != null ? Number(m.promo_price_cad) : null;
     const promoMap = listed ?? (p[promoMapField] != null ? Number(p[promoMapField]) : null);
     if (promoMap == null) { noPromoMap.push(m.sku); continue; }
-    if (promoMap >= map) { atOrAbove.push(m.sku); continue; }
     if (listed != null) fromList += 1;
-    if ((map - promoMap) / map < 0.05) under5.push(m.sku);
+    // Reported, never dropped: a WAS price missing in the PIM, or a promo
+    // MAP that is not below it.
+    const map = p.map_cad != null ? Number(p.map_cad) : null;
+    if (map == null) noMap.push(m.sku);
+    else if (promoMap >= map) atOrAbove.push(m.sku);
     const regularCost = p.cost_cad_rona_hd != null ? Number(p.cost_cad_rona_hd) : null;
     const listedCost = m.promo_costs?.rona_hd_cad;
     const promoCost = listedCost != null ? Number(listedCost) : p[promoCostField] != null ? Number(p[promoCostField]) : null;
@@ -200,7 +205,7 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
       promoCost,
     });
   }
-  if (!lines.length) throw new Error(`Nothing to write: no ${tagged.length ? tagged.map((c) => CATEGORY_LABELS[c] ?? c).join(' / ') + ' ' : ''}product of this promotion has a Home Depot Canada id and a promo MAP below its MAP.`);
+  if (!lines.length) throw new Error(`Nothing to write: no ${tagged.length ? tagged.map((c) => CATEGORY_LABELS[c] ?? c).join(' / ') + ' ' : ''}product of this promotion has a Home Depot Canada id and a promo MAP.`);
 
   // Rows already carrying an article stay; ours go on the first empty rows
   // after them (the template ships thousands of pre-formatted rows, J with
@@ -237,13 +242,14 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
   let xml = cellsByRow.size ? mergeRows(hit.xml, cellsByRow, true) : hit.xml;
   if (appended) xml = injectRows(xml, appended, firstRow + lines.length - 1);
   zip.file(hit.path, xml);
+  await recalcOnOpen(zip); // J's formula has no cached value until Excel computes it
 
   const period = String(promotion.period).slice(0, 7);
   const catLabel = tagged.map((c) => CATEGORY_LABELS[c] ?? c).join('_').replace(/[^\w]+/g, '_');
   await downloadZip(zip, `HomeDepotCA_${catLabel || 'Promo'}_${period}`, templateExt(template.storage_path));
 
   const report = {
-    rows: lines.length, tier, fromList, categories: tagged, family: [...categories], otherCategory, noAlias, noMap, noPromoMap, atOrAbove, under5, noCost, noPromoCost, noStock,
+    rows: lines.length, tier, fromList, categories: tagged, family: [...categories], otherCategory, noAlias, noMap, noPromoMap, atOrAbove, noCost, noPromoCost, noStock,
     atZero: lines.filter((l) => l.forecast === 0 && stock[l.sku]).length, excluded, sheet: hit.name, firstRow,
   };
   logActivity({
@@ -252,7 +258,7 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
     entityId: String(promotion.id),
     target: channel.key,
     summary: `Filled Home Depot Canada NLP file for "${promotion.name}" (${lines.length} articles, ${levelLabel(tier)} level, forecast = Canada stock)`,
-    metadata: { template: template.file_name, ...report, otherCategory: otherCategory.length, noAlias: noAlias.length, noMap: noMap.length, noPromoMap: noPromoMap.length, atOrAbove: atOrAbove.length, under5: under5.length, noCost: noCost.length, noPromoCost: noPromoCost.length, noStock: noStock.length },
+    metadata: { template: template.file_name, ...report, otherCategory: otherCategory.length, noAlias: noAlias.length, noMap: noMap.length, noPromoMap: noPromoMap.length, atOrAbove: atOrAbove.length, noCost: noCost.length, noPromoCost: noPromoCost.length, noStock: noStock.length },
   });
   return report;
 }
@@ -265,10 +271,9 @@ export function summarizeHomeDepotCaFill(channel, r) {
   const parts = [`${channel.label} file ready. ${r.rows} articles (${cats}) from row ${r.firstRow} of sheet "${r.sheet}": NLP price = MAP ${levelLabel(r.tier)}, new cost = WC ${levelLabel(r.tier)}${r.fromList ? ` (${r.fromList} prices from the promotion's own list)` : ''}, forecast = Canada stock${r.atZero ? ` (${r.atZero} at 0)` : ''}. Fiscal Week (column A) is yours to fill`];
   if (r.otherCategory.length) parts.push(`${r.otherCategory.length} promo products of other categories left out (this template is ${cats})`);
   if (r.noAlias.length) parts.push(`no Home Depot Canada id in Aliases, left out: ${few(r.noAlias)}`);
-  if (r.noMap.length) parts.push(`no MAP CAD in the PIM, left out: ${few(r.noMap)}`);
   if (r.noPromoMap.length) parts.push(`no MAP ${levelLabel(r.tier)} in the PIM, left out: ${few(r.noPromoMap)}`);
-  if (r.atOrAbove.length) parts.push(`promo MAP not below MAP, left out: ${few(r.atOrAbove)}`);
-  if (r.under5.length) parts.push(`discount under Home Depot's 5% minimum: ${few(r.under5)}`);
+  if (r.noMap.length) parts.push(`${r.noMap.length} without MAP CAD in the PIM (WAS price empty): ${few(r.noMap, 5)}`);
+  if (r.atOrAbove.length) parts.push(`${r.atOrAbove.length} with the promo MAP not below MAP, check them: ${few(r.atOrAbove, 5)}`);
   if (r.noCost.length) parts.push(`${r.noCost.length} without WC Rona / Home Depot (column O empty): ${few(r.noCost, 5)}`);
   if (r.noPromoCost.length) parts.push(`${r.noPromoCost.length} without WC ${levelLabel(r.tier)} (column P empty): ${few(r.noPromoCost, 5)}`);
   if (r.noStock.length) parts.push(`${r.noStock.length} not in the Canada inventory file, forecast 0: ${few(r.noStock, 5)}`);
