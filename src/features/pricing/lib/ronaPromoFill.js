@@ -44,7 +44,7 @@ import {
   indexToCol,
   norm,
 } from '@/features/syndication/exports/templateFiller';
-import { promotionMembersFor } from '@/features/pricing/api/promotions';
+import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -84,7 +84,7 @@ function locate(grid) {
 
 /**
  * @param template  marketplace_templates row (Rona, purpose "promotions" or "flash_deals")
- * @param promotion promotions row (kind decides the WC level: monthly → Orange, else Purple)
+ * @param promotion promotions row (kind decides the level: monthly and flash → Orange, special event → Purple; see KIND_LEVEL)
  * @param channel   PROMO_CHANNELS entry for Rona (key, label, market 'ca')
  */
 export async function fillRonaPromoTemplate(template, promotion, channel) {
@@ -101,7 +101,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   }
   if (!hit) throw new Error(`No sheet in "${template.file_name}" has the Rona columns (Rona product #, PROMO COST). Send me the file and I map it.`);
 
-  const tier = (promotion.kind ?? 'monthly') === 'monthly' ? 'orange' : 'purple';
+  const tier = promotionLevel(promotion, channel);
   const promoCostField = `cost_cad_rona_hd_${tier}`;
   const promoMapField = `map_${tier}_cad`;
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel.key);

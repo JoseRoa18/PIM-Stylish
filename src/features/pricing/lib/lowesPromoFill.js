@@ -52,7 +52,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
-import { promotionMembersFor, PROMOTION_KINDS } from '@/features/pricing/api/promotions';
+import { promotionMembersFor, PROMOTION_KINDS, promotionLevel } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -156,11 +156,11 @@ const monthName = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-US
 
 /**
  * @param template  marketplace_templates row (Lowe's US, purpose "promotions" or "flash_deals")
- * @param promotion promotions row (kind decides the level: monthly → Orange, else Purple)
+ * @param promotion promotions row (kind decides the level: monthly and flash → Orange, special event → Purple; see KIND_LEVEL)
  * @param channel   PROMO_CHANNELS entry for Lowe's USA
  */
 export async function fillLowesPromoTemplate(template, promotion, channel) {
-  const tier = (promotion.kind ?? 'monthly') === 'monthly' ? 'orange' : 'purple';
+  const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const mapField = `map_${tier}_usd`;
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel.key);

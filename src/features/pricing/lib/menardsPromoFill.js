@@ -3,8 +3,8 @@
 // SKU, and only three columns are ours to write (rules given by the user
 // 2026-09-23):
 //
-//   F  MAP of the promo level   MAP Orange for a monthly promotion, MAP
-//                               Purple for a flash deal / special event
+//   F  MAP of the promo level   MAP Orange for a monthly promotion or a
+//                               flash deal, MAP Purple for a special event
 //   G  WC Menards of the level  cost_usd_menards_orange / _purple
 //   H  MAP of the promo level   same value as F
 //
@@ -31,7 +31,7 @@ import {
   downloadZip,
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
-import { promotionMembersFor } from '@/features/pricing/api/promotions';
+import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 // 0-based columns Menards reserves for us: F, G, H.
@@ -70,7 +70,7 @@ async function locateSkuColumn(zip, shared, pimSkus) {
  * Returns the plan the dialog shows and fillMenardsPromoFile consumes.
  */
 export async function analyzeMenardsPromoFile(file, promotion) {
-  const tier = (promotion.kind ?? 'monthly') === 'monthly' ? 'orange' : 'purple';
+  const tier = promotionLevel(promotion);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const mapField = `map_${tier}_usd`;
   const costField = `cost_usd_menards_${tier}`;

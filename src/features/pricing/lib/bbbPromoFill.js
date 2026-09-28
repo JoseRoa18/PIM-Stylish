@@ -26,6 +26,13 @@
 // Portal rules worth pre-checking (from the template's own header text):
 // the promo MAP must be at least 1% below SITE_PRICE — violations are
 // reported so they can be fixed before the portal rejects the upload.
+//
+// Beyond rule (2026-09-28): a flash deal goes out at the PURPLE level here
+// (elsewhere flash deals run at Orange); special events are Purple everywhere.
+// For both kinds `tier` is set (promotionLevel with the channel) and
+// PROMO_MAP / PROMO_COST are read from the products' level columns at
+// generation time — not from the promotion's rows. Monthly promotions keep
+// reading the rows (the pasted price list).
 
 import {
   loadJSZip,
@@ -40,7 +47,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { parseCsvText } from '@/features/import/lib/parseSpreadsheet';
-import { promotionMembersFor } from '@/features/pricing/api/promotions';
+import { promotionMembersFor, LEVEL_FIELDS, promotionLevel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { supabase } from '@/lib/supabase';
 
@@ -49,6 +56,31 @@ export const BEYOND_PORTALS = {
   bbb: { label: 'Bed Bath & Beyond', file: 'BBB_Promo' },
   overstock: { label: 'Overstock', file: 'Overstock_Promo' },
 };
+const tierLabel = (tier) => tier.charAt(0).toUpperCase() + tier.slice(1);
+
+/**
+ * PROMO_MAP / PROMO_COST from the products' price level (Beyond's flash
+ * deals and special events): every member gets an entry, null where the
+ * level has no value, so planFills can report it instead of dropping the
+ * row as "not in the promo".
+ */
+async function levelPrices(skus, tier) {
+  const level = LEVEL_FIELDS[tier];
+  if (!level) throw new Error(`Unknown price level "${tier}".`);
+  const mapCol = level.promo_price_usd;
+  const costCol = level.costs.lowes_sod_bbb_usd;
+  const num = (v) => (v == null || v === '' ? null : Number(v));
+  const out = new Map();
+  for (let i = 0; i < skus.length; i += 200) {
+    const { data, error } = await supabase
+      .from('products')
+      .select(`sku, ${mapCol}, ${costCol}`)
+      .in('sku', skus.slice(i, i + 200));
+    if (error) throw error;
+    for (const p of data ?? []) out.set(p.sku, { map: num(p[mapCol]), cost: num(p[costCol]) });
+  }
+  return out;
+}
 
 /** Overstock SKU → PIM SKU for the promotion's members. */
 async function loadAliasMap(skus) {
@@ -150,18 +182,25 @@ function downloadCsv(name, text) {
  * downloaded template Blob wrapped with its name).
  * `trim`: take out every product row that is not in the promotion (used
  * when the file is the full-catalog template, see fillBBBPromoTemplate).
+ * `tier`: read PROMO_MAP / PROMO_COST from the products' price level
+ * ('purple') instead of the promotion's rows — the Beyond rule for flash
+ * deals and special events.
  */
-export async function fillBBBPromoFile(file, promotion, { trim = false, portal = 'bbb' } = {}) {
+export async function fillBBBPromoFile(file, promotion, { trim = false, portal = 'bbb', tier = null } = {}) {
   const who = BEYOND_PORTALS[portal] ?? BEYOND_PORTALS.bbb;
   // Exclusions are one switch for both portals.
   const { rows: prices, excluded } = await promotionMembersFor(promotion, 'bbb');
-  const bySku = new Map(
-    prices
-      .filter((r) => r.promo_price_usd != null || r.promo_costs?.lowes_sod_bbb_usd != null)
-      .map((r) => [r.sku, { map: r.promo_price_usd ?? null, cost: r.promo_costs?.lowes_sod_bbb_usd ?? null }]),
-  );
+  const bySku = tier
+    ? await levelPrices(prices.map((r) => r.sku), tier)
+    : new Map(
+      prices
+        .filter((r) => r.promo_price_usd != null || r.promo_costs?.lowes_sod_bbb_usd != null)
+        .map((r) => [r.sku, { map: r.promo_price_usd ?? null, cost: r.promo_costs?.lowes_sod_bbb_usd ?? null }]),
+    );
   if (!bySku.size) {
-    throw new Error('This promotion has no US promo MAP or Lowes/SOD/BB&B promo costs loaded.');
+    throw new Error(tier
+      ? `None of this promotion's products exist in the PIM to read their ${tierLabel(tier)} prices from.`
+      : 'This promotion has no US promo MAP or Lowes/SOD/BB&B promo costs loaded.');
   }
   const byAlias = await loadAliasMap([...bySku.keys()]);
 
@@ -240,11 +279,12 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: portal,
-    summary: trim
+    summary: (trim
       ? `Generated the ${who.label} promo file for "${promotion.name}" from the catalog template (${filled} rows kept)`
-      : `Filled the ${who.label} promo file for "${promotion.name}" (${filled} rows)`,
+      : `Filled the ${who.label} promo file for "${promotion.name}" (${filled} rows)`) + (tier ? ` at the ${tierLabel(tier)} level` : ''),
     metadata: {
       portal,
+      tier,
       filled,
       trimmed: trim,
       removed: trim ? plan.notInPromo.length : 0,
@@ -259,6 +299,7 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
 
   return {
     excluded,
+    tier,
     filled,
     trimmed: trim,
     fileRows: plan.fileSkus.size,
@@ -274,21 +315,24 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
  * (BB&B / Overstock, purpose Promotions): the promotion's rows get
  * PROMO_MAP / PROMO_COST, every other product row is taken out. The other
  * columns (SITE_PRICE, FIRST_COST, MAP_PRICE) are whatever the template
- * carried the day it was uploaded.
+ * carried the day it was uploaded. A flash deal or special event takes its
+ * level for this channel (Purple for both here) straight from the products.
  */
 export async function fillBBBPromoTemplate(template, promotion, channel) {
   const { data: blob, error } = await supabase.storage.from('templates').download(template.storage_path);
   if (error) throw new Error(`Failed to download template: ${error.message}`);
   const file = { name: template.file_name, text: () => blob.text(), arrayBuffer: () => blob.arrayBuffer() };
-  return fillBBBPromoFile(file, promotion, { trim: true, portal: channel?.portal ?? 'bbb' });
+  const tier = (promotion.kind ?? 'monthly') === 'monthly' ? null : promotionLevel(promotion, channel);
+  return fillBBBPromoFile(file, promotion, { trim: true, portal: channel?.portal ?? 'bbb', tier });
 }
 
 /** Message after Generate (template, trimmed) or Fill file (portal file, nothing removed). */
 export function summarizeBBBFill(channel, r) {
   const label = channel?.label ?? 'Bed Bath & Beyond';
+  const level = r.tier ? ` at the ${tierLabel(r.tier)} level` : '';
   const parts = [r.trimmed
-    ? `${label} file ready — ${r.filled} promo rows kept, ${r.notInPromo.length} other products taken out`
-    : `${label} file ready — ${r.filled} of ${r.fileRows} rows filled`];
+    ? `${label} file ready — ${r.filled} promo rows kept${level}, ${r.notInPromo.length} other products taken out`
+    : `${label} file ready — ${r.filled} of ${r.fileRows} rows filled${level}`];
   if (r.notInFile.length) parts.push(`promo members not in the file: ${r.notInFile.slice(0, 8).join(', ')}${r.notInFile.length > 8 ? '…' : ''}`);
   if (!r.trimmed && r.notInPromo.length) parts.push(`file rows not in this promo: ${r.notInPromo.slice(0, 8).join(', ')}${r.notInPromo.length > 8 ? '…' : ''}`);
   if (r.missingData.length) parts.push(`skipped, incomplete promo data: ${r.missingData.join(', ')}`);

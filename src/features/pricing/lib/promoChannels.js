@@ -19,7 +19,19 @@ import { templatePurpose } from '@/features/templates/api/templates';
  * 'mirakl' fills a Mirakl offers-import file (Home Depot USA): price =
  * `priceField`, msrp = `msrpField`, promo = discount-price + dates; the
  * SKU is the product's alias on `aliasMarketplace` when it has one.
+ * `levelByKind` pins a promotion kind to a price level for that channel
+ * (the usual levels are KIND_LEVEL in api/promotions: monthly and flash at
+ * Orange, special at Purple): its file is generated from the products'
+ * level columns instead of the promotion's rows (see channelLevelFor and
+ * promotionLevel).
  */
+const BEYOND_LEVELS = { flash: 'purple' };
+
+/** The price level a channel pins this promotion's kind to, or null (the kind's usual level, see KIND_LEVEL in api/promotions). */
+export function channelLevelFor(channel, promotion) {
+  return channel?.levelByKind?.[promotion?.kind ?? 'monthly'] ?? null;
+}
+
 export const PROMO_CHANNELS = [
   { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', kind: 'api', stamp: 'ca_applied_at',
     how: 'Automatic. Promo MAP CAD goes live on the first Thursday.' },
@@ -36,8 +48,13 @@ export const PROMO_CHANNELS = [
   // catalog file uploaded in Templates ("BB&B / Overstock US" is Bed Bath &
   // Beyond's, "Overstock US" is Overstock's). Generate keeps the promo's
   // rows only and fills PROMO_MAP / PROMO_COST.
-  { key: 'bbb', label: 'Bed Bath & Beyond', monogram: 'BB', market: 'us', kind: 'template', auditTarget: 'bbb', marketplace: /b(ed)?\s*b(ath)?\s*(&|and)?\s*b/i, fill: 'bbb', portal: 'bbb', costSlug: 'lowes_sod_bbb_usd' },
-  { key: 'overstock', label: 'Overstock', monogram: 'OS', market: 'us', kind: 'template', auditTarget: 'overstock', marketplace: /^overstock/i, fill: 'bbb', portal: 'overstock', exclusionKey: 'bbb', costSlug: 'lowes_sod_bbb_usd' },
+  // Beyond rule (2026-09-28): a FLASH DEAL goes out at the PURPLE level here
+  // (every other channel runs flash deals at Orange) — MAP Purple USD and WC
+  // Purple of the Lowe's / SOD / BB&B group, read from the products when the
+  // file is generated, whatever the promotion's rows carry. Special events
+  // are Purple everywhere, so they need no pin.
+  { key: 'bbb', label: 'Bed Bath & Beyond', monogram: 'BB', market: 'us', kind: 'template', auditTarget: 'bbb', marketplace: /b(ed)?\s*b(ath)?\s*(&|and)?\s*b/i, fill: 'bbb', portal: 'bbb', costSlug: 'lowes_sod_bbb_usd', levelByKind: BEYOND_LEVELS },
+  { key: 'overstock', label: 'Overstock', monogram: 'OS', market: 'us', kind: 'template', auditTarget: 'overstock', marketplace: /^overstock/i, fill: 'bbb', portal: 'overstock', exclusionKey: 'bbb', costSlug: 'lowes_sod_bbb_usd', levelByKind: BEYOND_LEVELS },
   { key: 'homedepot_ca', label: 'Home Depot Canada', monogram: 'HD', market: 'ca', kind: 'template', marketplace: /home ?depot.*(\bca\b|canada)/i, costSlug: 'rona_hd_cad' },
   // Rona's own file: Rona id + name from Aliases, WC Blue as regular cost,
   // WC Orange (monthly) / Purple (flash, event) as promo cost, MAP Blue kept.
@@ -46,7 +63,7 @@ export const PROMO_CHANNELS = [
   // Walmart Canada goes by API, and can also produce the Seller Center
   // price & promotion file when a promotions template is uploaded.
   { key: 'walmart_ca', label: 'Walmart Canada', monogram: 'WM', market: 'ca', kind: 'api', stamp: 'wm_ca_scheduled_at', schedule: 'walmart_ca', marketplace: /walmart.*(\bca\b|canada)/i, fill: 'walmart_ca',
-    how: 'Promotional prices sent through the Walmart API for the Canada window. Walmart turns them on and off by itself. Generate fills the Seller Center price & promotion file instead.' },
+    how: 'Automatic: promotional prices sent through the Walmart API the day before the Canada window opens (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the Seller Center price & promotion file instead.' },
   // Home Depot USA runs on Mirakl: its promotions file is the offers import
   // (sku, price, msrp, discount-price + dates). Regular = MAP USD.
   { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null, fill: 'mirakl', priceField: 'map_usd', costField: 'cost_usd_lowes_sod_bbb', promoCostSlug: 'lowes_sod_bbb_usd', aliasMarketplace: 'Home Depot US' }, // HD USA: base cost and promo cost = the Lowe's / SOD / BB&B group
@@ -58,7 +75,10 @@ export const PROMO_CHANNELS = [
   { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'portal_file', filler: 'menards', costSlug: 'menards_usd',
     how: "Upload the file Menards sent. The PIM fills F, G and H with the level's MAP and WC Menards and asks about products without a level price." },
   { key: 'amazon_us', label: 'Amazon USA', monogram: 'AM', market: 'us', kind: 'template', marketplace: /amazon.*\bus(a)?\b/i, costSlug: null, fill: 'amazon', sellerSku: 'pim' }, // Amazon.com lists our products under the PIM SKU itself
-  { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us', kind: 'template', marketplace: /walmart.*\bus(a)?\b/i, costSlug: null },
+  // Walmart USA goes by API too (feed `promo`, since 2026-09-28), and can
+  // still produce the Seller Center file when a promotions template is uploaded.
+  { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us', kind: 'api', stamp: 'wm_us_scheduled_at', schedule: 'walmart_us', marketplace: /walmart.*\bus(a)?\b/i, costSlug: null,
+    how: 'Automatic: promotional prices sent through the Walmart API the day before the 1st (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the promotions file instead.' },
 ];
 
 /**

@@ -13,8 +13,10 @@ import {
   CheckCircle2,
   X,
   Search,
+  RefreshCw,
 } from 'lucide-react';
 import FilterDropdown from '@/features/products/components/FilterDropdown';
+import { getStockFor, refreshInventory, describeInventoryPull, describeStock, stockAge } from '@/features/pricing/api/inventory';
 // Icon DATA (vanilla lucide) for MorphIcon — it animates the strokes between
 // the two shapes instead of swapping elements.
 import { MorphIcon } from 'morphicons/react';
@@ -34,8 +36,9 @@ import {
   setPromotionSkusFromLevel,
   addFileToPromotion,
   autoScheduleBestBuyPromo,
-  scheduleWalmartCaPromo,
-  readWalmartCaPromo,
+  scheduleWalmartPromo,
+  readWalmartPromo,
+  WALMART_MARKETS,
   markPromotionActive,
   updatePromotionDates,
   deletePromotion,
@@ -44,14 +47,14 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
-import { PROMOTION_KINDS, monthlyOverlap } from '@/features/pricing/api/promotions';
+import { PROMOTION_KINDS, monthlyOverlap, KIND_LEVEL, levelLabel, promotionLevel } from '@/features/pricing/api/promotions';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
-import { PROMO_CHANNELS, promoTemplateFor } from '@/features/pricing/lib/promoChannels';
+import { PROMO_CHANNELS, promoTemplateFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
@@ -78,6 +81,25 @@ const costMeta = (slug) =>
   PROMO_COST_META[slug] ?? { label: slug, unit: slug.endsWith('_usd') ? 'USD' : 'CAD', market: slug.includes('usd') && !slug.includes('_ca_') ? 'us' : 'ca' };
 
 const fmt = (v) => (v == null ? '—' : `$${Number(v).toFixed(2)}`);
+
+// Stock states of the price table's filter (each market reads its own
+// ShipStation warehouse). A SKU without a row is unknown, not zero.
+const STOCK_STATES = ['In stock', 'Out of stock', 'Not tracked'];
+
+// The markets a promotion's card shows. A flash deal / special event only
+// the markets of the portals it goes to (BB&B + Overstock → USA only, Rona →
+// Canada only, a mix → both); a monthly promotion always both.
+function promoMarkets(promo) {
+  const portals = promo?.marketplaces ?? [];
+  if ((promo?.kind ?? 'monthly') === 'monthly' || !portals.length) return ['ca', 'us'];
+  const wanted = new Set(portals.map((k) => PROMO_CHANNELS.find((c) => c.key === k)?.market).filter(Boolean));
+  const markets = ['ca', 'us'].filter((m) => wanted.has(m));
+  return markets.length ? markets : ['ca', 'us'];
+}
+const marketsLabel = (promo) => {
+  const m = promoMarkets(promo);
+  return m.length === 2 ? 'every market' : m[0] === 'us' ? 'USA only' : 'Canada only';
+};
 
 const STATUS_META = {
   draft: { label: 'Draft', class: 'bg-surface-container text-on-surface-variant' },
@@ -192,7 +214,7 @@ export default function PricingPage() {
           </div>
           <p className="text-title-md text-on-surface font-medium">No {PROMOTION_KINDS[tab].toLowerCase()}s yet</p>
           <p className="text-body-md text-on-surface-variant mt-1 max-w-md mx-auto">
-            {tab === 'monthly' ? "Create the month's promotion and paste its price list — SKU and promo price, one per line." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates, its SKUs and the portal it goes to. Prices come from the Purple level.`}
+            {tab === 'monthly' ? "Create the month's promotion and paste its price list — SKU and promo price, one per line." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates, its SKUs and the portal it goes to. Prices come from the ${levelLabel(KIND_LEVEL[tab])} level${tab === 'flash' ? ' (Purple for Bed Bath & Beyond and Overstock)' : ''}.`}
           </p>
         </div>
       ) : (
@@ -207,7 +229,13 @@ export default function PricingPage() {
               onCreator={setCreatorFilter}
             />
           )}
-          {promotions.filter((p) => (p.kind ?? 'monthly') === tab && (tab === 'monthly' || ((portalFilter === 'all' || (p.marketplaces ?? []).includes(portalFilter)) && (creatorFilter === 'all' || (p.created_by ?? 'unknown') === creatorFilter)))).map((promo) => (
+          {/* Monthly promotions come ordered by month; flash deals and special
+              events are listed by when they were created in the PIM, newest
+              first — not by their dates on the portal. */}
+          {promotions
+            .filter((p) => (p.kind ?? 'monthly') === tab && (tab === 'monthly' || ((portalFilter === 'all' || (p.marketplaces ?? []).includes(portalFilter)) && (creatorFilter === 'all' || (p.created_by ?? 'unknown') === creatorFilter))))
+            .sort((a, b) => (tab === 'monthly' ? 0 : String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))))
+            .map((promo) => (
             <PromotionCard
               key={promo.id}
               promo={promo}
@@ -793,7 +821,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
 
   const parsed = useMemo(() => parsePriceList(text), [text]);
   // Flash deals and special events take a plain SKU list: every price comes
-  // from the product's Purple level, so nothing else is asked.
+  // from the product's level for that kind (KIND_LEVEL: Orange for a flash
+  // deal, Purple for a special event), so nothing else is asked.
   const skuList = useMemo(() => parseSkuList(text), [text]);
 
   async function handleFile(market, file) {
@@ -842,13 +871,13 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         ends_on: customDates ? endsOn : null,
       };
       const res = !monthly
-        ? await createPromotionFromLevels({ ...payload, skus: skuList.skus, tier: 'purple', marketplaces: portals })
+        ? await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: portals })
         : mode === 'file'
           ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
           : await createPromotion({ ...payload, currency, rows: parsed.rows });
       const notes = [];
       if (res.notInPim.length) notes.push(`Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
-      if (res.noLevel?.length) notes.push(`No Purple price in the PIM: ${res.noLevel.join(', ')}`);
+      if (res.noLevel?.length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in the PIM: ${res.noLevel.join(', ')}`);
       if (notes.length) setError(`Created — ${res.added} SKUs added. ${notes.join(' · ')}`);
       onCreated(res.promotion);
     } catch (err) {
@@ -968,7 +997,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             placeholder={'S-822H\nK-131NR\n…'}
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
-          <span className="block mt-1 text-body-sm text-on-surface-variant">Prices come from each product's Purple level (MAP and WC of that marketplace). Once created, generate its file or schedule it from the card.</span>
+          <span className="block mt-1 text-body-sm text-on-surface-variant">{`Prices come from each product's ${levelLabel(KIND_LEVEL[kind])} level (MAP and WC of that marketplace)${kind === 'flash' ? '; Bed Bath & Beyond and Overstock take flash deals at Purple' : ''}. Once created, generate its file or schedule it from the card.`}</span>
         </label>
       ) : mode === 'file' ? (
         <div className="grid sm:grid-cols-2 gap-4">
@@ -1063,12 +1092,17 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
   const [mapBySku, setMapBySku] = useState(null);
   // Flash deals / special events: the SKU list can be changed after creation.
   const [editingSkus, setEditingSkus] = useState(false);
-  // Price-table filters: SKU text, product categories and brands.
+  // Price-table filters: SKU text, product categories and brands, and the
+  // stock state (of the market shown).
   const [skuQuery, setSkuQuery] = useState('');
   const [catFilter, setCatFilter] = useState([]);
   const [brandFilter, setBrandFilter] = useState([]);
+  const [stockFilter, setStockFilter] = useState([]);
+  // Stock per market and SKU from product_inventory (ShipStation); null
+  // until loaded.
+  const [stockByMarket, setStockByMarket] = useState(null);
   const [skuText, setSkuText] = useState('');
-  const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete'
+  const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete' | 'stock'
   const [msg, setMsg] = useState(null);
   const [progress, setProgress] = useState(null);
   const [importModal, setImportModal] = useState(false);
@@ -1092,13 +1126,22 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
           for (const p of data ?? []) maps[p.sku] = p;
         }
         setMapBySku(maps);
+        // Stock is an add-on to the table: if it cannot be read the prices
+        // still show, with the Stock column empty.
+        try {
+          setStockByMarket(await getStockFor(skus));
+        } catch {
+          setStockByMarket({ ca: {}, us: {} });
+        }
       } catch (err) {
         setMsg({ tone: 'error', text: err.message });
       }
     })();
   }, [open, rows, promo.id]);
 
-  const [market, setMarket] = useState('ca');
+  // The market tab; the table below falls back to the promotion's first
+  // market when the portals no longer include the one selected.
+  const [marketTab, setMarket] = useState(() => promoMarkets(promo)[0]);
 
   // A promo price below its own promo COST is a real anomaly (negative
   // margin) — below MAP is just what promotions are, so no alarm for that.
@@ -1115,14 +1158,29 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
     });
   }, [rows]);
 
+  // Pull both markets' stock from ShipStation now (the cron does it hourly).
+  async function refreshStock() {
+    setBusy('stock');
+    setMsg(null);
+    try {
+      const r = await refreshInventory();
+      setStockByMarket(await getStockFor((rows ?? []).map((x) => x.sku)));
+      setMsg({ tone: r.ok ? 'success' : 'error', text: `Stock refreshed — ${describeInventoryPull(r).join(' · ')}.` });
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function saveSkus() {
     setBusy('skus');
     setMsg(null);
     try {
-      const r = await setPromotionSkusFromLevel(promo, parseSkuList(skuText).skus, 'purple');
+      const r = await setPromotionSkusFromLevel(promo, parseSkuList(skuText).skus);
       const notes = [`${r.added} added, ${r.removed} removed.`];
       if (r.notInPim.length) notes.push(`Not in the PIM, skipped: ${r.notInPim.join(', ')}.`);
-      if (r.noLevel.length) notes.push(`No Purple price in the PIM: ${r.noLevel.join(', ')}.`);
+      if (r.noLevel.length) notes.push(`No ${levelLabel(promotionLevel(promo))} price in the PIM: ${r.noLevel.join(', ')}.`);
       setMsg({ tone: 'success', text: notes.join(' ') });
       setEditingSkus(false);
       setRows(null); // reload the list
@@ -1352,6 +1410,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
           {rows === null ? (
             <p className="text-body-sm text-on-surface-variant"><Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading prices…</p>
           ) : (() => {
+            const markets = promoMarkets(promo);
+            const market = markets.includes(marketTab) ? marketTab : markets[0];
             const costKeys = [...new Set(rows.flatMap((r) => Object.keys(r.promo_costs ?? {})))]
               .filter((k) => costMeta(k).market === market)
               .sort();
@@ -1363,13 +1423,23 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
             const brandOf = (r) => mapBySku?.[r.sku]?.brand ?? null;
             const categories = [...new Set(marketRows.map(catOf).filter(Boolean))].sort();
             const brands = [...new Set(marketRows.map(brandOf).filter(Boolean))].sort();
+            // Stock of the market shown: each tab reads its own ShipStation
+            // warehouse (Canada = Cambridge, USA = Flowery Branch).
+            const stockRows = stockByMarket?.[market] ?? {};
+            const stockOf = (r) => stockRows[r.sku] ?? null;
+            const stockStateOf = (r) => {
+              const s = stockOf(r);
+              return !s ? 'Not tracked' : s.available > 0 ? 'In stock' : 'Out of stock';
+            };
+            const stockSyncedAt = Object.values(stockRows).reduce((latest, s) => (s.synced_at > (latest ?? '') ? s.synced_at : latest), null);
             const visibleRows = marketRows.filter((r) =>
               (!q || r.sku.toUpperCase().includes(q)) &&
               (!catFilter.length || catFilter.includes(catOf(r))) &&
-              (!brandFilter.length || brandFilter.includes(brandOf(r))),
+              (!brandFilter.length || brandFilter.includes(brandOf(r))) &&
+              (!stockFilter.length || stockFilter.includes(stockStateOf(r))),
             );
-            const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0;
-            const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); };
+            const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0 || stockFilter.length > 0;
+            const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); setStockFilter([]); };
             // Membership per market for the tab labels — same rule as the
             // table: a promo price OR any cost of that market counts.
             const countFor = (m) => rows.filter((r) =>
@@ -1381,7 +1451,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="inline-flex rounded-full bg-surface-container p-1">
-                    {[['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
+                    {[['ca', 'Canada'], ['us', 'USA']].filter(([key]) => markets.includes(key)).map(([key, label]) => (
                       <button
                         key={key}
                         type="button"
@@ -1430,12 +1500,23 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                     </div>
                     <FilterDropdown label="Category" options={categories} selected={catFilter} onChange={setCatFilter} />
                     <FilterDropdown label="Brand" options={brands} selected={brandFilter} onChange={setBrandFilter} />
+                    <FilterDropdown label="Stock" options={STOCK_STATES} selected={stockFilter} onChange={setStockFilter} />
                     <span className="text-body-sm text-on-surface-variant tabular-nums whitespace-nowrap">
                       {filtering ? `${visibleRows.length} of ${marketRows.length}` : `${marketRows.length} products`}
                       {filtering && (
                         <button type="button" onClick={clearFilters} className="ml-2 text-primary hover:underline">Clear</button>
                       )}
                     </span>
+                    <button
+                      type="button"
+                      onClick={refreshStock}
+                      disabled={busy === 'stock'}
+                      title="Pull both markets' stock now — ShipStation for the USA, the Canada inventory file for Canada (it also refreshes every hour)"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md font-medium text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {busy === 'stock' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      {stockSyncedAt ? `Stock ${stockAge(stockSyncedAt)}` : 'Stock not synced yet'}
+                    </button>
                   </div>
                 )}
 
@@ -1453,7 +1534,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                         {busy === 'skus' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save SKUs
                       </button>
                       <button type="button" onClick={() => setEditingSkus(false)} disabled={busy === 'skus'} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
-                      <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take their Purple prices, removed ones leave the {PROMOTION_KINDS[promo.kind]?.toLowerCase() ?? 'promotion'}.</span>
+                      <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take their {levelLabel(promotionLevel(promo))} prices, removed ones leave the {PROMOTION_KINDS[promo.kind]?.toLowerCase() ?? 'promotion'}.</span>
                     </div>
                   </div>
                 )}
@@ -1482,6 +1563,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">SKU</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Promo MAP</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={market === 'ca' ? 'Units in stock per the Canada inventory file' : 'Units available in the USA warehouse (ShipStation)'}>Stock</th>
                           {costKeys.map((k) => {
                             const m = costMeta(k);
                             return (
@@ -1503,6 +1585,17 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                               <td className="px-4 py-2 font-mono text-on-surface">{r.sku}</td>
                               <td className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
                               <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[mapKey])}</td>
+                              {(() => {
+                                const s = stockOf(r);
+                                return (
+                                  <td
+                                    className={`px-4 py-2 text-right tabular-nums ${!s ? 'text-on-surface-variant/60' : s.available > 0 ? 'text-on-surface' : 'text-error font-semibold'}`}
+                                    title={describeStock(s, market)}
+                                  >
+                                    {s ? s.available : '—'}
+                                  </td>
+                                );
+                              })()}
                               {costKeys.map((k) => (
                                 <td key={k} className="px-4 py-2 text-right text-on-surface-variant tabular-nums">
                                   {fmt(r.promo_costs?.[k])}
@@ -1597,7 +1690,7 @@ const FILE_FILLERS = {
     label: 'Menards',
     monogram: 'ME',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
-    hint: 'The promotion file Menards sent — columns F, G and H are filled on every row: the promo level (Orange monthly, Purple flash / event) for the promotion\'s products, Blue for the rest. Rows are never added or removed.',
+    hint: 'The promotion file Menards sent — columns F, G and H are filled on every row: the promo level (Orange for a monthly promotion or a flash deal, Purple for a special event) for the promotion\'s products, Blue for the rest. Rows are never added or removed.',
     accept: '.xlsx,.xlsm',
     analyze: analyzeMenardsPromoFile,
     fill: (file, promo, opts) => fillMenardsPromoFile(file, promo, opts),
@@ -1641,7 +1734,7 @@ function PromoDates({ promo, canEdit, onChanged }) {
     <div className="flex items-center gap-3 flex-wrap text-body-sm">
       <span className="text-on-surface-variant">Runs</span>
       {custom ? (
-        <span className="text-on-surface">{fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">· {(promo.kind ?? 'monthly') === 'monthly' ? 'custom dates, every market' : 'every market'}</span></span>
+        <span className="text-on-surface">{fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">· {(promo.kind ?? 'monthly') === 'monthly' ? 'custom dates, every market' : marketsLabel(promo)}</span></span>
       ) : (
         <span className="text-on-surface">USA {fmt(us.start)} to {fmt(us.end)} <span className="text-on-surface-variant">·</span> Canada {fmt(ca.start)} to {fmt(ca.end)} <span className="text-on-surface-variant">· market calendar</span></span>
       )}
@@ -1693,11 +1786,12 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : null);
   const dayOf = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 
-  // Walmart Canada: the person picks the SKUs, previews the payload and only
-  // then sends (user rule: pushes are manual and chosen by SKU).
-  const [wmDialog, setWmDialog] = useState(false);
-  function schedule() {
-    setWmDialog(true);
+  // Walmart (either market) by hand: pick the SKUs, preview the payload, then
+  // send. The promo-apply cron does the whole promotion the day before each
+  // window opens; this is for tests, subsets and re-sends.
+  const [wmDialog, setWmDialog] = useState(null); // 'ca' | 'us' — the market being sent
+  function schedule(ch) {
+    setWmDialog(ch.market);
   }
 
   async function generate(channel, template) {
@@ -1731,18 +1825,23 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       let status;
       let tone;
       let detail = ch.how ?? '';
+      // A channel that pins this kind to another level than the usual one
+      // (Beyond: flash deals at Purple, everywhere else Orange) says so.
+      const pinnedLevel = channelLevelFor(ch, promo);
+      if (pinnedLevel) detail = `${detail} ${pinnedLevel.charAt(0).toUpperCase() + pinnedLevel.slice(1)} level prices, read from the products when the file is generated.`.trim();
       if (ch.kind === 'api') {
         if (ch.key === 'bestbuy') {
           const sch = promo.bb_schedule;
           status = sch ? `${sch.scheduled} scheduled` : 'Not scheduled';
           tone = sch ? 'ok' : 'muted';
           if (sch) detail += ` Sent ${day(promo.bb_scheduled_at)} for ${sch.period} to ${sch.end}.`;
-        } else if (ch.key === 'walmart_ca') {
-          const sch = promo.wm_ca_schedule;
+        } else if (ch.schedule) {
+          // Walmart Canada / USA: the per-feed report the push left behind.
+          const sch = promo[`wm_${ch.market}_schedule`];
           const sent = sch ? Math.max(0, (sch.attempted ?? 0) - (sch.itemsFailed ?? 0)) : 0;
           status = sch ? `${sent} scheduled` : 'Not scheduled';
           tone = sch ? (sch.itemsFailed ? 'warn' : 'ok') : 'muted';
-          if (sch) detail += ` Sent ${day(promo.wm_ca_scheduled_at)}, feed ${sch.feed_id ?? '?'}${sch.itemsFailed ? `, ${sch.itemsFailed} rejected` : ''}${sch.not_listed ? `, ${sch.not_listed} not listed there` : ''}.`;
+          if (sch) detail += ` Sent ${day(promo[ch.stamp])}, feed ${sch.feed_id ?? '?'}${sch.itemsFailed ? `, ${sch.itemsFailed} rejected` : ''}${sch.not_listed ? `, ${sch.not_listed} not listed there` : ''}.`;
         } else if (promo[ch.stamp]) {
           status = `Live since ${day(promo[ch.stamp])}`;
           tone = 'ok';
@@ -1836,9 +1935,10 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       </ul>
       )}
       {wmDialog && (
-        <WalmartCaSendDialog
+        <WalmartSendDialog
           promo={promo}
-          onClose={() => setWmDialog(false)}
+          market={wmDialog}
+          onClose={() => setWmDialog(null)}
           onSent={(text) => { onMsg({ tone: 'success', text }); onChanged?.(); }}
         />
       )}
@@ -1846,12 +1946,13 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   );
 }
 
-// ======================= Walmart Canada send dialog =======================
+// ========================= Walmart send dialog ============================
 
-// Preview first (the function builds the feed and posts nothing), then send
-// the previewed lines. A subset of SKUs does not stamp the promotion as
-// scheduled — that is what a one-product test is for.
-function WalmartCaSendDialog({ promo, onClose, onSent }) {
+// One dialog for both Walmart markets (`market` 'ca' | 'us'). Preview first
+// (the function builds the feed and posts nothing), then send the previewed
+// lines. A subset of SKUs does not stamp the promotion as scheduled — that
+// is what a one-product test is for.
+function WalmartSendDialog({ promo, market, onClose, onSent }) {
   const [text, setText] = useState('');
   const [preview, setPreview] = useState(null); // dry-run report for the current SKU text
   const [result, setResult] = useState(null);   // real send outcome
@@ -1859,15 +1960,17 @@ function WalmartCaSendDialog({ promo, onClose, onSent }) {
   const [busy, setBusy] = useState(null);       // 'preview' | 'send' | 'read'
   const [error, setError] = useState(null);
 
+  const label = WALMART_MARKETS[market] ?? 'Walmart';
+  const currency = market === 'ca' ? 'CAD' : 'USD';
   const { skus } = parseSkuList(text);
   const subset = skus.length ? skus : null;
-  const lines = (preview?.payload?.MPItem ?? []).map((it) => it.Price);
+  const lines = preview?.lines ?? []; // { sku, price, msrp, promo, start, end } — the same for both feeds
   const day = (iso) => (iso ? String(iso).replace('T', ' ').replace(/Z$/, ' UTC') : '');
 
   async function runPreview() {
     setBusy('preview'); setError(null); setResult(null); setLive({});
     try {
-      setPreview(await scheduleWalmartCaPromo(promo, { skus: subset, dryRun: true }));
+      setPreview(await scheduleWalmartPromo(promo, market, { skus: subset, dryRun: true }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1878,10 +1981,10 @@ function WalmartCaSendDialog({ promo, onClose, onSent }) {
   async function send() {
     setBusy('send'); setError(null);
     try {
-      const r = await scheduleWalmartCaPromo(promo, { skus: subset });
+      const r = await scheduleWalmartPromo(promo, market, { skus: subset });
       setResult(r);
       const sent = Math.max(0, (r.attempted ?? 0) - (r.itemsFailed ?? 0));
-      onSent(`Walmart Canada: ${sent} promo price${sent === 1 ? '' : 's'} scheduled for ${r.window?.start?.slice(0, 10)} to ${r.window?.end?.slice(0, 10)} (feed ${r.feedId ?? '?'}, ${r.feedStatus ?? 'status pending'})` + (r.itemsFailed ? ` · ${r.itemsFailed} rejected` : ''));
+      onSent(`${label}: ${sent} promo price${sent === 1 ? '' : 's'} scheduled for ${r.window?.start?.slice(0, 10)} to ${r.window?.end?.slice(0, 10)} (feed ${r.feedId ?? '?'}, ${r.feedStatus ?? 'status pending'})` + (r.itemsFailed ? ` · ${r.itemsFailed} rejected` : ''));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1893,7 +1996,7 @@ function WalmartCaSendDialog({ promo, onClose, onSent }) {
     setBusy('read'); setError(null);
     try {
       setLive((m) => ({ ...m, [wsku]: null }));
-      const r = await readWalmartCaPromo(wsku);
+      const r = await readWalmartPromo(wsku, market);
       setLive((m) => ({ ...m, [wsku]: r }));
     } catch (err) {
       setError(err.message);
@@ -1903,16 +2006,16 @@ function WalmartCaSendDialog({ promo, onClose, onSent }) {
   }
 
   const skipped = preview ? [
-    preview.not_listed ? `${preview.not_listed} not listed on Walmart Canada` : null,
-    preview.no_map?.length ? `no MAP CAD: ${preview.no_map.slice(0, 8).join(', ')}` : null,
+    preview.not_listed ? `${preview.not_listed} not listed on ${label}` : null,
+    preview.no_map?.length ? `no MAP ${currency}: ${preview.no_map.slice(0, 8).join(', ')}` : null,
     preview.at_or_above_map?.length ? `promo price at or above MAP: ${preview.at_or_above_map.slice(0, 8).join(', ')}` : null,
-    preview.excluded ? `${preview.excluded} excluded from Walmart Canada` : null,
+    preview.excluded ? `${preview.excluded} excluded from ${label}` : null,
   ].filter(Boolean) : [];
 
   return (
     <Dialog
       onClose={onClose}
-      title="Send promo prices to Walmart Canada"
+      title={`Send promo prices to ${label}`}
       subtitle="Preview builds the feed without sending. Send posts the previewed lines; Walmart turns the promo on and off by itself."
       maxWidth="max-w-2xl"
       footer={(
@@ -1967,9 +2070,9 @@ function WalmartCaSendDialog({ promo, onClose, onSent }) {
                         <td className="px-3 py-1.5 font-mono">{l.sku}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{l.price}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{l.msrp ?? ''}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{l.promotionInformation?.promotionPrice}</td>
-                        <td className="px-3 py-1.5 whitespace-nowrap">{day(l.promotionInformation?.promotionPriceStartDateTime)}</td>
-                        <td className="px-3 py-1.5 whitespace-nowrap">{day(l.promotionInformation?.promotionPriceEndDateTime)}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{l.promo}</td>
+                        <td className="px-3 py-1.5 whitespace-nowrap">{day(l.start)}</td>
+                        <td className="px-3 py-1.5 whitespace-nowrap">{day(l.end)}</td>
                         <td className="px-3 py-1.5 text-right">
                           <button type="button" onClick={() => readLive(l.sku)} disabled={busy != null} className="text-label-md text-primary hover:underline disabled:opacity-50" title="Read what Walmart holds for this SKU right now">
                             {live[l.sku] === null ? 'Reading…' : 'Read live'}

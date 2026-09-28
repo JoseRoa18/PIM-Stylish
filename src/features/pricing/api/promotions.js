@@ -23,7 +23,8 @@ export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
     .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count), creator:profiles(full_name, email)')
-    .order('period', { ascending: false });
+    .order('period', { ascending: false })
+    .order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((p) => ({
     ...p,
@@ -131,12 +132,24 @@ export const LEVEL_FIELDS = {
   },
 };
 
+// The price level each promotion kind runs at, on every market (user rule
+// 2026-09-28): monthly promotions and flash deals at Orange, special events
+// at Purple. A channel can pin a kind to another level for its own file
+// (`levelByKind` in promoChannels — Bed Bath & Beyond and Overstock take
+// flash deals at Purple); promotionLevel resolves both.
+export const KIND_LEVEL = { monthly: 'orange', flash: 'orange', special: 'purple' };
+export const levelLabel = (tier) => (tier === 'purple' ? 'Purple' : 'Orange');
+export function promotionLevel(promotion, channel = null) {
+  const kind = promotion?.kind ?? 'monthly';
+  return channel?.levelByKind?.[kind] ?? KIND_LEVEL[kind] ?? 'orange';
+}
+
 /**
- * Create a promotion from a SKU list, taking every price from the products'
- * price level (Purple for flash deals and special events, Orange for a
- * monthly promotion): promo MAP CAD/USD and the WC of each channel group.
- * Returns the SKUs not in the PIM and those with no price on that level in
- * either market (added anyway, so the files can report them).
+ * The promotion rows a SKU list gets from a price level (the kind's level,
+ * see KIND_LEVEL: Orange for flash deals, Purple for special events): promo
+ * MAP CAD/USD and the WC of each channel group. The rows are what every
+ * channel file reads, except a channel that pins the kind to another level
+ * (Beyond's flash deals), which reads the products at generation time.
  */
 /**
  * The promotion rows a SKU list gets from a price level: promo MAP CAD/USD
@@ -175,7 +188,7 @@ async function levelPriceRows(skus, tier) {
  * their prices from the level, SKUs no longer listed are removed, the rest
  * keep what they have. Returns what changed.
  */
-export async function setPromotionSkusFromLevel(promotion, skus, tier = 'purple') {
+export async function setPromotionSkusFromLevel(promotion, skus, tier = promotionLevel(promotion)) {
   const wanted = [...new Set((skus ?? []).map((s) => String(s).trim().toUpperCase()).filter(Boolean))];
   if (!wanted.length) throw new Error('Keep at least one SKU.');
   const current = await getPromotionPrices(promotion.id);
@@ -206,13 +219,14 @@ export async function setPromotionSkusFromLevel(promotion, skus, tier = 'purple'
 // `marketplaces` are the PROMO_CHANNELS keys the promotion is made for
 // (flash deals and special events go to the portals picked on creation,
 // one or several); empty/null means every marketplace (monthly).
-export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = 'purple', marketplaces = [] }) {
+export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [] }) {
   assertKindDates(kind, starts_on, ends_on);
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
   if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} is for.`);
   const wanted = [...new Set(skus)];
   if (!wanted.length) throw new Error('Paste at least one SKU.');
-  const { rows, valid, notInPim, noLevel } = await levelPriceRows(wanted, tier);
+  const level = tier ?? promotionLevel({ kind });
+  const { rows, valid, notInPim, noLevel } = await levelPriceRows(wanted, level);
   if (!valid.length) throw new Error('None of the SKUs in the list exist in the PIM.');
 
   const { data: promo, error } = await supabase
@@ -232,8 +246,8 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
     action: 'create',
     entityType: 'promotion',
     entityId: String(promo.id),
-    summary: `Created ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} "${name}" from the ${tier} level (${valid.length} SKUs${portals.length ? `, for ${portals.join(', ')}` : ''})`,
-    metadata: { period, kind, tier, marketplaces: portals, skus: valid.length, not_in_pim: notInPim.length, no_level: noLevel.length },
+    summary: `Created ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} "${name}" from the ${level} level (${valid.length} SKUs${portals.length ? `, for ${portals.join(', ')}` : ''})`,
+    metadata: { period, kind, tier: level, marketplaces: portals, skus: valid.length, not_in_pim: notInPim.length, no_level: noLevel.length },
   });
   return { promotion: promo, added: valid.length, notInPim, noLevel };
 }
@@ -637,24 +651,28 @@ export async function autoScheduleBestBuyPromo(promotion) {
   return report;
 }
 
-/**
- * Schedule the promotion on Walmart Canada as promotional prices (feed
- * PRICE_AND_PROMOTION): regular price = the PIM MAP CAD, promo price = the
- * promo MAP CAD, window = Canada's (first Thursday to the day before the
- * next one). Walmart turns it on and off by itself. `skus` restricts the
- * push (controlled tests); `dryRun` returns the payload and sends nothing.
- */
-/** What Walmart Canada holds today as the promotion of one SKU (their SKU, i.e. the alias when there is one). Read-only. */
-export async function readWalmartCaPromo(sku) {
-  const { data, error } = await supabase.functions.invoke('walmart-push-promo', { body: { mode: 'promo', sku } });
+export const WALMART_MARKETS = { ca: 'Walmart Canada', us: 'Walmart USA' };
+
+/** What Walmart holds today as the promotion of one SKU on a market (their SKU, i.e. the alias when there is one). Read-only. */
+export async function readWalmartPromo(sku, market = 'ca') {
+  const { data, error } = await supabase.functions.invoke('walmart-push-promo', { body: { mode: 'promo', market, sku } });
   if (error) throw new Error(error.message ?? 'walmart-push-promo failed');
   if (data?.error) throw new Error(data.error);
   return data;
 }
 
-export async function scheduleWalmartCaPromo(promotion, { skus = null, dryRun = false } = {}) {
+/**
+ * Schedule the promotion on a Walmart market as promotional prices —
+ * Canada: feed PRICE_AND_PROMOTION (regular price = MAP CAD, promo = promo
+ * MAP CAD, the Canada window); USA: feed `promo` (promo MAP USD against MAP
+ * USD, the USA window). Walmart turns it on and off by itself. The
+ * promo-apply cron does this the day before each window opens; here it is
+ * by hand. `skus` restricts the push (controlled tests, no stamp); `dryRun`
+ * returns the lines and the payload and sends nothing.
+ */
+export async function scheduleWalmartPromo(promotion, market = 'ca', { skus = null, dryRun = false } = {}) {
   const { data, error } = await supabase.functions.invoke('walmart-push-promo', {
-    body: { mode: 'push', promotionId: promotion.id, dryRun, ...(skus ? { skus } : {}) },
+    body: { mode: 'push', market, promotionId: promotion.id, dryRun, ...(skus ? { skus } : {}) },
   });
   if (error) throw new Error(error.message ?? 'walmart-push-promo failed');
   if (data?.error) throw new Error(data.error);
@@ -663,10 +681,10 @@ export async function scheduleWalmartCaPromo(promotion, { skus = null, dryRun = 
       action: 'push',
       entityType: 'promotion',
       entityId: String(promotion.id),
-      target: 'walmart_ca',
-      summary: `Scheduled "${promotion.name}" on Walmart Canada — ${data.attempted} promo prices (feed ${data.feedId ?? '?'})` +
+      target: `walmart_${market}`,
+      summary: `Scheduled "${promotion.name}" on ${WALMART_MARKETS[market] ?? market} — ${data.attempted} promo prices (feed ${data.feedId ?? '?'})` +
         (data.itemsFailed ? ` · ${data.itemsFailed} rejected` : '') + (data.not_listed ? ` · ${data.not_listed} not listed there` : ''),
-      metadata: { feed_id: data.feedId, attempted: data.attempted, failed: data.itemsFailed ?? 0, not_listed: data.not_listed, skus: skus ?? null },
+      metadata: { market, feed_id: data.feedId, attempted: data.attempted, failed: data.itemsFailed ?? 0, not_listed: data.not_listed, skus: skus ?? null },
     });
   }
   return data;

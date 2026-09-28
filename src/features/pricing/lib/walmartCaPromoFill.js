@@ -34,7 +34,7 @@ import {
   templateExt,
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
-import { promotionMembersFor } from '@/features/pricing/api/promotions';
+import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -84,7 +84,7 @@ function locate(grid) {
 
 /**
  * @param template  marketplace_templates row (Walmart CA, purpose "promotions" or "flash_deals")
- * @param promotion promotions row (kind decides the MAP level: monthly → Orange, else Purple)
+ * @param promotion promotions row (kind decides the MAP level: monthly and flash → Orange, special event → Purple; see KIND_LEVEL)
  * @param channel   PROMO_CHANNELS entry for Walmart Canada
  */
 export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
@@ -108,7 +108,7 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
   const { cols } = hit;
   if (cols.start === -1 || cols.end === -1) throw new Error('The file has no promotionPriceStartDateTime / promotionPriceEndDateTime columns.');
 
-  const tier = (promotion.kind ?? 'monthly') === 'monthly' ? 'orange' : 'purple';
+  const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const promoMapField = `map_${tier}_cad`;
   const { rows: members, excluded } = await promotionMembersFor(promotion, 'walmart_ca');
@@ -209,7 +209,7 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
 
 // The deal file: one row per product, SKU + promo price, nothing else.
 async function fillDealFile(zip, hit, template, promotion, channel) {
-  const tier = (promotion.kind ?? 'monthly') === 'monthly' ? 'orange' : 'purple';
+  const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const promoMapField = `map_${tier}_cad`;
   const { rows: members, excluded } = await promotionMembersFor(promotion, 'walmart_ca');
