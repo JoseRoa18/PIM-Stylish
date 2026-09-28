@@ -22,6 +22,8 @@
 //      Walmart asks for against what the PIM fills.
 //   7. mode "account" (read-only, production) returns the account's ship nodes
 //      (the fulfillmentCenterID inventory needs), partner profile and item count.
+//   8. mode "get" (read-only, production): one GET on an allowed Walmart path
+//      (catalog search, items, feeds, taxonomy, settings) — for diagnosing item setup.
 //
 // Body: {
 //   mode?: "preview" | "submit" | "status" | "spec", default preview
@@ -31,6 +33,8 @@
 //   confirm?: "CREATE",                        submit to production only
 //   feedId?: string,                           status
 //   productTypes?: string[],                   spec (default ["Sinks"])
+//   trim?: "required",                         preview / submit: only the spec's required fields
+//   path?: string,                             get: the Walmart GET path
 // }
 // Caller: authenticated admin/editor.
 // Secrets: WALMART_US_PROD_CLIENT_ID/SECRET, WALMART_US_SANDBOX_CLIENT_ID/SECRET.
@@ -280,6 +284,17 @@ function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: 
   return { item: { Visible: { Sinks: vis }, Orderable: ord }, rows, missing: [...new Set(missing)], warnings };
 }
 
+// The fields the Sinks spec requires (Get Spec, 5.0.20260803): Orderable's
+// `required` list and Visible.Sinks' `required` list, plus warrantyText, which
+// has_written_warranty = "Yes - Warranty Text" makes conditional-required.
+type MPItem = { Visible: { Sinks: Record<string, unknown> }; Orderable: Record<string, unknown> };
+const REQUIRED_ORDERABLE = ["sku", "productIdentifiers", "price", "ShippingWeight", "country_of_origin_substantial_transformation"];
+const REQUIRED_SINKS = ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "has_written_warranty", "warrantyText", "material", "netContent", "sink_type"];
+const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
+function trimToRequired(item: MPItem): MPItem {
+  return { Visible: { Sinks: pick(item.Visible.Sinks, REQUIRED_SINKS) }, Orderable: pick(item.Orderable, REQUIRED_ORDERABLE) };
+}
+
 // ---------------------------------------------------------------- spec validation
 // Walmart's Get Spec API returns the JSON Schema (draft-07) of the MP_ITEM
 // feed for the requested product types. Validating locally catches what
@@ -380,6 +395,21 @@ Deno.serve(async (req) => {
       return json({ ok: true, env: "production", ...out });
     }
 
+    // --- get (read-only diagnostics) -------------------------------------------
+    if (mode === "get") {
+      const path = String(body.path ?? "");
+      if (!/^\/v3\/(items\/walmart\/search|items(\/|\?|$)|feeds(\/|\?|$)|utilities\/taxonomy|settings\/)/.test(path)) return json({ error: "path not allowed (read-only diagnostics: /v3/items/walmart/search, /v3/items, /v3/feeds, /v3/utilities/taxonomy, /v3/settings/…)" }, 400);
+      const PCID = Deno.env.get("WALMART_US_PROD_CLIENT_ID"), PSEC = Deno.env.get("WALMART_US_PROD_CLIENT_SECRET");
+      if (!PCID || !PSEC) return json({ error: "Walmart US production secrets are not set." }, 500);
+      const prodBase = "https://marketplace.walmartapis.com";
+      const wm = await getToken(prodBase, PCID, PSEC);
+      const r = await fetch(`${prodBase}${path}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm }) });
+      const t = await r.text();
+      let parsed: unknown = t.slice(0, 20000);
+      try { parsed = JSON.parse(t); } catch { /* keep text */ }
+      return json({ ok: r.ok, env: "production", path, status: r.status, body: parsed });
+    }
+
     // --- build ----------------------------------------------------------------
     const skus: string[] = Array.isArray(body.skus) ? body.skus.map(String) : body.sku ? [String(body.sku)] : [];
     if (!skus.length) return json({ error: "skus[] is required." }, 400);
@@ -431,7 +461,8 @@ Deno.serve(async (req) => {
         const perSku: Record<string, { path: string; message: string }[]> = {};
         let allValid = true;
         readyRows.forEach((r, i) => {
-          const one = validateFeed(schema, { MPItemFeedHeader: feed.MPItemFeedHeader, MPItem: [items[i]] });
+          const item = body.trim === "required" ? trimToRequired(items[i] as MPItem) : items[i];
+          const one = validateFeed(schema, { MPItemFeedHeader: feed.MPItemFeedHeader, MPItem: [item] });
           if (!one.valid) { allValid = false; perSku[r.sku] = one.errors.map((e) => ({ ...e, path: e.path.replace(/^\/MPItem\/0/, "") })); }
         });
         validation = { valid: allValid, specVersion: SPEC_VERSION, checked: readyRows.length, errors: perSku };
@@ -440,7 +471,8 @@ Deno.serve(async (req) => {
           if (errs) (r as Record<string, unknown>).specErrors = errs;
         }
       }
-      return json({ ok: true, env, preview: true, products: report, skipped, validation, payload: body.debug ? feed : undefined });
+      const shown = body.trim === "required" ? { ...feed, MPItem: (items as MPItem[]).map(trimToRequired) } : feed;
+      return json({ ok: true, env, preview: true, trimmed: body.trim === "required", products: report, skipped, validation, payload: body.debug ? shown : undefined });
     }
 
     // --- submit ---------------------------------------------------------------
@@ -448,8 +480,13 @@ Deno.serve(async (req) => {
     if (!sandbox && body.confirm !== "CREATE") return json({ error: 'Production submit needs confirm: "CREATE".' }, 400);
     if (!items.length) return json({ error: "Nothing to submit: no SKU has every required field.", products: report, skipped }, 400);
     const wm = await getToken(base, CID, SEC);
+    // trim: "required" sends only what the spec requires (no variant group, no
+    // optional attributes) — to tell a Walmart-side rejection of the account
+    // from one of the optional fields (ERR_PDI_0001, 2026-09-28).
+    const trimmed = body.trim === "required";
+    const sendFeed = trimmed ? { ...feed, MPItem: (items as MPItem[]).map(trimToRequired) } : feed;
     const form = new FormData();
-    form.append("file", new Blob([JSON.stringify(feed)], { type: "application/json" }), "mp_item.json");
+    form.append("file", new Blob([JSON.stringify(sendFeed)], { type: "application/json" }), "mp_item.json");
     const res = await fetch(`${base}/v3/feeds?feedType=MP_ITEM`, {
       method: "POST",
       headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm }),
@@ -477,10 +514,10 @@ Deno.serve(async (req) => {
     const submitted = (report as { sku: string; ready: boolean }[]).filter((r) => r.ready).map((r) => r.sku);
     await admin.from("audit_log").insert({
       actor_id: caller.id, actor_email: caller.email ?? null, actor_name: null, action: "push", entity_type: "channel", entity_id: "walmart_us", target: "walmart",
-      summary: `${sandbox ? "Sandbox test" : "Created"} ${submitted.length} Walmart US item(s): ${submitted.slice(0, 8).join(", ")}${submitted.length > 8 ? "…" : ""}`,
-      metadata: { env, feedId, skus: submitted, ...outcome, items: undefined },
+      summary: `${sandbox ? "Sandbox test:" : "Submitted"} ${submitted.length} Walmart US item(s)${trimmed ? " (required fields only)" : ""}: ${submitted.slice(0, 8).join(", ")}${submitted.length > 8 ? "…" : ""} — feed ${feedId ?? "?"}${outcome.feedStatus ? `, ${outcome.feedStatus}` : ""}`,
+      metadata: { env, feedId, skus: submitted, trimmed, ...outcome, items: undefined },
     }).then(() => {}, () => {});
-    return json({ ok: true, env, feedId, submitted, products: report, skipped, ...outcome });
+    return json({ ok: true, env, feedId, submitted, trimmed, products: report, skipped, ...outcome, sent: trimmed ? sendFeed : undefined });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[walmart-add-items] FAILED:", message);

@@ -15,6 +15,12 @@ export default function WalmartAdditionCard({ product }) {
   const [busy, setBusy] = useState(null); // 'preview' | 'sandbox' | 'create' | 'status' | null
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState(null);
+  // Diagnostic: send only the fields Walmart's spec requires (no variant
+  // group, no optional attributes) — tells a Walmart-side rejection of the
+  // account (ERR_PDI_0001) from one of the optional fields. Changing it asks
+  // for a new Validate, which then checks the trimmed item.
+  const [onlyRequired, setOnlyRequired] = useState(false);
+  const trim = onlyRequired ? 'required' : undefined;
   const row = result?.products?.[0];
   const skipped = result?.skipped?.[0];
   // Create unlocks only after a clean Validate (mapping complete + official spec passed).
@@ -24,7 +30,9 @@ export default function WalmartAdditionCard({ product }) {
     if (mode === 'create') {
       const ok = await confirm({
         title: `Create ${product.sku} on Walmart USA?`,
-        message: 'This posts the item to the real Walmart catalog. Walmart processes it in minutes to hours; it cannot be undone from the PIM.',
+        message: onlyRequired
+          ? 'This posts the item to the real Walmart catalog with ONLY the fields Walmart requires (no variant group, no optional attributes) — a test. If it is created, the full content goes later as an update. It cannot be undone from the PIM.'
+          : 'This posts the item to the real Walmart catalog. Walmart processes it in minutes to hours; it cannot be undone from the PIM.',
         confirmLabel: 'Create listing',
       });
       if (!ok) return;
@@ -34,8 +42,8 @@ export default function WalmartAdditionCard({ product }) {
     setStatus(null);
     try {
       const data = mode === 'preview' || mode === 'validate'
-        ? await previewWalmartItems([product.sku], { validate: mode === 'validate' })
-        : await submitWalmartItems([product.sku], { sandbox: mode === 'sandbox', confirm: mode === 'create' ? 'CREATE' : undefined });
+        ? await previewWalmartItems([product.sku], { validate: mode === 'validate', trim })
+        : await submitWalmartItems([product.sku], { sandbox: mode === 'sandbox', confirm: mode === 'create' ? 'CREATE' : undefined, trim });
       setResult(data);
     } catch (err) {
       setResult({ error: err.message });
@@ -93,6 +101,16 @@ export default function WalmartAdditionCard({ product }) {
                 Check feed
               </button>
             )}
+            <label className="inline-flex items-center gap-2 ml-1 text-body-sm text-on-surface-variant cursor-pointer" title="Sends only the fields Walmart requires, to tell whether Walmart rejects the account or one of the optional fields. Validate again after changing it.">
+              <input
+                type="checkbox"
+                checked={onlyRequired}
+                onChange={(e) => { setOnlyRequired(e.target.checked); setResult(null); setStatus(null); }}
+                disabled={!!busy}
+                className="accent-primary"
+              />
+              Required fields only (test)
+            </label>
           </div>
         )}
 
@@ -116,7 +134,7 @@ export default function WalmartAdditionCard({ product }) {
               {row.ready ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />}
               <span className="min-w-0 break-words">
                 <span className="text-on-surface-variant">{result.preview ? 'preview' : result.env} · </span>
-                {row.productType} · {row.fields} fields
+                {row.productType} · {result.trimmed ? `required fields only (${row.rows.filter((r) => r.required).length + 1} of ${row.fields})` : `${row.fields} fields`}
                 {result.validation ? (result.validation.valid ? ' · spec OK' : ' · spec errors') : ''}
                 {result.feedId ? ` · feed ${result.feedId}` : ''}
                 {result.feedStatus ? ` · ${result.feedStatus}` : ''}

@@ -26,21 +26,21 @@ async function invoke(body) {
  * warnings. validate=true also checks each item against Walmart's official
  * item spec. Sends nothing either way.
  */
-export function previewWalmartItems(skus, { validate = false } = {}) {
-  return invoke({ mode: 'preview', skus, validate });
+export function previewWalmartItems(skus, { validate = false, trim } = {}) {
+  return invoke({ mode: 'preview', skus, validate, trim });
 }
 
 /**
  * Post the MP_ITEM feed. sandbox=true is Walmart's test environment (no real
  * catalog). Production needs sandbox=false and confirm='CREATE'.
  */
-export async function submitWalmartItems(skus, { sandbox = true, confirm } = {}) {
-  const data = await invoke({ mode: 'submit', skus, sandbox, confirm });
+export async function submitWalmartItems(skus, { sandbox = true, confirm, trim } = {}) {
+  const data = await invoke({ mode: 'submit', skus, sandbox, confirm, trim });
   if (!sandbox) {
     for (const sku of data.submitted ?? []) {
       logActivity({
         action: 'push', entityType: 'product', entityId: sku, target: 'walmart',
-        summary: `Submitted ${sku} as a new Walmart US item`,
+        summary: `Submitted ${sku} as a new Walmart US item${trim ? ' (required fields only)' : ''}`,
         metadata: { feedId: data.feedId, env: data.env },
       });
     }
