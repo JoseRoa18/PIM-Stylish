@@ -26,22 +26,23 @@ async function invoke(body) {
  * warnings. validate=true also checks each item against Walmart's official
  * item spec. Sends nothing either way.
  */
-export function previewWalmartItems(skus, { validate = false, trim } = {}) {
-  return invoke({ mode: 'preview', skus, validate, trim });
+export function previewWalmartItems(skus, { validate = false, trim, setup } = {}) {
+  return invoke({ mode: 'preview', skus, validate, trim, setup });
 }
 
 /**
- * Post the MP_ITEM feed. sandbox=true is Walmart's test environment (no real
+ * Post the MP_ITEM feed (setup 'match': MP_ITEM_MATCH, an offer on the listing
+ * Walmart already has for the UPC). sandbox=true is Walmart's test environment (no real
  * catalog). Production needs sandbox=false and confirm='CREATE'.
  */
-export async function submitWalmartItems(skus, { sandbox = true, confirm, trim } = {}) {
-  const data = await invoke({ mode: 'submit', skus, sandbox, confirm, trim });
+export async function submitWalmartItems(skus, { sandbox = true, confirm, trim, setup } = {}) {
+  const data = await invoke({ mode: 'submit', skus, sandbox, confirm, trim, setup });
   if (!sandbox) {
     for (const sku of data.submitted ?? []) {
       logActivity({
         action: 'push', entityType: 'product', entityId: sku, target: 'walmart',
-        summary: `Submitted ${sku} as a new Walmart US item${trim ? ' (required fields only)' : ''}`,
-        metadata: { feedId: data.feedId, env: data.env },
+        summary: setup === 'match' ? `Submitted ${sku} as a Walmart US offer on the existing listing (match)` : `Submitted ${sku} as a new Walmart US item${trim ? ' (required fields only)' : ''}`,
+        metadata: { feedId: data.feedId, env: data.env, feedType: data.feedType },
       });
     }
   }
