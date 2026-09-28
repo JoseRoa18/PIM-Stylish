@@ -110,6 +110,11 @@ function columnStyles(xml) {
 
 const CATEGORY_LABELS = { kitchen_sink: 'Kitchen Sinks', bathroom_sink: 'Bath Sinks', kitchen_faucet: 'Kitchen Faucets', bathroom_faucet: 'Bath Faucets', accessory: 'Accessories', bar_prep_sink: 'Bar Sinks', laundry_sink: 'Laundry Sinks', outdoor_sink: 'Outdoor Sinks', colander_drying_rack: 'Colanders' };
 
+// Home Depot Canada files sinks by family: its "Kitchen Sinks" sheet also
+// takes the bar / prep, laundry and outdoor sinks (user rule 2026-09-28), so
+// a template tagged kitchen_sink in Templates covers all four categories.
+const CATEGORY_FAMILY = { kitchen_sink: ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink'] };
+
 /**
  * @param template  marketplace_templates row (Home Depot CA, purpose "promotions" or "flash_deals"; its categories pick the members)
  * @param promotion promotions row (kind decides the level: monthly and flash → Orange, special event → Purple)
@@ -132,7 +137,8 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
   const tier = promotionLevel(promotion, channel);
   const promoMapField = `map_${tier}_cad`;
   const promoCostField = `cost_cad_rona_hd_${tier}`;
-  const categories = new Set(template.categories ?? []);
+  const tagged = template.categories ?? [];
+  const categories = new Set(tagged.flatMap((c) => CATEGORY_FAMILY[c] ?? [c]));
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel.key);
   if (!members.length) throw new Error('This promotion has no products.');
   const skus = members.map((r) => r.sku);
@@ -194,7 +200,7 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
       promoCost,
     });
   }
-  if (!lines.length) throw new Error(`Nothing to write: no ${categories.size ? [...categories].map((c) => CATEGORY_LABELS[c] ?? c).join(' / ') + ' ' : ''}product of this promotion has a Home Depot Canada id and a promo MAP below its MAP.`);
+  if (!lines.length) throw new Error(`Nothing to write: no ${tagged.length ? tagged.map((c) => CATEGORY_LABELS[c] ?? c).join(' / ') + ' ' : ''}product of this promotion has a Home Depot Canada id and a promo MAP below its MAP.`);
 
   // Rows already carrying an article stay; ours go on the first empty rows
   // after them (the template ships thousands of pre-formatted rows, J with
@@ -233,11 +239,11 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
   zip.file(hit.path, xml);
 
   const period = String(promotion.period).slice(0, 7);
-  const catLabel = [...categories].map((c) => CATEGORY_LABELS[c] ?? c).join('_').replace(/[^\w]+/g, '_');
+  const catLabel = tagged.map((c) => CATEGORY_LABELS[c] ?? c).join('_').replace(/[^\w]+/g, '_');
   await downloadZip(zip, `HomeDepotCA_${catLabel || 'Promo'}_${period}`, templateExt(template.storage_path));
 
   const report = {
-    rows: lines.length, tier, fromList, categories: [...categories], otherCategory, noAlias, noMap, noPromoMap, atOrAbove, under5, noCost, noPromoCost, noStock,
+    rows: lines.length, tier, fromList, categories: tagged, family: [...categories], otherCategory, noAlias, noMap, noPromoMap, atOrAbove, under5, noCost, noPromoCost, noStock,
     atZero: lines.filter((l) => l.forecast === 0 && stock[l.sku]).length, excluded, sheet: hit.name, firstRow,
   };
   logActivity({
@@ -254,7 +260,8 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
 const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? ` and ${list.length - n} more` : ''}`;
 
 export function summarizeHomeDepotCaFill(channel, r) {
-  const cats = r.categories.length ? r.categories.map((c) => CATEGORY_LABELS[c] ?? c).join(' / ') : 'every category';
+  const extra = (r.family ?? []).filter((c) => !r.categories.includes(c)).map((c) => (CATEGORY_LABELS[c] ?? c).toLowerCase());
+  const cats = r.categories.length ? r.categories.map((c) => CATEGORY_LABELS[c] ?? c).join(' / ') + (extra.length ? ` incl. ${extra.join(', ')}` : '') : 'every category';
   const parts = [`${channel.label} file ready. ${r.rows} articles (${cats}) from row ${r.firstRow} of sheet "${r.sheet}": NLP price = MAP ${levelLabel(r.tier)}, new cost = WC ${levelLabel(r.tier)}${r.fromList ? ` (${r.fromList} prices from the promotion's own list)` : ''}, forecast = Canada stock${r.atZero ? ` (${r.atZero} at 0)` : ''}. Fiscal Week (column A) is yours to fill`];
   if (r.otherCategory.length) parts.push(`${r.otherCategory.length} promo products of other categories left out (this template is ${cats})`);
   if (r.noAlias.length) parts.push(`no Home Depot Canada id in Aliases, left out: ${few(r.noAlias)}`);
