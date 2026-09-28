@@ -25,7 +25,10 @@
 //     promotion. Stylish brand sites sell at MSRP and are never touched.
 //   - Day before the first Thursday (prep pass): submits the Best Buy
 //     scheduled discounts for the Canada window (start date is in the
-//     future, which Mirakl requires).
+//     future, which Mirakl requires) and Walmart Canada's promotional
+//     prices; the day before the 1st, Walmart USA's (walmart-push-promo,
+//     Settings switches walmart_ca / walmart_us). Both boundary passes carry
+//     a safety net for a promotion not scheduled the day before.
 //   Manual "Run now" (body {sync:true}) RECONCILES: re-applies whatever
 //   should be live today on both markets, dates aside.
 //
@@ -43,6 +46,7 @@ import {
   promoWindow,
   windowContains,
 } from "../_shared/promoCalendar.ts";
+import { isServiceRole } from "../_shared/serviceRole.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -131,6 +135,8 @@ interface PromoRow {
   us_applied_at: string | null;
   ca_applied_at: string | null;
   bb_scheduled_at: string | null;
+  wm_ca_scheduled_at: string | null;
+  wm_us_scheduled_at: string | null;
 }
 interface PriceRow { sku: string; promo_price_cad: number | null; promo_price_usd: number | null }
 
@@ -280,6 +286,31 @@ async function scheduleBestBuy(
   return report;
 }
 
+// ---------- Walmart (both markets) ------------------------------------------
+// walmart-push-promo builds and posts the promotional-price feed; Walmart
+// flips the promo on the window's first minute by itself. Scheduled the day
+// before a market's window opens (prep) and, as a safety net, on the
+// boundary day when the prep did not happen. "Nothing to send" (no member
+// listed there yet — Walmart USA has no items so far) is an outcome, not an
+// error, and leaves the promotion unstamped so a later pass tries again.
+async function scheduleWalmart(market: "ca" | "us", promoId: number, dryRun: boolean): Promise<Record<string, unknown>> {
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/walmart-push-promo`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "push", market, promotionId: promoId, dryRun }),
+  });
+  const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+  if (resp.status === 400 && typeof body.error === "string") {
+    return { skipped: body.error, attempted: body.attempted ?? 0, not_listed: body.not_listed ?? 0 };
+  }
+  if (!resp.ok || body.error) throw new Error(String(body.error ?? `walmart-push-promo ${resp.status}`));
+  return {
+    attempted: body.attempted, not_listed: body.not_listed, excluded: body.excluded,
+    feed_id: body.feedId ?? null, feedStatus: body.feedStatus ?? null, itemsFailed: body.itemsFailed ?? 0,
+    ...(body.dryRun === true ? { dryRun: true } : {}),
+  };
+}
+
 // ---------- the run ---------------------------------------------------------
 
 async function run(dryRun: boolean, reconcile: boolean) {
@@ -301,7 +332,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
   // -- 1. promos on the board ------------------------------------------------
   const promos = await restGet<PromoRow[]>(
     // Only the MONTHLY promotions are automated; flash deals and special events run by hand.
-    "promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at&status=in.(draft,active)&kind=eq.monthly&order=id.desc",
+    "promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at,wm_ca_scheduled_at,wm_us_scheduled_at&status=in.(draft,active)&kind=eq.monthly&order=id.desc",
   );
   // The promotion whose window on a market contains a day — custom dates
   // when the promotion carries them, else its month's market calendar.
@@ -325,14 +356,17 @@ async function run(dryRun: boolean, reconcile: boolean) {
   // back to regular).
   const usStartsToday = (usTarget ? win(usTarget, "us").start === today : today === periodOfDay(today));
   const caStartsToday = (caTarget ? win(caTarget, "ca").start === today : caPeriod != null && today === marketWindow(caPeriod, "ca").start);
-  // Best Buy is scheduled the day before Canada's window opens.
+  // Best Buy and Walmart Canada are scheduled the day before Canada's window
+  // opens; Walmart USA the day before the USA window opens (the 1st).
   const prepTarget = promos.find((p) => win(p, "ca").start === tomorrow) ?? null;
+  const prepUsTarget = promos.find((p) => win(p, "us").start === tomorrow) ?? null;
 
   const doUS = reconcile || (usStartsToday && !usTarget?.us_applied_at);
   const doCA = reconcile || (caStartsToday && !caTarget?.ca_applied_at);
-  // The prep pass always (re)schedules — it overwrites idempotently, and an
-  // earlier schedule may carry an outdated window (e.g. pre-calendar-change).
-  const doPrep = prepTarget != null;
+  // The prep pass always (re)schedules Best Buy — it overwrites idempotently,
+  // and an earlier schedule may carry an outdated window (e.g.
+  // pre-calendar-change). Walmart is scheduled once (stamped).
+  const doPrep = prepTarget != null || prepUsTarget != null;
 
   if (!doUS && !doCA && !doPrep) {
     return { ...report, skipped: "no promo boundary today" };
@@ -373,6 +407,17 @@ async function run(dryRun: boolean, reconcile: boolean) {
         us_applied_at: nowIso,
         ...(usTarget.status === "draft" ? { status: "active", activated_at: nowIso } : {}),
       });
+    }
+  }
+  // Walmart USA safety net: the day-before prep normally schedules it; if it
+  // did not (promo loaded late / toggle off), schedule for the rest of the
+  // window (the function starts a window already open in a few minutes).
+  if (doUS && settings.walmart_us !== false && usTarget && !usTarget.wm_us_scheduled_at) {
+    try {
+      const rows = (await promoPrices(usTarget.id)).filter((r) => r.promo_price_usd != null);
+      if (rows.length) report.walmart_us = await scheduleWalmart("us", usTarget.id, dryRun);
+    } catch (err) {
+      errors.push(`walmart us: ${(err as Error).message}`);
     }
   }
 
@@ -465,6 +510,14 @@ async function run(dryRun: boolean, reconcile: boolean) {
         errors.push(`bestbuy: ${(err as Error).message}`);
       }
     }
+    // Same safety net for Walmart Canada.
+    if (settings.walmart_ca !== false && caTarget && cadRows.length && !caTarget.wm_ca_scheduled_at) {
+      try {
+        report.walmart_ca = await scheduleWalmart("ca", caTarget.id, dryRun);
+      } catch (err) {
+        errors.push(`walmart ca: ${(err as Error).message}`);
+      }
+    }
 
     if (!dryRun && caTarget) {
       await restPatch(`promotions?id=eq.${caTarget.id}`, {
@@ -487,6 +540,23 @@ async function run(dryRun: boolean, reconcile: boolean) {
       errors.push(`bestbuy prep: ${(err as Error).message}`);
     }
   }
+  // Walmart: the day before each market's window opens, its promotional
+  // prices go in (Walmart starts them on the window's first minute). Once
+  // per promotion — the stamp says it is done.
+  if (prepTarget && settings.walmart_ca !== false && !prepTarget.wm_ca_scheduled_at) {
+    try {
+      report.walmart_ca_prep = await scheduleWalmart("ca", prepTarget.id, dryRun);
+    } catch (err) {
+      errors.push(`walmart ca prep: ${(err as Error).message}`);
+    }
+  }
+  if (prepUsTarget && settings.walmart_us !== false && !prepUsTarget.wm_us_scheduled_at) {
+    try {
+      report.walmart_us_prep = await scheduleWalmart("us", prepUsTarget.id, dryRun);
+    } catch (err) {
+      errors.push(`walmart us prep: ${(err as Error).message}`);
+    }
+  }
 
   report.errors = errors;
   report.ok = errors.length === 0;
@@ -496,7 +566,12 @@ async function run(dryRun: boolean, reconcile: boolean) {
     const parts: string[] = [];
     if (doUS) parts.push(usTarget ? `USA on promo "${usTarget.name}"` : "USA back to regular prices");
     if (doCA) parts.push(caTarget ? `Canada on promo "${caTarget.name}"` : "Canada back to regular prices");
-    if (doPrep && prepTarget) parts.push(`Best Buy scheduled for "${prepTarget.name}" (starts tomorrow)`);
+    if (doPrep && prepTarget && settings.bestbuy !== false) parts.push(`Best Buy scheduled for "${prepTarget.name}" (starts tomorrow)`);
+    const sent = (r: unknown) => r && !(r as Record<string, unknown>).skipped;
+    if (sent(report.walmart_ca_prep)) parts.push(`Walmart Canada scheduled for "${prepTarget?.name}" (starts tomorrow)`);
+    if (sent(report.walmart_us_prep)) parts.push(`Walmart USA scheduled for "${prepUsTarget?.name}" (starts tomorrow)`);
+    if (sent(report.walmart_ca)) parts.push(`Walmart Canada scheduled for "${caTarget?.name}"`);
+    if (sent(report.walmart_us)) parts.push(`Walmart USA scheduled for "${usTarget?.name}"`);
     try {
       await restPost("audit_log", {
         action: "push",
@@ -524,7 +599,8 @@ Deno.serve(async (req) => {
     const cronSecret = Deno.env.get("CRON_SECRET");
     const provided = req.headers.get("x-cron-secret");
     const auth = req.headers.get("authorization") ?? "";
-    let authorized = (cronSecret && provided === cronSecret) || auth === `Bearer ${SERVICE_KEY}`;
+    const bearer = auth.replace(/^Bearer\s+/i, "").trim();
+    let authorized = Boolean(cronSecret && provided === cronSecret) || await isServiceRole(SUPABASE_URL, bearer, SERVICE_KEY);
 
     if (!authorized && auth.startsWith("Bearer ")) {
       // Settings page "Run now": an authenticated ADMIN may trigger a run.

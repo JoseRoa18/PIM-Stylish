@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap } from 'lucide-react';
+import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, Upload } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
+import { getInventoryReport, refreshInventory, uploadCanadaInventory, describeInventoryPull, stockAge } from '@/features/pricing/api/inventory';
 import { listPromotions } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { Link } from 'react-router-dom';
@@ -50,6 +51,142 @@ function SettingRow({ title, description, checked, disabled, onChange }) {
   );
 }
 
+// Stock sources: USA from ShipStation on its own (hourly); Canada from the
+// "Stylish Inventory" workbook, mailed daily to the PIM mailbox
+// (scripts/gmail-inventory-to-pim.gs) or uploaded here. The last pull's
+// report per market comes from app_settings.
+const STOCK_SOURCES = [
+  { key: 'us', title: 'USA — ShipStation', description: 'Every hour, and right after a product is created.' },
+  { key: 'ca', title: 'Canada — "Stylish Inventory" file', description: 'From the daily email, or the file uploaded here. A SKU not in the file is not tracked.' },
+];
+
+function describeSource(r) {
+  if (!r) return 'not loaded yet';
+  if (r.skipped) return r.note ?? 'unchanged';
+  if (!r.ok) return r.error ?? 'not loaded yet';
+  const bits = [`${r.matched} SKUs tracked`, `${r.inStock} in stock`];
+  if (r.outOfStock) bits.push(`${r.outOfStock} at 0`);
+  if (r.unmatched?.length) bits.push(`${r.unmatched.length} not in the PIM`);
+  const how = r.via === 'email' ? `emailed${r.file ? ` "${r.file}"` : ''}`
+    : r.via === 'upload' ? `uploaded${r.file ? ` "${r.file}"` : ''}`
+    : r.via ? `SharePoint (${r.via})` : 'ShipStation';
+  return `${bits.join(', ')} · ${how} · ${stockAge(r.syncedAt)}`;
+}
+
+function InventorySection() {
+  const [report, setReport] = useState(null);
+  const [busy, setBusy] = useState(null); // 'refresh' | 'upload'
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    getInventoryReport().then((r) => setReport(r ?? {})).catch(() => setReport({}));
+  }, []);
+
+  async function refresh() {
+    setBusy('refresh');
+    setMsg(null);
+    try {
+      const r = await refreshInventory();
+      setReport((await getInventoryReport()) ?? {});
+      setMsg({ tone: r.ok ? 'success' : 'error', text: describeInventoryPull(r).join(' · ') });
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function upload(file) {
+    if (!file) return;
+    setBusy('upload');
+    setMsg(null);
+    try {
+      const r = await uploadCanadaInventory(file);
+      setReport((await getInventoryReport()) ?? {});
+      const ca = r.markets?.ca;
+      setMsg(ca?.ok
+        ? { tone: 'success', text: `"${file.name}" loaded — ${describeInventoryPull(r).join(' · ')}` }
+        : { tone: 'error', text: ca?.error ?? r.error ?? 'The file could not be loaded.' });
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const markets = report?.markets ?? {};
+  return (
+    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
+          <Package className="w-5 h-5" strokeWidth={2} />
+        </div>
+        <div>
+          <h2 className="text-title-md text-on-surface font-semibold">Stock</h2>
+          <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
+            Shown in the catalog, on each product and in the promotion tables. A missing SKU is "not tracked", never 0.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl bg-surface-container-low/60 p-4 space-y-3">
+        {report === null ? (
+          <p className="text-body-sm text-on-surface-variant">
+            <Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading…
+          </p>
+        ) : (
+          STOCK_SOURCES.map(({ key, title, description }) => {
+            const r = markets[key];
+            const fine = Boolean(r?.ok);
+            return (
+              <div key={key} className="flex items-start gap-2 text-body-sm">
+                {fine ? (
+                  <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-on-surface-variant flex-shrink-0 mt-0.5" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-on-surface font-medium">{title} <span className="font-normal text-on-surface-variant">— {describeSource(r)}</span></p>
+                  <p className="text-on-surface-variant">{description}</p>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+        >
+          {busy === 'refresh' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          Refresh now
+        </button>
+        <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy !== null ? 'opacity-40 pointer-events-none' : ''}`}>
+          {busy === 'upload' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+          Upload the Canada file (.xlsx)
+          <input
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ''; }}
+          />
+        </label>
+      </div>
+
+      {msg && (
+        <p className={`mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+          {msg.tone === 'error' ? <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+          {msg.text}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const confirm = useConfirm();
   const [settings, setSettings] = useState(null);
@@ -60,11 +197,11 @@ export default function SettingsPage() {
 
   useEffect(() => {
     Promise.all([
-      getAppSetting('promo_automation', { enabled: true, wix: true, bestbuy: true }),
+      getAppSetting('promo_automation', { enabled: true, wix: true, bestbuy: true, walmart_ca: true, walmart_us: true }),
       listPromotions(),
     ])
       .then(([s, promos]) => {
-        setSettings({ enabled: true, wix: true, bestbuy: true, ...s });
+        setSettings({ enabled: true, wix: true, bestbuy: true, walmart_ca: true, walmart_us: true, ...s });
         setPromotions(promos);
       })
       .catch((err) => setError(err.message));
@@ -107,7 +244,7 @@ export default function SettingsPage() {
   async function runNow() {
     const ok = await confirm({
       title: 'Run promotion automation now?',
-      message: 'Re-applies what should be live today on both markets (USA + Canada) and re-schedules Best Buy. Safe to re-run.',
+      message: 'Re-applies what should be live today on both markets (USA + Canada), re-schedules Best Buy and schedules Walmart Canada / USA when they are not yet. Safe to re-run.',
       confirmLabel: 'Run now',
     });
     if (!ok) return;
@@ -134,6 +271,11 @@ export default function SettingsPage() {
     if (r.us) parts.push(`Wix US ${r.us.pushed}/${r.us.linked}`);
     if (r.ca) parts.push(`Wix CA ${r.ca.pushed}/${r.ca.linked}`);
     if (r.bestbuy || r.prep) parts.push(`Best Buy ${(r.bestbuy ?? r.prep).listed} scheduled`);
+    for (const [key, label] of [['walmart_ca', 'Walmart CA'], ['walmart_ca_prep', 'Walmart CA'], ['walmart_us', 'Walmart US'], ['walmart_us_prep', 'Walmart US']]) {
+      const w = r[key];
+      if (!w) continue;
+      parts.push(w.skipped ? `${label}: ${w.skipped}` : `${label} ${w.attempted} scheduled${w.itemsFailed ? ` (${w.itemsFailed} rejected)` : ''}`);
+    }
     if (r.errors?.length) parts.push(`⚠ ${r.errors.length} error${r.errors.length === 1 ? '' : 's'}`);
     return parts.join(' · ') || 'Nothing to do today';
   };
@@ -191,6 +333,20 @@ export default function SettingsPage() {
             disabled={!settings || settings?.enabled === false}
             onChange={(v) => update({ bestbuy: v })}
           />
+          <SettingRow
+            title="Walmart Canada"
+            description="Promo prices sent through the Walmart API the day before Canada’s window — Walmart turns them on and off by itself."
+            checked={settings?.walmart_ca !== false}
+            disabled={!settings || settings?.enabled === false}
+            onChange={(v) => update({ walmart_ca: v })}
+          />
+          <SettingRow
+            title="Walmart USA"
+            description="Promo prices sent through the Walmart API the day before the 1st — Walmart turns them on and off by itself."
+            checked={settings?.walmart_us !== false}
+            disabled={!settings || settings?.enabled === false}
+            onChange={(v) => update({ walmart_us: v })}
+          />
         </div>
 
         <div className="mt-4 rounded-xl bg-surface-container-low/60 p-4 space-y-2">
@@ -244,6 +400,7 @@ export default function SettingsPage() {
         )}
       </section>
 
+      <InventorySection />
     </div>
   );
 }
