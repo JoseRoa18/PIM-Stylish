@@ -15,7 +15,10 @@
 //   discount-start/end-date and discount-retail-price-start/end-date
 //                          the market's promo window as Eastern-time stamps
 //                          (2026-10-01T00:00:00.000-04:00 … T23:59:59.999)
-//   quantity               1
+//   quantity               the market's stock in the PIM (product_inventory —
+//                          USA: ShipStation), 1 when the SKU is not tracked
+//                          there (user rule 2026-09-28: every stock column of
+//                          a promo file takes the PIM's inventory)
 //   state                  11
 //   update-delete          "update"
 // (Home Depot USA rules given by the user 2026-09-14.)
@@ -33,6 +36,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor } from '@/features/pricing/api/promotions';
+import { getStockFor } from '@/features/pricing/api/inventory';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -122,12 +126,17 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     }
   }
 
+  // The offer's quantity is the market's stock in the PIM; a SKU the
+  // warehouse does not track keeps the old fixed 1 and is reported.
+  const stock = (await getStockFor(skus))[market] ?? {};
+
   const window = promoWindow(promotion, market);
   const { cols } = hit;
   const lines = [];
   const noRegular = [];
   const atOrAbove = [];
   const noAlias = [];
+  const noStock = [];
   let aliased = 0;
   for (const m of members) {
     if (channel.aliasMarketplace && !alias.has(m.sku)) { noAlias.push(m.sku); continue; }
@@ -136,6 +145,8 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     if (channel.priceField && regular == null) { noRegular.push(m.sku); continue; }
     if (regular != null && Number(m[priceKey]) >= Number(regular)) { atOrAbove.push(m.sku); continue; }
     if (alias.has(m.sku)) aliased += 1;
+    const tracked = stock[m.sku];
+    if (!tracked) noStock.push(m.sku);
     lines.push({
       sku: m.sku,
       productId: alias.get(m.sku) ?? null,
@@ -143,6 +154,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
       baseCost: channel.costField ? p[channel.costField] ?? null : null,
       promoCost: channel.promoCostSlug ? m.promo_costs?.[channel.promoCostSlug] ?? null : null,
       discount: Number(m[priceKey]),
+      quantity: tracked ? Number(tracked.available) : 1,
     });
   }
   if (!lines.length) throw new Error('Nothing to write: no member has a promo price below its regular price.');
@@ -166,7 +178,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     put(cols.discount, l.promoCost != null ? Number(l.promoCost) : null);
     put(cols.start, startStamp(window.start));
     put(cols.end, endStamp(window.end));
-    put(cols.quantity, 1);
+    put(cols.quantity, l.quantity);
     put(cols.state, 11);
     put(cols.updateDelete, 'update');
     rowsXml += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
@@ -178,20 +190,22 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
 
   const noPromoCost = lines.filter((l) => l.promoCost == null).length;
   const noBaseCost = channel.costField ? lines.filter((l) => l.baseCost == null).length : 0;
-  const report = { rows: lines.length, aliased, noAlias, noRegular, atOrAbove, noPromoCost, noBaseCost, excluded, window, sheet: hit.name };
+  const atZero = lines.filter((l) => l.quantity === 0).length;
+  const report = { rows: lines.length, aliased, noAlias, noRegular, atOrAbove, noPromoCost, noBaseCost, noStock, atZero, excluded, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: channel.key,
-    summary: `Filled ${channel.label} promotions file for "${promotion.name}" (${lines.length} offers)`,
-    metadata: { template: template.file_name, rows: lines.length, noAlias: noAlias.length, noRegular: noRegular.length, atOrAbove: atOrAbove.length, window },
+    summary: `Filled ${channel.label} promotions file for "${promotion.name}" (${lines.length} offers, quantity = ${market === 'us' ? 'USA' : 'Canada'} stock)`,
+    metadata: { template: template.file_name, rows: lines.length, noAlias: noAlias.length, noRegular: noRegular.length, atOrAbove: atOrAbove.length, noStock: noStock.length, atZero, window },
   });
   return report;
 }
 
 export function summarizeMiraklFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.rows} offers, ${startStamp(r.window.start)} to ${endStamp(r.window.end)}`];
+  const parts = [`${channel.label} file ready. ${r.rows} offers, ${startStamp(r.window.start)} to ${endStamp(r.window.end)}, quantity = ${channel.market === 'us' ? 'USA' : 'Canada'} stock${r.atZero ? ` (${r.atZero} at 0)` : ''}`];
+  if (r.noStock?.length) parts.push(`${r.noStock.length} not tracked in the warehouse, quantity 1: ${r.noStock.slice(0, 8).join(', ')}${r.noStock.length > 8 ? ` and ${r.noStock.length - 8} more` : ''}`);
   if (r.noPromoCost) parts.push(`${r.noPromoCost} rows without a promo cost (column U empty)`);
   if (r.noBaseCost) parts.push(`${r.noBaseCost} rows without the channel cost in the PIM (column F empty)`);
   if (r.noAlias.length) parts.push(`no ${channel.label} id on file, left out: ${r.noAlias.slice(0, 8).join(', ')}${r.noAlias.length > 8 ? ` and ${r.noAlias.length - 8} more` : ''}`);

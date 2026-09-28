@@ -12,7 +12,11 @@
 //   G SUPPLIER_ID                   always 550562
 //   H Brand                         the product's brand (Stylish or Azuni)
 //   I Product Description           the name on the alias (Rona's own title)
-//   J Inventory                     0 for now (to be decided)
+//   J Inventory                     the Canada stock in the PIM
+//                                   (product_inventory: the inventory file),
+//                                   0 when the SKU is not in it (user rule
+//                                   2026-09-28: every stock column of a promo
+//                                   file takes the PIM's inventory)
 //   K Status                        empty
 //   L REGULAR COST                  WC Blue  = cost_cad_rona_hd
 //   M PROMO COST                    WC Orange for a monthly promotion, WC
@@ -45,6 +49,7 @@ import {
   norm,
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
+import { getStockFor } from '@/features/pricing/api/inventory';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -122,6 +127,10 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
     for (const a of aliases ?? []) alias.set(a.sku, a);
   }
 
+  // Column J is the Canada stock in the PIM; a SKU the inventory file does
+  // not carry goes out as 0 and is reported.
+  const stock = (await getStockFor(skus)).ca ?? {};
+
   const window = promoWindow(promotion, 'ca');
   const lines = [];
   const noAlias = [];
@@ -130,6 +139,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   const noRegularCost = [];
   const noPromoCost = [];
   const noPromoMap = [];
+  const noStock = [];
   const atOrAbove = [];
   let fromList = 0;
   for (const m of members) {
@@ -148,6 +158,8 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
     if (!a.listing_title) noName.push(m.sku);
     const upc = String(p.attributes?.upc ?? '').trim();
     if (!upc) noUpc.push(m.sku);
+    const tracked = stock[m.sku];
+    if (!tracked) noStock.push(m.sku);
     lines.push({
       sku: m.sku,
       ronaId: a.alias,
@@ -158,6 +170,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
       promoCost,
       map: p.map_cad != null ? Number(p.map_cad) : null,
       promoMap,
+      inventory: tracked ? Number(tracked.available) : 0,
     });
   }
   if (!lines.length) throw new Error('Nothing to write: no product has a Rona id with a promo cost below its regular cost.');
@@ -203,7 +216,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
     put(cols.supplierId, RONA_SUPPLIER.id);
     put(cols.brand, l.brand);
     put(cols.description, l.name);
-    put(cols.inventory, 0);
+    put(cols.inventory, l.inventory);
     put(cols.regularCost, l.regularCost);
     put(cols.promoCost, l.promoCost);
     put(cols.regularMap, l.map);
@@ -222,14 +235,15 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   const period = String(promotion.period).slice(0, 7);
   await downloadZip(zip, `Rona_Promo_${period}`, templateExt(template.storage_path));
 
-  const report = { rows: lines.length, tier, fromList, noAlias, noName, noUpc, noRegularCost, noPromoCost, noPromoMap, atOrAbove, excluded, window, sheet: hit.name };
+  const atZero = lines.filter((l) => l.inventory === 0 && stock[l.sku]).length;
+  const report = { rows: lines.length, tier, fromList, noAlias, noName, noUpc, noRegularCost, noPromoCost, noPromoMap, noStock, atZero, atOrAbove, excluded, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: channel.key,
-    summary: `Filled Rona promotions file for "${promotion.name}" (${lines.length} products, WC ${tier})`,
-    metadata: { template: template.file_name, rows: lines.length, tier, noAlias: noAlias.length, noName: noName.length, noUpc: noUpc.length, noRegularCost: noRegularCost.length, noPromoCost: noPromoCost.length, noPromoMap: noPromoMap.length, atOrAbove: atOrAbove.length, window },
+    summary: `Filled Rona promotions file for "${promotion.name}" (${lines.length} products, WC ${tier}, inventory = Canada stock)`,
+    metadata: { template: template.file_name, rows: lines.length, tier, noAlias: noAlias.length, noName: noName.length, noUpc: noUpc.length, noRegularCost: noRegularCost.length, noPromoCost: noPromoCost.length, noPromoMap: noPromoMap.length, noStock: noStock.length, atZero, atOrAbove: atOrAbove.length, window },
   });
   return report;
 }
@@ -245,6 +259,8 @@ export function summarizeRonaFill(channel, r) {
   if (r.noPromoMap.length) parts.push(`${r.noPromoMap.length} without MAP ${r.tier === 'orange' ? 'Orange' : 'Purple'} (column Q empty): ${few(r.noPromoMap, 5)}`);
   if (r.noName.length) parts.push(`${r.noName.length} without a Rona name (column I empty): ${few(r.noName, 5)}`);
   if (r.noUpc.length) parts.push(`${r.noUpc.length} without UPC (column E empty): ${few(r.noUpc, 5)}`);
+  parts.push(`inventory (column J) = Canada stock${r.atZero ? `, ${r.atZero} at 0` : ''}`);
+  if (r.noStock?.length) parts.push(`${r.noStock.length} not in the Canada inventory file, inventory 0: ${few(r.noStock, 5)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${few(r.excluded)}`);
   return parts.join(' · ');
 }
