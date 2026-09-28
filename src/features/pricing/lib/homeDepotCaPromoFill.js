@@ -26,9 +26,12 @@
 //                            (promo_costs.rona_hd_cad) wins
 //   Q… everything else       empty
 //
-// The workbook ships every data row pre-formatted (J carries the formula),
-// so lines are merged into the first empty rows under the header; new cells
-// take the sheet's column styles (<cols>) so the formats survive. Members
+// The workbook ships every data row pre-formatted — one styled empty cell per
+// column (borders, centering, currency), J with the formula — so lines are
+// merged into the first empty rows under the header and every value keeps
+// the style of the cell it replaces; only a row the template does not carry
+// falls back to the sheet's column styles (<cols>). Article # is written as
+// a number (the sheet validates C as a whole number ≥ 1000000000). Members
 // outside the template's categories (marketplace_templates.categories) are
 // left out and reported, as are those without a Home Depot Canada id or
 // without any promo MAP to write; everything else goes in (user rule
@@ -58,10 +61,12 @@ import { getStockFor } from '@/features/pricing/api/inventory';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const ALIAS_MARKETPLACE = 'Home Depot CA';
+// Spelled the way the sheet's own dropdowns and Home Depot's filled files
+// have them (I validates "YES,NO"; E is written "Ea" in their files).
 export const HDCA_CONSTANTS = {
   merchant: 'Wendy Chan',
-  unit: 'EA',
-  priceUp: 'Yes',
+  unit: 'Ea',
+  priceUp: 'YES',
   market: 'ALL',
   duration: '30 Days',
   funding: 'Cost Reduction',
@@ -196,7 +201,7 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
     if (!tracked) noStock.push(m.sku);
     lines.push({
       sku: m.sku,
-      article: a.alias,
+      article: /^\d+$/.test(String(a.alias).trim()) ? Number(a.alias) : a.alias,
       description: a.listing_title ?? null,
       forecast: tracked ? Number(tracked.available) : 0,
       map,
@@ -222,7 +227,10 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
   for (const [idx, l] of lines.entries()) {
     const rn = firstRow + idx;
     const cells = new Map();
-    const put = (c, v) => { if (c != null && v != null && v !== '') cells.set(c + 1, buildCell(`${indexToCol(c + 1)}${rn}`, v, styles.get(c + 1) ?? null)); };
+    // In a row the template carries, the merge (keepStyle) hands each value
+    // the style of the empty cell it replaces; elsewhere the column style.
+    const inTemplate = existingRows.has(rn);
+    const put = (c, v) => { if (c != null && v != null && v !== '') cells.set(c + 1, buildCell(`${indexToCol(c + 1)}${rn}`, v, inTemplate ? null : styles.get(c + 1) ?? null)); };
     put(cols.merchant, HDCA_CONSTANTS.merchant);
     put(cols.article, l.article);
     put(cols.description, l.description);
