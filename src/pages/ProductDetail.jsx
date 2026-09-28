@@ -44,6 +44,8 @@ import Dialog from '@/components/ui/Dialog';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
 import StatusBadge from '@/features/products/components/StatusBadge';
+import StockBadge from '@/features/products/components/StockBadge';
+import { getStockFor } from '@/features/pricing/api/inventory';
 import MediaSection from '@/features/media/components/MediaSection';
 import DocumentsSection from '@/features/media/components/DocumentsSection';
 import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
@@ -425,6 +427,17 @@ export default function ProductDetail() {
   const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({});
 
+  // Stock per market (the ShipStation cache): undefined while looking it
+  // up; inside, null where that warehouse doesn't track this SKU.
+  const [stock, setStock] = useState(undefined);
+  useEffect(() => {
+    let active = true;
+    getStockFor([sku])
+      .then((map) => { if (active) setStock({ ca: map.ca[sku] ?? null, us: map.us[sku] ?? null }); })
+      .catch(() => { if (active) setStock({ ca: null, us: null }); });
+    return () => { active = false; };
+  }, [sku]);
+
   // Data-driven dropdown suggestions: the distinct values the catalog already
   // uses for enumerable fields. New values stay possible via "Other…".
   const [suggestions, setSuggestions] = useState({});
@@ -566,6 +579,8 @@ export default function ProductDetail() {
               <StatusBadge status={product.workflow_status} />
             )}
             <WixLinkBadge product={product} />
+            <StockBadge market="ca" stock={stock?.ca} loading={stock === undefined} />
+            <StockBadge market="us" stock={stock?.us} loading={stock === undefined} />
           </div>
           {isEditing ? (
             <input

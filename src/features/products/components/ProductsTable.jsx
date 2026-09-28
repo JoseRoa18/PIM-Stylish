@@ -18,6 +18,8 @@ const COLUMNS = [
   { key: 'brand', label: 'Brand', align: 'left', width: 'w-28' },
   { key: 'category', label: 'Category', align: 'left', width: 'w-44' },
   { key: 'status', label: 'Status', align: 'left', width: 'w-36' },
+  { key: 'stock_ca', label: 'Stock CA', align: 'right', width: 'w-28' },
+  { key: 'stock_us', label: 'Stock USA', align: 'right', width: 'w-28' },
   { key: 'msrp', label: 'MSRP', align: 'right', width: 'w-28' },
 ];
 
@@ -45,10 +47,17 @@ export default function ProductsTable({
   sortDir,
   onSort,
   showMsrp = false,
+  showStockCa = false,
+  showStockUs = false,
 }) {
   const navigate = useNavigate();
   const selectionEnabled = typeof onToggleSelect === 'function';
-  const columns = showMsrp ? COLUMNS : COLUMNS.filter((c) => c.key !== 'msrp');
+  const columns = COLUMNS.filter(
+    (c) =>
+      (c.key !== 'msrp' || showMsrp) &&
+      (c.key !== 'stock_ca' || showStockCa) &&
+      (c.key !== 'stock_us' || showStockUs),
+  );
 
   if (error) {
     return (
@@ -239,6 +248,8 @@ export default function ProductsTable({
                   <td className="py-2 px-4">
                     <StatusBadge status={product.workflow_status} />
                   </td>
+                  {showStockCa && <StockCell value={product.stock_ca} market="ca" />}
+                  {showStockUs && <StockCell value={product.stock_us} market="us" />}
                   {showMsrp && (
                     <td className="py-2 px-4 text-body-md font-semibold text-on-surface text-right whitespace-nowrap tabular-nums">
                       {formatCAD(product.msrp_cad)}
@@ -251,6 +262,30 @@ export default function ProductsTable({
         </table>
       </div>
     </div>
+  );
+}
+
+// Units available per market (USA: ShipStation's warehouse; Canada: the
+// inventory file); "—" is not tracked, never zero.
+const STOCK_TITLES = {
+  ca: { none: 'Not in the Canada inventory file', some: (v) => `${v} in stock per the Canada inventory file` },
+  us: { none: 'Not tracked in ShipStation (USA warehouse)', some: (v) => `${v} available in the USA warehouse (ShipStation)` },
+};
+function StockCell({ value, market }) {
+  const t = STOCK_TITLES[market];
+  return (
+    <td
+      className={`py-2 px-4 text-body-md text-right whitespace-nowrap tabular-nums ${
+        value == null
+          ? 'text-on-surface-variant/60'
+          : value > 0
+            ? 'text-on-surface font-semibold'
+            : 'text-error font-semibold'
+      }`}
+      title={value == null ? t.none : t.some(value)}
+    >
+      {value == null ? '—' : value}
+    </td>
   );
 }
 

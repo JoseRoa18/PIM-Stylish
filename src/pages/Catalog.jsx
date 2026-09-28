@@ -14,6 +14,7 @@ import Pagination from '@/components/ui/Pagination';
 import { useAuth } from '@/features/auth/AuthContext';
 import { statusMeta, STATUS_ORDER } from '@/features/products/lib/workflowStatus';
 import { getThumbnailUrl } from '@/features/media/api/media';
+import { getAllStock } from '@/features/pricing/api/inventory';
 
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -24,6 +25,8 @@ const SORT_ACCESSORS = {
   brand: (p) => p.brand,
   category: (p) => p.category,
   status: (p) => p.workflow_status,
+  stock_ca: (p) => p.stock_ca,
+  stock_us: (p) => p.stock_us,
   msrp: (p) => p.msrp_cad,
 };
 
@@ -118,7 +121,31 @@ export default function Catalog() {
     sessionStorage.setItem('catalog:lastSearch', qs ? `?${qs}` : '');
   }, [searchParams]);
 
-  const baseFiltered = useFilteredProducts(products, { searchTerm, filters });
+  // Stock per market and SKU (the ShipStation cache) joined onto the rows as
+  // `stock_ca` / `stock_us` so the columns sort like any other: a number,
+  // null when that warehouse doesn't track the SKU, undefined until the
+  // lookup answers.
+  const [stockByMarket, setStockByMarket] = useState(null);
+  useEffect(() => {
+    let active = true;
+    getAllStock()
+      .then((map) => { if (active) setStockByMarket(map); })
+      .catch(() => { if (active) setStockByMarket({ ca: {}, us: {} }); });
+    return () => { active = false; };
+  }, []);
+  const productsWithStock = useMemo(
+    () =>
+      products
+        ? products.map((p) => ({
+            ...p,
+            stock_ca: stockByMarket ? (stockByMarket.ca[p.sku]?.available ?? null) : undefined,
+            stock_us: stockByMarket ? (stockByMarket.us[p.sku]?.available ?? null) : undefined,
+          }))
+        : products,
+    [products, stockByMarket],
+  );
+
+  const baseFiltered = useFilteredProducts(productsWithStock, { searchTerm, filters });
   const filteredProducts = useMemo(
     () =>
       statusFilter
@@ -132,6 +159,17 @@ export default function Catalog() {
   // doesn't appear and vanish while paginating or sorting.
   const showMsrp = useMemo(
     () => filteredProducts.some((p) => p.msrp_cad != null && p.msrp_cad !== ''),
+    [filteredProducts],
+  );
+  // Same rule for each stock column: shown when the filtered set has any
+  // SKU that warehouse tracks (a brand sold in one market only would leave
+  // the other column all "—").
+  const showStockCa = useMemo(
+    () => filteredProducts.some((p) => p.stock_ca != null),
+    [filteredProducts],
+  );
+  const showStockUs = useMemo(
+    () => filteredProducts.some((p) => p.stock_us != null),
     [filteredProducts],
   );
 
@@ -335,6 +373,8 @@ export default function Catalog() {
             sortDir={sortDir}
             onSort={onSort}
             showMsrp={showMsrp}
+            showStockCa={showStockCa}
+            showStockUs={showStockUs}
           />
           {!loading && !error && (
             <Pagination
