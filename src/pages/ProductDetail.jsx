@@ -1599,7 +1599,7 @@ function PricingTab({ product, edit, onAddPricing }) {
               product={product}
               edit={edit}
               columns={[
-                { label: 'MAP · Wayfair Canada', help: 'Wayfair Canada is priced in US dollars. Blue is its base MAP; Orange the monthly-promotion level; Purple the special event level.', keys: ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple'] },
+                { label: 'MAP · Wayfair Canada', help: 'Wayfair Canada in US dollars. Its wholesale cost is billed in USD; Wayfair shows its MAP in CAD (the Canada MAP above) and uses this USD MAP only on the few products where it keeps one.', keys: ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple'] },
                 { label: 'WC · Wayfair Canada', keys: ['cost_usd_wayfair_ca', 'cost_usd_wayfair_ca_orange', 'cost_usd_wayfair_ca_purple'] },
               ]}
             />

@@ -27,10 +27,11 @@
 //   B2bRecommendedDiscountPercent    0
 //   B2bPromotionalDiscountPercent    0
 //   B2bPromotionalDiscountBaseCost   empty
-// Canada supplier (confirmed against the July submission): discount 0, base
-// cost = the product's WC Wayfair Canada (USD) of the promotion's level
-// (cost_usd_wayfair_ca_orange / _purple, loaded 2026-09-28), promotional MAP
-// empty, B2B columns untouched.
+// Canada supplier (July submission + its real file 2026-09-28): discount 0,
+// base cost = the product's WC Wayfair Canada (USD) of the promotion's level
+// (cost_usd_wayfair_ca_orange / _purple), promotional MAP empty, and the B2B
+// columns as for the USA — Wayfair pre-fills a 22.33 % discount and 27.33 %
+// B2B discounts there, all set to 0.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -125,10 +126,8 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     const put = (c, v, style = null) => { if (c != null && v != null) cells.set(c + 1, buildCell(`${colLetter(c)}${rn}`, v, style)); };
     put(cols.discount, 0);
     put(cols.baseCost, cost, costStyle);
-    if (usa) {
-      put(cols.b2bRecommended, 0);
-      put(cols.b2bDiscount, 0);
-    }
+    put(cols.b2bRecommended, 0);
+    put(cols.b2bDiscount, 0);
     return cells;
   };
 
@@ -172,7 +171,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     // appended row come from the PIM — the truth those values mirror anyway.
     const { data: pimRows } = await supabase
       .from('products')
-      .select(usa ? 'sku, map:map_usd, msrp:msrp_usd' : 'sku, map:map_usd_wayfair_ca')
+      .select(usa ? 'sku, map:map_usd, msrp:msrp_usd' : 'sku, map:map_cad, msrp:msrp_cad')
       .in('sku', toAppend);
     const pimBySku = new Map((pimRows ?? []).map((p) => [p.sku, p]));
     const skuStyle = (xml.match(new RegExp(`<c r="${colLetter(cols.sku)}${firstData + 1}" s="(\\d+)"`)) || [])[1] ?? null;
@@ -182,9 +181,9 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
       const pim = pimBySku.get(sku);
       const cells = promoCells(rn, costBySku.get(sku));
       cells.set(cols.sku + 1, buildCell(`${colLetter(cols.sku)}${rn}`, sku, skuStyle));
-      // Wayfair Canada is priced in USD too (its own MAP level); no USD MSRP for it.
-      const mapCol = cols.mapUsd;
-      const msrpCol = usa ? cols.msrpUsd : null;
+      // Wayfair keeps the Canada supplier's MAP / MSRP in CAD.
+      const mapCol = usa ? cols.mapUsd : cols.mapCad;
+      const msrpCol = usa ? cols.msrpUsd : cols.msrpCad;
       if (mapCol != null && pim?.map != null) cells.set(mapCol + 1, buildCell(`${colLetter(mapCol)}${rn}`, Number(pim.map), skuStyle));
       if (msrpCol != null && pim?.msrp != null) cells.set(msrpCol + 1, buildCell(`${colLetter(msrpCol)}${rn}`, Number(pim.msrp), skuStyle));
       rowsXml += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
@@ -214,7 +213,7 @@ export function summarizeWayfairFill(channel, r) {
   const label = channel?.label ?? (r.supplier === 'USA' ? 'Wayfair USA' : 'Wayfair Canada');
   const usa = r.supplier === 'USA';
   const costName = usa ? 'WC Wayfair' : 'WC Wayfair Canada (USD)';
-  const parts = [`${label} file ready — ${r.filled} of ${r.fileRows} rows filled (discount 0, cost after discount = ${costName} ${levelLabel(r.tier)}${usa ? ', B2B 0' : ''})`];
+  const parts = [`${label} file ready — ${r.filled} of ${r.fileRows} rows filled (discount 0, cost after discount = ${costName} ${levelLabel(r.tier)}, B2B 0)`];
   if (r.removed) parts.push(`${r.removed} rows of products outside the promotion removed`);
   if (r.appended.length) parts.push(`${r.appended.length} rows added (${r.appended.slice(0, 8).join(', ')}${r.appended.length > 8 ? '…' : ''})`);
   if (r.notOnWayfair.length) parts.push(`skipped, not listed on ${label}: ${r.notOnWayfair.slice(0, 8).join(', ')}${r.notOnWayfair.length > 8 ? '…' : ''}`);
