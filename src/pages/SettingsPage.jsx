@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, Upload } from 'lucide-react';
+import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, Upload, UserCheck } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
 import { getInventoryReport, refreshInventory, uploadCanadaInventory, describeInventoryPull, stockAge } from '@/features/pricing/api/inventory';
 import { listPromotions } from '@/features/pricing/api/promotions';
+import { listTaskOwners } from '@/features/pricing/api/promoTasks';
+import { TASK_CHANNELS } from '@/features/pricing/lib/promoTasks';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { Link } from 'react-router-dom';
 
@@ -71,6 +73,92 @@ function describeSource(r) {
     : r.via === 'upload' ? `uploaded${r.file ? ` "${r.file}"` : ''}`
     : r.via ? `SharePoint (${r.via})` : 'ShipStation';
   return `${bits.join(', ')} · ${how} · ${stockAge(r.syncedAt)}`;
+}
+
+// Who answers for each channel whose promotion files go through its own
+// portal (Wayfair Canada / USA): the PromoTaskNudge reminders go to that
+// person only; a channel without an owner reminds every admin.
+function PromoOwnersSection() {
+  const [owners, setOwners] = useState(null);
+  const [people, setPeople] = useState([]);
+  const [saving, setSaving] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    Promise.all([getAppSetting('promo_channel_owners', {}), listTaskOwners()])
+      .then(([o, list]) => { setOwners(o ?? {}); setPeople(list); })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  async function change(key, value) {
+    const prev = owners;
+    const next = { ...owners };
+    if (value) next[key] = value;
+    else delete next[key];
+    setOwners(next);
+    setSaving(key);
+    setError(null);
+    try {
+      await saveAppSetting('promo_channel_owners', next);
+      const channel = TASK_CHANNELS.find((c) => c.key === key);
+      const person = people.find((x) => x.id === value);
+      logActivity({
+        action: 'update',
+        entityType: 'setting',
+        entityId: 'promo_channel_owners',
+        summary: `${channel?.label ?? key} promotion files: ${person ? person.full_name || person.email : 'no owner (every admin)'}`,
+        metadata: next,
+      });
+    } catch (err) {
+      setOwners(prev);
+      setError(err.message);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
+          <UserCheck className="w-5 h-5" strokeWidth={2} />
+        </div>
+        <div>
+          <h2 className="text-title-md text-on-surface font-semibold">Promotion file owners</h2>
+          <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
+            Who gets the reminders for the marketplaces whose files go through their portal: the promotions file before a promotion starts, and the price change back to Blue when a flash deal or special event ends. Without an owner, every admin gets them.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl bg-surface-container-low/60 p-4 space-y-3">
+        {owners === null && !error ? (
+          <p className="text-body-sm text-on-surface-variant">
+            <Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading…
+          </p>
+        ) : TASK_CHANNELS.map((c) => (
+          <label key={c.key} className="flex items-center justify-between gap-4">
+            <span className="text-label-lg font-medium text-on-surface">{c.label}</span>
+            <span className="inline-flex items-center gap-2">
+              {saving === c.key && <Loader2 className="w-4 h-4 animate-spin text-on-surface-variant" />}
+              <select
+                value={owners?.[c.key] ?? ''}
+                onChange={(e) => change(c.key, e.target.value || null)}
+                disabled={saving !== null || owners === null}
+                className="px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              >
+                <option value="">No owner (every admin)</option>
+                {people.map((x) => (
+                  <option key={x.id} value={x.id}>{x.full_name || x.email}</option>
+                ))}
+              </select>
+            </span>
+          </label>
+        ))}
+        {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
+      </div>
+    </section>
+  );
 }
 
 function InventorySection() {
@@ -399,6 +487,8 @@ export default function SettingsPage() {
           </p>
         )}
       </section>
+
+      <PromoOwnersSection />
 
       <InventorySection />
     </div>

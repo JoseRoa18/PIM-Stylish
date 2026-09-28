@@ -5,10 +5,9 @@
 // listed row plus the tracking processId, and gets filled in place (JSZip
 // XML edit), never rebuilt:
 //   - rows already in the file that are promotion members get their promo
-//     columns filled; every other row is left alone (no promotion) — except
-//     for the USA supplier, whose file lists every Wayfair product: there the
-//     rows outside the promotion are REMOVED and the kept rows renumbered
-//     from the first data row (user rule 2026-09-28)
+//     columns filled; the file lists every Wayfair product, so every other
+//     row is REMOVED and the kept rows renumbered from the first data row
+//     (user rule 2026-09-28, both markets)
 //   - promotion members missing from the file are APPENDED, validated
 //     against what Wayfair actually lists (latest API audit snapshot),
 //     carrying the PIM's MAP / MSRP in the "Current" columns (the API exposes
@@ -43,10 +42,12 @@ import {
   mergeRows,
   injectRows,
   ensureNumberFormat,
+  keepOnlyRows,
   downloadZip,
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { markPromotionTask } from '@/features/pricing/api/promoTasks';
 
 const COST_FORMAT = '"$"#,##0.00';
 // Technical column names (header row) → roles.
@@ -74,22 +75,6 @@ function locate(grid) {
     if (cols.discount != null && cols.baseCost != null) return { headerRow: r, cols };
   }
   return null;
-}
-// Keep only the data rows in `keep` (1-based numbers, all ≥ fromRow): the
-// others are dropped and the kept ones renumbered consecutively from fromRow,
-// cell refs included; the rows above fromRow (header, labels, instructions)
-// stay as they are. The sheet has no formulas, merges or validations to shift.
-function keepOnlyRows(xml, fromRow, keep) {
-  let next = fromRow;
-  let removed = 0;
-  const out = xml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (row, n) => {
-    if (Number(n) < fromRow) return row;
-    if (!keep.has(Number(n))) { removed += 1; return ''; }
-    const to = next++;
-    return row.replace(/^<row r="\d+"/, `<row r="${to}"`).replace(/(<c r="[A-Z]+)\d+"/g, `$1${to}"`);
-  });
-  const lastRow = next - 1;
-  return { xml: out.replace(/(<dimension ref="[A-Z]+1:[A-Z]+)\d+/, `$1${lastRow}`), removed, lastRow };
 }
 const colLetter = (c) => { let n = c + 1; let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
 
@@ -157,11 +142,9 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   const cellsByRow = new Map();
   const fileSkus = new Set();
   let filled = 0;
-  let lastRow = hit.headerRow + 1;
   for (let i = hit.headerRow + 1; i < grid.length; i++) {
     const sku = String(grid[i]?.[cols.sku] ?? '').trim();
     if (!sku || /\s/.test(sku)) continue; // the label and instruction rows under the header
-    lastRow = i + 1;
     fileSkus.add(sku);
     const cost = costBySku.get(sku);
     if (cost == null) continue;
@@ -169,13 +152,10 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     filled += 1;
   }
   let merged = cellsByRow.size ? mergeRows(xml, cellsByRow, true) : xml;
-  let removed = 0;
-  if (usa) {
-    const kept = keepOnlyRows(merged, firstData + 1, new Set(cellsByRow.keys()));
-    merged = kept.xml;
-    removed = kept.removed;
-    lastRow = kept.lastRow;
-  }
+  const kept = keepOnlyRows(merged, firstData + 1, new Set(cellsByRow.keys()));
+  merged = kept.xml;
+  const removed = kept.removed;
+  const lastRow = kept.lastRow;
 
   // Members missing from the file: append them — but only those Wayfair
   // actually lists (latest API audit snapshot, 2×/day); a SKU Wayfair doesn't
@@ -227,9 +207,11 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: usa ? 'wayfair_usa' : 'wayfair',
-    summary: `Filled Wayfair ${usa ? 'USA' : 'Canada'} promotions file for "${promotion.name}" (${filled} rows filled, ${toAppend.length} added${usa ? `, ${removed} outside the promotion removed, WC Wayfair ${levelLabel(tier)}` : ''})`,
+    summary: `Filled Wayfair ${usa ? 'USA' : 'Canada'} promotions file for "${promotion.name}" (${filled} rows filled, ${toAppend.length} added, ${removed} outside the promotion removed${usa ? `, WC Wayfair ${levelLabel(tier)}` : ''})`,
     metadata: { filled, appended: toAppend.length, removed, file_rows: fileSkus.size, not_on_wayfair: notOnWayfair.length, no_cost: noCost.length, tier: usa ? tier : null },
   });
+
+  await markPromotionTask(promotion.id, `${usa ? 'wayfair_us' : 'wayfair_ca'}:promo_file`, { rows: filled + toAppend.length });
 
   return { supplier, tier: usa ? tier : null, filled, removed, appended: toAppend, fileRows: fileSkus.size, notOnWayfair, noCost, excluded };
 }

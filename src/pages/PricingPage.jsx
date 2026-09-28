@@ -51,6 +51,7 @@ import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile, summarizeWayfairFill } from '@/features/pricing/lib/wayfairPromoFill';
+import { fillWayfairPriceChangeFile, summarizeWayfairPriceChange } from '@/features/pricing/lib/wayfairPriceChangeFill';
 import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
@@ -63,7 +64,7 @@ import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill } f
 import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
 import { fillLowesPromoTemplate, summarizeLowesFill } from '@/features/pricing/lib/lowesPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
 // Each slug belongs to one market view (Canada or USA) — Wayfair Canada is
@@ -124,6 +125,27 @@ export default function PricingPage() {
   const [autoOpenId, setAutoOpenId] = useState(null); // the promotion just created, opened on its Marketplaces panel
   const [portalFilter, setPortalFilter] = useState('all'); // flash deals / special events history, by marketplace
   const [creatorFilter, setCreatorFilter] = useState('all'); // …and by who created them
+
+  // A file-task reminder (PromoTaskNudge) lands here with the promotion and
+  // the file to fill: switch to its tab and open its card on the upload
+  // dialog. Handled once per click (nonce), then the router state is dropped
+  // so a refresh doesn't reopen it.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const link = location.state?.promoTask ?? null;
+  const [deepLink, setDeepLink] = useState(null);
+  if (link && promotions && deepLink?.nonce !== link.nonce) {
+    const target = promotions.find((x) => x.id === link.promoId);
+    setDeepLink({ id: target?.id ?? null, fill: link.fill, nonce: link.nonce });
+    if (target) {
+      setTab(target.kind ?? 'monthly');
+      setPortalFilter('all');
+      setCreatorFilter('all');
+    }
+  }
+  useEffect(() => {
+    if (link && deepLink?.nonce === link.nonce) navigate(location.pathname, { replace: true, state: null });
+  }, [link, deepLink, navigate, location.pathname]);
 
   async function reload() {
     try {
@@ -236,12 +258,13 @@ export default function PricingPage() {
             .sort((a, b) => (tab === 'monthly' ? 0 : String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))))
             .map((promo) => (
             <PromotionCard
-              key={promo.id}
+              key={deepLink?.id === promo.id ? `${promo.id}:${deepLink.nonce}` : promo.id}
               promo={promo}
               canEdit={canEdit}
               confirm={confirm}
               onChanged={reload}
               defaultOpen={promo.id === autoOpenId}
+              initialFill={deepLink?.id === promo.id ? deepLink.fill : null}
             />
           ))}
         </div>
@@ -1069,8 +1092,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
 
 // ============================== Promotion card ==============================
 
-function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen);
+function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false, initialFill = null }) {
+  const [open, setOpen] = useState(defaultOpen || Boolean(initialFill));
   const [rows, setRows] = useState(null);
   const [mapBySku, setMapBySku] = useState(null);
   // Flash deals / special events: the SKU list can be changed after creation.
@@ -1089,7 +1112,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
   const [msg, setMsg] = useState(null);
   const [progress, setProgress] = useState(null);
   const [importModal, setImportModal] = useState(false);
-  const [fillModal, setFillModal] = useState(null); // filler key of FILE_FILLERS, or null
+  const [fillModal, setFillModal] = useState(initialFill); // filler key of FILE_FILLERS, or null (a reminder opens it)
 
   const meta = STATUS_META[promo.status] ?? STATUS_META.draft;
 
@@ -1340,7 +1363,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
               promo={promo}
               initial={fillModal}
               onClose={() => setFillModal(null)}
-              onDone={(m) => { setFillModal(null); setMsg(m); }}
+              onDone={(m) => { setFillModal(null); setMsg(m); onChanged?.(); }}
             />
           )}
 
@@ -1657,6 +1680,26 @@ const FILE_FILLERS = {
     fill: (file, promo) => fillWayfairPromoFile(file, promo, 'USA'),
     summarize: (r) => summarizeWayfairFill(null, r),
   },
+  // Price change: when a promotion ends, the pricing file downloaded from
+  // Partner Home goes back with the promotion's products at Blue.
+  wayfair_price_change: {
+    label: 'Wayfair Canada · Price change',
+    monogram: 'WF',
+    monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
+    hint: "Pricing file downloaded from Partner Home (Canada supplier) when the promotion ends — New MAP (CAD) = MAP Blue, only the promotion's rows are kept. New Base Cost stays empty: Wayfair Canada has no Blue cost (USD) in Pricing yet.",
+    accept: '.xlsx,.xlsm',
+    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN'),
+    summarize: summarizeWayfairPriceChange,
+  },
+  wayfair_us_price_change: {
+    label: 'Wayfair USA · Price change',
+    monogram: 'WF',
+    monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
+    hint: "Pricing file downloaded from Partner Home (USA supplier) when the promotion ends — New Base Cost = WC Wayfair Blue, New MAP (USD) = MAP Blue, only the promotion's rows are kept.",
+    accept: '.xlsx,.xlsm',
+    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA'),
+    summarize: summarizeWayfairPriceChange,
+  },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
   // products without a level price can be kept blank or taken out.
   menards: {
@@ -1830,6 +1873,19 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           status = `Starts ${dayOf(promoWindow(promo, ch.market).start)}`;
           tone = 'muted';
         }
+      } else if (ch.priceChange) {
+        // Wayfair: what went to Partner Home, from promotions.file_tasks
+        // (readable by everyone, unlike the audit log).
+        const done = promo.file_tasks ?? {};
+        const pf = done[`${ch.key}:promo_file`];
+        const pc = done[`${ch.key}:price_change`];
+        const generated = pf?.at ?? history[ch.auditTarget ?? ch.key] ?? null;
+        const how = (t) => `${t.manual ? 'marked done' : 'filled'}${t.name ? ` by ${t.name}` : ''} ${day(t.at)}`;
+        status = pc ? `Back at Blue ${day(pc.at)}` : generated ? `Generated ${day(generated)}` : 'Not generated';
+        tone = pc || generated ? 'ok' : 'muted';
+        if (pf) detail += ` Promotions file ${how(pf)}.`;
+        if (pc) detail += ` Price change ${how(pc)}.`;
+        else if ((promo.kind ?? 'monthly') !== 'monthly') detail += ` Price change due ${dayOf(promoWindow(promo, ch.market).end)}.`;
       } else if (history[ch.auditTarget ?? ch.key]) {
         status = `Generated ${day(history[ch.auditTarget ?? ch.key])}`;
         tone = 'ok';
@@ -1897,6 +1953,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
               )}
               {canEdit && ch.kind === 'portal_file' && (
                 <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file</button>
+              )}
+              {canEdit && ch.priceChange && (
+                <button type="button" onClick={() => onFillFile(ch.priceChange)} className={actionCls}>Price change</button>
               )}
               {canEdit && ch.template && (
                 <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className={actionCls}>

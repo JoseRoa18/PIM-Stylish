@@ -39,15 +39,15 @@ export const PROMO_CHANNELS = [
     how: 'Automatic. Promo MAP USD goes live on the 1st.' },
   { key: 'bestbuy', label: 'Best Buy Canada', monogram: 'BB', market: 'ca', kind: 'api', stamp: 'bb_scheduled_at',
     how: 'Scheduled discounts sent when the list loads. Check the portal: API discounts have not shown up so far.' },
-  { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca', kind: 'portal_file', filler: 'wayfair', auditTarget: 'wayfair',
-    how: 'Upload the Partner Home promotions file. The PIM fills the base cost per row and adds missing members.' },
+  { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca', kind: 'portal_file', filler: 'wayfair', priceChange: 'wayfair_price_change', auditTarget: 'wayfair',
+    how: "Upload the promotions file downloaded from Partner Home. The PIM fills the base cost, keeps only the promotion's rows and adds missing members. Price change puts them back at Blue when the promotion ends." },
   // Wayfair (both markets) always works from the file downloaded from Partner
   // Home right before it is used (user decision 2026-09-28): its "Current"
   // columns are Wayfair's own snapshot and it carries the tracking processId,
   // so a copy kept in Templates goes stale. USA: discount 0, cost after
   // discount = WC Wayfair of the level, B2B 0, rows outside the promotion removed.
-  { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', market: 'us', kind: 'portal_file', filler: 'wayfair_us', auditTarget: 'wayfair_usa',
-    how: "Download the promotions file from Partner Home and upload it here. The PIM fills discount 0, the WC Wayfair of the level and B2B 0, and keeps only the promotion's rows." },
+  { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', market: 'us', kind: 'portal_file', filler: 'wayfair_us', priceChange: 'wayfair_us_price_change', auditTarget: 'wayfair_usa',
+    how: "Download the promotions file from Partner Home and upload it here. The PIM fills discount 0, the WC Wayfair of the level and B2B 0, and keeps only the promotion's rows. Price change puts them back at Blue when the promotion ends." },
   // Bed Bath & Beyond and Overstock (Beyond Inc.): same prices, aliases and
   // exclusion switch ('bbb'), same file layout, but each portal has its own
   // catalog file uploaded in Templates ("BB&B / Overstock US" is Bed Bath &

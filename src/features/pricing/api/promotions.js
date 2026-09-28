@@ -22,7 +22,7 @@ import { getAppSetting } from '@/features/settings/api/appSettings';
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, promotion_prices(count), creator:profiles(full_name, email)')
+    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, file_tasks, promotion_prices(count), creator:profiles(full_name, email)')
     .order('period', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw error;

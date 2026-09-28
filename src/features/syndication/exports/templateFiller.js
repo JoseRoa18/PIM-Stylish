@@ -225,6 +225,24 @@ export function removeRows(sheetXml, rowNums) {
   return out.replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)\d+("\s*\/>)/, `$1${last}$2`);
 }
 
+// Keep only the data rows in `keep` (1-based numbers, all ≥ fromRow): the
+// others are dropped and the kept ones renumbered consecutively from fromRow,
+// cell refs included; the rows above fromRow (header, labels, instructions)
+// stay as they are. Only for sheets without formulas, merges or validations
+// below fromRow (Wayfair's Partner Home files) — nothing else is shifted.
+export function keepOnlyRows(xml, fromRow, keep) {
+  let next = fromRow;
+  let removed = 0;
+  const out = xml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (row, n) => {
+    if (Number(n) < fromRow) return row;
+    if (!keep.has(Number(n))) { removed += 1; return ''; }
+    const to = next++;
+    return row.replace(/^<row r="\d+"/, `<row r="${to}"`).replace(/(<c r="[A-Z]+)\d+"/g, `$1${to}"`);
+  });
+  const lastRow = next - 1;
+  return { xml: out.replace(/(<dimension ref="[A-Z]+1:[A-Z]+)\d+/, `$1${lastRow}`), removed, lastRow };
+}
+
 // A cell style with a number format the template lacks (e.g. "$"#,##0.00 for
 // a cost Wayfair wants shown as $80.00): the format and an <xf> cloned from
 // `baseXf` (the fill / border / font of the cells it replaces) are added to
