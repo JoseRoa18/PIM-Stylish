@@ -20,6 +20,8 @@
 //   6. mode "spec" returns Walmart's official MP_ITEM JSON Schema for the
 //      product types asked (default Sinks) — read-only, to audit which fields
 //      Walmart asks for against what the PIM fills.
+//   7. mode "account" (read-only, production) returns the account's ship nodes
+//      (the fulfillmentCenterID inventory needs), partner profile and item count.
 //
 // Body: {
 //   mode?: "preview" | "submit" | "status" | "spec", default preview
@@ -359,6 +361,23 @@ Deno.serve(async (req) => {
       const types: string[] = Array.isArray(body.productTypes) && body.productTypes.length ? body.productTypes.map(String) : ["Sinks"];
       const schema = await fetchSpec(prodBase, wm, types);
       return json({ ok: true, specVersion: SPEC_VERSION, productTypes: types, schema });
+    }
+
+    // --- account (read-only) ---------------------------------------------------
+    if (mode === "account") {
+      const PCID = Deno.env.get("WALMART_US_PROD_CLIENT_ID"), PSEC = Deno.env.get("WALMART_US_PROD_CLIENT_SECRET");
+      if (!PCID || !PSEC) return json({ error: "Walmart US production secrets are not set." }, 500);
+      const prodBase = "https://marketplace.walmartapis.com";
+      const wm = await getToken(prodBase, PCID, PSEC);
+      const out: Record<string, unknown> = {};
+      for (const [key, path] of [["shipNodes", "/v3/settings/shipping/shipnodes"], ["partnerProfile", "/v3/settings/partnerprofile"], ["items", "/v3/items?limit=5"]]) {
+        const r = await fetch(`${prodBase}${path}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm }) });
+        const t = await r.text();
+        let parsed: unknown = t.slice(0, 4000);
+        try { parsed = JSON.parse(t); } catch { /* keep text */ }
+        out[key] = { status: r.status, body: parsed };
+      }
+      return json({ ok: true, env: "production", ...out });
     }
 
     // --- build ----------------------------------------------------------------
