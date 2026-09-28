@@ -17,14 +17,18 @@
 //      sandbox=true targets sandbox.walmartapis.com; production needs
 //      sandbox=false AND confirm="CREATE".
 //   5. mode "status" reads a feed's per-item outcome (feedId).
+//   6. mode "spec" returns Walmart's official MP_ITEM JSON Schema for the
+//      product types asked (default Sinks) — read-only, to audit which fields
+//      Walmart asks for against what the PIM fills.
 //
 // Body: {
-//   mode?: "preview" | "submit" | "status",   default preview
+//   mode?: "preview" | "submit" | "status" | "spec", default preview
 //   skus?: string[],                           preview / submit
 //   validate?: boolean,                        preview: check against the official spec
 //   sandbox?: boolean,                         default true
 //   confirm?: "CREATE",                        submit to production only
 //   feedId?: string,                           status
+//   productTypes?: string[],                   spec (default ["Sinks"])
 // }
 // Caller: authenticated admin/editor.
 // Secrets: WALMART_US_PROD_CLIENT_ID/SECRET, WALMART_US_SANDBOX_CLIENT_ID/SECRET.
@@ -344,6 +348,17 @@ Deno.serve(async (req) => {
         if (page_.length < 50 || offset >= Number(d.itemsReceived ?? 0)) break;
       }
       return json({ ok: true, env, feedId: body.feedId, ...summary, items });
+    }
+
+    // --- spec (read-only) ------------------------------------------------------
+    if (mode === "spec") {
+      const PCID = Deno.env.get("WALMART_US_PROD_CLIENT_ID"), PSEC = Deno.env.get("WALMART_US_PROD_CLIENT_SECRET");
+      if (!PCID || !PSEC) return json({ error: "Walmart US production secrets are not set (needed to read the spec)." }, 500);
+      const prodBase = "https://marketplace.walmartapis.com";
+      const wm = await getToken(prodBase, PCID, PSEC);
+      const types: string[] = Array.isArray(body.productTypes) && body.productTypes.length ? body.productTypes.map(String) : ["Sinks"];
+      const schema = await fetchSpec(prodBase, wm, types);
+      return json({ ok: true, specVersion: SPEC_VERSION, productTypes: types, schema });
     }
 
     // --- build ----------------------------------------------------------------
