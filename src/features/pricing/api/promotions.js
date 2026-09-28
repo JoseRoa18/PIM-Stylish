@@ -137,6 +137,14 @@ export const LEVEL_FIELDS = {
 // at Purple. A channel can pin a kind to another level for its own file
 // (`levelByKind` in promoChannels — Bed Bath & Beyond and Overstock take
 // flash deals at Purple); promotionLevel resolves both.
+//
+// The products' levels in Pricing are the ONLY source of promotion prices:
+// the database derives every promotion_prices row from them when the row is
+// written and refreshes the rows of draft / active promotions when a level
+// changes (20260928_promotion_prices_from_levels.sql). Pasted lists and
+// price files only contribute SKUs (plus Wayfair Canada's base cost, which
+// has no product column). The same rule lives in KIND_LEVEL here and in
+// promotion_level_of() there — keep them in step.
 export const KIND_LEVEL = { monthly: 'orange', flash: 'orange', special: 'purple' };
 export const levelLabel = (tier) => (tier === 'purple' ? 'Purple' : 'Orange');
 export function promotionLevel(promotion, channel = null) {

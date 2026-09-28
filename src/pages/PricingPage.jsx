@@ -27,9 +27,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import {
   listPromotions,
   getPromotionPrices,
-  parsePriceList,
   parseSkuList,
-  createPromotion,
   createPromotionFromFile,
   createPromotionFromLevels,
   updatePromotionMarketplaces,
@@ -215,7 +213,7 @@ export default function PricingPage() {
           </div>
           <p className="text-title-md text-on-surface font-medium">No {PROMOTION_KINDS[tab].toLowerCase()}s yet</p>
           <p className="text-body-md text-on-surface-variant mt-1 max-w-md mx-auto">
-            {tab === 'monthly' ? "Create the month's promotion and paste its price list — SKU and promo price, one per line." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates, its SKUs and the portal it goes to. Prices come from the ${levelLabel(KIND_LEVEL[tab])} level${tab === 'flash' ? ' (Purple for Bed Bath & Beyond and Overstock)' : ''}.`}
+            {tab === 'monthly' ? "Create the month's promotion from its SKU list — every price comes from the products' Orange level in Pricing." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates, its SKUs and the portal it goes to. Prices come from the ${levelLabel(KIND_LEVEL[tab])} level${tab === 'flash' ? ' (Purple for Bed Bath & Beyond and Overstock)' : ''}.`}
           </p>
         </div>
       ) : (
@@ -812,7 +810,6 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [endsOn, setEndsOn] = useState('');
   const [mode, setMode] = useState('file'); // 'file' | 'paste'
   const [portals, setPortals] = useState([]); // PROMO_CHANNELS keys — flash deals and special events go to the portals picked here
-  const [currency, setCurrency] = useState('cad');
   const [text, setText] = useState('');
   // One file per market — memberships differ, so each market has its own
   // template and slot. Either alone is enough to create the promotion.
@@ -820,9 +817,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const parsed = useMemo(() => parsePriceList(text), [text]);
-  // Flash deals and special events take a plain SKU list: every price comes
-  // from the product's level for that kind (KIND_LEVEL: Orange for a flash
+  // Every kind takes a plain SKU list: prices come from the product's level
+  // for that kind (KIND_LEVEL: Orange for a monthly promotion or a flash
   // deal, Purple for a special event), so nothing else is asked.
   const skuList = useMemo(() => parseSkuList(text), [text]);
 
@@ -871,11 +867,12 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         starts_on: customDates ? startsOn : null,
         ends_on: customDates ? endsOn : null,
       };
-      const res = !monthly
-        ? await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: portals })
-        : mode === 'file'
-          ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
-          : await createPromotion({ ...payload, currency, rows: parsed.rows });
+      // Prices always come from the products' levels (the database derives
+      // every promotion row from them); a pasted list only contributes its
+      // SKUs, and a price file its SKUs plus Wayfair Canada's base cost.
+      const res = monthly && mode === 'file'
+        ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
+        : await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: monthly ? [] : portals });
       const notes = [];
       if (res.notInPim.length) notes.push(`Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
       if (res.noLevel?.length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in the PIM: ${res.noLevel.join(', ')}`);
@@ -887,7 +884,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
-  const canCreate = !monthly ? skuList.skus.length > 0 && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : parsed.rows.length > 0;
+  const canCreate = !monthly ? skuList.skus.length > 0 && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : skuList.skus.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
   // those days makes no sense in a flash deal — warn before creating.
@@ -1002,7 +999,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         </label>
       ) : mode === 'file' ? (
         <div className="grid sm:grid-cols-2 gap-4">
-          {[['ca', 'Canada file', 'Promo MAP CAD + costs Rona/HD · Small Online · Wayfair CA'], ['us', 'USA file', 'Promo MAP USD + costs Lowes/HD USA/SOD/BB&B · Wayfair US · Menards']].map(([market, title, hint]) => (
+          {[['ca', 'Canada file', 'Its SKUs and the Wayfair Canada base cost are read; every other price comes from the products\' Orange level'], ['us', 'USA file', 'Its SKUs are read; every price comes from the products\' Orange level']].map(([market, title, hint]) => (
             <div key={market} className="rounded-xl border border-outline-variant p-4 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-label-lg font-semibold text-on-surface">{title}</span>
@@ -1032,38 +1029,23 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           ))}
         </div>
       ) : (
-        <>
-          <label className="block">
-            <span className="text-label-lg text-on-surface-variant">List currency</span>
-            <select
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              className="mt-1 w-full sm:w-64 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-            >
-              <option value="cad">CAD (Canada / SinksDirect)</option>
-              <option value="usd">USD (USA marketplaces)</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-label-lg text-on-surface-variant">
-              Price list — one per line: <span className="font-mono">SKU&nbsp;&nbsp;price</span>
-            </span>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={8}
-              placeholder={'S-822H\t379\nK-131NR\t289\n…'}
-              className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-            />
-          </label>
-        </>
+        <label className="block">
+          <span className="text-label-lg text-on-surface-variant">Products — one SKU per line</span>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={8}
+            placeholder={'S-822H\nK-131NR\n…'}
+            className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          <span className="block mt-1 text-body-sm text-on-surface-variant">Every price comes from each product's Orange level in Pricing (MAP and WC of each marketplace); a price after the SKU is ignored.</span>
+        </label>
       )}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-body-sm text-on-surface-variant">
-          {!monthly
-            ? `${skuList.skus.length} SKU${skuList.skus.length === 1 ? '' : 's'}${skuList.skipped.length > 0 ? ` · ${skuList.skipped.length} line${skuList.skipped.length === 1 ? '' : 's'} skipped` : ''}`
-            : mode === 'paste' && `${parsed.rows.length} price${parsed.rows.length === 1 ? '' : 's'} parsed${parsed.skipped.length > 0 ? ` · ${parsed.skipped.length} line${parsed.skipped.length === 1 ? '' : 's'} skipped` : ''}`}
+          {(!monthly || mode === 'paste')
+            && `${skuList.skus.length} SKU${skuList.skus.length === 1 ? '' : 's'}${skuList.skipped.length > 0 ? ` · ${skuList.skipped.length} line${skuList.skipped.length === 1 ? '' : 's'} skipped` : ''}`}
         </p>
         <button
           type="button"

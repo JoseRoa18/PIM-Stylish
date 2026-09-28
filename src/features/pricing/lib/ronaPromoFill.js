@@ -147,13 +147,14 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
     if (!a) { noAlias.push(m.sku); continue; }
     const p = pim.get(m.sku) ?? {};
     const regularCost = p.cost_cad_rona_hd != null ? Number(p.cost_cad_rona_hd) : null;
+    // The product's level is the truth; the promotion's row only fills a gap.
     const listed = m.promo_costs?.rona_hd_cad;
-    const promoCost = listed != null ? Number(listed) : p[promoCostField] != null ? Number(p[promoCostField]) : null;
+    const promoCost = p[promoCostField] != null ? Number(p[promoCostField]) : listed != null ? Number(listed) : null;
     if (regularCost == null) { noRegularCost.push(m.sku); continue; }
     if (promoCost == null) { noPromoCost.push(m.sku); continue; }
     if (promoCost >= regularCost) { atOrAbove.push(m.sku); continue; }
     if (listed != null) fromList += 1;
-    const promoMap = m.promo_price_cad != null ? Number(m.promo_price_cad) : p[promoMapField] != null ? Number(p[promoMapField]) : null;
+    const promoMap = p[promoMapField] != null ? Number(p[promoMapField]) : m.promo_price_cad != null ? Number(m.promo_price_cad) : null;
     if (promoMap == null) noPromoMap.push(m.sku);
     if (!a.listing_title) noName.push(m.sku);
     const upc = String(p.attributes?.upc ?? '').trim();
