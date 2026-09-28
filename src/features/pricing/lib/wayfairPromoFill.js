@@ -28,9 +28,9 @@
 //   B2bPromotionalDiscountPercent    0
 //   B2bPromotionalDiscountBaseCost   empty
 // Canada supplier (confirmed against the July submission): discount 0, base
-// cost = the promotion's wayfair_ca_usd (Wayfair Canada's USD cost has no
-// product column yet, so it still comes from the promotion's price file),
-// promotional MAP empty, B2B columns untouched.
+// cost = the product's WC Wayfair Canada (USD) of the promotion's level
+// (cost_usd_wayfair_ca_orange / _purple, loaded 2026-09-28), promotional MAP
+// empty, B2B columns untouched.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -100,26 +100,19 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
 
   const { rows: prices, excluded } = await promotionMembersFor(promotion, usa ? 'wayfair_us' : 'wayfair_ca');
   const tier = promotionLevel(promotion);
-  // The base cost per member: USA from the product's level in Pricing,
-  // Canada from the promotion's row (see the header note).
+  // The base cost per member, from the product's level in Pricing: WC Wayfair
+  // (USA) or WC Wayfair Canada in USD (Canada).
   const costBySku = new Map();
-  if (usa) {
-    const field = `cost_usd_wayfair_${tier}`;
-    const skus = prices.map((r) => r.sku);
-    for (let i = 0; i < skus.length; i += 100) {
-      const { data, error } = await supabase.from('products').select(`sku, cost:${field}`).in('sku', skus.slice(i, i + 100));
-      if (error) throw error;
-      for (const p of data ?? []) if (p.cost != null) costBySku.set(p.sku, Number(p.cost));
-    }
-  } else {
-    for (const r of prices) if (r.promo_costs?.wayfair_ca_usd != null) costBySku.set(r.sku, Number(r.promo_costs.wayfair_ca_usd));
+  const costName = usa ? 'WC Wayfair' : 'WC Wayfair Canada (USD)';
+  const field = usa ? `cost_usd_wayfair_${tier}` : `cost_usd_wayfair_ca_${tier}`;
+  const skus = prices.map((r) => r.sku);
+  for (let i = 0; i < skus.length; i += 100) {
+    const { data, error } = await supabase.from('products').select(`sku, cost:${field}`).in('sku', skus.slice(i, i + 100));
+    if (error) throw error;
+    for (const p of data ?? []) if (p.cost != null) costBySku.set(p.sku, Number(p.cost));
   }
   const noCost = prices.map((r) => r.sku).filter((s) => !costBySku.has(s)).sort();
-  if (!costBySku.size) {
-    throw new Error(usa
-      ? `No member of this promotion has a WC Wayfair ${levelLabel(tier)} in Pricing.`
-      : 'This promotion has no Wayfair Canada (USD) promo costs loaded — they come from the promotion\'s price file.');
-  }
+  if (!costBySku.size) throw new Error(`No member of this promotion has a ${costName} ${levelLabel(tier)} in Pricing.`);
 
   // The currency style for the base cost, cloned from the editable cells.
   const firstData = hit.headerRow + 3; // labels, instructions, then data
@@ -179,7 +172,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     // appended row come from the PIM — the truth those values mirror anyway.
     const { data: pimRows } = await supabase
       .from('products')
-      .select(usa ? 'sku, map:map_usd, msrp:msrp_usd' : 'sku, map:map_cad, msrp:msrp_cad')
+      .select(usa ? 'sku, map:map_usd, msrp:msrp_usd' : 'sku, map:map_usd_wayfair_ca')
       .in('sku', toAppend);
     const pimBySku = new Map((pimRows ?? []).map((p) => [p.sku, p]));
     const skuStyle = (xml.match(new RegExp(`<c r="${colLetter(cols.sku)}${firstData + 1}" s="(\\d+)"`)) || [])[1] ?? null;
@@ -189,8 +182,9 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
       const pim = pimBySku.get(sku);
       const cells = promoCells(rn, costBySku.get(sku));
       cells.set(cols.sku + 1, buildCell(`${colLetter(cols.sku)}${rn}`, sku, skuStyle));
-      const mapCol = usa ? cols.mapUsd : cols.mapCad;
-      const msrpCol = usa ? cols.msrpUsd : cols.msrpCad;
+      // Wayfair Canada is priced in USD too (its own MAP level); no USD MSRP for it.
+      const mapCol = cols.mapUsd;
+      const msrpCol = usa ? cols.msrpUsd : null;
       if (mapCol != null && pim?.map != null) cells.set(mapCol + 1, buildCell(`${colLetter(mapCol)}${rn}`, Number(pim.map), skuStyle));
       if (msrpCol != null && pim?.msrp != null) cells.set(msrpCol + 1, buildCell(`${colLetter(msrpCol)}${rn}`, Number(pim.msrp), skuStyle));
       rowsXml += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
@@ -207,22 +201,24 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: usa ? 'wayfair_usa' : 'wayfair',
-    summary: `Filled Wayfair ${usa ? 'USA' : 'Canada'} promotions file for "${promotion.name}" (${filled} rows filled, ${toAppend.length} added, ${removed} outside the promotion removed${usa ? `, WC Wayfair ${levelLabel(tier)}` : ''})`,
-    metadata: { filled, appended: toAppend.length, removed, file_rows: fileSkus.size, not_on_wayfair: notOnWayfair.length, no_cost: noCost.length, tier: usa ? tier : null },
+    summary: `Filled Wayfair ${usa ? 'USA' : 'Canada'} promotions file for "${promotion.name}" (${filled} rows filled, ${toAppend.length} added, ${removed} outside the promotion removed, ${costName} ${levelLabel(tier)})`,
+    metadata: { filled, appended: toAppend.length, removed, file_rows: fileSkus.size, not_on_wayfair: notOnWayfair.length, no_cost: noCost.length, tier },
   });
 
   await markPromotionTask(promotion.id, `${usa ? 'wayfair_us' : 'wayfair_ca'}:promo_file`, { rows: filled + toAppend.length });
 
-  return { supplier, tier: usa ? tier : null, filled, removed, appended: toAppend, fileRows: fileSkus.size, notOnWayfair, noCost, excluded };
+  return { supplier, tier, filled, removed, appended: toAppend, fileRows: fileSkus.size, notOnWayfair, noCost, excluded };
 }
 
 export function summarizeWayfairFill(channel, r) {
   const label = channel?.label ?? (r.supplier === 'USA' ? 'Wayfair USA' : 'Wayfair Canada');
-  const parts = [`${label} file ready — ${r.filled} of ${r.fileRows} rows filled${r.tier ? ` (discount 0, cost after discount = WC Wayfair ${levelLabel(r.tier)}, B2B 0)` : ''}`];
+  const usa = r.supplier === 'USA';
+  const costName = usa ? 'WC Wayfair' : 'WC Wayfair Canada (USD)';
+  const parts = [`${label} file ready — ${r.filled} of ${r.fileRows} rows filled (discount 0, cost after discount = ${costName} ${levelLabel(r.tier)}${usa ? ', B2B 0' : ''})`];
   if (r.removed) parts.push(`${r.removed} rows of products outside the promotion removed`);
   if (r.appended.length) parts.push(`${r.appended.length} rows added (${r.appended.slice(0, 8).join(', ')}${r.appended.length > 8 ? '…' : ''})`);
   if (r.notOnWayfair.length) parts.push(`skipped, not listed on ${label}: ${r.notOnWayfair.slice(0, 8).join(', ')}${r.notOnWayfair.length > 8 ? '…' : ''}`);
-  if (r.noCost?.length) parts.push(`${r.noCost.length} promo members without ${r.tier ? `WC Wayfair ${levelLabel(r.tier)} in Pricing` : 'a Wayfair Canada cost'}, left out: ${r.noCost.slice(0, 8).join(', ')}${r.noCost.length > 8 ? '…' : ''}`);
+  if (r.noCost?.length) parts.push(`${r.noCost.length} promo members without ${costName} ${levelLabel(r.tier)} in Pricing, left out: ${r.noCost.slice(0, 8).join(', ')}${r.noCost.length > 8 ? '…' : ''}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${label}`);
   return parts.join(' · ');
 }

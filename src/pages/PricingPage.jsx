@@ -892,7 +892,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       };
       // Prices always come from the products' levels (the database derives
       // every promotion row from them); a pasted list only contributes its
-      // SKUs, and a price file its SKUs plus Wayfair Canada's base cost.
+      // SKUs, and a price file its SKUs too.
       const res = monthly && mode === 'file'
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
         : await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: monthly ? [] : portals });
@@ -1687,7 +1687,7 @@ const FILE_FILLERS = {
     label: 'Wayfair Canada · Promo MAP',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Pricing file downloaded from Partner Home (Canada supplier) the day the promotion starts — New MAP (CAD) = the MAP of the promotion's level, only the promotion's rows are kept. The file has no dates: Wayfair applies it when imported.",
+    hint: "Pricing file downloaded from Partner Home (Canada supplier) the day the promotion starts — New MAP (USD) = the Wayfair Canada MAP of the promotion's level, only the promotion's rows are kept (the cost goes in the promotions file). The file has no dates: Wayfair applies it when imported.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'promo'),
     summarize: summarizeWayfairPriceChange,
@@ -1705,7 +1705,7 @@ const FILE_FILLERS = {
     label: 'Wayfair Canada · Back to Blue',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Pricing file downloaded from Partner Home (Canada supplier) when the promotion ends — New MAP (CAD) = MAP Blue, only the promotion's rows are kept. New Base Cost stays empty: Wayfair Canada has no Blue cost (USD) in Pricing yet.",
+    hint: "Pricing file downloaded from Partner Home (Canada supplier) when the promotion ends — New Base Cost = WC Wayfair Canada Blue, New MAP (USD) = Wayfair Canada MAP Blue, only the promotion's rows are kept.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'blue'),
     summarize: summarizeWayfairPriceChange,

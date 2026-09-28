@@ -123,12 +123,12 @@ export const LEVEL_FIELDS = {
   orange: {
     promo_price_cad: 'map_orange_cad',
     promo_price_usd: 'map_orange_usd',
-    costs: { rona_hd_cad: 'cost_cad_rona_hd_orange', sod_cad: 'cost_cad_wayfair_sod_orange', lowes_sod_bbb_usd: 'cost_usd_lowes_sod_bbb_orange', wayfair_usd: 'cost_usd_wayfair_orange', menards_usd: 'cost_usd_menards_orange' },
+    costs: { rona_hd_cad: 'cost_cad_rona_hd_orange', sod_cad: 'cost_cad_wayfair_sod_orange', lowes_sod_bbb_usd: 'cost_usd_lowes_sod_bbb_orange', wayfair_usd: 'cost_usd_wayfair_orange', wayfair_ca_usd: 'cost_usd_wayfair_ca_orange', menards_usd: 'cost_usd_menards_orange' },
   },
   purple: {
     promo_price_cad: 'map_purple_cad',
     promo_price_usd: 'map_purple_usd',
-    costs: { rona_hd_cad: 'cost_cad_rona_hd_purple', sod_cad: 'cost_cad_wayfair_sod_purple', lowes_sod_bbb_usd: 'cost_usd_lowes_sod_bbb_purple', wayfair_usd: 'cost_usd_wayfair_purple', menards_usd: 'cost_usd_menards_purple' },
+    costs: { rona_hd_cad: 'cost_cad_rona_hd_purple', sod_cad: 'cost_cad_wayfair_sod_purple', lowes_sod_bbb_usd: 'cost_usd_lowes_sod_bbb_purple', wayfair_usd: 'cost_usd_wayfair_purple', wayfair_ca_usd: 'cost_usd_wayfair_ca_purple', menards_usd: 'cost_usd_menards_purple' },
   },
 };
 
@@ -142,8 +142,8 @@ export const LEVEL_FIELDS = {
 // the database derives every promotion_prices row from them when the row is
 // written and refreshes the rows of draft / active promotions when a level
 // changes (20260928_promotion_prices_from_levels.sql). Pasted lists and
-// price files only contribute SKUs (plus Wayfair Canada's base cost, which
-// has no product column). The same rule lives in KIND_LEVEL here and in
+// price files only contribute SKUs (Wayfair Canada's USD cost too has its own
+// levels since 2026-09-28, 20260928_wayfair_ca_levels.sql). The same rule lives in KIND_LEVEL here and in
 // promotion_level_of() there — keep them in step.
 export const KIND_LEVEL = { monthly: 'orange', flash: 'orange', special: 'purple' };
 export const levelLabel = (tier) => (tier === 'purple' ? 'Purple' : 'Orange');

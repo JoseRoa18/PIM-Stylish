@@ -197,6 +197,12 @@ function buildEditForm(product) {
     cost_usd_wayfair_purple: product.cost_usd_wayfair_purple ?? '',
     cost_usd_menards_orange: product.cost_usd_menards_orange ?? '',
     cost_usd_menards_purple: product.cost_usd_menards_purple ?? '',
+    map_usd_wayfair_ca: product.map_usd_wayfair_ca ?? '',
+    map_usd_wayfair_ca_orange: product.map_usd_wayfair_ca_orange ?? '',
+    map_usd_wayfair_ca_purple: product.map_usd_wayfair_ca_purple ?? '',
+    cost_usd_wayfair_ca: product.cost_usd_wayfair_ca ?? '',
+    cost_usd_wayfair_ca_orange: product.cost_usd_wayfair_ca_orange ?? '',
+    cost_usd_wayfair_ca_purple: product.cost_usd_wayfair_ca_purple ?? '',
     cost_usd_lowes_sod_bbb: product.cost_usd_lowes_sod_bbb ?? '',
     cost_usd_wayfair: product.cost_usd_wayfair ?? '',
     cost_usd_menards: product.cost_usd_menards ?? '',
@@ -266,11 +272,15 @@ function buildEditForm(product) {
   return form;
 }
 
+// Wayfair Canada's own levels, in USD (its supplier account is priced in US dollars).
+const WAYFAIR_CA_KEYS = ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple', 'cost_usd_wayfair_ca', 'cost_usd_wayfair_ca_orange', 'cost_usd_wayfair_ca_purple'];
+
 const NUMBER_COLUMNS = new Set([
   'family_number', 'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
   'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
   'map_orange_cad', 'map_orange_usd', 'map_purple_cad', 'map_purple_usd',
   'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards_orange', 'cost_usd_menards_purple',
+  ...WAYFAIR_CA_KEYS,
   'shipping_weight_lb',
 ]);
 
@@ -1536,6 +1546,7 @@ function PricingTab({ product, edit, onAddPricing }) {
     'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
   'map_orange_cad', 'map_orange_usd', 'map_purple_cad', 'map_purple_usd',
   'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards_orange', 'cost_usd_menards_purple',
+  ...WAYFAIR_CA_KEYS,
   ];
   const noPricing = !edit.isEditing && PRICE_KEYS.every((k) => product[k] == null);
   return (
@@ -1580,6 +1591,16 @@ function PricingTab({ product, edit, onAddPricing }) {
                 { label: "WC · Lowe's / HD USA / Small Online / BB&B", keys: ['cost_usd_lowes_sod_bbb', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple'] },
                 { label: 'WC · Wayfair', keys: ['cost_usd_wayfair', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple'] },
                 { label: 'WC · Menards', keys: ['cost_usd_menards', 'cost_usd_menards_orange', 'cost_usd_menards_purple'] },
+              ]}
+            />
+          </Section>
+          <Section title="Wayfair Canada (USD)">
+            <PriceTierTable
+              product={product}
+              edit={edit}
+              columns={[
+                { label: 'MAP · Wayfair Canada', help: 'Wayfair Canada is priced in US dollars. Blue is its base MAP; Orange the monthly-promotion level; Purple the special event level.', keys: ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple'] },
+                { label: 'WC · Wayfair Canada', keys: ['cost_usd_wayfair_ca', 'cost_usd_wayfair_ca_orange', 'cost_usd_wayfair_ca_purple'] },
               ]}
             />
           </Section>
@@ -2432,10 +2453,12 @@ function PriceTierTable({ product, edit, msrpKey, columns }) {
   };
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-        <EditableField label="MSRP" fieldKey={msrpKey} type="currency" product={product} edit={edit} />
-        <DerivedCost label="B&M Cost" baseKey={msrpKey} factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
-      </div>
+      {msrpKey && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+          <EditableField label="MSRP" fieldKey={msrpKey} type="currency" product={product} edit={edit} />
+          <DerivedCost label="B&M Cost" baseKey={msrpKey} factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-body-sm">
           <thead>

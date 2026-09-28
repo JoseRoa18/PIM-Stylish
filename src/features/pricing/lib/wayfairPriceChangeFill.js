@@ -10,10 +10,11 @@
 // columns by their technical names on the header row:
 //   USA supplier     NewMapUSD = MAP of the target level (map_usd / map_<level>_usd)
 //                    BaseCost = WC Wayfair Blue (cost_usd_wayfair), END only
-//   Canada supplier  NewMapCAD = MAP of the target level (map_cad / map_<level>_cad);
-//                    BaseCost stays empty — Wayfair Canada's USD cost has no
-//                    column in Pricing yet
-//   MSRP columns and the other market's MAP stay empty (no change).
+//   Canada supplier  priced in USD on Wayfair, with its own levels (loaded
+//                    2026-09-28): NewMapUSD = Wayfair Canada MAP of the target
+//                    level (map_usd_wayfair_ca / _<level>), BaseCost = WC
+//                    Wayfair Canada Blue (cost_usd_wayfair_ca), END only
+//   MSRP columns and the CAD MAP columns stay empty (no change).
 // The file lists every Wayfair product: only the promotion's rows are kept
 // (renumbered from the first data row); promotion products the file doesn't
 // list are not live there and are reported. Rows whose Current values already
@@ -87,9 +88,9 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   const hit = locate(grid);
   if (!hit) throw new Error("Unexpected column layout — no SupplierPartNumber / BaseCost header. Is this Wayfair's pricing file?");
   const { cols } = hit;
-  const mapCol = usa ? cols.newMapUsd : cols.newMapCad;
-  const currentMapCol = usa ? cols.currentMapUsd : cols.currentMapCad;
-  if (mapCol == null) throw new Error(`The file has no ${usa ? 'NewMapUSD' : 'NewMapCAD'} column — is it the ${usa ? 'USA' : 'Canada'} supplier's pricing file?`);
+  const mapCol = cols.newMapUsd;
+  const currentMapCol = cols.currentMapUsd;
+  if (mapCol == null) throw new Error(`The file has no NewMapUSD column — is it the ${label} pricing file from Partner Home?`);
 
   const { rows: members, excluded } = await promotionMembersFor(promotion, usa ? 'wayfair_us' : 'wayfair_ca');
   if (!members.length) throw new Error(`This promotion has no products for ${label}.`);
@@ -97,13 +98,14 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   const memberSet = new Set(memberSkus);
 
   // The target level of every member, straight from Pricing.
-  const mapField = start ? `map_${tier}_${usa ? 'usd' : 'cad'}` : usa ? 'map_usd' : 'map_cad';
-  const withCost = usa && !start;
+  const mapField = usa ? (start ? `map_${tier}_usd` : 'map_usd') : (start ? `map_usd_wayfair_ca_${tier}` : 'map_usd_wayfair_ca');
+  const costField = usa ? 'cost_usd_wayfair' : 'cost_usd_wayfair_ca';
+  const withCost = !start;
   const values = new Map();
   for (let i = 0; i < memberSkus.length; i += 100) {
     const { data, error } = await supabase
       .from('products')
-      .select(withCost ? `sku, cost:cost_usd_wayfair, map:${mapField}` : `sku, map:${mapField}`)
+      .select(withCost ? `sku, cost:${costField}, map:${mapField}` : `sku, map:${mapField}`)
       .in('sku', memberSkus.slice(i, i + 100));
     if (error) throw error;
     for (const p of data ?? []) values.set(p.sku, { cost: withCost && p.cost != null ? Number(p.cost) : null, map: p.map != null ? Number(p.map) : null });
@@ -156,11 +158,11 @@ export function summarizeWayfairPriceChange(r) {
   const usa = r.supplier === 'USA';
   const start = r.target === 'promo';
   const label = usa ? 'Wayfair USA' : 'Wayfair Canada';
+  const name = usa ? '' : ' Wayfair Canada';
   const what = start
-    ? `New MAP (${usa ? 'USD' : 'CAD'}) = MAP ${r.levelName}`
-    : usa ? 'New Base Cost = WC Wayfair, New MAP (USD) = MAP' : 'New MAP (CAD) = MAP';
+    ? `New MAP (USD) =${name} MAP ${r.levelName}`
+    : `New Base Cost = WC${usa ? ' Wayfair' : name}, New MAP (USD) =${name} MAP`;
   const parts = [`${label} price change ready — ${r.rows} products ${start ? `down to the ${r.levelName} MAP` : 'back at Blue'} (${what}), ${r.removed} other rows removed`];
-  if (!usa && !start) parts.push('New Base Cost left empty: Wayfair Canada has no cost (USD) in Pricing yet');
   if (start) parts.push('upload it on the day the promotion starts: the file has no dates, the change applies when Wayfair imports it');
   if (r.already.length) parts.push(start
     ? `${r.already.length} already show the ${r.levelName} MAP on Wayfair (${list(r.already)})`
