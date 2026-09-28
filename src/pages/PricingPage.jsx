@@ -60,6 +60,7 @@ import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/ge
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
 import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
+import { fillHomeDepotCaPromoTemplate, summarizeHomeDepotCaFill } from '@/features/pricing/lib/homeDepotCaPromoFill';
 import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill } from '@/features/pricing/lib/menardsPromoFill';
 import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
 import { fillLowesPromoTemplate, summarizeLowesFill } from '@/features/pricing/lib/lowesPromoFill';
@@ -1803,6 +1804,8 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           ? summarizeMiraklFill(channel, await fillMiraklPromoTemplate(template, promo, channel))
           : channel.fill === 'rona'
             ? summarizeRonaFill(channel, await fillRonaPromoTemplate(template, promo, channel))
+            : channel.fill === 'homedepot_ca'
+              ? summarizeHomeDepotCaFill(channel, await fillHomeDepotCaPromoTemplate(template, promo, channel))
             : channel.fill === 'walmart_ca'
               ? summarizeWalmartCaFill(channel, await fillWalmartCaPromoTemplate(template, promo, channel))
               : channel.fill === 'lowes'

@@ -55,9 +55,11 @@ export const PROMO_CHANNELS = [
   // are Purple everywhere, so they need no pin.
   { key: 'bbb', label: 'Bed Bath & Beyond', monogram: 'BB', market: 'us', kind: 'template', auditTarget: 'bbb', marketplace: /b(ed)?\s*b(ath)?\s*(&|and)?\s*b/i, fill: 'bbb', portal: 'bbb', costSlug: 'lowes_sod_bbb_usd', levelByKind: BEYOND_LEVELS },
   { key: 'overstock', label: 'Overstock', monogram: 'OS', market: 'us', kind: 'template', auditTarget: 'overstock', marketplace: /^overstock/i, fill: 'bbb', portal: 'overstock', exclusionKey: 'bbb', costSlug: 'lowes_sod_bbb_usd', levelByKind: BEYOND_LEVELS },
-  // Home Depot Canada lists us under its own "SKU Assigned by Merchant"
-  // (Aliases, loaded 2026-09-28): the generic fill writes those ids.
-  { key: 'homedepot_ca', label: 'Home Depot Canada', monogram: 'HD', market: 'ca', kind: 'template', marketplace: /home ?depot.*(\bca\b|canada)/i, costSlug: 'rona_hd_cad', aliasMarketplace: 'Home Depot CA' },
+  // Home Depot Canada's NLP workbook (one template per category, Kitchen
+  // Sinks first): Article # = its "SKU Assigned by Merchant" (Aliases, loaded
+  // 2026-09-28), WAS/NLP price = MAP Blue / promo MAP, Old/New cost = WC
+  // Blue / WC promo, forecast = Canada stock. See homeDepotCaPromoFill.
+  { key: 'homedepot_ca', label: 'Home Depot Canada', monogram: 'HD', market: 'ca', kind: 'template', marketplace: /home ?depot.*(\bca\b|canada)/i, costSlug: 'rona_hd_cad', fill: 'homedepot_ca', aliasMarketplace: 'Home Depot CA' },
   // Rona's own file: Rona id + name from Aliases, WC Blue as regular cost,
   // WC Orange (monthly) / Purple (flash, event) as promo cost, MAP Blue kept.
   { key: 'rona', label: 'Rona', monogram: 'RO', market: 'ca', kind: 'template', marketplace: /rona/i, costSlug: 'rona_hd_cad', fill: 'rona', aliasMarketplace: 'Rona' },
