@@ -8,6 +8,12 @@
 //
 // Rows: rows that already carry a SKU are filled in place; promotion members
 // the file does not list are appended below the last row.
+//
+// Marketplaces that list us under their own id (`channel.aliasMarketplace`,
+// e.g. Home Depot Canada's "SKU Assigned by Merchant" kept in Aliases): the
+// file's SKU column carries that id, so rows match by alias as well as by
+// PIM SKU, appended rows write the alias, and members without one are left
+// out and reported.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -101,11 +107,29 @@ export async function fillPromoTemplate(template, promotion, channel) {
   if (!members.length) {
     throw new Error(`This promotion has no ${channel.market === 'us' ? 'USA' : 'Canada'} prices${channel.costSlug ? ' or costs' : ''} loaded.`);
   }
-  const bySku = new Map(members.map((m) => [m.sku, m]));
+  const skus = members.map((m) => m.sku);
+
+  // The marketplace's own id per member, when it has one (see the header note).
+  const alias = new Map();
+  const noAlias = [];
+  if (channel.aliasMarketplace) {
+    for (let i = 0; i < skus.length; i += 100) {
+      const { data } = await supabase.from('product_aliases').select('sku, alias').eq('marketplace', channel.aliasMarketplace).in('sku', skus.slice(i, i + 100));
+      for (const a of data ?? []) if (a.alias) alias.set(a.sku, a.alias);
+    }
+    for (const m of members) if (!alias.has(m.sku)) noAlias.push(m.sku);
+  }
+  const eligible = channel.aliasMarketplace ? members.filter((m) => alias.has(m.sku)) : members;
+  if (!eligible.length) throw new Error(`None of this promotion's products has a ${channel.aliasMarketplace} id in Aliases.`);
+  // A file row is ours when its SKU cell is the PIM SKU or the marketplace's id.
+  const byKey = new Map();
+  for (const m of eligible) {
+    byKey.set(m.sku, m);
+    if (alias.has(m.sku)) byKey.set(alias.get(m.sku), m);
+  }
 
   const mapBySku = new Map();
   if (hit.cols.map != null) {
-    const skus = members.map((m) => m.sku);
     for (let i = 0; i < skus.length; i += 100) {
       const { data } = await supabase.from('products').select(`sku, map:${mapKey}`).in('sku', skus.slice(i, i + 100));
       for (const p of data ?? []) mapBySku.set(p.sku, p.map);
@@ -138,20 +162,21 @@ export async function fillPromoTemplate(template, promotion, channel) {
     if (!sku) continue;
     lastRow = i + 1;
     fileSkus.add(sku);
-    const m = bySku.get(sku);
+    const m = byKey.get(sku);
     if (!m) continue;
     cellsByRow.set(i + 1, cellsFor(i + 1, m));
   }
   let merged = cellsByRow.size ? mergeRows(hit.xml, cellsByRow) : hit.xml;
 
-  // Members the file does not carry: append them.
-  const toAppend = members.filter((m) => !fileSkus.has(m.sku));
+  // Members the file does not carry: append them (under the marketplace's
+  // id when it has one).
+  const toAppend = eligible.filter((m) => !fileSkus.has(m.sku) && !fileSkus.has(alias.get(m.sku)));
   if (toAppend.length) {
     let rowsXml = '';
     for (const [idx, m] of toAppend.entries()) {
       const rn = lastRow + 1 + idx;
       const cells = cellsFor(rn, m);
-      cells.set(hit.cols.sku + 1, buildCell(`${indexToCol(hit.cols.sku + 1)}${rn}`, m.sku));
+      cells.set(hit.cols.sku + 1, buildCell(`${indexToCol(hit.cols.sku + 1)}${rn}`, alias.get(m.sku) ?? m.sku));
       rowsXml += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
     }
     merged = injectRows(merged, rowsXml, lastRow + toAppend.length);
@@ -165,22 +190,23 @@ export async function fillPromoTemplate(template, promotion, channel) {
   const columns = Object.fromEntries(Object.entries(hit.cols).map(([role, c]) => [role, indexToCol(c + 1)]));
   const wanted = ['promoPrice', ...(channel.costSlug ? ['cost'] : []), 'start', 'end'];
   const missing = wanted.filter((role) => hit.cols[role] == null);
-  const report = { sheet: hit.name, columns, missing, filled: cellsByRow.size, appended: toAppend.length, fileRows: fileSkus.size, excluded };
+  const report = { sheet: hit.name, columns, missing, filled: cellsByRow.size, appended: toAppend.length, fileRows: fileSkus.size, aliased: channel.aliasMarketplace ? eligible.length : 0, noAlias, excluded };
 
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: channel.key,
-    summary: `Filled ${channel.label} promotions template for "${promotion.name}" (${report.filled} rows filled, ${report.appended} added)`,
-    metadata: { template: template.file_name, ...report },
+    summary: `Filled ${channel.label} promotions template for "${promotion.name}" (${report.filled} rows filled, ${report.appended} added${channel.aliasMarketplace ? `, under the ${channel.aliasMarketplace} ids` : ''})`,
+    metadata: { template: template.file_name, ...report, noAlias: noAlias.length },
   });
   return report;
 }
 
 /** One-line result for the promo card. */
 export function summarizePromoFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.filled} rows filled, ${r.appended} added, sheet "${r.sheet}"`];
+  const parts = [`${channel.label} file ready. ${r.filled} rows filled, ${r.appended} added, sheet "${r.sheet}"${r.aliased ? ` (rows under the ${channel.aliasMarketplace} ids)` : ''}`];
+  if (r.noAlias?.length) parts.push(`no ${channel.aliasMarketplace} id in Aliases, left out: ${r.noAlias.slice(0, 8).join(', ')}${r.noAlias.length > 8 ? ` and ${r.noAlias.length - 8} more` : ''}`);
   const names = { promoPrice: 'promo price', cost: 'promo cost', start: 'start date', end: 'end date', map: 'regular MAP', sku: 'SKU' };
   parts.push('columns: ' + Object.entries(r.columns).map(([role, col]) => `${names[role]} ${col}`).join(', '));
   if (r.missing.length) parts.push(`not found in the template: ${r.missing.map((m) => names[m]).join(', ')}`);
