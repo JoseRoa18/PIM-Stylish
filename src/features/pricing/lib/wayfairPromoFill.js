@@ -1,6 +1,6 @@
-// Fill Wayfair's Partner Home PROMOTIONS file from a PIM promotion — either
-// the file uploaded fresh from Partner Home (Fill file, Wayfair Canada) or
-// the copy kept in Templates (Generate, Wayfair USA since 2026-09-28). The
+// Fill Wayfair's Partner Home PROMOTIONS file from a PIM promotion — always
+// the file downloaded fresh from Partner Home and uploaded (Fill file), for
+// both markets and every kind of promotion (user decision 2026-09-28). The
 // sheet "Promotions" carries Wayfair's complete "Current" info for every
 // listed row plus the tracking processId, and gets filled in place (JSZip
 // XML edit), never rebuilt:
@@ -44,7 +44,6 @@ import {
   injectRows,
   ensureNumberFormat,
   downloadZip,
-  templateExt,
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
@@ -95,7 +94,7 @@ function keepOnlyRows(xml, fromRow, keep) {
 const colLetter = (c) => { let n = c + 1; let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
 
 /**
- * @param file      anything with .name and .arrayBuffer() (a File, or a Templates blob wrapped with its name)
+ * @param file      the file the person uploaded (anything with .name and .arrayBuffer())
  * @param promotion promotions row
  * @param supplier  'CAN' | 'USA'
  */
@@ -233,14 +232,6 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   });
 
   return { supplier, tier: usa ? tier : null, filled, removed, appended: toAppend, fileRows: fileSkus.size, notOnWayfair, noCost, excluded };
-}
-
-/** Generate from the Partner Home file kept in Templates (Wayfair USA). */
-export async function fillWayfairPromoTemplate(template, promotion, channel) {
-  const { data: blob, error } = await supabase.storage.from('templates').download(template.storage_path);
-  if (error) throw new Error(`Failed to download template: ${error.message}`);
-  const file = { name: template.file_name || `template.${templateExt(template.storage_path)}`, arrayBuffer: () => blob.arrayBuffer() };
-  return fillWayfairPromoFile(file, promotion, channel?.market === 'us' ? 'USA' : 'CAN');
 }
 
 export function summarizeWayfairFill(channel, r) {

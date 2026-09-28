@@ -50,7 +50,7 @@ import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
-import { fillWayfairPromoFile, fillWayfairPromoTemplate, summarizeWayfairFill } from '@/features/pricing/lib/wayfairPromoFill';
+import { fillWayfairPromoFile, summarizeWayfairFill } from '@/features/pricing/lib/wayfairPromoFill';
 import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
@@ -1648,6 +1648,15 @@ const FILE_FILLERS = {
     fill: fillWayfairPromoFile,
     summarize: (r) => summarizeWayfairFill(null, r),
   },
+  wayfair_us: {
+    label: 'Wayfair USA',
+    monogram: 'WF',
+    monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
+    hint: "Promotions file downloaded from Partner Home (USA supplier) — discount 0, the WC Wayfair of the promotion's level as the cost after discount, B2B 0; rows outside the promotion are removed, missing members appended when Wayfair lists them.",
+    accept: '.xlsx,.xlsm',
+    fill: (file, promo) => fillWayfairPromoFile(file, promo, 'USA'),
+    summarize: (r) => summarizeWayfairFill(null, r),
+  },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
   // products without a level price can be kept blank or taken out.
   menards: {
@@ -1767,8 +1776,6 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           ? summarizeMiraklFill(channel, await fillMiraklPromoTemplate(template, promo, channel))
           : channel.fill === 'rona'
             ? summarizeRonaFill(channel, await fillRonaPromoTemplate(template, promo, channel))
-            : channel.fill === 'wayfair'
-              ? summarizeWayfairFill(channel, await fillWayfairPromoTemplate(template, promo, channel))
             : channel.fill === 'homedepot_ca'
               // Home Depot Canada hands out one file per product family: every
               // promotions template of the marketplace is filled in one go.

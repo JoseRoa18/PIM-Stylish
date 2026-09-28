@@ -41,10 +41,13 @@ export const PROMO_CHANNELS = [
     how: 'Scheduled discounts sent when the list loads. Check the portal: API discounts have not shown up so far.' },
   { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca', kind: 'portal_file', filler: 'wayfair', auditTarget: 'wayfair',
     how: 'Upload the Partner Home promotions file. The PIM fills the base cost per row and adds missing members.' },
-  // Wayfair USA generates from the Partner Home file kept in Templates
-  // (2026-09-28): discount 0, cost after discount = WC Wayfair of the level,
-  // B2B 0. Re-upload the file in Templates to refresh Wayfair's "Current" columns.
-  { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', market: 'us', kind: 'template', fill: 'wayfair', marketplace: /wayfair.*\bus(a)?\b/i, auditTarget: 'wayfair_usa', costSlug: null },
+  // Wayfair (both markets) always works from the file downloaded from Partner
+  // Home right before it is used (user decision 2026-09-28): its "Current"
+  // columns are Wayfair's own snapshot and it carries the tracking processId,
+  // so a copy kept in Templates goes stale. USA: discount 0, cost after
+  // discount = WC Wayfair of the level, B2B 0, rows outside the promotion removed.
+  { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', market: 'us', kind: 'portal_file', filler: 'wayfair_us', auditTarget: 'wayfair_usa',
+    how: "Download the promotions file from Partner Home and upload it here. The PIM fills discount 0, the WC Wayfair of the level and B2B 0, and keeps only the promotion's rows." },
   // Bed Bath & Beyond and Overstock (Beyond Inc.): same prices, aliases and
   // exclusion switch ('bbb'), same file layout, but each portal has its own
   // catalog file uploaded in Templates ("BB&B / Overstock US" is Bed Bath &
