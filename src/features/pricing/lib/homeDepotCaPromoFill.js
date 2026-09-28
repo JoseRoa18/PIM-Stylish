@@ -10,10 +10,14 @@
 //   E Unit of Measure        "EA"
 //   F NLP Forecast           the Canada stock in the PIM (product_inventory)
 //   G WAS Price              MAP Blue (map_cad)
-//   H NLP Price              promo MAP of the promotion's level (Orange for a
-//                            monthly promotion / flash deal, Purple for a
-//                            special event); a price on the promotion's own
-//                            list (promo_price_cad) wins
+//   H NLP Price              the product's promo MAP of the promotion's level
+//                            (map_orange_cad for a monthly promotion / flash
+//                            deal, map_purple_cad for a special event) — the
+//                            level is the truth here (user 2026-09-28: the
+//                            October list said 394 where Orange is 388); the
+//                            promotion's own list (promo_price_cad) only fills
+//                            in when the product has no level price, and the
+//                            SKUs where the two differ are reported
 //   I Automatic Price-Up?    "Yes"
 //   J Price Change %         the template's own formula, untouched
 //   K Applicable Market      "ALL"
@@ -21,9 +25,10 @@
 //   M Funding Type           "Cost Reduction"
 //   N Credit Per Unit        empty
 //   O Old Cost               WC Blue (cost_cad_rona_hd)
-//   P New Cost               WC of the level (cost_cad_rona_hd_<level>); a
-//                            cost on the promotion's list
-//                            (promo_costs.rona_hd_cad) wins
+//   P New Cost               the product's WC of the level
+//                            (cost_cad_rona_hd_<level>); the promotion's list
+//                            (promo_costs.rona_hd_cad) only when the product
+//                            has none
 //   Q… everything else       empty
 //
 // The workbook ships every data row pre-formatted — one styled empty cell per
@@ -177,16 +182,21 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
   const noCost = [];
   const noPromoCost = [];
   const noStock = [];
+  const listDiffers = [];
   let fromList = 0;
   for (const m of members) {
     const p = pim.get(m.sku) ?? {};
     if (categories.size && !categories.has(p.category)) { otherCategory.push(m.sku); continue; }
     const a = alias.get(m.sku);
     if (!a) { noAlias.push(m.sku); continue; }
+    // The product's level price is the truth; the promotion's own list only
+    // fills a gap, and a list price that disagrees is reported.
     const listed = m.promo_price_cad != null ? Number(m.promo_price_cad) : null;
-    const promoMap = listed ?? (p[promoMapField] != null ? Number(p[promoMapField]) : null);
+    const level = p[promoMapField] != null ? Number(p[promoMapField]) : null;
+    const promoMap = level ?? listed;
     if (promoMap == null) { noPromoMap.push(m.sku); continue; }
-    if (listed != null) fromList += 1;
+    if (level == null) fromList += 1;
+    else if (listed != null && listed !== level) listDiffers.push(`${m.sku} (list ${listed}, ${levelLabel(tier)} ${level})`);
     // Reported, never dropped: a WAS price missing in the PIM, or a promo
     // MAP that is not below it.
     const map = p.map_cad != null ? Number(p.map_cad) : null;
@@ -194,7 +204,7 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
     else if (promoMap >= map) atOrAbove.push(m.sku);
     const regularCost = p.cost_cad_rona_hd != null ? Number(p.cost_cad_rona_hd) : null;
     const listedCost = m.promo_costs?.rona_hd_cad;
-    const promoCost = listedCost != null ? Number(listedCost) : p[promoCostField] != null ? Number(p[promoCostField]) : null;
+    const promoCost = p[promoCostField] != null ? Number(p[promoCostField]) : listedCost != null ? Number(listedCost) : null;
     if (regularCost == null) noCost.push(m.sku);
     if (promoCost == null) noPromoCost.push(m.sku);
     const tracked = stock[m.sku];
@@ -257,7 +267,7 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
   await downloadZip(zip, `HomeDepotCA_${catLabel || 'Promo'}_${period}`, templateExt(template.storage_path));
 
   const report = {
-    rows: lines.length, tier, fromList, categories: tagged, family: [...categories], otherCategory, noAlias, noMap, noPromoMap, atOrAbove, noCost, noPromoCost, noStock,
+    rows: lines.length, tier, fromList, listDiffers, categories: tagged, family: [...categories], otherCategory, noAlias, noMap, noPromoMap, atOrAbove, noCost, noPromoCost, noStock,
     atZero: lines.filter((l) => l.forecast === 0 && stock[l.sku]).length, excluded, sheet: hit.name, firstRow,
   };
   logActivity({
@@ -266,7 +276,7 @@ export async function fillHomeDepotCaPromoTemplate(template, promotion, channel)
     entityId: String(promotion.id),
     target: channel.key,
     summary: `Filled Home Depot Canada NLP file for "${promotion.name}" (${lines.length} articles, ${levelLabel(tier)} level, forecast = Canada stock)`,
-    metadata: { template: template.file_name, ...report, otherCategory: otherCategory.length, noAlias: noAlias.length, noMap: noMap.length, noPromoMap: noPromoMap.length, atOrAbove: atOrAbove.length, noCost: noCost.length, noPromoCost: noPromoCost.length, noStock: noStock.length },
+    metadata: { template: template.file_name, ...report, listDiffers: listDiffers.length, otherCategory: otherCategory.length, noAlias: noAlias.length, noMap: noMap.length, noPromoMap: noPromoMap.length, atOrAbove: atOrAbove.length, noCost: noCost.length, noPromoCost: noPromoCost.length, noStock: noStock.length },
   });
   return report;
 }
@@ -276,7 +286,8 @@ const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? 
 export function summarizeHomeDepotCaFill(channel, r) {
   const extra = (r.family ?? []).filter((c) => !r.categories.includes(c)).map((c) => (CATEGORY_LABELS[c] ?? c).toLowerCase());
   const cats = r.categories.length ? r.categories.map((c) => CATEGORY_LABELS[c] ?? c).join(' / ') + (extra.length ? ` incl. ${extra.join(', ')}` : '') : 'every category';
-  const parts = [`${channel.label} file ready. ${r.rows} articles (${cats}) from row ${r.firstRow} of sheet "${r.sheet}": NLP price = MAP ${levelLabel(r.tier)}, new cost = WC ${levelLabel(r.tier)}${r.fromList ? ` (${r.fromList} prices from the promotion's own list)` : ''}, forecast = Canada stock${r.atZero ? ` (${r.atZero} at 0)` : ''}. Fiscal Week (column A) is yours to fill`];
+  const parts = [`${channel.label} file ready. ${r.rows} articles (${cats}) from row ${r.firstRow} of sheet "${r.sheet}": NLP price = the products' MAP ${levelLabel(r.tier)}, new cost = WC ${levelLabel(r.tier)}${r.fromList ? ` (${r.fromList} from the promotion's own list, no level price)` : ''}, forecast = Canada stock${r.atZero ? ` (${r.atZero} at 0)` : ''}. Fiscal Week (column A) is yours to fill`];
+  if (r.listDiffers?.length) parts.push(`${r.listDiffers.length} where the promotion's list differs from the ${levelLabel(r.tier)} level (the level went in): ${few(r.listDiffers, 4)}`);
   if (r.otherCategory.length) parts.push(`${r.otherCategory.length} promo products of other categories left out (this template is ${cats})`);
   if (r.noAlias.length) parts.push(`no Home Depot Canada id in Aliases, left out: ${few(r.noAlias)}`);
   if (r.noPromoMap.length) parts.push(`no MAP ${levelLabel(r.tier)} in the PIM, left out: ${few(r.noPromoMap)}`);
