@@ -52,13 +52,13 @@ import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile } from '@/features/pricing/lib/wayfairPromoFill';
 import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
-import { PROMO_CHANNELS, promoTemplateFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
+import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
 import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
-import { fillHomeDepotCaPromoTemplate, summarizeHomeDepotCaFill } from '@/features/pricing/lib/homeDepotCaPromoFill';
+import { fillHomeDepotCaPromoTemplates, summarizeHomeDepotCaFill } from '@/features/pricing/lib/homeDepotCaPromoFill';
 import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill } from '@/features/pricing/lib/menardsPromoFill';
 import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
 import { fillLowesPromoTemplate, summarizeLowesFill } from '@/features/pricing/lib/lowesPromoFill';
@@ -1787,7 +1787,9 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           : channel.fill === 'rona'
             ? summarizeRonaFill(channel, await fillRonaPromoTemplate(template, promo, channel))
             : channel.fill === 'homedepot_ca'
-              ? summarizeHomeDepotCaFill(channel, await fillHomeDepotCaPromoTemplate(template, promo, channel))
+              // Home Depot Canada hands out one file per product family: every
+              // promotions template of the marketplace is filled in one go.
+              ? summarizeHomeDepotCaFill(channel, await fillHomeDepotCaPromoTemplates(channel.templates?.length ? channel.templates : [template], promo, channel))
             : channel.fill === 'walmart_ca'
               ? summarizeWalmartCaFill(channel, await fillWalmartCaPromoTemplate(template, promo, channel))
               : channel.fill === 'lowes'
@@ -1807,6 +1809,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   const allRows = PROMO_CHANNELS
     .map((ch) => {
       const template = promoTemplateFor(ch, templates, promo.kind ?? 'monthly');
+      const templatesAll = promoTemplatesFor(ch, templates, promo.kind ?? 'monthly');
       let status;
       let tone;
       let detail = ch.how ?? '';
@@ -1849,7 +1852,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
         tone = 'muted';
         if (template) detail = `Generated from ${template.file_name}.`;
       }
-      return { ...ch, template, status, tone, detail };
+      return { ...ch, template, templates: templatesAll, status, tone, detail };
     });
   // A promotion made for chosen marketplaces shows those only.
   const targeted = Boolean(promo.marketplaces?.length);

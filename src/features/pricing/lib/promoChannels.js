@@ -92,11 +92,20 @@ export const PROMO_CHANNELS = [
  * otherwise the monthly promotions file serves every kind.
  */
 export function promoTemplateFor(channel, templates, kind = 'monthly') {
-  if (!channel.marketplace) return null;
+  return promoTemplatesFor(channel, templates, kind)[0] ?? null;
+}
+
+/**
+ * Every promotions template of a template-kind channel for the kind (a
+ * marketplace can hand out one file per product family — Home Depot Canada:
+ * kitchen sinks, faucets & porcelain — and Generate fills them all).
+ */
+export function promoTemplatesFor(channel, templates, kind = 'monthly') {
+  if (!channel.marketplace) return [];
   const mine = (templates ?? []).filter((t) => channel.marketplace.test(t.marketplace ?? ''));
   if (kind !== 'monthly') {
-    const flash = mine.find((t) => templatePurpose(t) === 'flash_deals');
-    if (flash) return flash;
+    const flash = mine.filter((t) => templatePurpose(t) === 'flash_deals');
+    if (flash.length) return flash;
   }
-  return mine.find((t) => templatePurpose(t) === 'promotions') ?? null;
+  return mine.filter((t) => templatePurpose(t) === 'promotions');
 }
