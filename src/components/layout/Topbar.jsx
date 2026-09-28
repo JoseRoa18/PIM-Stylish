@@ -169,7 +169,7 @@ export default function Topbar({ onMenuClick }) {
             }}
             onFocus={() => trimmed && setIsOpen(true)}
             onKeyDown={handleKeyDown}
-            placeholder={compact ? 'Search…' : 'Search by SKU or product name…'}
+            placeholder={compact ? 'Search…' : 'Search by SKU, name or marketplace id…'}
             aria-label="Search products"
             aria-autocomplete="list"
             aria-expanded={showDropdown}
@@ -270,7 +270,7 @@ export default function Topbar({ onMenuClick }) {
                                 <HighlightedText text={p.model_name || p.sku} query={trimmed} />
                               </span>
                             </div>
-                            {(hasModelName || p.brand || p.category) && (
+                            {(hasModelName || p.brand || p.category || p.matched_alias) && (
                               <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap text-body-sm text-on-surface-variant mt-0.5">
                                 {hasModelName && (
                                   <span className="font-mono shrink-0">
@@ -287,6 +287,14 @@ export default function Topbar({ onMenuClick }) {
                                   <span className="truncate">
                                     {(hasModelName || p.brand) && '· '}
                                     {formatCategory(p.category)}
+                                  </span>
+                                )}
+                                {p.matched_alias && (
+                                  // Found through a marketplace id: say which one.
+                                  <span className="shrink-0">
+                                    {(hasModelName || p.brand || p.category) && '· '}
+                                    {p.matched_alias.marketplace}{' '}
+                                    <span className="font-mono"><HighlightedText text={String(p.matched_alias.alias ?? '')} query={trimmed} /></span>
                                   </span>
                                 )}
                               </div>

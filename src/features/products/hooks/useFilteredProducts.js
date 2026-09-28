@@ -10,7 +10,9 @@ export function useFilteredProducts(products, { searchTerm, filters }) {
 
     let result = products;
 
-    // Text search across SKU, model_name, family_number, factory_code
+    // Text search across SKU, model_name, family_number, factory_code and
+    // the marketplace ids (aliases, Amazon seller SKUs / ASINs) — a Home
+    // Depot article number or a Rona id finds the product.
     if (searchTerm && searchTerm.trim()) {
       const term = searchTerm.trim().toLowerCase();
       result = result.filter((p) => {
@@ -19,6 +21,8 @@ export function useFilteredProducts(products, { searchTerm, filters }) {
           p.model_name,
           p.family_number,
           p.factory_code,
+          ...(p.product_aliases ?? []).map((a) => a.alias),
+          ...(p.amazon_links ?? []).flatMap((a) => [a.seller_sku, a.asin]),
         ]
           .filter(Boolean)
           .join(' ')

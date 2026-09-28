@@ -23,7 +23,9 @@ export async function listProducts() {
       msrp_cad,
       created_at,
       wix_product_id,
-      product_media (storage_path, alt_text, is_primary)
+      product_media (storage_path, alt_text, is_primary),
+      product_aliases (marketplace, alias),
+      amazon_links (marketplace, seller_sku, asin)
     `)
     // Only the primary image is shown in the table, so filter the embed
     // server-side — without this, every media row (all photos + the
@@ -216,9 +218,7 @@ export async function searchProducts(query, limit = 8) {
     orParts.push(`family_number.eq.${q}`);
   }
 
-  const { data, error } = await supabase
-    .from('products')
-    .select(`
+  const SELECT = `
       sku,
       model_name,
       family_number,
@@ -226,14 +226,8 @@ export async function searchProducts(query, limit = 8) {
       category,
       workflow_status,
       product_media (storage_path, is_primary)
-    `)
-    .eq('product_media.is_primary', true)
-    .or(orParts.join(','))
-    .limit(limit);
-
-  if (error) throw error;
-
-  return (data ?? []).map((p) => ({
+    `;
+  const toResult = (p, matched = null) => ({
     sku: p.sku,
     model_name: p.model_name,
     family_number: p.family_number,
@@ -241,7 +235,37 @@ export async function searchProducts(query, limit = 8) {
     category: p.category,
     workflow_status: p.workflow_status,
     primary_image: p.product_media?.find((m) => m.is_primary) ?? null,
-  }));
+    // The marketplace id that matched, when the product was found through
+    // one (Home Depot article #, Rona id, Amazon seller SKU / ASIN…).
+    matched_alias: matched,
+  });
+
+  // A marketplace's own id finds the product too: the manual aliases
+  // (product_aliases) and the Amazon links (seller SKU, ASIN).
+  const [direct, aliasHits, amazonHits] = await Promise.all([
+    supabase.from('products').select(SELECT).eq('product_media.is_primary', true).or(orParts.join(',')).limit(limit),
+    supabase.from('product_aliases').select('sku, marketplace, alias').ilike('alias', `%${q}%`).limit(limit * 3),
+    supabase.from('amazon_links').select('sku, marketplace, seller_sku, asin').or(`seller_sku.ilike.*${safe}*,asin.ilike.*${safe}*`).limit(limit * 3),
+  ]);
+  if (direct.error) throw direct.error;
+
+  const matchedBySku = new Map();
+  for (const a of aliasHits.data ?? []) if (!matchedBySku.has(a.sku)) matchedBySku.set(a.sku, { marketplace: a.marketplace, alias: a.alias });
+  for (const a of amazonHits.data ?? []) {
+    if (matchedBySku.has(a.sku)) continue;
+    const hit = String(a.seller_sku ?? '').toLowerCase().includes(q.toLowerCase()) ? a.seller_sku : a.asin;
+    matchedBySku.set(a.sku, { marketplace: a.marketplace === 'us' ? 'Amazon USA' : 'Amazon Canada', alias: hit });
+  }
+
+  const results = (direct.data ?? []).map((p) => toResult(p, matchedBySku.get(p.sku) ?? null));
+  const seen = new Set(results.map((r) => r.sku));
+  const extra = [...matchedBySku.keys()].filter((s) => !seen.has(s)).slice(0, Math.max(0, limit - results.length));
+  if (extra.length) {
+    const { data, error } = await supabase.from('products').select(SELECT).eq('product_media.is_primary', true).in('sku', extra);
+    if (error) throw error;
+    for (const p of data ?? []) results.push(toResult(p, matchedBySku.get(p.sku)));
+  }
+  return results.slice(0, limit);
 }
 
 /**
