@@ -299,11 +299,11 @@ function trimToRequired(item: MPItem): MPItem {
 // Walmart's Get Spec API returns the JSON Schema (draft-07) of the MP_ITEM
 // feed for the requested product types. Validating locally catches what
 // Walmart would reject on ingestion, without posting anything.
-async function fetchSpec(base: string, wm: string, productTypes: string[]) {
+async function fetchSpec(base: string, wm: string, productTypes: string[], feedType = "MP_ITEM", version = SPEC_VERSION) {
   const res = await fetch(`${base}/v3/items/spec`, {
     method: "POST",
     headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm, "Content-Type": "application/json" }),
-    body: JSON.stringify({ feedType: "MP_ITEM", version: SPEC_VERSION, productTypes }),
+    body: JSON.stringify({ feedType, version, productTypes }),
   });
   if (!res.ok) throw new Error(`Walmart spec ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return (await res.json()).schema;
@@ -374,8 +374,10 @@ Deno.serve(async (req) => {
       const prodBase = "https://marketplace.walmartapis.com";
       const wm = await getToken(prodBase, PCID, PSEC);
       const types: string[] = Array.isArray(body.productTypes) && body.productTypes.length ? body.productTypes.map(String) : ["Sinks"];
-      const schema = await fetchSpec(prodBase, wm, types);
-      return json({ ok: true, specVersion: SPEC_VERSION, productTypes: types, schema });
+      const feedType = body.feedType ? String(body.feedType) : "MP_ITEM";
+      const version = body.version ? String(body.version) : SPEC_VERSION;
+      const schema = await fetchSpec(prodBase, wm, types, feedType, version);
+      return json({ ok: true, feedType, specVersion: version, productTypes: types, schema });
     }
 
     // --- account (read-only) ---------------------------------------------------

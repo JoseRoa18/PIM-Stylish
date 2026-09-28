@@ -145,6 +145,7 @@ export default function WalmartAdditionCard({ product }) {
             <IssueList label="Warnings" items={row.warnings} tone="muted" />
             <IssueList label="Walmart spec errors" items={row.specErrors?.map((e) => `${e.path || '/'}: ${e.message}`)} tone="error" />
             <IssueList label="Walmart item errors" items={(result.items ?? []).filter((it) => it.ingestionStatus !== 'SUCCESS').map((it) => `${it.sku}: ${(it.ingestionErrors?.ingestionError ?? []).map((e) => e.description).join(' · ') || it.ingestionStatus}`)} tone="error" />
+            {matchError(result.items) && !status && <MatchHint product={product} />}
             <MappedTable rows={row.rows} />
           </div>
         )}
@@ -157,12 +158,35 @@ export default function WalmartAdditionCard({ product }) {
                 {(status.items ?? []).filter((it) => it.ingestionStatus !== 'SUCCESS').map((it, i) => (
                   <div key={i} className="text-error">{it.sku}: {(it.ingestionErrors?.ingestionError ?? []).map((e) => e.description).join(' · ') || it.ingestionStatus}</div>
                 ))}
+                {matchError(status.items) && <MatchHint product={product} />}
               </>
             )}
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+// ERR_PDI_0001 ("Unexpected system error occurred in item setup") is what
+// Walmart answers when the UPC ALREADY EXISTS in its catalog as a listing
+// without offers (S-414T, 2026-09-28: item 15229859144, likely from the
+// Walmart Canada catalog). The seller API's catalog search does not return
+// such listings, so the PIM can't tell beforehand — it explains it after.
+const matchError = (items) =>
+  (items ?? []).some((it) => (it.ingestionErrors?.ingestionError ?? []).some((e) => e.code === 'ERR_PDI_0001'));
+
+function MatchHint({ product }) {
+  const upc = product.upc || product.attributes?.upc || '';
+  return (
+    <div className="px-3 py-2 bg-tertiary-container/40 text-on-surface">
+      <p className="font-medium">Walmart probably already has this product in its catalog</p>
+      <p className="mt-0.5 text-on-surface-variant">
+        A listing without offers already uses this UPC, so a new item can't be set up with it — and the API can't see that listing beforehand.
+        Add your offer to it instead: Seller Center › Catalog › Add items › enter UPC {upc || '(the product UPC)'} › "We found a match" › Add item, with SKU {product.sku}.
+        Once the offer exists under that SKU, the PIM's Walmart USA promotions reach it by API.
+      </p>
+    </div>
   );
 }
 
