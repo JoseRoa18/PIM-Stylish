@@ -9,8 +9,8 @@ import { ownedTaskChannels, openTasksFor, taskKey, TASK_LABEL } from '@/features
 import { etToday } from '@/features/pricing/lib/promoCalendar';
 
 // The file tasks of the channels this person owns (Settings → Promotion file
-// owners): Wayfair's promotions file when a promotion starts, its price change
-// when a flash deal or special event ends. Same toast family as PromoNudge,
+// owners): Wayfair's promotions file and promo MAP when a promotion starts,
+// the price change back to Blue when it ends. Same toast family as PromoNudge,
 // but it does NOT auto-hide — it's a deadline. "Later" hides it for a few
 // hours; it goes away for good when the PIM fills the file or the person marks
 // it done. Checked a few seconds after the app opens and every half hour.
@@ -47,6 +47,10 @@ function describe(t, today) {
   if (t.task === 'promo_file') {
     const when = t.due === today ? 'starts today' : t.overdue ? `started ${dayLabel(t.due)}` : `starts ${dayLabel(t.due)}`;
     return `${name} ${when}. Download the promotions file from Partner Home and upload it here — the PIM fills it.`;
+  }
+  if (t.task === 'price_start') {
+    const when = t.due === today ? 'starts today' : `started ${dayLabel(t.due)}`;
+    return `${name} ${when}. Download the pricing file from Partner Home and upload it here — the PIM lowers the MAP to the promotion's level.`;
   }
   const when = t.due === today ? 'ends today' : `ended ${dayLabel(t.due)}`;
   return `${name} ${when}. Download the pricing file from Partner Home and upload it here — the PIM puts its products back at Blue.`;

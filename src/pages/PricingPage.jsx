@@ -1680,24 +1680,43 @@ const FILE_FILLERS = {
     fill: (file, promo) => fillWayfairPromoFile(file, promo, 'USA'),
     summarize: (r) => summarizeWayfairFill(null, r),
   },
-  // Price change: when a promotion ends, the pricing file downloaded from
-  // Partner Home goes back with the promotion's products at Blue.
+  // Price change, the pricing file downloaded from Partner Home: the day the
+  // promotion starts the MAP goes down to its level (Promo MAP), the day it
+  // ends it goes back to Blue.
+  wayfair_price_start: {
+    label: 'Wayfair Canada · Promo MAP',
+    monogram: 'WF',
+    monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
+    hint: "Pricing file downloaded from Partner Home (Canada supplier) the day the promotion starts — New MAP (CAD) = the MAP of the promotion's level, only the promotion's rows are kept. The file has no dates: Wayfair applies it when imported.",
+    accept: '.xlsx,.xlsm',
+    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'promo'),
+    summarize: summarizeWayfairPriceChange,
+  },
+  wayfair_us_price_start: {
+    label: 'Wayfair USA · Promo MAP',
+    monogram: 'WF',
+    monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
+    hint: "Pricing file downloaded from Partner Home (USA supplier) the day the promotion starts — New MAP (USD) = the MAP of the promotion's level, only the promotion's rows are kept (the cost goes in the promotions file). The file has no dates: Wayfair applies it when imported.",
+    accept: '.xlsx,.xlsm',
+    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA', 'promo'),
+    summarize: summarizeWayfairPriceChange,
+  },
   wayfair_price_change: {
-    label: 'Wayfair Canada · Price change',
+    label: 'Wayfair Canada · Back to Blue',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Pricing file downloaded from Partner Home (Canada supplier) when the promotion ends — New MAP (CAD) = MAP Blue, only the promotion's rows are kept. New Base Cost stays empty: Wayfair Canada has no Blue cost (USD) in Pricing yet.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN'),
+    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'blue'),
     summarize: summarizeWayfairPriceChange,
   },
   wayfair_us_price_change: {
-    label: 'Wayfair USA · Price change',
+    label: 'Wayfair USA · Back to Blue',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Pricing file downloaded from Partner Home (USA supplier) when the promotion ends — New Base Cost = WC Wayfair Blue, New MAP (USD) = MAP Blue, only the promotion's rows are kept.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA'),
+    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA', 'blue'),
     summarize: summarizeWayfairPriceChange,
   },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
@@ -1878,14 +1897,16 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
         // (readable by everyone, unlike the audit log).
         const done = promo.file_tasks ?? {};
         const pf = done[`${ch.key}:promo_file`];
+        const ps = done[`${ch.key}:price_start`];
         const pc = done[`${ch.key}:price_change`];
         const generated = pf?.at ?? history[ch.auditTarget ?? ch.key] ?? null;
         const how = (t) => `${t.manual ? 'marked done' : 'filled'}${t.name ? ` by ${t.name}` : ''} ${day(t.at)}`;
-        status = pc ? `Back at Blue ${day(pc.at)}` : generated ? `Generated ${day(generated)}` : 'Not generated';
-        tone = pc || generated ? 'ok' : 'muted';
+        const w = promoWindow(promo, ch.market);
+        status = pc ? `Back at Blue ${day(pc.at)}` : ps ? `Promo MAP ${day(ps.at)}` : generated ? `Generated ${day(generated)}` : 'Not generated';
+        tone = pc || ps || generated ? 'ok' : 'muted';
         if (pf) detail += ` Promotions file ${how(pf)}.`;
-        if (pc) detail += ` Price change ${how(pc)}.`;
-        else if ((promo.kind ?? 'monthly') !== 'monthly') detail += ` Price change due ${dayOf(promoWindow(promo, ch.market).end)}.`;
+        detail += ps ? ` Promo MAP ${how(ps)}.` : ` Promo MAP due ${dayOf(w.start)}.`;
+        detail += pc ? ` Back to Blue ${how(pc)}.` : ` Back to Blue due ${dayOf(w.end)}.`;
       } else if (history[ch.auditTarget ?? ch.key]) {
         status = `Generated ${day(history[ch.auditTarget ?? ch.key])}`;
         tone = 'ok';
@@ -1944,7 +1965,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
             <span className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-sm font-bold flex-shrink-0">{ch.monogram}</span>
             <span className="text-body-md text-on-surface min-w-0 truncate">{ch.label}</span>
             <span className={`ml-auto px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap ${chip[ch.tone]}`}>{ch.status}</span>
-            <span className="w-32 text-right flex-shrink-0">
+            <span className="min-w-32 flex flex-wrap items-center justify-end gap-1.5 flex-shrink-0">
               {canEdit && ch.kind === 'api' && ch.schedule && promo.status !== 'ended' && (
                 <button type="button" onClick={() => schedule(ch)} disabled={busy === ch.key} className={actionCls}>
                   {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
@@ -1954,8 +1975,11 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
               {canEdit && ch.kind === 'portal_file' && (
                 <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file</button>
               )}
+              {canEdit && ch.priceStart && (
+                <button type="button" onClick={() => onFillFile(ch.priceStart)} className={actionCls}>Promo MAP</button>
+              )}
               {canEdit && ch.priceChange && (
-                <button type="button" onClick={() => onFillFile(ch.priceChange)} className={actionCls}>Price change</button>
+                <button type="button" onClick={() => onFillFile(ch.priceChange)} className={actionCls}>Back to Blue</button>
               )}
               {canEdit && ch.template && (
                 <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className={actionCls}>

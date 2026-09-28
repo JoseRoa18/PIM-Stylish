@@ -126,7 +126,7 @@ function PromoOwnersSection() {
         <div>
           <h2 className="text-title-md text-on-surface font-semibold">Promotion file owners</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-            Who gets the reminders for the marketplaces whose files go through their portal: the promotions file before a promotion starts, and the price change back to Blue when a flash deal or special event ends. Without an owner, every admin gets them.
+            Who gets the reminders for the marketplaces whose files go through their portal: the promotions file and the promo MAP when a promotion starts, and the price change back to Blue when it ends. Without an owner, every admin gets them.
           </p>
         </div>
       </div>

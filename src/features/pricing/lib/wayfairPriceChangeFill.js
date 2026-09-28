@@ -1,19 +1,24 @@
-// Fill Wayfair's Partner Home PRICING file ("Pricing / MAP Change" export)
-// when a promotion ends: its products go back to their Blue level in Pricing
-// (user flow 2026-09-28). Like the promotions file, it is always the file the
-// person downloads from Partner Home right before — its "Current" columns are
-// Wayfair's own snapshot of the moment (during a promotion they show the
-// promo values), so the PIM never writes them. Sheet "Pricing", columns by
-// their technical names on the header row:
-//   USA supplier     BaseCost = WC Wayfair Blue (cost_usd_wayfair)
-//                    NewMapUSD = MAP Blue USD (map_usd)
-//   Canada supplier  NewMapCAD = MAP Blue CAD (map_cad); BaseCost stays empty
-//                    — Wayfair Canada's USD cost has no Blue column in Pricing yet
+// Fill Wayfair's Partner Home PRICING file ("Pricing / MAP Change" export) at
+// both ends of a promotion (user flow 2026-09-28, every kind incl. monthly):
+//   target 'promo'  the day it STARTS: the MAP goes down to the promotion's
+//                   level (Orange, Purple for a special event) — the cost
+//                   side of the promotion travels in the promotions file
+//   target 'blue'   the day it ENDS: back to the Blue level
+// Like the promotions file, it is always the file the person downloads from
+// Partner Home right before — its "Current" columns are Wayfair's own
+// snapshot of the moment, so the PIM never writes them. Sheet "Pricing",
+// columns by their technical names on the header row:
+//   USA supplier     NewMapUSD = MAP of the target level (map_usd / map_<level>_usd)
+//                    BaseCost = WC Wayfair Blue (cost_usd_wayfair), END only
+//   Canada supplier  NewMapCAD = MAP of the target level (map_cad / map_<level>_cad);
+//                    BaseCost stays empty — Wayfair Canada's USD cost has no
+//                    column in Pricing yet
 //   MSRP columns and the other market's MAP stay empty (no change).
 // The file lists every Wayfair product: only the promotion's rows are kept
 // (renumbered from the first data row); promotion products the file doesn't
 // list are not live there and are reported. Rows whose Current values already
-// equal Blue are kept and reported — the promotion may never have reached them.
+// equal the target are kept and reported (at the end: the promotion may never
+// have reached them; at the start: the MAP was already lowered).
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -27,7 +32,7 @@ import {
   ensureNumberFormat,
   downloadZip,
 } from '@/features/syndication/exports/templateFiller';
-import { promotionMembersFor } from '@/features/pricing/api/promotions';
+import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pricing/api/promotions';
 import { markPromotionTask } from '@/features/pricing/api/promoTasks';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -62,9 +67,13 @@ const list = (a, n = 8) => `${a.slice(0, n).join(', ')}${a.length > n ? '…' : 
  * @param file      the pricing file the person uploaded (.name, .arrayBuffer())
  * @param promotion promotions row (the one that ended)
  * @param supplier  'USA' | 'CAN'
+ * @param target    'blue' (the promotion ended) | 'promo' (it starts: MAP of its level)
  */
-export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'USA') {
+export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'USA', target = 'blue') {
   const usa = supplier === 'USA';
+  const start = target === 'promo';
+  const tier = start ? promotionLevel(promotion) : null;
+  const levelName = start ? levelLabel(tier) : 'Blue';
   const label = usa ? 'Wayfair USA' : 'Wayfair Canada';
   const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
@@ -87,67 +96,76 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   const memberSkus = members.map((r) => r.sku);
   const memberSet = new Set(memberSkus);
 
-  // The Blue level of every member, straight from Pricing.
-  const blue = new Map();
+  // The target level of every member, straight from Pricing.
+  const mapField = start ? `map_${tier}_${usa ? 'usd' : 'cad'}` : usa ? 'map_usd' : 'map_cad';
+  const withCost = usa && !start;
+  const values = new Map();
   for (let i = 0; i < memberSkus.length; i += 100) {
     const { data, error } = await supabase
       .from('products')
-      .select(usa ? 'sku, cost:cost_usd_wayfair, map:map_usd' : 'sku, map:map_cad')
+      .select(withCost ? `sku, cost:cost_usd_wayfair, map:${mapField}` : `sku, map:${mapField}`)
       .in('sku', memberSkus.slice(i, i + 100));
     if (error) throw error;
-    for (const p of data ?? []) blue.set(p.sku, { cost: usa && p.cost != null ? Number(p.cost) : null, map: p.map != null ? Number(p.map) : null });
+    for (const p of data ?? []) values.set(p.sku, { cost: withCost && p.cost != null ? Number(p.cost) : null, map: p.map != null ? Number(p.map) : null });
   }
 
   const money = await ensureNumberFormat(zip, MONEY, 0);
   const firstData = hit.headerRow + 3; // labels, instructions, then data
   const cellsByRow = new Map();
   const fileSkus = new Set();
-  const alreadyBlue = [];
-  const noBlue = [];
+  const already = [];
+  const missing = [];
   for (let i = firstData; i < grid.length; i++) {
     const sku = String(grid[i]?.[cols.sku] ?? '').trim();
     if (!sku) continue;
     fileSkus.add(sku);
     if (!memberSet.has(sku)) continue;
-    const { cost = null, map = null } = blue.get(sku) ?? {};
-    if (cost == null && map == null) { noBlue.push(sku); continue; }
+    const { cost = null, map = null } = values.get(sku) ?? {};
+    if (cost == null && map == null) { missing.push(sku); continue; }
     const rn = i + 1;
     const cells = new Map();
     if (cost != null) cells.set(cols.baseCost + 1, buildCell(`${colLetter(cols.baseCost)}${rn}`, cost, money));
     if (map != null) cells.set(mapCol + 1, buildCell(`${colLetter(mapCol)}${rn}`, map, money));
     cellsByRow.set(rn, cells);
     const same = (col, v) => v == null || col == null || Number(grid[i][col]) === v;
-    if (same(cols.currentBaseCost, cost) && same(currentMapCol, map)) alreadyBlue.push(sku);
+    if (same(cols.currentBaseCost, cost) && same(currentMapCol, map)) already.push(sku);
   }
-  if (!cellsByRow.size) throw new Error(`None of the promotion's products is in this file with Blue values in Pricing — check it is the ${label} pricing file.`);
+  if (!cellsByRow.size) throw new Error(`None of the promotion's products is in this file with ${levelName} values in Pricing — check it is the ${label} pricing file.`);
 
   const kept = keepOnlyRows(mergeRows(xml, cellsByRow, true), firstData + 1, new Set(cellsByRow.keys()));
   zip.file(path, kept.xml);
   const notInFile = memberSkus.filter((s) => !fileSkus.has(s)).sort();
 
-  const day = String(promotion.ends_on ?? promotion.period).slice(0, 10);
-  await downloadZip(zip, `Wayfair_${usa ? 'USA' : 'Canada'}_Price_Change_${day}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
+  const day = String((start ? promotion.starts_on : promotion.ends_on) ?? promotion.period).slice(0, 10);
+  await downloadZip(zip, `Wayfair_${usa ? 'USA' : 'Canada'}_Price_Change_${start ? 'Promo' : 'Blue'}_${day}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
 
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
-    target: `${usa ? 'wayfair_usa' : 'wayfair'}_price_change`,
-    summary: `Filled ${label} price change for "${promotion.name}" (${cellsByRow.size} products back at Blue, ${kept.removed} other rows removed)`,
-    metadata: { rows: cellsByRow.size, removed: kept.removed, already_blue: alreadyBlue.length, no_blue: noBlue.length, not_in_file: notInFile.length },
+    target: `${usa ? 'wayfair_usa' : 'wayfair'}_${start ? 'price_start' : 'price_change'}`,
+    summary: `Filled ${label} price change for "${promotion.name}" (${cellsByRow.size} products ${start ? `to MAP ${levelName}` : 'back at Blue'}, ${kept.removed} other rows removed)`,
+    metadata: { target, tier, rows: cellsByRow.size, removed: kept.removed, already: already.length, missing: missing.length, not_in_file: notInFile.length },
   });
-  await markPromotionTask(promotion.id, `${usa ? 'wayfair_us' : 'wayfair_ca'}:price_change`, { rows: cellsByRow.size });
+  await markPromotionTask(promotion.id, `${usa ? 'wayfair_us' : 'wayfair_ca'}:${start ? 'price_start' : 'price_change'}`, { rows: cellsByRow.size, tier });
 
-  return { supplier, rows: cellsByRow.size, removed: kept.removed, alreadyBlue, noBlue, notInFile, excluded };
+  return { supplier, target, levelName, rows: cellsByRow.size, removed: kept.removed, already, missing, notInFile, excluded };
 }
 
 export function summarizeWayfairPriceChange(r) {
   const usa = r.supplier === 'USA';
+  const start = r.target === 'promo';
   const label = usa ? 'Wayfair USA' : 'Wayfair Canada';
-  const parts = [`${label} price change ready — ${r.rows} products back at Blue (${usa ? 'New Base Cost = WC Wayfair, New MAP (USD) = MAP' : 'New MAP (CAD) = MAP'}), ${r.removed} other rows removed`];
-  if (!usa) parts.push('New Base Cost left empty: Wayfair Canada has no Blue cost (USD) in Pricing yet');
-  if (r.alreadyBlue.length) parts.push(`${r.alreadyBlue.length} already show the Blue values on Wayfair, the promotion may not have reached them (${list(r.alreadyBlue)})`);
-  if (r.noBlue.length) parts.push(`${r.noBlue.length} without Blue values in Pricing, left out: ${list(r.noBlue)}`);
+  const what = start
+    ? `New MAP (${usa ? 'USD' : 'CAD'}) = MAP ${r.levelName}`
+    : usa ? 'New Base Cost = WC Wayfair, New MAP (USD) = MAP' : 'New MAP (CAD) = MAP';
+  const parts = [`${label} price change ready — ${r.rows} products ${start ? `down to the ${r.levelName} MAP` : 'back at Blue'} (${what}), ${r.removed} other rows removed`];
+  if (!usa && !start) parts.push('New Base Cost left empty: Wayfair Canada has no cost (USD) in Pricing yet');
+  if (start) parts.push('upload it on the day the promotion starts: the file has no dates, the change applies when Wayfair imports it');
+  if (r.already.length) parts.push(start
+    ? `${r.already.length} already show the ${r.levelName} MAP on Wayfair (${list(r.already)})`
+    : `${r.already.length} already show the Blue values on Wayfair, the promotion may not have reached them (${list(r.already)})`);
+  if (r.missing.length) parts.push(`${r.missing.length} without ${r.levelName} values in Pricing, left out: ${list(r.missing)}`);
   if (r.notInFile.length) parts.push(`${r.notInFile.length} promotion products not in the file (not live on ${label}): ${list(r.notInFile)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${label}`);
   return parts.join(' · ');
