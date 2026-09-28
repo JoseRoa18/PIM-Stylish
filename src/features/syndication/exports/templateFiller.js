@@ -225,6 +225,45 @@ export function removeRows(sheetXml, rowNums) {
   return out.replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)\d+("\s*\/>)/, `$1${last}$2`);
 }
 
+// A cell style with a number format the template lacks (e.g. "$"#,##0.00 for
+// a cost Wayfair wants shown as $80.00): the format and an <xf> cloned from
+// `baseXf` (the fill / border / font of the cells it replaces) are added to
+// styles.xml once — an identical pair already there is reused. Returns the xf
+// index to pass to buildCell, or null when the workbook has no styles part.
+export async function ensureNumberFormat(zip, formatCode, baseXf = 0) {
+  const file = zip.file('xl/styles.xml');
+  if (!file) return null;
+  let xml = await file.async('string');
+  const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+  let id = null;
+  for (const m of xml.matchAll(/<numFmt numFmtId="(\d+)" formatCode="([^"]*)"\s*\/>/g)) {
+    if (unescape(m[2]) === formatCode) { id = Number(m[1]); break; }
+  }
+  if (id == null) {
+    const ids = [...xml.matchAll(/<numFmt numFmtId="(\d+)"/g)].map((m) => Number(m[1]));
+    id = Math.max(163, ...ids) + 1;
+    const tag = `<numFmt numFmtId="${id}" formatCode="${escapeXml(formatCode)}"/>`;
+    xml = /<numFmts\b/.test(xml)
+      ? xml.replace(/<numFmts count="(\d+)">/, (m, n) => `<numFmts count="${Number(n) + 1}">`).replace('</numFmts>', `${tag}</numFmts>`)
+      : xml.replace(/<styleSheet\b[^>]*>/, (m) => `${m}<numFmts count="1">${tag}</numFmts>`); // numFmts is the first child
+  }
+
+  const block = xml.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
+  if (!block) return null;
+  const xfs = [...block[2].matchAll(/<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g)];
+  const base = xfs[baseXf] ?? xfs[0];
+  const inner = base[2] ?? '';
+  const attrs = `${base[1].replace(/\s*numFmtId="\d+"/, '').replace(/\s*applyNumberFormat="\d+"/, '')} numFmtId="${id}" applyNumberFormat="1"`;
+  const key = (a) => a.trim().split(/\s+/).sort().join(' ');
+  const existing = xfs.findIndex((x) => key(x[1]) === key(attrs) && (x[2] ?? '') === inner);
+  if (existing !== -1) { zip.file('xl/styles.xml', xml); return existing; }
+  const newXf = inner ? `<xf${attrs}>${inner}</xf>` : `<xf${attrs}/>`;
+  xml = xml.replace(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/, (m, n, body) => `<cellXfs count="${Number(n) + 1}">${body}${newXf}</cellXfs>`);
+  zip.file('xl/styles.xml', xml);
+  return xfs.length;
+}
+
 // Make Excel recalculate every formula when the file is opened. Formula cells
 // we write (or a template's pre-formatted formula rows) carry no cached
 // value, and Excel shows them blank until something triggers a recalc —
