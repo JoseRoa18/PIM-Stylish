@@ -34,13 +34,13 @@
 //   C Vendor Name            "Stylish WAREHOUSE"
 //   D THD Article #          the alias        E Article Description  its title
 //   G WAS Price              MAP Blue         H Now Price   promo MAP of the level
-//   I Retail Change %        =IFERROR(H/G-1,"") — the template only carries Q's
+//   I Retail Change %        empty (user 2026-09-28)
 //   J NLP Funding Type       "Cost Reduction"
 //   L Old Cost               WC Blue          M New Cost    WC of the level
 //   N NLP Forecast           60% of the Canada stock, rounded
 //   Q Retail Change %        the template's formula, untouched
 //   W Notes                  "<Month> Promotion" (flash deal / special event: their kind)
-//   K, P, S, T, U, everything else  empty
+//   I, K, P, S, T, U, everything else  empty
 //
 // The products' levels are the truth (user 2026-09-28): the promotion's own
 // rows only fill a level the product lacks, and the SKUs where the two differ
@@ -61,7 +61,6 @@ import {
   sheetPathByName,
   sheetToGrid,
   buildCell,
-  buildFormulaCell,
   mergeRows,
   injectRows,
   recalcOnOpen,
@@ -96,7 +95,7 @@ const LAYOUTS = {
     required: ['article', 'wasPrice', 'nowPrice'],
     headers: {
       quarter: /^quarter/, vendor: /^vendorname/, article: /^thdarticle/, description: /^articledescription/,
-      wasPrice: /^wasprice/, nowPrice: /^nowprice/, change: /^retailchange/, funding: /^nlpfundingtype/,
+      wasPrice: /^wasprice/, nowPrice: /^nowprice/, funding: /^nlpfundingtype/,
       oldCost: /^oldcost/, newCost: /^newcost/, forecast: /^nlpforecast/, notes: /^notes$/,
     },
     forecastShare: 0.6,
@@ -268,7 +267,6 @@ async function buildWorkbook(template, promotion, channel) {
     const inTemplate = existingRows.has(rn);
     const styleFor = (c) => (inTemplate ? null : styles.get(c + 1) ?? null);
     const put = (c, v) => { if (c != null && v != null && v !== '') cells.set(c + 1, buildCell(`${col(c)}${rn}`, v, styleFor(c))); };
-    const formula = (c, f) => { if (c != null) cells.set(c + 1, buildFormulaCell(`${col(c)}${rn}`, f, styleFor(c))); };
     const k = layout.constants;
     if (hit.layout === 'nlp') {
       put(cols.merchant, k.merchant);
@@ -291,7 +289,6 @@ async function buildWorkbook(template, promotion, channel) {
       put(cols.description, l.description);
       put(cols.wasPrice, l.map);
       put(cols.nowPrice, l.promoMap);
-      if (cols.wasPrice != null && cols.nowPrice != null) formula(cols.change, `IFERROR(${col(cols.nowPrice)}${rn}/$${col(cols.wasPrice)}${rn}-1,"")`);
       put(cols.funding, k.funding);
       put(cols.oldCost, l.regularCost);
       put(cols.newCost, l.promoCost);
