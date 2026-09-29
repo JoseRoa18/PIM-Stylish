@@ -1663,6 +1663,8 @@ function CopySkusButton({ skus }) {
 // the matching, the summary turns its report into the card message.
 const FILE_FILLERS = {
   wayfair: {
+    group: 'wayfair_ca',
+    step: 'promo_file',
     label: 'Wayfair Canada',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
@@ -1672,6 +1674,8 @@ const FILE_FILLERS = {
     summarize: (r) => summarizeWayfairFill(null, r),
   },
   wayfair_us: {
+    group: 'wayfair_us',
+    step: 'promo_file',
     label: 'Wayfair USA',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
@@ -1684,6 +1688,8 @@ const FILE_FILLERS = {
   // promotion starts the MAP goes down to its level (Promo MAP), the day it
   // ends it goes back to Blue.
   wayfair_price_start: {
+    group: 'wayfair_ca',
+    step: 'price_start',
     label: 'Wayfair Canada · Promo MAP',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
@@ -1693,6 +1699,8 @@ const FILE_FILLERS = {
     summarize: summarizeWayfairPriceChange,
   },
   wayfair_us_price_start: {
+    group: 'wayfair_us',
+    step: 'price_start',
     label: 'Wayfair USA · Promo MAP',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
@@ -1702,6 +1710,8 @@ const FILE_FILLERS = {
     summarize: summarizeWayfairPriceChange,
   },
   wayfair_price_change: {
+    group: 'wayfair_ca',
+    step: 'price_change',
     label: 'Wayfair Canada · Back to Blue',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
@@ -1711,6 +1721,8 @@ const FILE_FILLERS = {
     summarize: summarizeWayfairPriceChange,
   },
   wayfair_us_price_change: {
+    group: 'wayfair_us',
+    step: 'price_change',
     label: 'Wayfair USA · Back to Blue',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
@@ -1722,6 +1734,8 @@ const FILE_FILLERS = {
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
   // products without a level price can be kept blank or taken out.
   menards: {
+    group: 'menards',
+    step: 'promo_file',
     label: 'Menards',
     monogram: 'ME',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
@@ -1732,6 +1746,8 @@ const FILE_FILLERS = {
     summarize: summarizeMenardsFill,
   },
   menards_price_change: {
+    group: 'menards',
+    step: 'price_change',
     label: 'Menards · Back to Blue',
     monogram: 'ME',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
@@ -1740,6 +1756,20 @@ const FILE_FILLERS = {
     fill: (file, promo) => fillMenardsBackToBlue(file, promo),
     summarize: summarizeMenardsBackToBlue,
   },
+};
+
+// The dialog asks two things: the marketplace, then which of its files (the
+// step of the promotion it belongs to). Colours as in the reminder: the
+// level each step moves the prices to.
+const FILE_GROUPS = [
+  { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', cls: 'bg-brand-wayfair/15 text-brand-wayfair' },
+  { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', cls: 'bg-brand-wayfair/15 text-brand-wayfair' },
+  { key: 'menards', label: 'Menards', monogram: 'ME', cls: 'bg-surface-container-high text-on-surface-variant' },
+];
+const FILE_STEPS = {
+  promo_file: { order: 0, label: 'Promotions file', when: 'Before the promotion starts', dot: 'bg-primary' },
+  price_start: { order: 1, label: 'Promo MAP', when: 'The day it starts', dot: 'bg-[#f0b27a]' },
+  price_change: { order: 2, label: 'Back to Blue', when: 'The day it ends', dot: 'bg-[#4a8ee6]' },
 };
 
 // ============================ Marketplace channels ============================
@@ -2192,6 +2222,11 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
 
 function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
   const [marketplace, setMarketplace] = useState(initial);
+  const [group, setGroup] = useState(initial ? FILE_FILLERS[initial]?.group ?? null : null);
+  const groupDef = FILE_GROUPS.find((g) => g.key === group) ?? null;
+  const steps = Object.entries(FILE_FILLERS)
+    .filter(([, f]) => f.group === group)
+    .sort(([, a], [, b]) => FILE_STEPS[a.step].order - FILE_STEPS[b.step].order);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   // A filler with `analyze` pauses here when promotion products are missing
@@ -2259,41 +2294,76 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
       subtitle="Upload the file downloaded from the marketplace's portal — the PIM fills the promo columns and hands it back."
       maxWidth="max-w-lg"
     >
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {Object.entries(FILE_FILLERS).map(([key, f]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => { setMarketplace(key); setError(null); }}
-              aria-pressed={marketplace === key}
-              className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors ${
-                marketplace === key
-                  ? 'border-primary bg-primary-container/25'
-                  : 'border-outline-variant bg-surface hover:bg-surface-container-low'
-              }`}
-            >
-              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-label-lg font-bold flex-shrink-0 ${f.monogramCls}`}>
-                {f.monogram}
-              </span>
-              <span className="text-label-lg font-medium text-on-surface">{f.label}</span>
-            </button>
-          ))}
+      <div className="space-y-5">
+        {/* 1 · the marketplace */}
+        <div>
+          <p className="text-label-md font-medium text-on-surface-variant mb-2">Marketplace</p>
+          <div className="grid grid-cols-3 gap-2">
+            {FILE_GROUPS.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => { if (g.key !== group) { setGroup(g.key); setMarketplace(null); } setError(null); }}
+                aria-pressed={group === g.key}
+                disabled={busy}
+                className={`flex flex-col items-center gap-2 px-2 py-3 rounded-xl border transition-colors ${
+                  group === g.key
+                    ? 'border-primary bg-primary-container/25'
+                    : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+                }`}
+              >
+                <span className={`w-9 h-9 rounded-lg flex items-center justify-center text-label-lg font-bold ${g.cls}`}>{g.monogram}</span>
+                <span className="text-label-lg font-medium text-on-surface text-center leading-tight">{g.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
+        {/* 2 · which of its files: the step of the promotion */}
+        {group && (
+          <div>
+            <p className="text-label-md font-medium text-on-surface-variant mb-2">File</p>
+            <div className="space-y-1.5">
+              {steps.map(([key, f]) => {
+                const s = FILE_STEPS[f.step];
+                const on = marketplace === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => { setMarketplace(key); setError(null); }}
+                    aria-pressed={on}
+                    disabled={busy}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-left transition-colors ${
+                      on ? 'border-primary bg-primary-container/25' : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+                    }`}
+                  >
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.dot}`} />
+                    <span className="flex-1 text-label-lg font-medium text-on-surface">{s.label}</span>
+                    <span className="text-body-sm text-on-surface-variant whitespace-nowrap">{s.when}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {def && (
-          <>
-            <p className="text-body-sm text-on-surface-variant">{def.hint}</p>
+          <div className="space-y-3">
+            <p className="text-body-sm text-on-surface-variant leading-relaxed">{def.hint}</p>
             <FileDropzone
               onFile={handleUpload}
               accept={def.accept}
               disabled={busy}
-              className="flex items-center justify-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+              className="flex flex-col items-center justify-center gap-1 px-4 py-6 rounded-xl border-2 border-dashed border-outline-variant text-center hover:bg-surface-container-low transition-colors"
             >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              {busy ? 'Filling…' : `Drop the ${def.label} file here — or click to browse`}
+              <span className="inline-flex items-center gap-2 text-body-md font-medium text-on-surface">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                {busy ? 'Filling…' : `Drop the ${groupDef?.label ?? ''} file here`}
+              </span>
+              {!busy && <span className="text-body-sm text-on-surface-variant">{FILE_STEPS[def.step]?.label} · or click to browse</span>}
             </FileDropzone>
-          </>
+          </div>
         )}
 
         {error && (
