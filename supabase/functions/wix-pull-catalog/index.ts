@@ -38,6 +38,22 @@ interface WixProduct {
   productPageUrl?: { base?: string; path?: string };
 }
 
+// The links of a listing's documents section ("DOCUMENTS TO DOWNLOAD"), so
+// listing health can flag a link that is not one of the PIM's current files
+// (a Dropbox leftover, or a PIM file since replaced) — found 2026-09-29 on
+// C233, whose installation guide and DXF still went to Dropbox.
+function docLinksOf(p: WixProduct): { label: string; url: string }[] {
+  const out: { label: string; url: string }[] = [];
+  for (const s of p.additionalInfoSections ?? []) {
+    if (!/DOCUMENT|DOWNLOAD/i.test(s.title ?? "")) continue;
+    for (const m of (s.description ?? "").matchAll(/<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+      const label = m[2].replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").trim();
+      out.push({ label, url: m[1].replace(/&amp;/g, "&") });
+    }
+  }
+  return out;
+}
+
 function pickSku(p: WixProduct): string | null {
   if (p.sku && p.sku.trim()) return p.sku.trim();
   const variantSku = p.variants?.[0]?.variant?.sku;
@@ -63,7 +79,7 @@ Deno.serve(async (req) => {
       id: string; sku: string | null; name: string; visible: boolean;
       price: number | null; discountedPrice: number | null;
       descriptionLength: number; imageCount: number; hasMainImage: boolean;
-      sectionTitles: string[]; url: string | null;
+      sectionTitles: string[]; docLinks: { label: string; url: string }[]; url: string | null;
     }[] = [];
     let offset = 0;
     const limit = 100;
@@ -113,6 +129,7 @@ Deno.serve(async (req) => {
           sectionTitles: (p.additionalInfoSections ?? [])
             .map((s) => (s.title ?? "").trim())
             .filter(Boolean),
+          docLinks: docLinksOf(p),
           // Public storefront URL, same shape wix-read-product exposes.
           url: p.productPageUrl?.base
             ? `${p.productPageUrl.base}${p.productPageUrl.path ?? ""}`
