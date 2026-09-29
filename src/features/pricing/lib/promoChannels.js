@@ -39,14 +39,14 @@ export const PROMO_CHANNELS = [
     how: 'Automatic. Promo MAP USD goes live on the 1st.' },
   { key: 'bestbuy', label: 'Best Buy Canada', monogram: 'BB', market: 'ca', kind: 'api', stamp: 'bb_scheduled_at',
     how: 'Scheduled discounts sent when the list loads. Check the portal: API discounts have not shown up so far.' },
-  { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca', kind: 'portal_file', filler: 'wayfair', priceStart: 'wayfair_price_start', priceChange: 'wayfair_price_change', auditTarget: 'wayfair',
+  { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca', kind: 'portal_file', filler: 'wayfair', priceStart: 'wayfair_price_start', priceChange: 'wayfair_price_change', savedStart: 'price_start', auditTarget: 'wayfair',
     how: "Upload the promotions file downloaded from Partner Home. The PIM fills the base cost, keeps only the promotion's rows and adds missing members. Promo MAP lowers the MAP the day it starts, Back to Blue returns it the day it ends." },
   // Wayfair (both markets) always works from the file downloaded from Partner
   // Home right before it is used (user decision 2026-09-28): its "Current"
   // columns are Wayfair's own snapshot and it carries the tracking processId,
   // so a copy kept in Templates goes stale. USA: discount 0, cost after
   // discount = WC Wayfair of the level, B2B 0, rows outside the promotion removed.
-  { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', market: 'us', kind: 'portal_file', filler: 'wayfair_us', priceStart: 'wayfair_us_price_start', priceChange: 'wayfair_us_price_change', auditTarget: 'wayfair_usa',
+  { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', market: 'us', kind: 'portal_file', filler: 'wayfair_us', priceStart: 'wayfair_us_price_start', priceChange: 'wayfair_us_price_change', savedStart: 'price_start', auditTarget: 'wayfair_usa',
     how: "Download the promotions file from Partner Home and upload it here. The PIM fills discount 0, the WC Wayfair of the level and B2B 0, and keeps only the promotion's rows. Promo MAP lowers the MAP the day it starts, Back to Blue returns MAP and cost the day it ends." },
   // Bed Bath & Beyond and Overstock (Beyond Inc.): same prices, aliases and
   // exclusion switch ('bbb'), same file layout, but each portal has its own
@@ -83,7 +83,7 @@ export const PROMO_CHANNELS = [
   // Menards of the promo level) on the rows carrying our SKUs and hands it back.
   // Back to Blue the day the promotion ends (user rule 2026-09-29, monthly
   // promotions and flash deals): the same file with every row at Blue.
-  { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'portal_file', filler: 'menards', priceChange: 'menards_price_change', costSlug: 'menards_usd',
+  { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'portal_file', filler: 'menards', priceChange: 'menards_price_change', savedStart: 'promo_file', costSlug: 'menards_usd',
     taskHow: {
       promo_file: "Upload the promotion file Menards sent — the PIM fills F, G and H with the level's prices.",
       price_change: 'Upload the Menards file — the PIM puts F, G and H back at Blue.',

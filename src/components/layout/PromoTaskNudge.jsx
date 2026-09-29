@@ -196,6 +196,7 @@ export default function PromoTaskNudge() {
       <ul className="px-2 pb-2 space-y-1.5 max-h-[60vh] overflow-y-auto" data-lenis-prevent>
         {shown.map((t) => {
           const due = dueChip(t, today);
+          const fromSaved = t.task === 'price_change' && Boolean(t.promo.file_tasks?.[taskKey(t.channel.key, t.channel.savedStart)]?.file);
           return (
             <li key={t.id} className="rounded-xl bg-surface-container-low px-3 py-3">
               <div className="flex items-start gap-3">
@@ -215,7 +216,7 @@ export default function PromoTaskNudge() {
                     <span className="font-medium">{t.promo.name}</span>
                     <span className="text-on-surface-variant"> · {whenText(t, today)}</span>
                   </p>
-                  <p className="mt-0.5 text-body-sm text-on-surface-variant leading-snug">{t.channel.taskHow?.[t.task] ?? HOW[t.task]}</p>
+                  <p className="mt-0.5 text-body-sm text-on-surface-variant leading-snug">{fromSaved ? 'The file saved when it started is ready — the PIM puts the products back at Blue.' : t.channel.taskHow?.[t.task] ?? HOW[t.task]}</p>
                   <div className="mt-3 flex items-center gap-1.5">
                     <button
                       type="button"
@@ -223,7 +224,7 @@ export default function PromoTaskNudge() {
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
                     >
                       <Upload className="w-3.5 h-3.5" />
-                      Upload file
+                      {fromSaved ? 'Generate file' : 'Upload file'}
                     </button>
                     <button
                       type="button"

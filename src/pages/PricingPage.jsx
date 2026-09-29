@@ -51,7 +51,8 @@ import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { fillWayfairPromoFile, summarizeWayfairFill } from '@/features/pricing/lib/wayfairPromoFill';
-import { fillWayfairPriceChangeFile, summarizeWayfairPriceChange } from '@/features/pricing/lib/wayfairPriceChangeFill';
+import { fillWayfairPriceChangeFile, fillWayfairPriceChangeFromSaved, summarizeWayfairPriceChange } from '@/features/pricing/lib/wayfairPriceChangeFill';
+import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
 import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
@@ -60,7 +61,7 @@ import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
 import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
 import { fillHomeDepotCaPromoTemplates, summarizeHomeDepotCaFill } from '@/features/pricing/lib/homeDepotCaPromoFill';
-import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill, fillMenardsBackToBlue, summarizeMenardsBackToBlue } from '@/features/pricing/lib/menardsPromoFill';
+import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill, fillMenardsBackToBlue, fillMenardsBackToBlueFromSaved, summarizeMenardsBackToBlue } from '@/features/pricing/lib/menardsPromoFill';
 import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
 import { fillLowesPromoTemplate, summarizeLowesFill } from '@/features/pricing/lib/lowesPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
@@ -149,7 +150,10 @@ export default function PricingPage() {
 
   async function reload() {
     try {
-      setPromotions(await listPromotions());
+      const list = await listPromotions();
+      setPromotions(list);
+      // Saved promotion files live 60 days (user rule 2026-09-29).
+      expirePromoFiles(list).catch(() => {});
     } catch (err) {
       setError(err.message);
     }
@@ -1668,7 +1672,7 @@ const FILE_FILLERS = {
     label: 'Wayfair Canada',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Promotions file downloaded from Partner Home (Canada supplier) — discount 0, the WC Wayfair Canada (USD) of the promotion's level as the cost after discount, B2B 0; rows outside the promotion are removed, missing members appended when Wayfair lists them.",
+    hint: "Fills the cost after discount with the WC Wayfair Canada of the promotion's level and keeps only its products.",
     accept: '.xlsx,.xlsm',
     fill: fillWayfairPromoFile,
     summarize: (r) => summarizeWayfairFill(null, r),
@@ -1679,7 +1683,7 @@ const FILE_FILLERS = {
     label: 'Wayfair USA',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Promotions file downloaded from Partner Home (USA supplier) — discount 0, the WC Wayfair of the promotion's level as the cost after discount, B2B 0; rows outside the promotion are removed, missing members appended when Wayfair lists them.",
+    hint: "Fills the cost after discount with the WC Wayfair of the promotion's level and keeps only its products.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillWayfairPromoFile(file, promo, 'USA'),
     summarize: (r) => summarizeWayfairFill(null, r),
@@ -1693,7 +1697,7 @@ const FILE_FILLERS = {
     label: 'Wayfair Canada · Promo MAP',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Pricing file downloaded from Partner Home (Canada supplier) the day the promotion starts — New MAP (CAD) = the Canada MAP of the promotion's level (and New MAP (USD) where Wayfair keeps one), only the promotion's rows are kept (the cost goes in the promotions file). The file has no dates: Wayfair applies it when imported.",
+    hint: "Lowers the MAP of the promotion's products to its level. Upload it the day the promotion starts.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'promo'),
     summarize: summarizeWayfairPriceChange,
@@ -1704,7 +1708,7 @@ const FILE_FILLERS = {
     label: 'Wayfair USA · Promo MAP',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Pricing file downloaded from Partner Home (USA supplier) the day the promotion starts — New MAP (USD) = the MAP of the promotion's level, only the promotion's rows are kept (the cost goes in the promotions file). The file has no dates: Wayfair applies it when imported.",
+    hint: "Lowers the MAP of the promotion's products to its level. Upload it the day the promotion starts.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA', 'promo'),
     summarize: summarizeWayfairPriceChange,
@@ -1715,9 +1719,10 @@ const FILE_FILLERS = {
     label: 'Wayfair Canada · Back to Blue',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Pricing file downloaded from Partner Home (Canada supplier) when the promotion ends — New Base Cost = WC Wayfair Canada Blue (USD), New MAP (CAD) = MAP Blue CAD (and New MAP (USD) where Wayfair keeps one), only the promotion's rows are kept.",
+    hint: "Puts the promotion's products back at their Blue MAP and cost.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'blue'),
+    saved: { task: 'wayfair_ca:price_start', fill: (promo) => fillWayfairPriceChangeFromSaved(promo, 'CAN'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
     summarize: summarizeWayfairPriceChange,
   },
   wayfair_us_price_change: {
@@ -1726,9 +1731,10 @@ const FILE_FILLERS = {
     label: 'Wayfair USA · Back to Blue',
     monogram: 'WF',
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
-    hint: "Pricing file downloaded from Partner Home (USA supplier) when the promotion ends — New Base Cost = WC Wayfair Blue, New MAP (USD) = MAP Blue, only the promotion's rows are kept.",
+    hint: "Puts the promotion's products back at their Blue MAP and cost.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA', 'blue'),
+    saved: { task: 'wayfair_us:price_start', fill: (promo) => fillWayfairPriceChangeFromSaved(promo, 'USA'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
     summarize: summarizeWayfairPriceChange,
   },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
@@ -1739,7 +1745,7 @@ const FILE_FILLERS = {
     label: 'Menards',
     monogram: 'ME',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
-    hint: 'The promotion file Menards sent — columns F, G and H are filled on every row: the promo level (Orange for a monthly promotion or a flash deal, Purple for a special event) for the promotion\'s products, Blue for the rest. Rows are never added or removed.',
+    hint: "Fills F, G and H with the prices of the promotion's level.",
     accept: '.xlsx,.xlsm',
     analyze: analyzeMenardsPromoFile,
     fill: (file, promo, opts) => fillMenardsPromoFile(file, promo, opts),
@@ -1751,9 +1757,10 @@ const FILE_FILLERS = {
     label: 'Menards · Back to Blue',
     monogram: 'ME',
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
-    hint: 'The Menards file the day the promotion ends — columns F, G and H go back to MAP Blue USD and WC Menards Blue on every row, the promotion\'s products included. Rows are never added or removed.',
+    hint: "Puts the promotion's products back at Blue and leaves out the rest.",
     accept: '.xlsx,.xlsm',
     fill: (file, promo) => fillMenardsBackToBlue(file, promo),
+    saved: { task: 'menards:promo_file', fill: (promo) => fillMenardsBackToBlueFromSaved(promo) },
     summarize: summarizeMenardsBackToBlue,
   },
 };
@@ -2233,6 +2240,22 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
   // from the file: { file, plan } until the person confirms.
   const [pending, setPending] = useState(null);
   const def = marketplace ? FILE_FILLERS[marketplace] : null;
+  // Back to Blue: the file saved when the promotion started, if still kept.
+  const savedEntry = def?.saved ? promo.file_tasks?.[def.saved.task] ?? null : null;
+  const savedFile = savedEntry?.file ? savedEntry : null;
+  const shortDay = (v) => new Date(v).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+
+  async function generateFromSaved() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await def.saved.fill(promo);
+      onDone({ tone: 'success', text: def.summarize(r) });
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
 
   async function finish(file, opts) {
     setBusy(true);
@@ -2351,6 +2374,32 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
         {def && (
           <div className="space-y-3">
             <p className="text-body-sm text-on-surface-variant leading-relaxed">{def.hint}</p>
+            {savedFile && (
+              <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary-container/15 px-3.5 py-3">
+                <CheckCircle2 className="w-5 h-5 text-primary flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-label-lg font-semibold text-on-surface">File saved {shortDay(savedFile.saved_at)}</p>
+                  <p className="text-body-sm text-on-surface-variant">
+                    {savedFile.skus?.length ?? 0} products · kept until {shortDay(savedFileExpiry(savedFile))}
+                  </p>
+                  {def.saved.note && <p className="text-body-sm text-on-surface-variant mt-1">{def.saved.note}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={generateFromSaved}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Generate
+                </button>
+              </div>
+            )}
+            {savedEntry && !savedFile && savedEntry.file_expired_at && (
+              <p className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant">
+                The saved file was deleted after 60 days — upload it again. Back to Blue still carries only the {savedEntry.skus?.length ?? 0} products that went out.
+              </p>
+            )}
             <FileDropzone
               onFile={handleUpload}
               accept={def.accept}
@@ -2359,7 +2408,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
             >
               <span className="inline-flex items-center gap-2 text-body-md font-medium text-on-surface">
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                {busy ? 'Filling…' : `Drop the ${groupDef?.label ?? ''} file here`}
+                {busy ? 'Filling…' : `${savedFile ? 'Or drop a new' : 'Drop the'} ${groupDef?.label ?? ''} file here`}
               </span>
               {!busy && <span className="text-body-sm text-on-surface-variant">{FILE_STEPS[def.step]?.label} · or click to browse</span>}
             </FileDropzone>

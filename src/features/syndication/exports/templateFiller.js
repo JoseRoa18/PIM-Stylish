@@ -243,6 +243,34 @@ export function keepOnlyRows(xml, fromRow, keep) {
   return { xml: out.replace(/(<dimension ref="[A-Z]+1:[A-Z]+)\d+/, `$1${lastRow}`), removed, lastRow };
 }
 
+// Remove the given rows (1-based numbers) and pull the rows below them up,
+// cell refs, the dimension and an autoFilter range included. For files whose
+// layout we don't control (Menards'): it refuses — returns null, the sheet
+// untouched — when the sheet has formulas, merged cells, validations,
+// conditional formats or hyperlinks, which shifting rows would break.
+export function removeRowsSafely(xml, drop) {
+  if (!drop?.size) return { xml, removed: 0 };
+  if (/<f[ >]|<mergeCell |<dataValidation |<conditionalFormatting|<hyperlink /.test(xml)) return null;
+  const sorted = [...drop].sort((a, b) => a - b);
+  const shiftAt = (n) => { let k = 0; while (k < sorted.length && sorted[k] < n) k += 1; return k; };
+  let removed = 0;
+  const out = xml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (row, n) => {
+    const r = Number(n);
+    if (drop.has(r)) { removed += 1; return ''; }
+    const shift = shiftAt(r);
+    if (!shift) return row;
+    const to = r - shift;
+    return row.replace(/^<row r="\d+"/, `<row r="${to}"`).replace(/(<c r="[A-Z]+)\d+"/g, `$1${to}"`);
+  });
+  const shrink = (m, head, end) => `${head}${Math.max(1, Number(end) - shiftAt(Number(end) + 1))}`;
+  return {
+    xml: out
+      .replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)(\d+)/, shrink)
+      .replace(/(<autoFilter ref="[A-Z]+\d+:[A-Z]+)(\d+)/, shrink),
+    removed,
+  };
+}
+
 // A cell style with a number format the template lacks (e.g. "$"#,##0.00 for
 // a cost Wayfair wants shown as $80.00): the format and an <xf> cloned from
 // `baseXf` (the fill / border / font of the cells it replaces) are added to

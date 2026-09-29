@@ -133,6 +133,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
 
   const cellsByRow = new Map();
   const fileSkus = new Set();
+  const sentSkus = []; // the promotion's products that went out — Back to Blue carries exactly these
   let filled = 0;
   for (let i = hit.headerRow + 1; i < grid.length; i++) {
     const sku = String(grid[i]?.[cols.sku] ?? '').trim();
@@ -141,6 +142,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     const cost = costBySku.get(sku);
     if (cost == null) continue;
     cellsByRow.set(i + 1, promoCells(i + 1, cost));
+    sentSkus.push(sku);
     filled += 1;
   }
   let merged = cellsByRow.size ? mergeRows(xml, cellsByRow, true) : xml;
@@ -204,7 +206,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     metadata: { filled, appended: toAppend.length, removed, file_rows: fileSkus.size, not_on_wayfair: notOnWayfair.length, no_cost: noCost.length, tier },
   });
 
-  await markPromotionTask(promotion.id, `${usa ? 'wayfair_us' : 'wayfair_ca'}:promo_file`, { rows: filled + toAppend.length });
+  await markPromotionTask(promotion.id, `${usa ? 'wayfair_us' : 'wayfair_ca'}:promo_file`, { rows: filled + toAppend.length, skus: [...new Set([...sentSkus, ...toAppend])].sort() });
 
   return { supplier, tier, filled, removed, appended: toAppend, fileRows: fileSkus.size, notOnWayfair, noCost, excluded };
 }
