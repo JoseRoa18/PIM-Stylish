@@ -3,7 +3,8 @@ import { promoWindow, etToday } from './promoCalendar';
 
 /**
  * Reminders for the channels whose promotion files come from their own portal
- * and go back through it (Wayfair Canada / USA since 2026-09-28). Per
+ * and go back through it (Wayfair Canada / USA since 2026-09-28, Menards since
+ * 2026-09-29 — its file at the start and back to Blue at the end). Per
  * promotion and channel:
  *   promo_file    the promotions file — from a week before the window opens
  *                 until it closes, while it hasn't been filled
@@ -49,7 +50,7 @@ export function openTasksFor(promo, channel, today = etToday()) {
     && w.start >= TASKS_SINCE && today >= addDays(w.start, -LEAD_DAYS) && today <= w.end) {
     out.push({ task: 'promo_file', due: w.start, overdue: today > w.start, filler: channel.filler });
   }
-  if (!done[taskKey(channel.key, 'price_start')] && promo.status !== 'ended'
+  if (channel.priceStart && !done[taskKey(channel.key, 'price_start')] && promo.status !== 'ended'
     && w.start >= TASKS_SINCE && today >= w.start && today <= w.end) {
     out.push({ task: 'price_start', due: w.start, overdue: today > w.start, filler: channel.priceStart });
   }

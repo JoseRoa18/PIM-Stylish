@@ -10,7 +10,8 @@ import { etToday } from '@/features/pricing/lib/promoCalendar';
 
 // The file tasks of the channels this person owns (Settings → Promotion file
 // owners): Wayfair's promotions file and promo MAP when a promotion starts,
-// the price change back to Blue when it ends. Same toast family as PromoNudge,
+// the price change back to Blue when it ends; Menards' file at both ends.
+// Same toast family as PromoNudge,
 // but it does NOT auto-hide — it's a deadline. "Later" hides it for a few
 // hours; it goes away for good when the PIM fills the file or the person marks
 // it done. Checked a few seconds after the app opens and every half hour.
@@ -42,18 +43,35 @@ function snooze(userId, ids, ms) {
 
 const dayLabel = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-function describe(t, today) {
-  const name = `"${t.promo.name}"`;
-  if (t.task === 'promo_file') {
-    const when = t.due === today ? 'starts today' : t.overdue ? `started ${dayLabel(t.due)}` : `starts ${dayLabel(t.due)}`;
-    return `${name} ${when}. Download the promotions file from Partner Home and upload it here — the PIM fills it.`;
-  }
-  if (t.task === 'price_start') {
-    const when = t.due === today ? 'starts today' : `started ${dayLabel(t.due)}`;
-    return `${name} ${when}. Download the pricing file from Partner Home and upload it here — the PIM lowers the MAP to the promotion's level.`;
-  }
-  const when = t.due === today ? 'ends today' : `ended ${dayLabel(t.due)}`;
-  return `${name} ${when}. Download the pricing file from Partner Home and upload it here — the PIM puts its products back at Blue.`;
+// What to do, per channel (promoChannels `taskHow`); Wayfair's wording is the default.
+const HOW = {
+  promo_file: 'Download the promotions file from Partner Home and upload it here — the PIM fills it.',
+  price_start: "Download the pricing file from Partner Home — the PIM lowers the MAP to the promotion's level.",
+  price_change: 'Download the pricing file from Partner Home — the PIM puts the products back at Blue.',
+};
+
+// The channel's monogram tile, in its brand colour where the theme has one.
+const MONOGRAM_CLS = {
+  wayfair_ca: 'bg-brand-wayfair/15 text-brand-wayfair',
+  wayfair_us: 'bg-brand-wayfair/15 text-brand-wayfair',
+  default: 'bg-surface-container-high text-on-surface-variant',
+};
+// The task's dot: the price level it moves to (Orange / Blue as in Pricing).
+const TASK_DOT = { promo_file: 'bg-primary', price_start: 'bg-[#f0b27a]', price_change: 'bg-[#4a8ee6]' };
+
+// "starts Oct 1" / "ended Oct 21" — the promotion's side of the date.
+function whenText(t, today) {
+  const ending = t.task === 'price_change';
+  if (t.due === today) return ending ? 'ends today' : 'starts today';
+  if (ending) return `ended ${dayLabel(t.due)}`;
+  return t.overdue ? `started ${dayLabel(t.due)}` : `starts ${dayLabel(t.due)}`;
+}
+
+// The due chip: red once overdue, warm on the day, neutral before.
+function dueChip(t, today) {
+  if (t.overdue) return { text: `Overdue · ${dayLabel(t.due)}`, cls: 'bg-error-container text-on-error-container' };
+  if (t.due === today) return { text: 'Due today', cls: 'bg-tertiary-container text-on-tertiary-container' };
+  return { text: `Due ${dayLabel(t.due)}`, cls: 'bg-surface-container-high text-on-surface-variant' };
 }
 
 export default function PromoTaskNudge() {
@@ -144,76 +162,100 @@ export default function PromoTaskNudge() {
     }
   }
 
+  const overdue = tasks.filter((t) => t.overdue).length;
+
   return (
     <div
       role="status"
       aria-live="polite"
-      className="fixed right-4 bottom-4 z-40 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-outline-variant bg-surface shadow-lg animate-menu-in"
+      className="fixed right-4 bottom-4 z-40 w-[24rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-outline-variant/70 bg-surface shadow-xl overflow-hidden animate-menu-in-up"
     >
-      <button
-        type="button"
-        onClick={later}
-        aria-label="Remind me later"
-        className="absolute top-2 right-2 p-1.5 rounded-full text-on-surface-variant hover:bg-on-surface/8 transition-colors"
-      >
-        <X className="w-4 h-4" />
-      </button>
-
-      <div className="flex items-start gap-3 p-4 pr-9">
-        <span className="w-9 h-9 rounded-full bg-tertiary-container text-on-tertiary-container flex items-center justify-center flex-shrink-0">
-          <CalendarClock className="w-4 h-4" />
+      {/* Header: what this is and how much is waiting */}
+      <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+        <span className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
+          <CalendarClock className="w-5 h-5" />
         </span>
-
         <div className="min-w-0 flex-1">
-          <p className="text-title-md text-on-surface">
-            {tasks.length === 1 ? 'A promotion file is due' : `${tasks.length} promotion files are due`}
+          <p className="text-title-md text-on-surface font-semibold leading-tight">Promotion files</p>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">
+            {tasks.length === 1 ? '1 file due' : `${tasks.length} files due`}
+            {overdue ? <span className="text-error font-medium"> · {overdue} overdue</span> : null}
           </p>
-
-          <ul className="mt-2 space-y-3">
-            {shown.map((t) => (
-              <li key={t.id}>
-                <p className="text-label-lg font-medium text-on-surface">
-                  {t.channel.label} · {TASK_LABEL[t.task]}
-                  {t.overdue && <span className="ml-1.5 text-label-sm font-medium text-error">overdue</span>}
-                </p>
-                <p className="mt-0.5 text-body-sm text-on-surface-variant">{describe(t, today)}</p>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => upload(t)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 transition-colors"
-                  >
-                    <Upload className="w-4 h-4" />
-                    Upload file
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => markDone(t)}
-                    disabled={busyId === t.id}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-lg text-on-surface-variant hover:bg-on-surface/8 transition-colors disabled:opacity-50"
-                  >
-                    {busyId === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Already done
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-          {tasks.length > SHOWN && (
-            <p className="mt-2 text-body-sm text-on-surface-variant">and {tasks.length - SHOWN} more — they show up here as these get done.</p>
-          )}
-          {error && <p className="mt-2 text-body-sm text-error">{error}</p>}
-
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={later}
-              className="px-3 py-1.5 rounded-lg text-label-lg text-on-surface-variant hover:bg-on-surface/8 transition-colors"
-            >
-              Later
-            </button>
-          </div>
         </div>
+        <button
+          type="button"
+          onClick={later}
+          aria-label="Remind me later"
+          className="p-1.5 -mr-1 rounded-full text-on-surface-variant hover:bg-on-surface/8 transition-colors self-start"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* One card per file */}
+      <ul className="px-2 pb-2 space-y-1.5 max-h-[60vh] overflow-y-auto" data-lenis-prevent>
+        {shown.map((t) => {
+          const due = dueChip(t, today);
+          return (
+            <li key={t.id} className="rounded-xl bg-surface-container-low px-3 py-3">
+              <div className="flex items-start gap-3">
+                <span className={`w-9 h-9 rounded-lg flex items-center justify-center text-label-md font-bold flex-shrink-0 ${MONOGRAM_CLS[t.channel.key] ?? MONOGRAM_CLS.default}`}>
+                  {t.channel.monogram}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-label-lg font-semibold text-on-surface truncate">{t.channel.label}</span>
+                    <span className={`ml-auto px-2 py-0.5 rounded-full text-label-sm font-medium whitespace-nowrap ${due.cls}`}>{due.text}</span>
+                  </div>
+                  <span className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high text-label-sm text-on-surface">
+                    <span className={`w-1.5 h-1.5 rounded-full ${TASK_DOT[t.task]}`} />
+                    {TASK_LABEL[t.task]}
+                  </span>
+                  <p className="mt-2 text-body-sm text-on-surface leading-snug">
+                    <span className="font-medium">{t.promo.name}</span>
+                    <span className="text-on-surface-variant"> · {whenText(t, today)}</span>
+                  </p>
+                  <p className="mt-0.5 text-body-sm text-on-surface-variant leading-snug">{t.channel.taskHow?.[t.task] ?? HOW[t.task]}</p>
+                  <div className="mt-3 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => upload(t)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      Upload file
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => markDone(t)}
+                      disabled={busyId === t.id}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-label-md text-on-surface-variant hover:bg-on-surface/8 transition-colors disabled:opacity-50"
+                    >
+                      {busyId === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      Already done
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      {error && <p className="mx-4 mb-2 text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
+
+      {/* Footer */}
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-outline-variant/60 bg-surface-container-lowest">
+        <span className="text-body-sm text-on-surface-variant">
+          {tasks.length > SHOWN ? `+${tasks.length - SHOWN} more after these` : 'Stays until the file is done'}
+        </span>
+        <button
+          type="button"
+          onClick={later}
+          className="px-3 py-1.5 rounded-full text-label-md font-medium text-on-surface-variant hover:bg-on-surface/8 transition-colors"
+        >
+          Remind me later
+        </button>
       </div>
     </div>
   );

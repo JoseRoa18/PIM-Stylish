@@ -81,8 +81,14 @@ export const PROMO_CHANNELS = [
   { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us', kind: 'template', marketplace: /lowe.*\bus(a)?\b/i, costSlug: 'lowes_sod_bbb_usd', fill: 'lowes', aliasMarketplace: "Lowe's US" },
   // Menards sends its own file: the PIM fills columns F, G, H (MAP and WC
   // Menards of the promo level) on the rows carrying our SKUs and hands it back.
-  { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'portal_file', filler: 'menards', costSlug: 'menards_usd',
-    how: "Upload the file Menards sent. The PIM fills F, G and H with the level's MAP and WC Menards and asks about products without a level price." },
+  // Back to Blue the day the promotion ends (user rule 2026-09-29, monthly
+  // promotions and flash deals): the same file with every row at Blue.
+  { key: 'menards', label: 'Menards', monogram: 'ME', market: 'us', kind: 'portal_file', filler: 'menards', priceChange: 'menards_price_change', costSlug: 'menards_usd',
+    taskHow: {
+      promo_file: "Upload the promotion file Menards sent — the PIM fills F, G and H with the level's prices.",
+      price_change: 'Upload the Menards file — the PIM puts F, G and H back at Blue.',
+    },
+    how: "Upload the file Menards sent. The PIM fills F, G and H with the level's MAP and WC Menards and asks about products without a level price. Back to Blue returns them the day the promotion ends." },
   { key: 'amazon_us', label: 'Amazon USA', monogram: 'AM', market: 'us', kind: 'template', marketplace: /amazon.*\bus(a)?\b/i, costSlug: null, fill: 'amazon', sellerSku: 'pim' }, // Amazon.com lists our products under the PIM SKU itself
   // Walmart USA goes by API too (feed `promo`, since 2026-09-28), and can
   // still produce the Seller Center file when a promotions template is uploaded.

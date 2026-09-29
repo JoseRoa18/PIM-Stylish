@@ -60,7 +60,7 @@ import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
 import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
 import { fillHomeDepotCaPromoTemplates, summarizeHomeDepotCaFill } from '@/features/pricing/lib/homeDepotCaPromoFill';
-import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill } from '@/features/pricing/lib/menardsPromoFill';
+import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill, fillMenardsBackToBlue, summarizeMenardsBackToBlue } from '@/features/pricing/lib/menardsPromoFill';
 import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
 import { fillLowesPromoTemplate, summarizeLowesFill } from '@/features/pricing/lib/lowesPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
@@ -1731,6 +1731,15 @@ const FILE_FILLERS = {
     fill: (file, promo, opts) => fillMenardsPromoFile(file, promo, opts),
     summarize: summarizeMenardsFill,
   },
+  menards_price_change: {
+    label: 'Menards · Back to Blue',
+    monogram: 'ME',
+    monogramCls: 'bg-surface-container-high text-on-surface-variant',
+    hint: 'The Menards file the day the promotion ends — columns F, G and H go back to MAP Blue USD and WC Menards Blue on every row, the promotion\'s products included. Rows are never added or removed.',
+    accept: '.xlsx,.xlsm',
+    fill: (file, promo) => fillMenardsBackToBlue(file, promo),
+    summarize: summarizeMenardsBackToBlue,
+  },
 };
 
 // ============================ Marketplace channels ============================
@@ -1893,8 +1902,8 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           tone = 'muted';
         }
       } else if (ch.priceChange) {
-        // Wayfair: what went to Partner Home, from promotions.file_tasks
-        // (readable by everyone, unlike the audit log).
+        // Wayfair / Menards: what went back to the portal, from
+        // promotions.file_tasks (readable by everyone, unlike the audit log).
         const done = promo.file_tasks ?? {};
         const pf = done[`${ch.key}:promo_file`];
         const ps = done[`${ch.key}:price_start`];
@@ -1905,7 +1914,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
         status = pc ? `Back at Blue ${day(pc.at)}` : ps ? `Promo MAP ${day(ps.at)}` : generated ? `Generated ${day(generated)}` : 'Not generated';
         tone = pc || ps || generated ? 'ok' : 'muted';
         if (pf) detail += ` Promotions file ${how(pf)}.`;
-        detail += ps ? ` Promo MAP ${how(ps)}.` : ` Promo MAP due ${dayOf(w.start)}.`;
+        if (ch.priceStart) detail += ps ? ` Promo MAP ${how(ps)}.` : ` Promo MAP due ${dayOf(w.start)}.`;
         detail += pc ? ` Back to Blue ${how(pc)}.` : ` Back to Blue due ${dayOf(w.end)}.`;
       } else if (history[ch.auditTarget ?? ch.key]) {
         status = `Generated ${day(history[ch.auditTarget ?? ch.key])}`;
