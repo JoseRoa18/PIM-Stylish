@@ -230,10 +230,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   function runMarketplaceExport(marketplace, templates, purpose = null) {
     setAsking(null);
     if (purpose) templates = templates.filter((t) => templatePurpose(t) === purpose);
-    if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates);
+    if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates, marketplace);
     if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
-    if (/lowe/i.test(marketplace)) return handleExportLowes(templates);
-    if (/menards/i.test(marketplace)) return handleExportMenards(templates);
+    if (/lowe/i.test(marketplace)) return handleExportLowes(templates, marketplace);
+    if (/menards/i.test(marketplace)) return handleExportMenards(templates, marketplace);
     setResult({
       type: 'error',
       message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart, Home Depot and Lowe's are supported so far.`,
@@ -242,22 +242,30 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
   // Lowe's new-item setup is a two-file package (Item Template + SOS Freight
   // Analysis); one Lowe's template covers every category, so no grouping.
-  async function handleExportLowes(templates) {
+  async function handleExportLowes(templates, marketplace) {
     setBusy('export');
     setResult(null);
     try {
       const skus = [...selectedSkus];
       const productList = [];
+      const excludedSkus = [];
+      const exclusionKey = templateMarketplaceKey(marketplace);
       for (const sku of skus) {
         const p = await getProduct(sku);
-        if (p) productList.push(p);
+        if (!p) continue;
+        // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the file.
+        if (exclusionKey && isExcluded(p, exclusionKey)) { excludedSkus.push(sku); continue; }
+        productList.push(p);
       }
-      if (!productList.length) throw new Error('Could not load product data.');
+      if (!productList.length) {
+        throw new Error(excludedSkus.length ? `Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.` : 'Could not load product data.');
+      }
 
       const res = await generateLowesSet(templates, productList);
       setResult({
         type: 'success',
-        message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — USD cost/MSRP/MAP included; lead times, forecast and competitive URLs stay blank for the business.`,
+        message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — USD cost/MSRP/MAP included; lead times, forecast and competitive URLs stay blank for the business.` +
+          (excludedSkus.length ? ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.` : ''),
       });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? "Lowe's export failed" });
@@ -270,7 +278,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   // dimension). Like the grouped exporters, a mixed selection exports the
   // categories that HAVE a template set and reports the ones that don't —
   // it never refuses the whole selection over one uncovered category.
-  async function handleExportMenards(templates) {
+  async function handleExportMenards(templates, marketplace) {
     setBusy('export');
     setResult(null);
     try {
@@ -291,12 +299,19 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
       const wanted = new Set(coveredCats);
       const productList = [];
+      const excludedSkus = [];
+      const exclusionKey = templateMarketplaceKey(marketplace);
       for (const p of selectedProducts) {
         if (!wanted.has(p.category)) continue;
         const full = await getProduct(p.sku);
-        if (full) productList.push(full);
+        if (!full) continue;
+        // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the files.
+        if (exclusionKey && isExcluded(full, exclusionKey)) { excludedSkus.push(p.sku); continue; }
+        productList.push(full);
       }
-      if (!productList.length) throw new Error('Could not load product data.');
+      if (!productList.length) {
+        throw new Error(excludedSkus.length ? `Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.` : 'Could not load product data.');
+      }
 
       // One file set per covered category (today that's kitchen sinks; more
       // sets slot in as they're uploaded).
@@ -321,6 +336,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       let message = `Exported ${files} Menards file(s) for ${countTotal} product(s).`;
       if (unmapped.size) message += ` ${unmapped.size} column(s) left for manual/account data (vendor terms, master packs…).`;
       if (skippedCats.length) message += ` ⚠ Skipped (no template): ${skippedCats.join(', ')}.`;
+      if (excludedSkus.length) message += ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.`;
       setResult({ type: skippedCats.length ? 'error' : 'success', message });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Menards export failed' });
@@ -333,13 +349,15 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   // Sinks, Bathroom Faucets, Soap Dispensers…) — resolve each product to ITS
   // template, fill each, one ZIP. Products without a template are reported,
   // never block the rest.
-  async function handleExportBBB(templates) {
+  async function handleExportBBB(templates, marketplace) {
     setBusy('export');
     setResult(null);
     setProgress({ done: 0, total: count + 1 });
     try {
       const groups = new Map(); // template id → { template, productList }
       const skippedSkus = [];
+      const excludedSkus = [];
+      const exclusionKey = templateMarketplaceKey(marketplace);
       let done = 0;
       for (const p of selectedProducts) {
         const tpl = templateForProduct(templates, p);
@@ -349,7 +367,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           continue;
         }
         const [product, media] = await Promise.all([getProduct(p.sku), listMedia(p.sku)]);
-        if (product) {
+        // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the files.
+        if (product && exclusionKey && isExcluded(product, exclusionKey)) {
+          excludedSkus.push(p.sku);
+        } else if (product) {
           const g = groups.get(tpl.id) ?? { template: tpl, productList: [] };
           g.productList.push({ product, media });
           groups.set(tpl.id, g);
@@ -357,6 +378,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         setProgress({ done: ++done, total: count + 1 });
       }
       if (groups.size === 0) {
+        if (excludedSkus.length && !skippedSkus.length) throw new Error(`Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.`);
         throw new Error(
           `No BB&B / Overstock template matches the selected products (${skippedSkus.slice(0, 6).join(', ')}${skippedSkus.length > 6 ? '…' : ''}). Upload the category's First Cost file in /templates.`
         );
@@ -368,7 +390,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       setResult({
         type: skippedSkus.length ? 'error' : 'success',
         message: `Exported ${res.count} product${res.count === 1 ? '' : 's'} to ${res.files} BB&B file${res.files === 1 ? '' : 's'}${res.files > 1 ? ' (one ZIP)' : ''}.` +
-          (skippedSkus.length ? ` ⚠ No template for: ${skippedSkus.slice(0, 8).join(', ')}${skippedSkus.length > 8 ? '…' : ''}.` : ''),
+          (skippedSkus.length ? ` ⚠ No template for: ${skippedSkus.slice(0, 8).join(', ')}${skippedSkus.length > 8 ? '…' : ''}.` : '') +
+          (excludedSkus.length ? ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.` : ''),
       });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Export failed' });

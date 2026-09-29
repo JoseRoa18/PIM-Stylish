@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { mergeRows } from './templateFiller';
 
 // JSZip loads on demand — it's only needed when the user actually exports,
 // so it stays out of the page bundles.
@@ -481,6 +482,23 @@ function buildSimpleRow(rowNum, cellData, style = '7') {
   return `<row r="${rowNum}" spans="1:268">${cells.join('')}</row>`;
 }
 
+// Put rows ([rowNum, rowXml], ascending) before the first existing row with a
+// higher number (or at the end of sheetData), so row order stays valid.
+function insertRowsInOrder(sheetXml, rows) {
+  if (!rows.length) return sheetXml;
+  const starts = [...sheetXml.matchAll(/<row\b[^>]*\br="(\d+)"/g)].map((m) => [Number(m[1]), m.index]);
+  let out = '';
+  let cursor = 0;
+  let k = 0;
+  for (const [rn, rowXml] of rows) {
+    while (k < starts.length && starts[k][0] < rn) k++;
+    const at = k < starts.length ? starts[k][1] : sheetXml.indexOf('</sheetData>');
+    out += sheetXml.slice(cursor, at) + rowXml;
+    cursor = at;
+  }
+  return out + sheetXml.slice(cursor);
+}
+
 // Core fill: template + products → { blob, fillReport }. Shared by the
 // single-file export and the per-category set below.
 async function fillBBBWorkbook(templateStoragePath, productList) {
@@ -507,26 +525,25 @@ async function fillBBBWorkbook(templateStoragePath, productList) {
     return cellData;
   });
 
-  let xml = sheet.xml;
-
-  // 1. First product → merge into the existing template row (row 8) — preserves
-  //    the F8 formula, styles, and all cell-level metadata.
-  xml = injectDataRow(xml, baseRow, productCellData[0], '7');
-
-  // 2. Additional products → build fresh, simple rows and insert after row 8.
-  //    Sheet-level data validations cover the new rows automatically.
-  if (productList.length > 1) {
-    const extraRows = productCellData
-      .slice(1)
-      .map((data, i) => buildSimpleRow(baseRow + 1 + i, data, '7'))
-      .join('');
-
-    // Find the closing </row> of the base row and insert after it.
-    const baseRowRe = new RegExp(`(<row\\b[^>]*\\br="${baseRow}"[^>]*>[\\s\\S]*?</row>)`);
-    const m = xml.match(baseRowRe);
-    if (!m) throw new Error('Could not locate base row to extend.');
-    xml = xml.replace(baseRowRe, `$1${extraRows}`);
-  }
+  // Each product merges into ITS row (8, 9, 10…), keeping the row's formulas
+  // (F = description length) and metadata. The First Cost files of
+  // 2026-08-19 ship with their empty rows already there (to 5001), so
+  // inserting rows after row 8 duplicated row numbers from row 9 on and Excel
+  // had to "repair" every multi-product file (found 2026-09-29). A row the
+  // template does not have is built fresh and put in its place in order;
+  // sheet-level data validations cover it too.
+  const cellsByRow = new Map();
+  const missing = [];
+  productCellData.forEach((data, i) => {
+    const rn = baseRow + i;
+    if (sheet.xml.includes(`<row r="${rn}"`)) {
+      cellsByRow.set(rn, new Map(Object.entries(data).map(([col, value]) => [colToIndex(col), buildCell(`${col}${rn}`, value, '7')])));
+    } else {
+      missing.push([rn, buildSimpleRow(rn, data, '7')]);
+    }
+  });
+  if (!cellsByRow.has(baseRow)) throw new Error(`Row ${baseRow} not found in the sheet.`);
+  const xml = insertRowsInOrder(mergeRows(sheet.xml, cellsByRow), missing);
 
   zip.file(sheet.path, xml);
 
