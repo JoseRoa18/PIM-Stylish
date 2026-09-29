@@ -190,18 +190,17 @@ export async function loadProductNames() {
 
 /** Promotions: the current and next period with their execution stamps and SKU counts. */
 export async function loadPromotions() {
+  // The database counts each promotion's SKUs (promotion_prices(count)) —
+  // downloading every price row to count them would hit the API's 1,000-row
+  // cap once six full monthly promotions are in range.
   const { data: promos, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, created_at, activated_at, ended_at, bb_scheduled_at, us_applied_at, ca_applied_at')
+    .select('id, name, period, status, created_at, activated_at, ended_at, bb_scheduled_at, us_applied_at, ca_applied_at, promotion_prices(count)')
     .order('period', { ascending: false })
     .limit(6);
   if (error) throw error;
-  const ids = (promos ?? []).map((p) => p.id);
   const counts = {};
-  if (ids.length) {
-    const { data: prices } = await supabase.from('promotion_prices').select('promotion_id').in('promotion_id', ids);
-    for (const r of prices ?? []) counts[r.promotion_id] = (counts[r.promotion_id] ?? 0) + 1;
-  }
+  for (const p of promos ?? []) counts[p.id] = p.promotion_prices?.[0]?.count ?? 0;
   const { data: runs } = await supabase
     .from('audit_log')
     .select('occurred_at, summary, metadata, target')
@@ -209,7 +208,8 @@ export async function loadPromotions() {
     .eq('action', 'push')
     .order('occurred_at', { ascending: false })
     .limit(12);
-  return { promos: (promos ?? []).map((p) => ({ ...p, skus: counts[p.id] ?? 0 })), runs: runs ?? [] };
+  // eslint-disable-next-line no-unused-vars -- the embedded count is folded into `skus`
+  return { promos: (promos ?? []).map(({ promotion_prices: _counted, ...p }) => ({ ...p, skus: counts[p.id] ?? 0 })), runs: runs ?? [] };
 }
 
 /** Targets per category: { global: {pct, date}, categories: { [cat]: {pct, date} } } */

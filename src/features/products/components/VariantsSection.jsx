@@ -4,7 +4,7 @@ import { Camera, Layers, Settings, X, Plus, Search, Loader2, Check, AlertTriangl
 import { useVariants } from '../hooks/useVariants';
 import { getThumbnailUrl, thumbFallback } from '@/features/media/api/media';
 import { formatCAD } from '@/lib/format';
-import { searchProducts, updateProduct, getProduct } from '../api/products';
+import { searchProducts, updateProduct, getProduct, getProducts } from '../api/products';
 import { computeFamilyDrift } from '../lib/variantFields';
 import { supabase } from '@/lib/supabase';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -23,9 +23,10 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
   // (Empty family → Promise.all([]) resolves to [] → no drift.)
   useEffect(() => {
     let active = true;
-    Promise.all(variants.map((v) => getProduct(v.sku))).then((list) => {
-      if (active) setDrift(computeFamilyDrift(product, list.filter(Boolean)));
-    });
+    // One query for the whole family (was one per sibling), same order.
+    getProducts(variants.map((v) => v.sku)).then((list) => {
+      if (active) setDrift(computeFamilyDrift(product, list));
+    }).catch(() => {});
     return () => { active = false; };
   }, [variants, product]);
 

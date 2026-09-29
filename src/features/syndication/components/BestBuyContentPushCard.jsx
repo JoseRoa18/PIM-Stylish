@@ -33,12 +33,14 @@ export default function BestBuyContentPushCard() {
   const [result, setResult] = useState(null);
 
   useEffect(() => {
+    // Viewers never see this card — don't load its candidates for them.
+    if (!canEdit) return undefined;
     let active = true;
     loadBestBuyPushCandidates()
       .then((d) => { if (active) setData(d); })
       .catch((err) => { if (active) setError(err.message); });
     return () => { active = false; };
-  }, []);
+  }, [canEdit]);
 
   const withDiff = useMemo(
     () => (data?.pushable ?? []).filter((c) => norm(c.bbTitle) !== norm(c.pimTitle)),

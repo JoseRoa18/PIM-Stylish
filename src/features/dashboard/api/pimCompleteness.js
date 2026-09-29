@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { loadCatalogWithMedia } from './catalogWithMedia';
 import { scoreCompleteness, summarizeByCategory } from '@/features/products/lib/completeness';
 
 /**
@@ -7,12 +7,9 @@ import { scoreCompleteness, summarizeByCategory } from '@/features/products/lib/
  * Archived products are left out (they are not being completed).
  */
 export async function computePimCompleteness() {
-  const { data: products, error } = await supabase
-    .from('products')
-    .select('*, product_media (id, media_type, is_primary, image_role, language, document_type)')
-    .neq('workflow_status', 'archived')
-    .order('sku');
-  if (error) throw error;
+  // Shared with the Listing Health scoring on the same page (one catalog
+  // download instead of two); already in SKU order from the database.
+  const products = (await loadCatalogWithMedia()).filter((p) => p.workflow_status !== 'archived');
 
   const rows = (products ?? []).map((p) => {
     const { product_media: media, ...product } = p;

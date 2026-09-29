@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { loadCatalogWithMedia } from './catalogWithMedia';
 import {
   buildListingHealthData,
   buildSummaryRows,
@@ -14,13 +15,9 @@ export { summarizeForDashboard };
  * server-side twice a day.
  */
 export async function computeListingHealth() {
-  const { data: dbProducts, error: prodErr } = await supabase
-    .from('products')
-    .select(`
-      *,
-      product_media (id, storage_path, media_type, is_primary, display_order)
-    `);
-  if (prodErr) throw prodErr;
+  // The catalog load is shared with the PIM completeness panel (both run on
+  // the Listing Health page), and the ten snapshots load at the same time.
+  const catalog = loadCatalogWithMedia();
 
   // Latest channel snapshots → per-SKU maps. null map = no snapshot yet
   // (the channel checks treat unknown as pass).
@@ -42,21 +39,38 @@ export async function computeListingHealth() {
     return null;
   }
 
+  const [
+    dbProducts,
+    wayfairMap, wayfairUsaMap, bestbuyMap, walmartUs, walmartCa,
+    wixSinksdirectUs, wixStylishCa, wixStylishUs, wixAzuniCa,
+  ] = await Promise.all([
+    catalog,
+    latestSnapshotMap('wayfair'),
+    latestSnapshotMap('wayfair_usa'),
+    latestSnapshotMap('bestbuy'),
+    latestSnapshotMap('walmart_us'),
+    latestSnapshotMap('walmart_ca'),
+    latestSnapshotMap('wix_sinksdirect_us'),
+    latestSnapshotMap('wix_stylish_ca'),
+    latestSnapshotMap('wix_stylish_us'),
+    latestSnapshotMap('wix_azuni_ca'),
+  ]);
+
   return buildListingHealthData(dbProducts ?? [], {
-    wayfairMap: await latestSnapshotMap('wayfair'),
-    wayfairUsaMap: await latestSnapshotMap('wayfair_usa'),
-    bestbuyMap: await latestSnapshotMap('bestbuy'),
+    wayfairMap,
+    wayfairUsaMap,
+    bestbuyMap,
     walmartMaps: {
-      walmart_us: await latestSnapshotMap('walmart_us'),
-      walmart_ca: await latestSnapshotMap('walmart_ca'),
+      walmart_us: walmartUs,
+      walmart_ca: walmartCa,
     },
     // The other three Wix sites score from their own catalog snapshots
     // (the SinksDirect CA card keeps its richer wix_raw cache).
     wixSiteMaps: {
-      wix_sinksdirect_us: await latestSnapshotMap('wix_sinksdirect_us'),
-      wix_stylish_ca: await latestSnapshotMap('wix_stylish_ca'),
-      wix_stylish_us: await latestSnapshotMap('wix_stylish_us'),
-      wix_azuni_ca: await latestSnapshotMap('wix_azuni_ca'),
+      wix_sinksdirect_us: wixSinksdirectUs,
+      wix_stylish_ca: wixStylishCa,
+      wix_stylish_us: wixStylishUs,
+      wix_azuni_ca: wixAzuniCa,
     },
   });
 }

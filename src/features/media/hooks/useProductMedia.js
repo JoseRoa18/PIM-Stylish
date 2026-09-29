@@ -8,6 +8,9 @@ import { listMedia, getThumbnailUrl, preloadImage } from '../api/media';
 // kept showing "No image yet" until a full page refresh. One store per SKU
 // keeps them all in sync.
 const EMPTY_STATE = { media: [], loading: false, error: null };
+// A list loaded less than this ago is not fetched again when another panel
+// or tab of the same product mounts (performance pass 2026-09-29).
+const MEDIA_FRESH_MS = 30000;
 const stores = new Map(); // sku → { state, listeners, loadedOnce, inFlight, fetchId }
 
 function storeFor(sku) {
@@ -39,6 +42,7 @@ async function load(sku, { silent = false } = {}) {
     const data = await listMedia(sku);
     if (id !== s.fetchId) return; // a newer fetch superseded this one
     s.loadedOnce = true;
+    s.loadedAt = Date.now();
     setState(s, { media: data, loading: false, error: null });
     warmGalleryThumbs(data);
   } catch (err) {
@@ -85,8 +89,12 @@ export function useProductMedia(sku) {
       const s = storeFor(sku);
       s.listeners.add(onChange);
       // First subscriber triggers the load; later mounts of an already-loaded
-      // SKU refresh silently so cached data can't go stale across visits.
-      if (!s.inFlight) load(sku, { silent: s.loadedOnce });
+      // SKU refresh silently so cached data can't go stale across visits —
+      // unless it was loaded moments ago (a hover prefetch, the other panels
+      // of the same page, a tab switch): then the list is fresh already.
+      // Changes made here always call reload(), which ignores this.
+      const fresh = s.loadedOnce && s.loadedAt && Date.now() - s.loadedAt < MEDIA_FRESH_MS;
+      if (!s.inFlight && !fresh) load(sku, { silent: s.loadedOnce });
       return () => s.listeners.delete(onChange);
     },
     [sku],

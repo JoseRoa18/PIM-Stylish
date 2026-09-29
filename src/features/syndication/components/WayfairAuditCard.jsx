@@ -4,7 +4,7 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { formatTimeAgo, formatCategory } from '@/lib/format';
-import { latestSnapshot } from '../lib/channels';
+import { latestSnapshot, insertSnapshot } from '../lib/channels';
 import { pushWayfairAttributes } from '../api/wayfairSync';
 import Dialog from '@/components/ui/Dialog';
 
@@ -138,7 +138,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
           changed: r.changed,
           fields: Object.entries(r.diff).filter(([, d]) => d.changed).slice(0, 4).map(([t]) => t),
         }));
-      await supabase.from('channel_health').insert({
+      await insertSnapshot({
         channel: supplier === 'USA' ? 'wayfair_usa' : 'wayfair',
         target: `${supplier}/${market}`,
         total: state.total,

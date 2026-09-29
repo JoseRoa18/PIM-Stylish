@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { insertSnapshot } from '@/features/syndication/lib/channels';
 import { etToday, promoWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
 import { isExcluded, wixExclusionKey } from '../lib/marketplaces';
 import { logActivity } from '@/features/activity/api/activityLog';
@@ -435,7 +436,7 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
     .filter((w) => w.sku && !pimSkus.has(w.sku))
     .map((w) => ({ sku: w.sku, wix_id: w.id, state: 'not_in_pim', name: w.name }));
 
-  await supabase.from('channel_health').insert({
+  await insertSnapshot({
     channel: cfg.channel,
     target: cfg.url.replace('https://www.', ''),
     total,

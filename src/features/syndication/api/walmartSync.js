@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { insertSnapshot } from '@/features/syndication/lib/channels';
 
 // Walmart US Marketplace — STRICTLY READ-ONLY integration. The edge function
 // only GETs the seller's items; nothing is ever written to Walmart from
@@ -43,7 +44,7 @@ export async function refreshWalmartItems(market = 'us') {
     ? items.filter((i) => i.feedStatus === 'SUCCESS').length
     : items.filter((i) => i.published === 'PUBLISHED').length;
 
-  await supabase.from('channel_health').insert({
+  await insertSnapshot({
     channel: isCa ? 'walmart_ca' : 'walmart_us',
     target: 'marketplace.walmartapis.com',
     total,

@@ -48,7 +48,7 @@ import StockBadge from '@/features/products/components/StockBadge';
 import { getStockFor } from '@/features/pricing/api/inventory';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import { isExcluded, wixExclusionKey, marketplaceLabel, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
-import { latestSnapshot } from '@/features/syndication/lib/channels';
+import { latestSnapshotItem } from '@/features/syndication/lib/channels';
 import RichTextEditor from '@/components/ui/LazyRichTextEditor';
 import { preloadRichTextEditor } from '@/components/ui/preloadRichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
@@ -75,6 +75,37 @@ const ChannelExclusionsCard = lazy(() => import('@/features/syndication/componen
 const AliasesTab = lazy(() => import('@/features/products/components/AliasesTab'));
 const ProductHistoryDialog = lazy(() => import('@/features/products/components/ProductHistoryDialog'));
 const CreateProductDialog = lazy(() => import('@/features/products/components/CreateProductDialog'));
+
+// Data-driven dropdown suggestions (the distinct values the catalog already
+// uses), shared across product visits for a few minutes — the page used to
+// scan the whole catalog on every visit for dropdowns only Edit mode shows.
+const SUGGESTIONS_TTL_MS = 5 * 60 * 1000;
+let suggestionsCache = null; // { at, promise }
+function loadSuggestions() {
+  if (!suggestionsCache || Date.now() - suggestionsCache.at > SUGGESTIONS_TTL_MS) {
+    const promise = supabase
+      .from('products')
+      .select('material, finish, spout_type:attributes->>spout_type, mounting_type:attributes->>mounting_type, lock_type:attributes->>lock_type')
+      .then(({ data, error }) => {
+        if (error || !data) throw error ?? new Error('no data');
+        const collect = (key) =>
+          [...new Set(data.map((r) => r[key]).filter((v) => v && String(v).trim()))].sort();
+        return {
+          material: collect('material'),
+          finish: collect('finish'),
+          spout_type: collect('spout_type'),
+          mounting_type: collect('mounting_type'),
+          lock_type: collect('lock_type'),
+        };
+      });
+    suggestionsCache = { at: Date.now(), promise };
+    promise.catch(() => { suggestionsCache = null; });
+  }
+  return suggestionsCache.promise;
+}
+function forgetSuggestions() {
+  suggestionsCache = null;
+}
 
 // What a tab shows while its code arrives (a fraction of a second).
 function TabFallback() {
@@ -460,21 +491,7 @@ export default function ProductDetail() {
   const [suggestions, setSuggestions] = useState({});
   useEffect(() => {
     let active = true;
-    supabase
-      .from('products')
-      .select('material, finish, spout_type:attributes->>spout_type, mounting_type:attributes->>mounting_type, lock_type:attributes->>lock_type')
-      .then(({ data }) => {
-        if (!active || !data) return;
-        const collect = (key) =>
-          [...new Set(data.map((r) => r[key]).filter((v) => v && String(v).trim()))].sort();
-        setSuggestions({
-          material: collect('material'),
-          finish: collect('finish'),
-          spout_type: collect('spout_type'),
-          mounting_type: collect('mounting_type'),
-          lock_type: collect('lock_type'),
-        });
-      });
+    loadSuggestions().then((s) => { if (active) setSuggestions(s); }).catch(() => {});
     return () => { active = false; };
   }, []);
   const [saving, setSaving] = useState(false);
@@ -520,6 +537,7 @@ export default function ProductDetail() {
       const changes = computeChanges(form, product).filter((c) => !NEVER_PROPAGATE.has(c.key));
       const hadFamily = product.family_number != null;
       const updated = await updateProduct(product.sku, patch);
+      forgetSuggestions(); // a value saved now shows in the dropdowns right away
       mergeProduct(updated);
       setIsEditing(false);
       setForm({});
@@ -1648,11 +1666,13 @@ function MarketplacesTab({ product, media, onUpdate }) {
   const [wmUs, setWmUs] = useState(undefined);
   useEffect(() => {
     let active = true;
-    latestSnapshot('walmart_ca').then((snap) => {
-      if (active) setWmCa((snap?.results ?? []).find((r) => r.sku === product.sku) ?? null);
+    // Just this SKU's item from each latest Walmart snapshot (the database
+    // picks it out — no longer the whole per-SKU list on every tab switch).
+    latestSnapshotItem('walmart_ca', product.sku).then((item) => {
+      if (active) setWmCa(item ?? null);
     });
-    latestSnapshot('walmart_us').then((snap) => {
-      if (active) setWmUs((snap?.results ?? []).find((r) => r.sku === product.sku) ?? null);
+    latestSnapshotItem('walmart_us', product.sku).then((item) => {
+      if (active) setWmUs(item ?? null);
     });
     return () => { active = false; };
   }, [product.sku]);

@@ -6,6 +6,36 @@ import { refreshBestBuyOffers, pushBestBuyPrices } from '@/features/syndication/
 import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells } from '@/features/syndication/lib/wixSites';
 
+// Reads shared by the targets of one Price Alignment view (performance pass
+// 2026-09-29): the page loads all eight targets at once and each one used to
+// read the products table and the active promotions again (~30 queries). A
+// read is shared for a few seconds; a manual pull drops its channel's
+// snapshot first, so a refreshed report is always read fresh.
+const SHARED_TTL_MS = 10000;
+const shared = new Map(); // key → { at, promise }
+function sharedLoad(key, loader) {
+  const hit = shared.get(key);
+  if (hit && Date.now() - hit.at < SHARED_TTL_MS) return hit.promise;
+  const promise = loader();
+  shared.set(key, { at: Date.now(), promise });
+  promise.catch(() => { if (shared.get(key)?.promise === promise) shared.delete(key); });
+  return promise;
+}
+
+// The latest snapshot of a channel (run_at + per-SKU results), shared.
+function latestChannelSnapshot(channel) {
+  return sharedLoad(`snapshot:${channel}`, async () => {
+    const { data, error } = await supabase
+      .from('channel_health')
+      .select('run_at, results')
+      .eq('channel', channel)
+      .order('run_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return data ?? [];
+  });
+}
+
 /**
  * Price Alignment Analyzer — the four Wix sites plus Best Buy.
  *
@@ -147,23 +177,29 @@ function classifySnapshot(snapshot, outOfScope = null) {
  * pulling the channel again (the pull only refreshes the LIVE prices).
  */
 async function loadExpectedPrices(cfg) {
-  const { data: prods, error: prodErr } = await supabase
-    .from('products')
-    .select(`sku, base:${cfg.priceField}`)
-    .range(0, 4999);
-  if (prodErr) throw prodErr;
-  const baseBySku = new Map((prods ?? []).map((p) => [p.sku, p.base]));
+  const prods = await sharedLoad(`products:${cfg.priceField}`, async () => {
+    const { data, error } = await supabase
+      .from('products')
+      .select(`sku, base:${cfg.priceField}`)
+      .range(0, 4999);
+    if (error) throw error;
+    return data ?? [];
+  });
+  const baseBySku = new Map(prods.map((p) => [p.sku, p.base]));
 
   const promoBySku = new Map();
   if (cfg.promoAware === false) return { baseBySku, promoBySku };
   const promoField = cfg.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
-  const { data: activePromos, error: promoErr } = await supabase
-    .from('promotions')
-    .select(`period, starts_on, ends_on, promotion_prices(sku, ${promoField})`)
-    .eq('status', 'active')
-    .eq('kind', 'monthly') // flash deals and special events are not the store's expected price
-    .order('period', { ascending: true });
-  if (promoErr) throw promoErr;
+  const activePromos = await sharedLoad(`promos:${promoField}`, async () => {
+    const { data, error } = await supabase
+      .from('promotions')
+      .select(`period, starts_on, ends_on, promotion_prices(sku, ${promoField})`)
+      .eq('status', 'active')
+      .eq('kind', 'monthly') // flash deals and special events are not the store's expected price
+      .order('period', { ascending: true });
+    if (error) throw error;
+    return data ?? [];
+  });
   // Market calendar: USA runs the 1st → month end; Canada runs first
   // Thursday → the day before the next first Thursday. Only the promo whose
   // window is open today sets the expected price.
@@ -181,13 +217,7 @@ async function loadExpectedPrices(cfg) {
 }
 
 async function loadOfferAlignment(cfg) {
-  const { data, error } = await supabase
-    .from('channel_health')
-    .select('run_at, results')
-    .eq('channel', cfg.channel)
-    .order('run_at', { ascending: false })
-    .limit(1);
-  if (error) throw error;
+  const data = await latestChannelSnapshot(cfg.channel);
   if (!data?.length) return null;
   const snapshot = data[0];
   const { baseBySku, promoBySku } = await loadExpectedPrices(cfg);
@@ -235,21 +265,18 @@ async function loadOfferAlignment(cfg) {
 export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
   const cfg = ALIGN_TARGETS[target];
   if (cfg.kind === 'bestbuy' || cfg.kind === 'walmart') return loadOfferAlignment(cfg);
-  const { data, error } = await supabase
-    .from('channel_health')
-    .select('run_at, results')
-    .eq('channel', cfg.channel)
-    .order('run_at', { ascending: false })
-    .limit(1);
-  if (error) throw error;
+  const data = await latestChannelSnapshot(cfg.channel);
   if (!data?.length) return null;
   // Brand scope applies to older snapshots too: products of a brand the site
   // never carries are dropped before classifying (Azuni on the Stylish sites).
   let outOfScope = null;
   if (cfg.excludedBrands?.length) {
-    const { data: prods, error: prodErr } = await supabase.from('products').select('sku, brand');
-    if (prodErr) throw prodErr;
-    outOfScope = new Set((prods ?? []).filter((p) => !wixSiteSells(cfg, p)).map((p) => p.sku));
+    const prods = await sharedLoad('products:brand', async () => {
+      const { data, error } = await supabase.from('products').select('sku, brand');
+      if (error) throw error;
+      return data ?? [];
+    });
+    outOfScope = new Set(prods.filter((p) => !wixSiteSells(cfg, p)).map((p) => p.sku));
   }
   // The snapshot's expected prices are as old as the pull; the PIM's are
   // read now, so a price changed today is judged today. Live prices stay
@@ -278,6 +305,7 @@ export async function runPriceAlignment(target = DEFAULT_WIX_SITE) {
   if (cfg.kind === 'bestbuy') await refreshBestBuyOffers();
   else if (cfg.kind === 'walmart') await refreshWalmartItems(cfg.market);
   else await refreshWixCatalog(target);
+  shared.delete(`snapshot:${cfg.channel}`); // the pull just wrote a new one
   return loadLatestAlignment(target);
 }
 

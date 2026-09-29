@@ -21,20 +21,25 @@ const COLUMNS = 'sku, on_hand, available, warehouses, source, eta, dropped_at, s
 
 async function rowsFor(market, skus) {
   const out = {};
-  for (let i = 0; i < skus.length; i += 100) {
-    const { data, error } = await supabase
-      .from('product_inventory')
-      .select(COLUMNS)
-      .eq('market', market)
-      .in('sku', skus.slice(i, i + 100));
+  // Chunks of 100 SKUs, fetched in parallel (they used to go one by one).
+  const chunks = [];
+  for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
+  const results = await Promise.all(chunks.map((part) => supabase
+    .from('product_inventory')
+    .select(COLUMNS)
+    .eq('market', market)
+    .in('sku', part)));
+  for (const { data, error } of results) {
     if (error) throw error;
     for (const r of data ?? []) out[r.sku] = r;
   }
   return out;
 }
 
+// The catalog's stock columns only read the quantity, so the full-table read
+// fetches just that (not warehouses, ETA, sync stamps…).
 async function allRows(market) {
-  const { data, error } = await supabase.from('product_inventory').select(COLUMNS).eq('market', market);
+  const { data, error } = await supabase.from('product_inventory').select('sku, available').eq('market', market);
   if (error) throw error;
   return Object.fromEntries((data ?? []).map((r) => [r.sku, r]));
 }

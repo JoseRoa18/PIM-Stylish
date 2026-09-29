@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   History,
@@ -117,6 +117,13 @@ export default function Activity() {
   const [target, setTarget] = useState('');
   const [rangeDays, setRangeDays] = useState('7');
   const [search, setSearch] = useState('');
+  // What is actually queried: the box's text 300 ms after typing stops — the
+  // log used to be searched once per keystroke (performance pass 2026-09-29).
+  const [searchQuery, setSearchQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
   const [page, setPage] = useState(1);
 
   // Wrap each filter setter so changing a filter resets to page 1 in the same
@@ -140,7 +147,7 @@ export default function Activity() {
       actorId: actorId || undefined,
       action: action || undefined,
       target: target || undefined,
-      search: search || undefined,
+      search: searchQuery || undefined,
       since,
     },
     page,

@@ -17,7 +17,7 @@ export const LIVE_CHANNELS = [
     stat: async (totals) => {
       // Prefer the fleet snapshot (live on site); fall back to the linked
       // count for installs that haven't pulled yet.
-      const snap = await latestSnapshot('wix');
+      const snap = await latestSnapshotCounters('wix');
       if (snap) return { value: `${snap.in_sync}/${snap.total}`, label: 'live on site' };
       const { count } = await supabase
         .from('products')
@@ -53,7 +53,7 @@ export const LIVE_CHANNELS = [
     mode: 'Read-only',
     modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
-      const snap = await latestSnapshot('bestbuy');
+      const snap = await latestSnapshotCounters('bestbuy');
       return snap
         ? { value: `${snap.in_sync}/${snap.total}`, label: 'offers active' }
         : { value: '—', label: 'no pull yet' };
@@ -71,7 +71,7 @@ export const LIVE_CHANNELS = [
     mode: 'Items via API',
     modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
-      const snap = await latestSnapshot('walmart_us');
+      const snap = await latestSnapshotCounters('walmart_us');
       return snap
         ? { value: `${snap.in_sync}/${snap.total}`, label: 'items published' }
         : { value: '—', label: 'no pull yet' };
@@ -89,7 +89,7 @@ export const LIVE_CHANNELS = [
     mode: 'Promos via API',
     modeClass: 'bg-surface-container-highest text-on-surface-variant border border-outline-variant',
     stat: async () => {
-      const snap = await latestSnapshot('walmart_ca');
+      const snap = await latestSnapshotCounters('walmart_ca');
       return snap
         ? { value: `${snap.total}`, label: 'SKUs in feed' }
         : { value: '—', label: 'no pull yet' };
@@ -99,14 +99,60 @@ export const LIVE_CHANNELS = [
 
 // Latest channel_health snapshot for a channel (written by the read-only
 // pulls); the directory reads it instead of hitting the live APIs.
+//
+// The whole snapshot carries `results` (60–220 kB of per-SKU items). Several
+// cards of one page ask for the same one as they mount (the Best Buy page
+// did it three times), so a read is shared for a few seconds; whatever
+// writes a new snapshot from the browser calls forgetSnapshot() first-hand.
+const SNAPSHOT_TTL_MS = 5000;
+const snapshotCache = new Map(); // channel → { at, promise }
+
 export async function latestSnapshot(channel) {
-  const { data } = await supabase
+  const hit = snapshotCache.get(channel);
+  if (hit && Date.now() - hit.at < SNAPSHOT_TTL_MS) return hit.promise;
+  const promise = supabase
     .from('channel_health')
     .select('*')
     .eq('channel', channel)
     .order('run_at', { ascending: false })
     .limit(1)
+    .maybeSingle()
+    .then(({ data }) => data ?? null, () => null);
+  snapshotCache.set(channel, { at: Date.now(), promise });
+  return promise;
+}
+
+/** Drop the shared read of a channel's snapshot (call after writing a new one). */
+export function forgetSnapshot(channel) {
+  snapshotCache.delete(channel);
+}
+
+/** Write a new snapshot row and drop the shared read, so the next read sees it. */
+export async function insertSnapshot(row) {
+  const res = await supabase.from('channel_health').insert(row);
+  forgetSnapshot(row.channel);
+  return res;
+}
+
+// The latest snapshot's counters only — for tiles and badges that never
+// need the per-SKU list.
+export async function latestSnapshotCounters(channel) {
+  const { data } = await supabase
+    .from('channel_health')
+    .select('channel, target, run_at, total, in_sync, with_diffs, errors, partial')
+    .eq('channel', channel)
+    .order('run_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
+  return data ?? null;
+}
+
+// One SKU's item from a channel's latest snapshot (null when it is not in
+// it) — the database picks it out (channel_health_item), so a product page
+// does not download the whole list to find itself.
+export async function latestSnapshotItem(channel, sku) {
+  const { data, error } = await supabase.rpc('channel_health_item', { p_channel: channel, p_sku: sku });
+  if (error) return null;
   return data ?? null;
 }
 

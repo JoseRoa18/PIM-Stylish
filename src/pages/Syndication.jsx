@@ -14,11 +14,15 @@ export default function Syndication() {
     let cancelled = false;
     (async () => {
       try {
+        // The file channels don't depend on the totals — both load at once,
+        // then the live counters (they only read counter columns now).
+        const filesPromise = loadFileChannels();
+        filesPromise.catch(() => {}); // awaited below; avoids an early unhandled-rejection warning
         const totals = await loadTotals();
         const entries = await Promise.all(
           LIVE_CHANNELS.map(async (c) => [c.id, await c.stat(totals)]),
         );
-        const files = await loadFileChannels();
+        const files = await filesPromise;
         if (!cancelled) {
           setStats(Object.fromEntries(entries));
           setFileChannels(files);

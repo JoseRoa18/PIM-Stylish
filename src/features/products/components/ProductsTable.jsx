@@ -36,6 +36,21 @@ const TH_STICKY =
 const SELECTED_STICKY_BG =
   'bg-[color-mix(in_srgb,var(--color-primary-container)_30%,var(--color-surface-container-lowest))]';
 
+// One pending hover prefetch at a time (performance pass 2026-09-29).
+let rowPrefetchTimer = null;
+function scheduleRowPrefetch(product) {
+  clearTimeout(rowPrefetchTimer);
+  rowPrefetchTimer = setTimeout(() => {
+    prefetchProductMedia(product.sku);
+    if (product.primary_image?.storage_path) {
+      preloadImage(getThumbnailUrl(product.primary_image.storage_path, 400));
+    }
+  }, 150);
+}
+function cancelRowPrefetch() {
+  clearTimeout(rowPrefetchTimer);
+}
+
 export default function ProductsTable({
   products,
   loading,
@@ -151,13 +166,14 @@ export default function ProductsTable({
                   // the route chunk (heaviest in the app), the media list,
                   // and the primary image at the gallery's exact size. All
                   // deduped — repeat hovers cost nothing.
+                  // The media list and image wait until the pointer rests on
+                  // the row (150 ms): sweeping down the table used to fire a
+                  // query for every row it crossed.
                   onPointerEnter={() => {
                     prefetchRoute('productDetail');
-                    prefetchProductMedia(product.sku);
-                    if (product.primary_image?.storage_path) {
-                      preloadImage(getThumbnailUrl(product.primary_image.storage_path, 400));
-                    }
+                    scheduleRowPrefetch(product);
                   }}
+                  onPointerLeave={cancelRowPrefetch}
                   // The row is a button, not an anchor — recreate the two
                   // browser gestures for "open in a new tab" (the SKU cell
                   // is a real link for the right-click menu).

@@ -1185,22 +1185,21 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
         const prices = await getPromotionPrices(promo.id);
         setRows(prices);
         const skus = prices.map((r) => r.sku);
-        const maps = {};
-        for (let i = 0; i < skus.length; i += 100) {
-          const { data } = await supabase
-            .from('products')
-            .select('sku, map_cad, map_usd, category, brand')
-            .in('sku', skus.slice(i, i + 100));
-          for (const p of data ?? []) maps[p.sku] = p;
-        }
-        setMapBySku(maps);
+        // The products' MAPs and the stock load at the same time, each in
+        // parallel chunks of 100 (they used to go one after another).
         // Stock is an add-on to the table: if it cannot be read the prices
         // still show, with the Stock column empty.
-        try {
-          setStockByMarket(await getStockFor(skus));
-        } catch {
-          setStockByMarket({ ca: {}, us: {} });
-        }
+        const stockPromise = getStockFor(skus).catch(() => ({ ca: {}, us: {} }));
+        const chunks = [];
+        for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
+        const parts = await Promise.all(chunks.map((part) => supabase
+          .from('products')
+          .select('sku, map_cad, map_usd, category, brand')
+          .in('sku', part)));
+        const maps = {};
+        for (const { data } of parts) for (const p of data ?? []) maps[p.sku] = p;
+        setMapBySku(maps);
+        setStockByMarket(await stockPromise);
       } catch (err) {
         setMsg({ tone: 'error', text: err.message });
       }

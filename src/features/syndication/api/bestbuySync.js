@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { insertSnapshot } from '@/features/syndication/lib/channels';
 import { isExcluded } from '../lib/marketplaces';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -81,7 +82,7 @@ export async function refreshBestBuyOffers() {
     (o) => o.msrp != null && o.price != null && Math.abs(o.price - o.msrp) > 0.01,
   ).length;
 
-  await supabase.from('channel_health').insert({
+  await insertSnapshot({
     channel: 'bestbuy',
     target: 'marketplace.bestbuy.ca',
     total,
@@ -118,6 +119,45 @@ const stripHtml = (h) =>
  * placeholder UPC in the PIM can't break the match), a PIM title, a
  * description and at least one image.
  */
+// Image URLs per SKU, primary first then display order. The API returns at
+// most 1,000 rows a query and the ~450 Best Buy offers carry ~5,300 images,
+// so a single query left most SKUs looking image-less and they were skipped
+// as "no images in the PIM" (found 2026-09-29). 20 SKUs a query stays under
+// the cap (a product has at most ~46 media rows); a query that still reaches
+// it is redone SKU by SKU.
+async function imagesForSkus(skus) {
+  const CAP = 1000;
+  const imagesBySku = new Map();
+  const query = (part) => supabase
+    .from('product_media')
+    .select('sku, storage_path, is_primary, display_order')
+    .eq('media_type', 'image')
+    .in('sku', part)
+    .order('is_primary', { ascending: false })
+    .order('display_order', { ascending: true });
+  const add = (rows) => {
+    for (const m of rows ?? []) {
+      if (!imagesBySku.has(m.sku)) imagesBySku.set(m.sku, []);
+      imagesBySku.get(m.sku).push(m.storage_path);
+    }
+  };
+  const chunks = [];
+  for (let i = 0; i < skus.length; i += 20) chunks.push(skus.slice(i, i + 20));
+  const results = await Promise.all(chunks.map(async (part) => {
+    const { data, error } = await query(part);
+    if (error) throw error;
+    if ((data ?? []).length < CAP) return [data];
+    return Promise.all(part.map(async (sku) => {
+      const one = await query([sku]);
+      if (one.error) throw one.error;
+      return one.data;
+    }));
+  }));
+  // Chunk order kept, so each SKU's images stay primary-first, display order.
+  for (const group of results) for (const rows of group) add(rows);
+  return imagesBySku;
+}
+
 export async function loadBestBuyPushCandidates() {
   const { data: snaps, error: snapErr } = await supabase
     .from('channel_health')
@@ -133,28 +173,16 @@ export async function loadBestBuyPushCandidates() {
   const skus = offers.map((o) => o.sku);
 
   // PostgREST caps unfiltered selects — always filter by the SKUs we need.
-  const [{ data: prods, error: prodErr }, { data: media, error: mediaErr }] = await Promise.all([
+  const [{ data: prods, error: prodErr }, imagesBySku] = await Promise.all([
     supabase
       .from('products')
       .select('sku, brand, description, attributes, channel_exclusions')
       .in('sku', skus),
-    supabase
-      .from('product_media')
-      .select('sku, storage_path, is_primary, display_order')
-      .eq('media_type', 'image')
-      .in('sku', skus)
-      .order('is_primary', { ascending: false })
-      .order('display_order', { ascending: true }),
+    imagesForSkus(skus),
   ]);
   if (prodErr) throw prodErr;
-  if (mediaErr) throw mediaErr;
 
   const bySku = new Map((prods ?? []).map((p) => [p.sku, p]));
-  const imagesBySku = new Map();
-  for (const m of media ?? []) {
-    if (!imagesBySku.has(m.sku)) imagesBySku.set(m.sku, []);
-    imagesBySku.get(m.sku).push(m.storage_path);
-  }
 
   const pushable = [];
   const excluded = [];
