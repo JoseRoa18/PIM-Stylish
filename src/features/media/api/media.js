@@ -42,6 +42,12 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
  * `fit=cover` + w=h gives a square, undistorted thumbnail matching the grid.
  *
  * Non-image / non-http paths (videos, etc.) are returned as-is.
+ *
+ * `default=` (fix 2026-09-29): when weserv cannot fetch or process the
+ * original in time — big photos, a slow first fetch — it redirects to the
+ * original file instead of failing, so a tile never ends up blank for a photo
+ * that is fine (B-112B / B-112G showed the camera placeholder). Where weserv
+ * itself is unreachable, thumbFallback() below swaps in the original.
  */
 // Warm the browser cache for an image URL without rendering anything. Used
 // by the hover/background prefetch — a repeat call for the same URL is free.
@@ -59,7 +65,25 @@ export function getThumbnailUrl(storagePath, width = 400) {
   if (!embed) return null;
   if (!/^https?:\/\//i.test(embed) || !IMAGE_EXT_RE.test(embed)) return embed;
   const encoded = encodeURIComponent(embed);
-  return `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${width}&fit=cover&output=webp&q=80`;
+  return `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${width}&fit=cover&output=webp&q=80&default=${encoded}`;
+}
+
+/**
+ * onError for a thumbnail <img>: when the resized copy fails to load (weserv
+ * down or rate-limited), show the original file instead — once; a second
+ * failure is left to the caller (onFail), e.g. a placeholder.
+ */
+export function thumbFallback(storagePath, onFail) {
+  return (e) => {
+    const img = e.currentTarget;
+    const original = getMediaUrl(storagePath);
+    if (original && img.dataset.thumbFallback !== '1') {
+      img.dataset.thumbFallback = '1';
+      img.src = original;
+    } else {
+      onFail?.();
+    }
+  };
 }
 
 // Public buckets for files uploaded to Supabase Storage.

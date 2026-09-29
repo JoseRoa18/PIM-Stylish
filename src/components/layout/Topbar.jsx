@@ -15,7 +15,7 @@ import AccountMenu from '@/components/layout/AccountMenu';
 import PresenceStack from '@/components/layout/PresenceStack';
 import { useProductSearch } from '@/features/search/hooks/useProductSearch';
 import { prefetchRoute } from '@/lib/routePrefetch';
-import { getThumbnailUrl, preloadImage } from '@/features/media/api/media';
+import { getThumbnailUrl, preloadImage, thumbFallback } from '@/features/media/api/media';
 import { prefetchProductMedia } from '@/features/media/hooks/useProductMedia';
 import { formatCategory } from '@/lib/format';
 
@@ -344,6 +344,7 @@ function ProductThumb({ product }) {
       <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-low border border-outline-variant flex-shrink-0">
         <img
           src={getThumbnailUrl(product.primary_image.storage_path, 80)}
+          onError={thumbFallback(product.primary_image.storage_path)}
           alt=""
           className="w-full h-full object-cover"
           loading="lazy"

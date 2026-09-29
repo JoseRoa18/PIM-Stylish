@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Camera, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { formatCAD, formatCategory } from '@/lib/format';
-import { getThumbnailUrl, preloadImage } from '@/features/media/api/media';
+import { getThumbnailUrl, preloadImage, thumbFallback } from '@/features/media/api/media';
 import { prefetchProductMedia } from '@/features/media/hooks/useProductMedia';
 import Skeleton from '@/components/ui/Skeleton';
 import Checkbox from '@/components/ui/Checkbox';
@@ -349,7 +349,7 @@ function ProductThumbnail({ primaryImage, alt, eager = false }) {
       <img
         src={getThumbnailUrl(primaryImage.storage_path, 128)}
         alt={primaryImage.alt_text || alt || ''}
-        onError={() => setError(true)}
+        onError={thumbFallback(primaryImage.storage_path, () => setError(true))}
         loading={eager ? 'eager' : 'lazy'}
         fetchPriority={eager ? 'high' : 'auto'}
         decoding="async"

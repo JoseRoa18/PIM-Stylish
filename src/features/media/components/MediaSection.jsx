@@ -20,6 +20,7 @@ import {
   reorderMedia,
   getMediaUrl,
   getThumbnailUrl,
+  thumbFallback,
   getVideoThumbnail,
   getVideoEmbed,
   isSupabaseStored,
@@ -958,6 +959,7 @@ function MediaCard({
           {!thumbLoaded && <Skeleton className="absolute inset-0 pointer-events-none" />}
           <img
             src={thumbUrl}
+            onError={thumbFallback(item.storage_path)}
             alt={item.alt_text || item.file_name}
             onClick={onView}
             onLoad={() => setThumbLoaded(true)}
@@ -981,6 +983,7 @@ function MediaCard({
           {!thumbLoaded && <Skeleton className="absolute inset-0 pointer-events-none" />}
           <img
             src={videoThumb}
+            onError={thumbFallback(posterUrl)}
             alt={item.alt_text || item.file_name}
             onLoad={() => setThumbLoaded(true)}
             className={`w-full h-full object-cover block ${thumbLoaded ? '' : 'opacity-0'}`}
@@ -1347,6 +1350,7 @@ function AltTextDialog({ item, onClose, onSave }) {
             <div className="w-20 h-20 rounded-lg overflow-hidden bg-surface-container flex-shrink-0">
               <img
                 src={getThumbnailUrl(item.storage_path, 160)}
+                onError={thumbFallback(item.storage_path)}
                 alt=""
                 className="w-full h-full object-cover"
               />
@@ -1527,7 +1531,7 @@ function ThumbnailPickerDialog({ item, images, defaultPoster, onClose, onSave })
                     }`}
                     title={img.file_name}
                   >
-                    <img src={getThumbnailUrl(img.storage_path, 200)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <img src={getThumbnailUrl(img.storage_path, 200)} onError={thumbFallback(img.storage_path)} alt="" className="w-full h-full object-cover" loading="lazy" />
                     {(active || isDefault) && (
                       <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-primary text-on-primary text-label-sm font-semibold">
                         {active ? 'Selected' : 'Default'}

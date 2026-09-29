@@ -41,7 +41,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useVariants } from '@/features/products/hooks/useVariants';
 import { VARIANT_DISTINGUISHING, NEVER_PROPAGATE, prettifyKey, readField } from '@/features/products/lib/variantFields';
 import Dialog from '@/components/ui/Dialog';
-import { getThumbnailUrl } from '@/features/media/api/media';
+import { getThumbnailUrl, thumbFallback } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
 import StatusBadge from '@/features/products/components/StatusBadge';
 import StockBadge from '@/features/products/components/StockBadge';
@@ -949,6 +949,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
                   {v.primary_image ? (
                     <img
                       src={getThumbnailUrl(v.primary_image.storage_path, 64)}
+                      onError={thumbFallback(v.primary_image.storage_path)}
                       alt=""
                       className="w-5 h-5 rounded-full object-cover flex-shrink-0"
                       loading="lazy"
@@ -1038,6 +1039,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
                     {v.primary_image ? (
                       <img
                         src={getThumbnailUrl(v.primary_image.storage_path, 64)}
+                        onError={thumbFallback(v.primary_image.storage_path)}
                         alt=""
                         className="w-6 h-6 rounded object-cover flex-shrink-0"
                         loading="lazy"
@@ -2741,7 +2743,7 @@ function ProductHeroImage({ primary }) {
   if (primary) {
     return (
       <div className="w-full sm:w-60 max-w-[240px] aspect-square rounded-xl overflow-hidden bg-surface-container flex-shrink-0 mx-auto sm:mx-0 border border-outline-variant">
-        <img src={getThumbnailUrl(primary.storage_path, 480)} alt={primary.alt_text || ''} className="w-full h-full object-cover" />
+        <img src={getThumbnailUrl(primary.storage_path, 480)} onError={thumbFallback(primary.storage_path)} alt={primary.alt_text || ''} className="w-full h-full object-cover" />
       </div>
     );
   }
