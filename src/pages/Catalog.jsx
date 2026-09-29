@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Plus, Upload } from 'lucide-react';
 import { useProducts } from '@/features/products/hooks/useProducts';
@@ -9,12 +9,14 @@ import {
 import ProductsToolbar, { ActiveFilters } from '@/features/products/components/ProductsToolbar';
 import ProductsTable from '@/features/products/components/ProductsTable';
 import BulkActionsBar from '@/features/products/components/BulkActionsBar';
-import CreateProductDialog from '@/features/products/components/CreateProductDialog';
 import Pagination from '@/components/ui/Pagination';
 import { useAuth } from '@/features/auth/AuthContext';
 import { statusMeta, STATUS_ORDER } from '@/features/products/lib/workflowStatus';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { getAllStock } from '@/features/pricing/api/inventory';
+
+// Loaded when "New product" opens — it drags the exporters' shared code along.
+const CreateProductDialog = lazy(() => import('@/features/products/components/CreateProductDialog'));
 
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -400,7 +402,9 @@ export default function Catalog() {
         }}
       />
 
-      {canEdit && creating && <CreateProductDialog onClose={() => setCreating(false)} />}
+      <Suspense fallback={null}>
+        {canEdit && creating && <CreateProductDialog onClose={() => setCreating(false)} />}
+      </Suspense>
     </div>
   );
 }

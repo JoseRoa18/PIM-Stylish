@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -46,39 +46,45 @@ import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/form
 import StatusBadge from '@/features/products/components/StatusBadge';
 import StockBadge from '@/features/products/components/StockBadge';
 import { getStockFor } from '@/features/pricing/api/inventory';
-import MediaSection from '@/features/media/components/MediaSection';
-import DocumentsSection from '@/features/media/components/DocumentsSection';
-import WixSyndicationCard from '@/features/syndication/components/WixSyndicationCard';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
-import WayfairProductCard from '@/features/syndication/components/WayfairProductCard';
-import AliasesTab from '@/features/products/components/AliasesTab';
-import WalmartProductCard from '@/features/syndication/components/WalmartProductCard';
-import WalmartAdditionCard from '@/features/syndication/components/WalmartAdditionCard';
-import ChannelExclusionsCard from '@/features/syndication/components/ChannelExclusionsCard';
 import { isExcluded, wixExclusionKey, marketplaceLabel, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
 import { latestSnapshot } from '@/features/syndication/lib/channels';
-import WayfairAdditionCard from '@/features/syndication/components/WayfairAdditionCard';
-import RichTextEditor from '@/components/ui/RichTextEditor';
+import RichTextEditor from '@/components/ui/LazyRichTextEditor';
+import { preloadRichTextEditor } from '@/components/ui/preloadRichTextEditor';
 import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
-import ProductHistoryDialog from '@/features/products/components/ProductHistoryDialog';
-import CreateProductDialog from '@/features/products/components/CreateProductDialog';
-import { generateBBBFromTemplate } from '@/features/syndication/exports/bbbExport';
-import { autoLinkChannels } from '@/features/syndication/api/autoLink';
-import { pushProductToAllWixSites } from '@/features/syndication/api/wixSync';
-import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
-import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
-import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
-import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
-import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
-import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
-import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/homeDepotCaExport';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct, purposesIn, templatePurpose, templatePurposeLabel } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useLengthUnit, toDisplayLength, withUnit, toFractionLength } from '@/features/products/lib/units';
 import UnitToggle from '@/components/ui/UnitToggle';
+
+// Loaded on first use (performance pass 2026-09-29): the Media, Marketplaces
+// and Aliases tabs, the marketplace cards and the dialogs stay out of the
+// page's first download; the exporters and the Wix push load on click, and
+// the description editor when someone edits (LazyRichTextEditor).
+const MediaSection = lazy(() => import('@/features/media/components/MediaSection'));
+const DocumentsSection = lazy(() => import('@/features/media/components/DocumentsSection'));
+const WixSyndicationCard = lazy(() => import('@/features/syndication/components/WixSyndicationCard'));
+const WayfairProductCard = lazy(() => import('@/features/syndication/components/WayfairProductCard'));
+const WayfairAdditionCard = lazy(() => import('@/features/syndication/components/WayfairAdditionCard'));
+const WalmartProductCard = lazy(() => import('@/features/syndication/components/WalmartProductCard'));
+const WalmartAdditionCard = lazy(() => import('@/features/syndication/components/WalmartAdditionCard'));
+const ChannelExclusionsCard = lazy(() => import('@/features/syndication/components/ChannelExclusionsCard'));
+const AliasesTab = lazy(() => import('@/features/products/components/AliasesTab'));
+const ProductHistoryDialog = lazy(() => import('@/features/products/components/ProductHistoryDialog'));
+const CreateProductDialog = lazy(() => import('@/features/products/components/CreateProductDialog'));
+
+// What a tab shows while its code arrives (a fraction of a second).
+function TabFallback() {
+  return (
+    <div className="space-y-4">
+      <Skeleton className="h-40 w-full rounded-2xl" />
+      <Skeleton className="h-64 w-full rounded-2xl" />
+    </div>
+  );
+}
 
 // ===================== Constants =====================
 
@@ -645,7 +651,7 @@ export default function ProductDetail() {
                 {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                 Delete
               </button>
-              <button type="button" onClick={startEditing}
+              <button type="button" onClick={startEditing} onPointerEnter={preloadRichTextEditor} onFocus={preloadRichTextEditor}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
                 <Pencil className="w-4 h-4" /> Edit
               </button>
@@ -658,16 +664,19 @@ export default function ProductDetail() {
         <div className="mb-4 px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">{saveError}</div>
       )}
 
-      {showClone && (
-        <CreateProductDialog cloneSource={product} onClose={() => setShowClone(false)} />
-      )}
-      {showHistory && (
-        <ProductHistoryDialog sku={sku} onClose={() => setShowHistory(false)} onReverted={refetch} />
-      )}
+      <Suspense fallback={null}>
+        {showClone && (
+          <CreateProductDialog cloneSource={product} onClose={() => setShowClone(false)} />
+        )}
+        {showHistory && (
+          <ProductHistoryDialog sku={sku} onClose={() => setShowHistory(false)} onReverted={refetch} />
+        )}
+      </Suspense>
 
       <TabBar tabs={TABS} active={activeTab} onChange={setTab} variants={familyVariants} />
 
       <div className="mt-6">
+        <Suspense fallback={<TabFallback />}>
         {activeTab === 'overview' && (
           <OverviewTab
             product={product}
@@ -698,6 +707,7 @@ export default function ProductDetail() {
         )}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
         {activeTab === 'aliases' && <AliasesTab product={product} />}
+        </Suspense>
       </div>
 
       {propagation && (
@@ -1676,6 +1686,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
     if (!ok) return;
     setPushAll('busy');
     try {
+      const { pushProductToAllWixSites } = await import('@/features/syndication/api/wixSync');
       setPushAll(await pushProductToAllWixSites(product.sku, brand));
     } catch (err) {
       setPushAll(err instanceof Error ? err : new Error(String(err)));
@@ -1685,6 +1696,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
   async function runAutoLink() {
     setAutoLink('busy');
     try {
+      const { autoLinkChannels } = await import('@/features/syndication/api/autoLink');
       const s = await autoLinkChannels(product.sku);
       setAutoLink(s);
       onUpdate?.();
@@ -1983,10 +1995,13 @@ function ExportTemplatesCard({ product, media }) {
       if (!set.length) throw new Error(`No ${templatePurposeLabel(purpose)} file for ${marketplace} fits this product.`);
       const tag = purpose === 'new_listing' ? '' : `_${templatePurposeLabel(purpose).replace(/[^\w]+/g, '')}`;
       const base = `${(product.model_name || product.sku).replace(/[^\w-]+/g, '_')}${tag}`;
+      // The exporters load on click — they stay out of the page's first download.
       if (/menards/i.test(marketplace)) {
+        const { generateMenardsFromTemplates } = await import('@/features/syndication/exports/menardsExport');
         await generateMenardsFromTemplates(set, [product]);
       } else if (/wayfair/i.test(marketplace)) {
         // Wayfair exports the whole variant family, so name the file by collection.
+        const { generateWayfairFromTemplate } = await import('@/features/syndication/exports/wayfairExport');
         const res = await generateWayfairFromTemplate(set[0].storage_path, [product], `Wayfair_${base}`);
         if (res.warnings?.length) {
           setError(
@@ -1994,16 +2009,22 @@ function ExportTemplatesCard({ product, media }) {
           );
         }
       } else if (/amazon/i.test(marketplace)) {
+        const { generateAmazonFromTemplate } = await import('@/features/syndication/exports/amazonExport');
         await generateAmazonFromTemplate(set[0].storage_path, [product], `Amazon_${base}`);
       } else if (/walmart/i.test(marketplace)) {
+        const { generateWalmartFromTemplate } = await import('@/features/syndication/exports/walmartExport');
         await generateWalmartFromTemplate(set[0].storage_path, [product], `Walmart_${base}`);
       } else if (/home ?depot.*(\bca\b|canada)/i.test(marketplace)) {
+        const { generateHomeDepotCaFromTemplate } = await import('@/features/syndication/exports/homeDepotCaExport');
         await generateHomeDepotCaFromTemplate(set[0].storage_path, [product], `HomeDepotCA_${base}`);
       } else if (/home ?depot/i.test(marketplace)) {
+        const { generateHomeDepotFromTemplate } = await import('@/features/syndication/exports/homeDepotExport');
         await generateHomeDepotFromTemplate(set[0].storage_path, [product], `HomeDepot_${base}`);
       } else if (/lowe/i.test(marketplace)) {
+        const { generateLowesSet } = await import('@/features/syndication/exports/lowesExport');
         await generateLowesSet(set, [product], `Lowes_${base}`);
       } else if (/bb&b|bbb|overstock/i.test(marketplace)) {
+        const { generateBBBFromTemplate } = await import('@/features/syndication/exports/bbbExport');
         await generateBBBFromTemplate(set[0].storage_path, product, media);
       } else {
         throw new Error(

@@ -50,23 +50,36 @@ import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
-import { fillWayfairPromoFile, summarizeWayfairFill } from '@/features/pricing/lib/wayfairPromoFill';
-import { fillWayfairPriceChangeFile, fillWayfairPriceChangeFromSaved, summarizeWayfairPriceChange } from '@/features/pricing/lib/wayfairPriceChangeFill';
 import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
-import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow, etToday } from '@/features/pricing/lib/promoCalendar';
 import { getAppSetting } from '@/features/settings/api/appSettings';
-import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
-import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
-import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
-import { fillRonaPromoTemplate, summarizeRonaFill } from '@/features/pricing/lib/ronaPromoFill';
-import { fillHomeDepotCaPromoTemplates, summarizeHomeDepotCaFill } from '@/features/pricing/lib/homeDepotCaPromoFill';
-import { analyzeMenardsPromoFile, fillMenardsPromoFile, summarizeMenardsFill, fillMenardsBackToBlue, fillMenardsBackToBlueFromSaved, summarizeMenardsBackToBlue } from '@/features/pricing/lib/menardsPromoFill';
-import { fillWalmartCaPromoTemplate, summarizeWalmartCaFill } from '@/features/pricing/lib/walmartCaPromoFill';
-import { fillLowesPromoTemplate, summarizeLowesFill } from '@/features/pricing/lib/lowesPromoFill';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+
+// The promotion file tools load the first time a file of their kind is
+// generated (performance pass 2026-09-29) — they stay out of the page's first
+// download. A summary always follows its fill, so the module is there by then.
+function lazyLib(loader) {
+  let mod = null;
+  return {
+    load: async () => (mod ??= await loader()),
+    get: () => mod,
+  };
+}
+const LIBS = {
+  wayfairPromo: lazyLib(() => import('@/features/pricing/lib/wayfairPromoFill')),
+  wayfairPriceChange: lazyLib(() => import('@/features/pricing/lib/wayfairPriceChangeFill')),
+  menards: lazyLib(() => import('@/features/pricing/lib/menardsPromoFill')),
+  bbb: lazyLib(() => import('@/features/pricing/lib/bbbPromoFill')),
+  generic: lazyLib(() => import('@/features/pricing/lib/genericPromoFill')),
+  amazon: lazyLib(() => import('@/features/pricing/lib/amazonPromoFill')),
+  mirakl: lazyLib(() => import('@/features/pricing/lib/miraklPromoFill')),
+  rona: lazyLib(() => import('@/features/pricing/lib/ronaPromoFill')),
+  homeDepotCa: lazyLib(() => import('@/features/pricing/lib/homeDepotCaPromoFill')),
+  walmartCa: lazyLib(() => import('@/features/pricing/lib/walmartCaPromoFill')),
+  lowes: lazyLib(() => import('@/features/pricing/lib/lowesPromoFill')),
+};
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
 // Each slug belongs to one market view (Canada or USA) — Wayfair Canada is
@@ -1741,8 +1754,8 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Fills the cost after discount with the WC Wayfair Canada of the promotion's level and keeps only its products.",
     accept: '.xlsx,.xlsm',
-    fill: fillWayfairPromoFile,
-    summarize: (r) => summarizeWayfairFill(null, r),
+    fill: async (file, promo) => (await LIBS.wayfairPromo.load()).fillWayfairPromoFile(file, promo),
+    summarize: (r) => LIBS.wayfairPromo.get().summarizeWayfairFill(null, r),
   },
   wayfair_us: {
     group: 'wayfair_us',
@@ -1752,8 +1765,8 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Fills the cost after discount with the WC Wayfair of the promotion's level and keeps only its products.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillWayfairPromoFile(file, promo, 'USA'),
-    summarize: (r) => summarizeWayfairFill(null, r),
+    fill: async (file, promo) => (await LIBS.wayfairPromo.load()).fillWayfairPromoFile(file, promo, 'USA'),
+    summarize: (r) => LIBS.wayfairPromo.get().summarizeWayfairFill(null, r),
   },
   // Price change, the pricing file downloaded from Partner Home: the day the
   // promotion starts the MAP goes down to its level (Promo MAP), the day it
@@ -1766,8 +1779,8 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Lowers the MAP of the promotion's products to its level. Upload it the day the promotion starts.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'promo'),
-    summarize: summarizeWayfairPriceChange,
+    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'CAN', 'promo'),
+    summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   wayfair_us_price_start: {
     group: 'wayfair_us',
@@ -1777,8 +1790,8 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Lowers the MAP of the promotion's products to its level. Upload it the day the promotion starts.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA', 'promo'),
-    summarize: summarizeWayfairPriceChange,
+    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'USA', 'promo'),
+    summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   wayfair_price_change: {
     group: 'wayfair_ca',
@@ -1788,9 +1801,9 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Puts the promotion's products back at their Blue MAP and cost.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'CAN', 'blue'),
-    saved: { task: 'wayfair_ca:price_start', fill: (promo) => fillWayfairPriceChangeFromSaved(promo, 'CAN'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
-    summarize: summarizeWayfairPriceChange,
+    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'CAN', 'blue'),
+    saved: { task: 'wayfair_ca:price_start', fill: async (promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFromSaved(promo, 'CAN'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
+    summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   wayfair_us_price_change: {
     group: 'wayfair_us',
@@ -1800,9 +1813,9 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Puts the promotion's products back at their Blue MAP and cost.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillWayfairPriceChangeFile(file, promo, 'USA', 'blue'),
-    saved: { task: 'wayfair_us:price_start', fill: (promo) => fillWayfairPriceChangeFromSaved(promo, 'USA'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
-    summarize: summarizeWayfairPriceChange,
+    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'USA', 'blue'),
+    saved: { task: 'wayfair_us:price_start', fill: async (promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFromSaved(promo, 'USA'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
+    summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
   // products without a level price can be kept blank or taken out.
@@ -1814,9 +1827,9 @@ const FILE_FILLERS = {
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
     hint: "Fills F, G and H with the prices of the promotion's level.",
     accept: '.xlsx,.xlsm',
-    analyze: analyzeMenardsPromoFile,
-    fill: (file, promo, opts) => fillMenardsPromoFile(file, promo, opts),
-    summarize: summarizeMenardsFill,
+    analyze: async (file, promo) => (await LIBS.menards.load()).analyzeMenardsPromoFile(file, promo),
+    fill: async (file, promo, opts) => (await LIBS.menards.load()).fillMenardsPromoFile(file, promo, opts),
+    summarize: (r) => LIBS.menards.get().summarizeMenardsFill(r),
   },
   menards_price_change: {
     group: 'menards',
@@ -1826,9 +1839,9 @@ const FILE_FILLERS = {
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
     hint: "Puts the promotion's products back at Blue and leaves out the rest.",
     accept: '.xlsx,.xlsm',
-    fill: (file, promo) => fillMenardsBackToBlue(file, promo),
-    saved: { task: 'menards:promo_file', fill: (promo) => fillMenardsBackToBlueFromSaved(promo) },
-    summarize: summarizeMenardsBackToBlue,
+    fill: async (file, promo) => (await LIBS.menards.load()).fillMenardsBackToBlue(file, promo),
+    saved: { task: 'menards:promo_file', fill: async (promo) => (await LIBS.menards.load()).fillMenardsBackToBlueFromSaved(promo) },
+    summarize: (r) => LIBS.menards.get().summarizeMenardsBackToBlue(r),
   },
 };
 
@@ -1953,23 +1966,34 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   async function generate(channel, template) {
     setBusy(channel.key);
     try {
-      const text = channel.fill === 'amazon'
-        ? summarizeAmazonFill(channel, await fillAmazonPromoTemplate(template, promo, channel))
-        : channel.fill === 'mirakl'
-          ? summarizeMiraklFill(channel, await fillMiraklPromoTemplate(template, promo, channel))
-          : channel.fill === 'rona'
-            ? summarizeRonaFill(channel, await fillRonaPromoTemplate(template, promo, channel))
-            : channel.fill === 'homedepot_ca'
-              // Home Depot Canada hands out one file per product family: every
-              // promotions template of the marketplace is filled in one go.
-              ? summarizeHomeDepotCaFill(channel, await fillHomeDepotCaPromoTemplates(channel.templates?.length ? channel.templates : [template], promo, channel))
-            : channel.fill === 'walmart_ca'
-              ? summarizeWalmartCaFill(channel, await fillWalmartCaPromoTemplate(template, promo, channel))
-              : channel.fill === 'lowes'
-                ? summarizeLowesFill(channel, await fillLowesPromoTemplate(template, promo, channel))
-                : channel.fill === 'bbb'
-                  ? summarizeBBBFill(channel, await fillBBBPromoTemplate(template, promo, channel))
-                  : summarizePromoFill(channel, await fillPromoTemplate(template, promo, channel));
+      let text;
+      if (channel.fill === 'amazon') {
+        const m = await LIBS.amazon.load();
+        text = m.summarizeAmazonFill(channel, await m.fillAmazonPromoTemplate(template, promo, channel));
+      } else if (channel.fill === 'mirakl') {
+        const m = await LIBS.mirakl.load();
+        text = m.summarizeMiraklFill(channel, await m.fillMiraklPromoTemplate(template, promo, channel));
+      } else if (channel.fill === 'rona') {
+        const m = await LIBS.rona.load();
+        text = m.summarizeRonaFill(channel, await m.fillRonaPromoTemplate(template, promo, channel));
+      } else if (channel.fill === 'homedepot_ca') {
+        // Home Depot Canada hands out one file per product family: every
+        // promotions template of the marketplace is filled in one go.
+        const m = await LIBS.homeDepotCa.load();
+        text = m.summarizeHomeDepotCaFill(channel, await m.fillHomeDepotCaPromoTemplates(channel.templates?.length ? channel.templates : [template], promo, channel));
+      } else if (channel.fill === 'walmart_ca') {
+        const m = await LIBS.walmartCa.load();
+        text = m.summarizeWalmartCaFill(channel, await m.fillWalmartCaPromoTemplate(template, promo, channel));
+      } else if (channel.fill === 'lowes') {
+        const m = await LIBS.lowes.load();
+        text = m.summarizeLowesFill(channel, await m.fillLowesPromoTemplate(template, promo, channel));
+      } else if (channel.fill === 'bbb') {
+        const m = await LIBS.bbb.load();
+        text = m.summarizeBBBFill(channel, await m.fillBBBPromoTemplate(template, promo, channel));
+      } else {
+        const m = await LIBS.generic.load();
+        text = m.summarizePromoFill(channel, await m.fillPromoTemplate(template, promo, channel));
+      }
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
       onMsg({ tone: 'success', text });
     } catch (err) {

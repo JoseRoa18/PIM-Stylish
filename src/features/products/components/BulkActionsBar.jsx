@@ -15,21 +15,26 @@ import {
 import BulkEditDialog from './BulkEditDialog';
 import ExportReadinessDialog from '@/features/syndication/components/ExportReadinessDialog';
 import { ThinkingOrb } from 'thinking-orbs';
-import { bulkUpdateProducts, getProduct, deleteProducts } from '../api/products';
+import { bulkUpdateProducts, getProducts, deleteProducts } from '../api/products';
 import { generateKeywords } from '../api/keywords';
-import { pushProductToWix, readWixProduct } from '@/features/syndication/api/wixSync';
-import { generateBBBSet } from '@/features/syndication/exports/bbbExport';
-import { generateWayfairFromTemplate } from '@/features/syndication/exports/wayfairExport';
-import { generateAmazonFromTemplate } from '@/features/syndication/exports/amazonExport';
-import { generateMenardsFromTemplates } from '@/features/syndication/exports/menardsExport';
-import { generateWalmartFromTemplate } from '@/features/syndication/exports/walmartExport';
-import { generateHomeDepotFromTemplate } from '@/features/syndication/exports/homeDepotExport';
-import { generateLowesSet } from '@/features/syndication/exports/lowesExport';
-import { generateHomeDepotCaFromTemplate } from '@/features/syndication/exports/homeDepotCaExport';
-import { generatePimExport, fetchAllProducts } from '@/features/syndication/exports/pimExport';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind, purposesIn, templatePurpose } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
-import { listMedia } from '@/features/media/api/media';
+import { listMediaFor } from '@/features/media/api/media';
+
+// The exporters, the PIM round-trip export and the Wix push load on click
+// (performance pass 2026-09-29) — they stay out of the Catalog's first download.
+const loadExports = {
+  bbb: () => import('@/features/syndication/exports/bbbExport'),
+  wayfair: () => import('@/features/syndication/exports/wayfairExport'),
+  amazon: () => import('@/features/syndication/exports/amazonExport'),
+  menards: () => import('@/features/syndication/exports/menardsExport'),
+  walmart: () => import('@/features/syndication/exports/walmartExport'),
+  homeDepot: () => import('@/features/syndication/exports/homeDepotExport'),
+  homeDepotCa: () => import('@/features/syndication/exports/homeDepotCaExport'),
+  lowes: () => import('@/features/syndication/exports/lowesExport'),
+  pim: () => import('@/features/syndication/exports/pimExport'),
+};
+const loadWixSync = () => import('@/features/syndication/api/wixSync');
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { isExcluded, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -173,6 +178,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       confirmLabel: 'Push to Wix',
     });
     if (!ok) return;
+    const { pushProductToWix } = await loadWixSync();
     await runBatch(linkedSkus, (sku) => pushProductToWix(sku), 'push');
   }
 
@@ -181,6 +187,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       setResult({ type: 'error', message: 'None of the selected products are linked to Wix.' });
       return;
     }
+    const { readWixProduct } = await loadWixSync();
     await runBatch(linkedSkus, (sku) => readWixProduct(sku), 'refresh');
   }
 
@@ -190,16 +197,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     setBusy('export');
     setResult(null);
     try {
-      let productList;
-      if (scope === 'all') {
-        productList = await fetchAllProducts();
-      } else {
-        productList = [];
-        for (const sku of [...selectedSkus]) {
-          const p = await getProduct(sku);
-          if (p) productList.push(p);
-        }
-      }
+      const { generatePimExport, fetchAllProducts } = await loadExports.pim();
+      const productList = scope === 'all' ? await fetchAllProducts() : await getProducts([...selectedSkus]);
       if (!productList.length) throw new Error('No products to export.');
       const res = await generatePimExport(productList);
       setResult({
@@ -246,15 +245,13 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     setBusy('export');
     setResult(null);
     try {
-      const skus = [...selectedSkus];
       const productList = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
-      for (const sku of skus) {
-        const p = await getProduct(sku);
-        if (!p) continue;
+      const [{ generateLowesSet }, loaded] = await Promise.all([loadExports.lowes(), getProducts([...selectedSkus])]);
+      for (const p of loaded) {
         // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the file.
-        if (exclusionKey && isExcluded(p, exclusionKey)) { excludedSkus.push(sku); continue; }
+        if (exclusionKey && isExcluded(p, exclusionKey)) { excludedSkus.push(p.sku); continue; }
         productList.push(p);
       }
       if (!productList.length) {
@@ -301,12 +298,13 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const productList = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
-      for (const p of selectedProducts) {
-        if (!wanted.has(p.category)) continue;
-        const full = await getProduct(p.sku);
-        if (!full) continue;
+      const [{ generateMenardsFromTemplates }, loaded] = await Promise.all([
+        loadExports.menards(),
+        getProducts(selectedProducts.filter((p) => wanted.has(p.category)).map((p) => p.sku)),
+      ]);
+      for (const full of loaded) {
         // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the files.
-        if (exclusionKey && isExcluded(full, exclusionKey)) { excludedSkus.push(p.sku); continue; }
+        if (exclusionKey && isExcluded(full, exclusionKey)) { excludedSkus.push(full.sku); continue; }
         productList.push(full);
       }
       if (!productList.length) {
@@ -358,25 +356,33 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const skippedSkus = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
-      let done = 0;
+      // Products and their media for every selected product that has a
+      // template, in a few batched queries (was two round trips per product).
+      const withTemplate = [];
       for (const p of selectedProducts) {
         const tpl = templateForProduct(templates, p);
-        if (!tpl) {
-          skippedSkus.push(p.sku);
-          setProgress({ done: ++done, total: count + 1 });
-          continue;
-        }
-        const [product, media] = await Promise.all([getProduct(p.sku), listMedia(p.sku)]);
+        if (tpl) withTemplate.push({ sku: p.sku, tpl });
+        else skippedSkus.push(p.sku);
+      }
+      setProgress({ done: skippedSkus.length, total: count + 1 });
+      const [{ generateBBBSet }, loaded, mediaBySku] = await Promise.all([
+        loadExports.bbb(),
+        getProducts(withTemplate.map((w) => w.sku)),
+        listMediaFor(withTemplate.map((w) => w.sku)),
+      ]);
+      const productBySku = new Map(loaded.map((p) => [p.sku, p]));
+      for (const { sku, tpl } of withTemplate) {
+        const product = productBySku.get(sku);
         // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the files.
         if (product && exclusionKey && isExcluded(product, exclusionKey)) {
-          excludedSkus.push(p.sku);
+          excludedSkus.push(sku);
         } else if (product) {
           const g = groups.get(tpl.id) ?? { template: tpl, productList: [] };
-          g.productList.push({ product, media });
+          g.productList.push({ product, media: mediaBySku.get(sku) ?? [] });
           groups.set(tpl.id, g);
         }
-        setProgress({ done: ++done, total: count + 1 });
       }
+      setProgress({ done: count, total: count + 1 });
       if (groups.size === 0) {
         if (excludedSkus.length && !skippedSkus.length) throw new Error(`Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.`);
         throw new Error(
@@ -411,24 +417,22 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         throw new Error(`No ${marketplace} template found. Upload one in /templates first.`);
       }
       const generate = /amazon/i.test(marketplace)
-        ? generateAmazonFromTemplate
+        ? (await loadExports.amazon()).generateAmazonFromTemplate
         : /walmart/i.test(marketplace)
-          ? generateWalmartFromTemplate
+          ? (await loadExports.walmart()).generateWalmartFromTemplate
           : /home ?depot.*(\bca\b|canada)/i.test(marketplace)
-            ? generateHomeDepotCaFromTemplate
+            ? (await loadExports.homeDepotCa()).generateHomeDepotCaFromTemplate
             : /home ?depot/i.test(marketplace)
-              ? generateHomeDepotFromTemplate
-              : generateWayfairFromTemplate;
+              ? (await loadExports.homeDepot()).generateHomeDepotFromTemplate
+              : (await loadExports.wayfair()).generateWayfairFromTemplate;
       const prefix = marketplace.replace(/[^a-z0-9]+/gi, '_');
 
-      const skus = [...selectedSkus];
       const byTemplate = new Map(); // template.id → { tmpl, label, products }
       const noTemplate = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
-      for (const sku of skus) {
-        const p = await getProduct(sku);
-        if (!p) continue;
+      for (const p of await getProducts([...selectedSkus])) {
+        const sku = p.sku;
         // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the file.
         if (exclusionKey && isExcluded(p, exclusionKey)) { excludedSkus.push(sku); continue; }
         const tmpl = templateForProduct(mkTemplates, p);

@@ -149,6 +149,36 @@ export async function listMedia(sku) {
   return data ?? [];
 }
 
+/**
+ * listMedia() for several SKUs in a few parallel queries: a Map sku → the
+ * same rows in the same order listMedia(sku) returns (empty array when none).
+ */
+export async function listMediaFor(skus) {
+  const list = [...new Set(skus)];
+  // 15 SKUs a query: a product carries at most ~46 media rows, so a query
+  // stays well under the API's 1,000-row cap; a query that still reaches it
+  // is redone SKU by SKU so no row is ever cut off.
+  const CAP = 1000;
+  const chunks = [];
+  for (let i = 0; i < list.length; i += 15) chunks.push(list.slice(i, i + 15));
+  const bySku = new Map(list.map((s) => [s, []]));
+  await Promise.all(chunks.map(async (part) => {
+    const { data, error } = await supabase
+      .from('product_media')
+      .select('*')
+      .in('sku', part)
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    if ((data ?? []).length >= CAP) {
+      for (const sku of part) bySku.set(sku, await listMedia(sku));
+      return;
+    }
+    for (const m of data ?? []) bySku.get(m.sku)?.push(m);
+  }));
+  return bySku;
+}
+
 // Build a collision-safe object path: `<sku>/<base>-<rand>.<ext>`. Keeps the
 // original name for display while guaranteeing two different files never clobber.
 function buildObjectPath(sku, fileName) {

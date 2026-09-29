@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import Lenis from 'lenis';
+import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
-import PromoNudge from './PromoNudge';
-import PromoTaskNudge from './PromoTaskNudge';
+
+// The reminders appear seconds after load at the earliest, so their code
+// (and the promotion helpers they use) stays out of the first download
+// (performance pass 2026-09-29).
+const PromoNudge = lazy(() => import('./PromoNudge'));
+const PromoTaskNudge = lazy(() => import('./PromoTaskNudge'));
 
 export default function AppShell({ children }) {
   // On <lg screens the sidebar becomes an overlay drawer toggled from the Topbar.
@@ -21,26 +24,34 @@ export default function AppShell({ children }) {
     const content = contentRef.current;
     if (!wrapper || !content) return;
 
-    const lenis = new Lenis({ wrapper, content, duration: 1.1, smoothWheel: true });
-
+    // Lenis loads after the first paint — native scrolling works meanwhile.
+    let lenis = null;
     let rafId;
-    const raf = (time) => {
-      lenis.raf(time);
+    let cancelled = false;
+    import('lenis').then(({ default: Lenis }) => {
+      if (cancelled) return;
+      lenis = new Lenis({ wrapper, content, duration: 1.1, smoothWheel: true });
+      const raf = (time) => {
+        lenis.raf(time);
+        rafId = requestAnimationFrame(raf);
+      };
       rafId = requestAnimationFrame(raf);
-    };
-    rafId = requestAnimationFrame(raf);
+    }).catch(() => { /* smooth scrolling is optional */ });
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(rafId);
-      lenis.destroy();
+      lenis?.destroy();
     };
   }, []);
 
   return (
     <div className="min-h-screen bg-background">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <PromoNudge />
-      <PromoTaskNudge />
+      <Suspense fallback={null}>
+        <PromoNudge />
+        <PromoTaskNudge />
+      </Suspense>
       <div className="lg:ml-64 h-screen flex flex-col">
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
         <main ref={mainRef} className="flex-1 overflow-y-auto">

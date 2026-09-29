@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { Camera, Loader2, Trash2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import Avatar from '@/components/ui/Avatar';
-import AvatarNudge from '@/components/layout/AvatarNudge';
+
+// Only shown to people without a photo, after a delay — loaded on demand.
+const AvatarNudge = lazy(() => import('@/components/layout/AvatarNudge'));
 import { uploadAvatar, removeAvatar } from '@/features/users/api/avatar';
 import { nameFromEmail } from '@/lib/format';
 
@@ -87,7 +89,11 @@ export default function AccountMenu() {
 
       {/* The "add a photo" reminder hangs off this same chip. Opening the menu
           retires it — they're already where the photo is managed. */}
-      {!open && <AvatarNudge />}
+      {!open && (
+        <Suspense fallback={null}>
+          <AvatarNudge />
+        </Suspense>
+      )}
 
       {open && (
         <>

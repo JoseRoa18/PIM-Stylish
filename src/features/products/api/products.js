@@ -121,6 +121,25 @@ export async function getProduct(sku) {
 }
 
 /**
+ * Several products at once — what getProduct() returns for each, in the
+ * order of `skus` (unknown SKUs left out), in a few parallel queries of 100
+ * instead of one round trip per SKU (exports of 365 products used to make
+ * 365 of them one after another).
+ */
+export async function getProducts(skus) {
+  const list = [...new Set(skus)];
+  const chunks = [];
+  for (let i = 0; i < list.length; i += 100) chunks.push(list.slice(i, i + 100));
+  const results = await Promise.all(chunks.map((part) => supabase.from('products').select('*').in('sku', part)));
+  const bySku = new Map();
+  for (const { data, error } of results) {
+    if (error) throw error;
+    for (const p of data ?? []) bySku.set(p.sku, p);
+  }
+  return list.map((s) => bySku.get(s)).filter(Boolean);
+}
+
+/**
  * Search products by SKU, name, or family number (case-insensitive substring).
  * Used by the global Topbar search.
  */

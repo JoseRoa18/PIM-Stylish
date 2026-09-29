@@ -27,7 +27,7 @@ import { supabase } from '@/lib/supabase';
 import { pushProductToWix, readWixProduct, createProductOnWix, pushMediaToWix } from '../api/wixSync';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useWixCollections } from '../hooks/useWixCollections';
-import RichTextEditor from '@/components/ui/RichTextEditor';
+import RichTextEditor from '@/components/ui/LazyRichTextEditor';
 import ProductHealthBadge from '@/features/dashboard/components/ProductHealthBadge';
 import { useAuth } from '@/features/auth/AuthContext';
 import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
