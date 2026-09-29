@@ -1290,7 +1290,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
               {promo.bb_schedule && (
                 <span
                   className="px-2 py-0.5 rounded-full text-label-md font-medium bg-surface-container text-on-surface-variant"
-                  title={`Best Buy scheduled discounts: ${promo.bb_schedule.scheduled} SKUs for ${promo.bb_schedule.period} → ${promo.bb_schedule.end}${promo.bb_schedule.not_listed ? ` · ${promo.bb_schedule.not_listed} not listed on Best Buy` : ''}`}
+                  title={`Best Buy scheduled discounts: ${promo.bb_schedule.scheduled} SKUs for ${promo.bb_schedule.start ?? promo.bb_schedule.period} → ${promo.bb_schedule.end}${promo.bb_schedule.not_listed ? ` · ${promo.bb_schedule.not_listed} not listed on Best Buy` : ''}`}
                 >
                   Best Buy · {promo.bb_schedule.scheduled} scheduled
                 </span>
@@ -1999,7 +1999,20 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           const sch = promo.bb_schedule;
           status = sch ? `${sch.scheduled} scheduled` : 'Not scheduled';
           tone = sch ? 'ok' : 'muted';
-          if (sch) detail += ` Sent ${day(promo.bb_scheduled_at)} for ${sch.period} to ${sch.end}.`;
+          if (sch) {
+            // The window Best Buy really got vs the promotion's dates now (they
+            // can change after the send — custom dates set later).
+            const w = promoWindow(promo, 'ca');
+            const sentStart = sch.start ?? sch.period;
+            detail += ` Sent ${day(promo.bb_scheduled_at)} for ${dayOf(sentStart)} to ${dayOf(sch.end)}.`;
+            if (promo.status !== 'ended' && (sentStart !== w.start || sch.end !== w.end)) {
+              const resend = shiftDay(w.start, -1);
+              const auto = (promo.kind ?? 'monthly') === 'monthly' && automation && automation.enabled !== false && automation.bestbuy !== false && resend >= etToday();
+              status = auto ? `Re-sends ${dayOf(resend)}` : 'Old dates';
+              tone = auto ? 'muted' : 'warn';
+              detail += ` The promotion now runs ${dayOf(w.start)} to ${dayOf(w.end)}${auto ? `: the PIM re-sends it with these dates on ${dayOf(resend)}, the day before the Canada window.` : ', but Best Buy still has the dates above.'}`;
+            }
+          }
         } else if (ch.schedule) {
           // Walmart Canada / USA: the per-feed report the push left behind.
           const sch = promo[`wm_${ch.market}_schedule`];

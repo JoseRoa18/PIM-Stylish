@@ -286,6 +286,28 @@ async function scheduleBestBuy(
   return report;
 }
 
+// The card's record of a Best Buy send (promotions.bb_schedule), in the shape
+// the app writes when it schedules by hand — so a re-send by this automation
+// (e.g. after the promotion's dates changed) shows the window it really sent.
+function bbScheduleRecord(promo: PromoRow, report: Record<string, unknown>, nowIso: string): Record<string, unknown> {
+  const w = (report.window ?? {}) as { start?: string; end?: string };
+  const listed = Number(report.listed ?? 0);
+  const failed = Number(report.lines_in_error ?? 0);
+  return {
+    at: nowIso,
+    period: promo.period,
+    start: w.start ?? null,
+    end: w.end ?? null,
+    scheduled: Math.max(0, listed - failed),
+    attempted: listed,
+    not_listed: Number(report.not_listed ?? 0),
+    skipped_at_or_above_map: Number(report.skipped_at_or_above_map ?? 0),
+    import_id: report.import_id ?? null,
+    lines_in_error: failed,
+    by: "automation",
+  };
+}
+
 // ---------- Walmart (both markets) ------------------------------------------
 // walmart-push-promo builds and posts the promotional-price feed; Walmart
 // flips the promo on the window's first minute by itself. Scheduled the day
@@ -505,7 +527,13 @@ async function run(dryRun: boolean, reconcile: boolean) {
         const w = win(caTarget, "ca");
         const start = w.start > today ? w.start : tomorrow;
         report.bestbuy = await scheduleBestBuy(await withoutExcluded(cadRows, "bestbuy"), start, w.end, dryRun);
-        if (!dryRun) await restPatch(`promotions?id=eq.${caTarget.id}`, { bb_scheduled_at: nowIso });
+        if (!dryRun) {
+          const sent = report.bestbuy as Record<string, unknown>;
+          await restPatch(`promotions?id=eq.${caTarget.id}`, {
+            bb_scheduled_at: nowIso,
+            ...(!sent.skipped && Number(sent.listed ?? 0) > 0 ? { bb_schedule: bbScheduleRecord(caTarget, sent, nowIso) } : {}),
+          });
+        }
       } catch (err) {
         errors.push(`bestbuy: ${(err as Error).message}`);
       }
@@ -534,7 +562,13 @@ async function run(dryRun: boolean, reconcile: boolean) {
       if (rows.length) {
         const w = win(prepTarget, "ca");
         report.prep = await scheduleBestBuy(rows, w.start, w.end, dryRun);
-        if (!dryRun) await restPatch(`promotions?id=eq.${prepTarget.id}`, { bb_scheduled_at: nowIso });
+        if (!dryRun) {
+          const sent = report.prep as Record<string, unknown>;
+          await restPatch(`promotions?id=eq.${prepTarget.id}`, {
+            bb_scheduled_at: nowIso,
+            ...(!sent.skipped && Number(sent.listed ?? 0) > 0 ? { bb_schedule: bbScheduleRecord(prepTarget, sent, nowIso) } : {}),
+          });
+        }
       }
     } catch (err) {
       errors.push(`bestbuy prep: ${(err as Error).message}`);
