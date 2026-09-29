@@ -60,30 +60,96 @@ export function preloadImage(url) {
   img.src = url;
 }
 
+// ---- Our own thumbnails (performance pass 2026-09-29) ----------------------
+// Every product image in product-images/<path> gets two square WebP copies in
+// the public bucket product-thumbs — <path>.w200.webp and <path>.w480.webp —
+// made on upload (makeThumbnails below) and by scripts/backfill-thumbnails.mjs
+// for older images. They are ~3–15 kB and come straight from our storage, so
+// tiles no longer depend on the weserv proxy (which timed out on big photos
+// and left gray tiles). When one is missing, thumbFallback() walks on to
+// weserv, then to the original file.
+export const THUMBS_BUCKET = 'product-thumbs';
+const THUMB_SIZES = [200, 480];
+const IMAGES_PUBLIC = '/storage/v1/object/public/product-images/';
+const thumbSizeFor = (width) => (width <= 200 ? 200 : 480);
+
+/** Our own thumbnail URL for a product-images file, or null for anything else. */
+function ownThumbUrl(url, width) {
+  const i = url.indexOf(IMAGES_PUBLIC);
+  if (i === -1) return null;
+  const objectPath = url.slice(i + IMAGES_PUBLIC.length).split(/[?#]/)[0];
+  return `${url.slice(0, i)}/storage/v1/object/public/${THUMBS_BUCKET}/${objectPath}.w${thumbSizeFor(width)}.webp`;
+}
+
+function weservUrl(url, width) {
+  const encoded = encodeURIComponent(url);
+  return `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${width}&fit=cover&output=webp&q=80&default=${encoded}`;
+}
+
 export function getThumbnailUrl(storagePath, width = 400) {
   const embed = getMediaUrl(storagePath);
   if (!embed) return null;
   if (!/^https?:\/\//i.test(embed) || !IMAGE_EXT_RE.test(embed)) return embed;
-  const encoded = encodeURIComponent(embed);
-  return `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${width}&fit=cover&output=webp&q=80&default=${encoded}`;
+  return ownThumbUrl(embed, width) ?? weservUrl(embed, width);
 }
 
 /**
- * onError for a thumbnail <img>: when the resized copy fails to load (weserv
- * down or rate-limited), show the original file instead — once; a second
- * failure is left to the caller (onFail), e.g. a placeholder.
+ * onError for a thumbnail <img>: walks the fallbacks one at a time — our own
+ * thumbnail → the weserv proxy → the original file — and only when the
+ * original fails too is the caller told (onFail), e.g. to show a placeholder.
  */
 export function thumbFallback(storagePath, onFail) {
   return (e) => {
     const img = e.currentTarget;
     const original = getMediaUrl(storagePath);
-    if (original && img.dataset.thumbFallback !== '1') {
-      img.dataset.thumbFallback = '1';
+    const src = img.currentSrc || img.src || '';
+    const stage = img.dataset.thumbStage
+      ?? (src.includes(`/${THUMBS_BUCKET}/`) ? 'own' : src.includes('images.weserv.nl') ? 'weserv' : 'original');
+    if (stage === 'own' && original) {
+      img.dataset.thumbStage = 'weserv';
+      img.src = weservUrl(original, Number(/\.w(\d+)\.webp/.exec(src)?.[1] ?? 480));
+    } else if (stage === 'weserv' && original) {
+      img.dataset.thumbStage = 'original';
       img.src = original;
     } else {
       onFail?.();
     }
   };
+}
+
+/**
+ * Make an uploaded image's two thumbnails in the browser (same square
+ * "cover" crop the backfill script and weserv make) and store them next to
+ * nothing else — failures are silent: the fallbacks cover a missing one.
+ */
+async function makeThumbnails(file, objectPath) {
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return;
+  const bitmap = await createImageBitmap(file);
+  try {
+    for (const size of THUMB_SIZES) {
+      const scale = Math.max(size / bitmap.width, size / bitmap.height);
+      const w = Math.round(bitmap.width * scale);
+      const h = Math.round(bitmap.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bitmap, Math.round((size - w) / 2), Math.round((size - h) / 2), w, h);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.8));
+      // A browser that cannot encode WebP hands back a PNG — the bucket only
+      // takes WebP, so skip it (the fallbacks show the image anyway).
+      if (!blob || blob.type !== 'image/webp') continue;
+      await supabase.storage.from(THUMBS_BUCKET).upload(`${objectPath}.w${size}.webp`, blob, {
+        cacheControl: '2592000',
+        upsert: true,
+        contentType: 'image/webp',
+      });
+    }
+  } finally {
+    bitmap.close?.();
+  }
 }
 
 // Public buckets for files uploaded to Supabase Storage.
@@ -325,6 +391,7 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
   let primaryAssigned = !!existingPrimary;
 
   const rows = [];
+  const thumbJobs = [];
   let done = 0;
   for (const file of list) {
     const path = buildObjectPath(sku, file.name);
@@ -337,6 +404,9 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
 
     const { data: pub } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
     const isVideo = file.type.startsWith('video/');
+    // Thumbnails are made while the next file uploads; the rows are saved
+    // once they are done, so the gallery shows them from the first render.
+    if (!isVideo) thumbJobs.push(makeThumbnails(file, path).catch(() => {}));
     const asHero = !isVideo && !heroAssigned && looksGrayHero(file.name);
     if (asHero) heroAssigned = true;
     // The gray hero is never the white marketplace main.
@@ -370,6 +440,7 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
     done += 1;
     onProgress?.(done, list.length);
   }
+  await Promise.all(thumbJobs);
 
   const { data, error } = await supabase.from('product_media').insert(rows).select();
   if (error) throw error;
@@ -723,11 +794,18 @@ export async function removeMedia(media) {
  */
 export async function deleteStorageObjects(storagePaths) {
   const byBucket = new Map();
+  const add = (bucket, path) => {
+    if (!byBucket.has(bucket)) byBucket.set(bucket, []);
+    byBucket.get(bucket).push(path);
+  };
   for (const p of storagePaths ?? []) {
     const obj = parseStorageObject(p);
     if (!obj) continue;
-    if (!byBucket.has(obj.bucket)) byBucket.set(obj.bucket, []);
-    byBucket.get(obj.bucket).push(obj.path);
+    add(obj.bucket, obj.path);
+    // An image's own thumbnails go with it.
+    if (obj.bucket === MEDIA_BUCKET && IMAGE_EXT_RE.test(obj.path)) {
+      for (const size of THUMB_SIZES) add(THUMBS_BUCKET, `${obj.path}.w${size}.webp`);
+    }
   }
   for (const [bucket, paths] of byBucket) {
     try {
