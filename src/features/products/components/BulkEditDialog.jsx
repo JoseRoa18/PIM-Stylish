@@ -5,6 +5,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { bulkUpdateProducts } from '../api/products';
 import { WORKFLOW_STATUS } from '../lib/workflowStatus';
 import { CATEGORY_OPTIONS } from '../lib/categories';
+import { BRAND_OPTIONS } from '../lib/brands';
 
 // Fields safe to mass-edit. Closed-list fields (status, category) render as
 // selects and can't be cleared; the identity fields (sku, model, family)
@@ -24,7 +25,13 @@ const EDITABLE_FIELDS = [
     noClear: true,
     note: 'Category drives template matching and Listing Health checks.',
   },
-  { key: 'brand', label: 'Brand' },
+  {
+    key: 'brand',
+    label: 'Brand',
+    options: BRAND_OPTIONS,
+    noClear: true,
+    note: 'The brand also sets the general warranty and the Wix stores that sell it.',
+  },
   { key: 'series', label: 'Series' },
   { key: 'material', label: 'Material' },
   { key: 'finish', label: 'Finish' },

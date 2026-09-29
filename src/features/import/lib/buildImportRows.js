@@ -6,6 +6,7 @@ import {
   VALUE_CANONICALS,
   normalizeHeader,
 } from './importSchema';
+import { BRANDS, canonicalBrand } from '@/features/products/lib/brands';
 
 const EMPTY_VALUES = new Set(['', 'n/a', 'na', '#n/a', '#n/d', '-', '—', 'null', 'none']);
 
@@ -48,6 +49,9 @@ function coerce(type, raw) {
       const mapped = CATEGORY_MAP[s.toLowerCase()];
       return mapped ?? null;
     }
+    case 'brand':
+      // Only Stylish and Azuni exist (rule 2026-09-29); any casing maps onto them.
+      return canonicalBrand(s);
     case 'date': {
       // Already ISO → keep. Excel serial number → convert. Otherwise best-effort
       // parse; anything unrecognized is dropped (null) rather than risking a bad
@@ -147,6 +151,9 @@ export function buildImportRows(parsed) {
         // Category present-but-unmappable is an error, not just missing
         if (def.type === 'category' && cleanText(rawVal)) {
           errors.push(`Unknown category "${cleanText(rawVal)}"`);
+        }
+        if (def.type === 'brand' && cleanText(rawVal)) {
+          errors.push(`Unknown brand "${cleanText(rawVal)}" — only ${BRANDS.join(' or ')}`);
         }
         continue;
       }

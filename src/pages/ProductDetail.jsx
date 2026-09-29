@@ -100,6 +100,7 @@ const WORKFLOW_OPTIONS = [
 ];
 
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
+import { BRAND_OPTIONS } from '@/features/products/lib/brands';
 
 // Matches Wayfair's "Warranty Length" valid values (used in exports).
 const WARRANTY_LENGTH_OPTIONS = [
@@ -1072,7 +1073,7 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <Field label="SKU" value={product.sku} mono />
           <AttrField label="UPC" attrKey="upc" product={product} edit={edit} mono />
-          <EditableField label="Brand" fieldKey="brand" product={product} edit={edit} />
+          <EditableField label="Brand" fieldKey="brand" type="select" options={BRAND_OPTIONS} product={product} edit={edit} />
           <AttrField label="Manufacturer" attrKey="manufacturer" product={product} edit={edit} />
           <EditableField label="Category" fieldKey="category" type="select" options={CATEGORY_OPTIONS} product={product} edit={edit} />
           <EditableField label="Series" fieldKey="series" product={product} edit={edit} />

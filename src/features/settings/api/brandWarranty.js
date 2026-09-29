@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { getAppSetting, saveAppSetting } from './appSettings';
 import { DOCS_BUCKET, deleteStorageObjectsIfUnreferenced } from '@/features/media/api/media';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { BRANDS } from '@/features/products/lib/brands';
 
 /**
  * General warranty per brand (user rule 2026-09-29): one warranty document
@@ -10,7 +11,7 @@ import { logActivity } from '@/features/activity/api/activityLog';
  * product — see 20260929_brand_warranty.sql); new products get it on
  * creation by trigger.
  */
-export const WARRANTY_BRANDS = ['Stylish', 'Azuni'];
+export const WARRANTY_BRANDS = BRANDS;
 const KEY = 'brand_warranty';
 
 /** { Stylish?: {storage_path, file_name, …}, Azuni?: {…} } */

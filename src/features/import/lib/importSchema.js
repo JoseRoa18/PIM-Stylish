@@ -88,7 +88,7 @@ export const FIELD_DEFS = [
   { key: 'quickbooks_description', label: 'Quickbooks Description', aliases: ['quickbooksdescription'], type: 'text', target: { col: 'quickbooks_description' } },
   // NOTE: "Family #" from spreadsheets is intentionally ignored — variant
   // families are derived automatically from the SKU base model (S-300XG → S-300).
-  { key: 'brand', label: 'Brand', aliases: ['brand'], type: 'text', target: { col: 'brand' }, required: true },
+  { key: 'brand', label: 'Brand', aliases: ['brand'], type: 'brand', target: { col: 'brand' }, required: true },
   { key: 'category', label: 'Category', aliases: ['category'], type: 'category', target: { col: 'category' }, required: true },
   { key: 'msrp_cad', label: 'MSRP CAD$', aliases: ['msrpcad', 'msrp', 'msrpcad$'], type: 'number', target: { col: 'msrp_cad' } },
   { key: 'launch_lead', label: 'Launch Lead', aliases: ['launchlead'], type: 'date', target: { col: 'launch_lead' } },

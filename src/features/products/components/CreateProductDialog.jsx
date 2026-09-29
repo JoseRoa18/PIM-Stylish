@@ -7,6 +7,7 @@ import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import Dialog from '@/components/ui/Dialog';
 
 import { CATEGORY_OPTIONS } from '../lib/categories';
+import { BRAND_OPTIONS } from '../lib/brands';
 
 const inputClass =
   'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
@@ -218,12 +219,15 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                   <span className="text-label-md text-on-surface-variant">
                     Brand <span className="text-error">*</span>
                   </span>
-                  <input
-                    type="text"
+                  <select
                     value={form.brand}
                     onChange={(e) => setField('brand', e.target.value)}
                     className={inputClass}
-                  />
+                  >
+                    {BRAND_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
                 </label>
 
                 <label className="flex flex-col gap-1.5">
