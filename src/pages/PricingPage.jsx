@@ -1986,6 +1986,10 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       let status;
       let tone;
       let detail = ch.how ?? '';
+      // Walmart: the manual send button — 'schedule' (flash deals, special
+      // events, automation off), 'retry' (the automatic send failed or items
+      // were rejected), or null while the automation handles it.
+      let sendAction = null;
       // A channel that pins this kind to another level than the usual one
       // (Beyond: flash deals at Purple, everywhere else Orange) says so.
       const pinnedLevel = channelLevelFor(ch, promo);
@@ -2003,20 +2007,24 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           status = sch ? `${sent} scheduled` : 'Not scheduled';
           tone = sch ? (sch.itemsFailed ? 'warn' : 'ok') : 'muted';
           if (sch) detail += ` Sent ${day(promo[ch.stamp])}, feed ${sch.feed_id ?? '?'}${sch.itemsFailed ? `, ${sch.itemsFailed} rejected` : ''}${sch.not_listed ? `, ${sch.not_listed} not listed there` : ''}.`;
-          else if (promo.status !== 'ended' && (promo.kind ?? 'monthly') === 'monthly') {
-            // Not sent yet: promo-apply sends it the day before the window opens.
-            const auto = automation && automation.enabled !== false && automation[ch.schedule] !== false;
-            const sendDay = shiftDay(promoWindow(promo, ch.market).start, -1);
+          const monthlyAuto = (promo.kind ?? 'monthly') === 'monthly' && automation && automation.enabled !== false && automation[ch.schedule] !== false;
+          if (promo.status === 'ended') sendAction = null;
+          else if (!monthlyAuto) sendAction = automation ? 'schedule' : null; // flash deals, special events, automation off
+          else if (sch) sendAction = sch.itemsFailed ? 'retry' : null;
+          else {
+            // Not sent yet: promo-apply sends it the day before the market's
+            // window opens; the row shows the day it goes live, like Sinks Direct.
+            const startDay = promoWindow(promo, ch.market).start;
+            const sendDay = shiftDay(startDay, -1);
             const today = etToday();
-            if (auto && sendDay >= today) {
-              status = sendDay === today ? 'Sends today' : `Sends ${dayOf(sendDay)}`;
-              detail += ` Sent automatically on ${dayOf(sendDay)}, the day before the window opens, with the Pricing levels of that day. Send now sends it right away.`;
-            } else if (auto) {
+            if (sendDay >= today) {
+              status = `Starts ${dayOf(startDay)}`;
+              detail += ` Goes live on Walmart ${dayOf(startDay)} (the ${ch.market === 'ca' ? 'Canada' : 'USA'} window). The PIM sends it by itself on ${dayOf(sendDay)}, the day before, with the Pricing levels of that day.`;
+            } else {
               status = 'Not scheduled';
               tone = 'warn';
-              detail += ' The automatic send has not gone out — use Send now.';
-            } else if (automation) {
-              detail += ' The automatic send is off in Settings — use Send now.';
+              detail += ' The automatic send has not gone out — send it by hand.';
+              sendAction = 'retry';
             }
           }
         } else if (promo[ch.stamp]) {
@@ -2056,7 +2064,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
         tone = 'muted';
         if (template) detail = `Generated from ${template.file_name}.`;
       }
-      return { ...ch, template, templates: templatesAll, status, tone, detail };
+      return { ...ch, template, templates: templatesAll, status, tone, detail, sendAction };
     });
   // A promotion made for chosen marketplaces shows those only.
   const targeted = Boolean(promo.marketplaces?.length);
@@ -2103,10 +2111,10 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
             <span className="text-body-md text-on-surface min-w-0 truncate">{ch.label}</span>
             <span className={`ml-auto px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap ${chip[ch.tone]}`}>{ch.status}</span>
             <span className="min-w-32 flex flex-wrap items-center justify-end gap-1.5 flex-shrink-0">
-              {canEdit && ch.kind === 'api' && ch.schedule && promo.status !== 'ended' && (
+              {canEdit && ch.kind === 'api' && ch.schedule && ch.sendAction && (
                 <button type="button" onClick={() => schedule(ch)} disabled={busy === ch.key} className={actionCls}>
                   {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                  {promo[ch.stamp] ? 'Re-send' : 'Send now'}
+                  {ch.sendAction === 'retry' ? (promo[ch.stamp] ? 'Re-send' : 'Send') : promo[ch.stamp] ? 'Re-send' : 'Schedule'}
                 </button>
               )}
               {canEdit && ch.kind === 'portal_file' && (
