@@ -358,6 +358,7 @@ export default function SettingsPage() {
     if (r.store) parts.push(`${r.store.on_sale} on sale, ${r.store.cleared} cleared`);
     if (r.us) parts.push(`Wix US ${r.us.pushed}/${r.us.linked}`);
     if (r.ca) parts.push(`Wix CA ${r.ca.pushed}/${r.ca.linked}`);
+    if (r.wix_owed) parts.push(r.wix_continuing ? `Wix: ${r.wix_owed} more going out in the background` : `Wix: ${r.wix_owed} left`);
     if (r.bestbuy || r.prep) parts.push(`Best Buy ${(r.bestbuy ?? r.prep).listed} scheduled`);
     for (const [key, label] of [['walmart_ca', 'Walmart CA'], ['walmart_ca_prep', 'Walmart CA'], ['walmart_us', 'Walmart US'], ['walmart_us_prep', 'Walmart US']]) {
       const w = r[key];

@@ -13,7 +13,10 @@
 // one of the two runs lands just after midnight Eastern; see
 // 20260828_promo_calendar_cron.sql). Each run is idempotent — boundary
 // passes stamp promotions.us_applied_at / ca_applied_at so the second firing
-// skips.
+// skips. A market is stamped only once every Wix change went through: Wix
+// is pushed at a pace, and what it refuses or what does not fit in a run is
+// finished by continuation runs the function chains to itself (see "Wix
+// pacing" below).
 //
 // What a run does (only on the matching dates, everything idempotent):
 //   - Day 1 (US pass): pushes SinksDirect US to promo USD ?? MAP USD for the
@@ -35,7 +38,8 @@
 // Auth: `x-cron-secret` header, the service-role key as Bearer, or an
 // authenticated ADMIN user (the Settings page's "Run now").
 // Body: { sync?: boolean, dryRun?: boolean } — dryRun computes the full plan
-// and writes/pushes nothing (implies sync + reconcile).
+// and writes/pushes nothing (implies sync + reconcile). { chain: n,
+// reconcile } is the continuation call a run makes to itself (background).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -161,7 +165,73 @@ async function withoutExcluded<T extends { sku: string }>(rows: T[], channelKey:
 
 interface WixJob { sku: string; site: string; only: string[]; fields?: Record<string, unknown> }
 
-async function pushWixJobs(allJobs: WixJob[], dryRun: boolean, errors: string[]) {
+// Wix pacing (fix 2026-09-29). On the September launches Wix answered "Rate
+// limit exceeded" to most price changes (USA 1st: 30 of 175 went through,
+// Canada 3rd: 30 of 182) and the market was stamped anyway, so nothing was
+// retried. Now: two changes at a time with a pause between them; a "rate
+// limit" answer waits what Wix asks (or a default) and tries again; what does
+// not fit in this run's time budget is left for a continuation run (see
+// run(): it chains itself), with the changes that already went through today
+// remembered in app_settings.promo_apply_wix_progress; a market is stamped
+// only once every change went through.
+const WIX_CONCURRENCY = 2;
+const WIX_GAP_MS = 700; // pause after each change, per worker
+const WIX_MAX_TRIES = 5; // per change and run, rate-limit answers only
+const WIX_BUDGET_MS = 105_000; // from the run's start, cooldown included (the runtime caps a run at ~150 s)
+const WIX_COOLDOWN_MS = 20_000; // a continuation run waits this before pushing again
+const WIX_MAX_CHAIN = 20;
+const WIX_PROGRESS_KEY = "promo_apply_wix_progress";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const jobKey = (j: WixJob) => `${j.site}:${j.sku}`;
+
+interface WixProgress { day: string; done: Set<string>; lock_until: string | null }
+interface PushCtx { deadline: number; progress: WixProgress; skip: boolean }
+
+async function loadWixProgress(today: string, fresh: boolean): Promise<WixProgress> {
+  if (fresh) return { day: today, done: new Set(), lock_until: null };
+  const rows = await restGet<{ value: { day?: string; done?: string[]; lock_until?: string | null } }[]>(
+    `app_settings?key=eq.${WIX_PROGRESS_KEY}&select=value`,
+  );
+  const v = rows[0]?.value ?? {};
+  if (v.day !== today) return { day: today, done: new Set(), lock_until: null };
+  return { day: today, done: new Set(v.done ?? []), lock_until: v.lock_until ?? null };
+}
+
+async function saveWixProgress(p: WixProgress): Promise<void> {
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?on_conflict=key`, {
+    method: "POST",
+    headers: { ...restHeaders, Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      key: WIX_PROGRESS_KEY,
+      value: { day: p.day, done: [...p.done], lock_until: p.lock_until },
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  if (!resp.ok) throw new Error(`save wix progress ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+}
+
+// One change to Wix: ok, a rate-limit answer (with how long to wait), or an error.
+async function pushOneWix(job: WixJob): Promise<{ ok: true } | { ok: false; rateLimited: boolean; waitMs: number; message: string }> {
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/wix-push-product`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify(job),
+  });
+  if (resp.ok) return { ok: true };
+  const message = String(((await resp.json().catch(() => ({}))) as { error?: string }).error ?? resp.status);
+  const rateLimited = resp.status === 429 || /rate limit|too many requests/i.test(message);
+  // Wix says "Retry after 56003ms." (milliseconds); plain seconds are read too.
+  const m = message.match(/retry after\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|seconds)?/i);
+  const n = m ? Number(m[1]) : NaN;
+  const asked = !Number.isFinite(n) || n <= 0 ? 30_000 : /^s/i.test(m?.[2] ?? "") || (!m?.[2] && n < 300) ? n * 1000 : n;
+  const waitMs = Math.min(65_000, Math.max(2_000, asked + 500));
+  return { ok: false, rateLimited, waitMs, message };
+}
+
+type WixOut = Record<string, { pushed: number; failed: number; excluded?: number; already: number; deferred: number; rate_limited: number }>;
+
+async function pushWixJobs(allJobs: WixJob[], dryRun: boolean, errors: string[], ctx: PushCtx): Promise<WixOut> {
   // Marketplace exclusion (rule 2026-09-22): a product switched off for a
   // store gets no job there, not even a price change.
   const jobs: WixJob[] = [];
@@ -171,28 +241,70 @@ async function pushWixJobs(allJobs: WixJob[], dryRun: boolean, errors: string[])
     const kept = await withoutExcluded(list, `wix_${site}`);
     jobs.push(...kept);
   }
-  const out: Record<string, { pushed: number; failed: number; excluded?: number }> = {};
-  for (const j of allJobs) out[j.site] = out[j.site] ?? { pushed: 0, failed: 0 };
+  const out: WixOut = {};
+  for (const j of allJobs) out[j.site] = out[j.site] ?? { pushed: 0, failed: 0, already: 0, deferred: 0, rate_limited: 0 };
   if (allJobs.length !== jobs.length) for (const [site, list] of bySite) out[site].excluded = list.length - jobs.filter((j) => j.site === site).length;
   if (dryRun || !jobs.length) return out;
-  const results = await mapLimit(jobs, 5, async (job) => {
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/wix-push-product`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify(job),
-    });
-    if (!resp.ok) throw new Error(`${job.sku} (${job.site}): ${((await resp.json().catch(() => ({}))) as { error?: string }).error ?? resp.status}`);
-    return job;
+
+  // Changes that already went through today (an earlier run of the chain).
+  const pending = jobs.filter((j) => {
+    if (!ctx.progress.done.has(jobKey(j))) return true;
+    out[j.site].already += 1;
+    return false;
   });
-  results.forEach((res, i) => {
-    if (res.status === "fulfilled") out[jobs[i].site].pushed += 1;
-    else {
-      out[jobs[i].site].failed += 1;
-      if (errors.length < 25) errors.push(`wix ${(res.reason as Error).message}`);
+  if (ctx.skip) {
+    // Another run is pushing right now: leave these to it.
+    for (const j of pending) out[j.site].deferred += 1;
+    return out;
+  }
+
+  // Wix lets about 30 changes through and then blocks for about a minute
+  // (September: "Retry after 56003ms"). A block pauses BOTH workers until the
+  // time Wix gave; a pause that does not fit in this run's budget stops the
+  // run (the rest goes to the continuation run) instead of hammering Wix.
+  let next = 0;
+  let pausedUntil = 0;
+  let stopped = false;
+  const worker = async () => {
+    while (next < pending.length && !stopped) {
+      if (pausedUntil > Date.now()) await sleep(pausedUntil - Date.now());
+      if (stopped || Date.now() > ctx.deadline) return; // the rest goes to the continuation run
+      const job = pending[next++];
+      for (let tries = 1; ; tries++) {
+        const r = await pushOneWix(job);
+        if (r.ok) {
+          out[job.site].pushed += 1;
+          ctx.progress.done.add(jobKey(job));
+          break;
+        }
+        if (r.rateLimited) {
+          pausedUntil = Math.max(pausedUntil, Date.now() + r.waitMs);
+          if (tries < WIX_MAX_TRIES && pausedUntil < ctx.deadline) {
+            await sleep(pausedUntil - Date.now());
+            continue;
+          }
+          out[job.site].rate_limited += 1; // tried again by the continuation run
+          stopped = true;
+          break;
+        }
+        out[job.site].failed += 1;
+        if (errors.length < 25) errors.push(`wix ${job.sku} (${job.site}): ${r.message}`);
+        break;
+      }
+      await sleep(WIX_GAP_MS);
     }
-  });
+  };
+  await Promise.all(Array.from({ length: Math.min(WIX_CONCURRENCY, pending.length) }, worker));
+  for (const j of pending.slice(next)) out[j.site].deferred += 1; // never started: over the time budget
+  // Remembered right away, so a run cut short does not repeat these.
+  await saveWixProgress(ctx.progress).catch((err) => console.error("[promo-apply] progress save failed:", (err as Error).message));
   return out;
 }
+
+// Changes of these stores still owed to Wix (over the time budget, or still
+// answered "rate limit"): the market is not stamped while any remain.
+const wixPending = (out: WixOut, sites: string[]) =>
+  sites.reduce((n, s) => n + (out[s]?.deferred ?? 0) + (out[s]?.rate_limited ?? 0), 0);
 
 // ---------- Best Buy scheduled discounts ------------------------------------
 
@@ -335,11 +447,15 @@ async function scheduleWalmart(market: "ca" | "us", promoId: number, dryRun: boo
 
 // ---------- the run ---------------------------------------------------------
 
-async function run(dryRun: boolean, reconcile: boolean) {
+async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number } = {}) {
+  const chain = opts.chain ?? 0;
+  const startedAt = Date.now();
+  // A continuation run (chained by the previous one) lets Wix breathe first.
+  if (chain > 0 && !dryRun) await sleep(WIX_COOLDOWN_MS);
   const today = etToday();
   const tomorrow = etToday(1);
   const nowIso = new Date().toISOString();
-  const report: Record<string, unknown> = { today, dryRun, mode: reconcile ? "reconcile" : "cron" };
+  const report: Record<string, unknown> = { today, dryRun, mode: reconcile ? "reconcile" : "cron", ...(chain ? { chain } : {}) };
   const errors: string[] = [];
 
   // -- 0. settings gate ------------------------------------------------------
@@ -355,6 +471,14 @@ async function run(dryRun: boolean, reconcile: boolean) {
   const promos = await restGet<PromoRow[]>(
     // Only the MONTHLY promotions are automated; flash deals and special events run by hand.
     "promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at,wm_ca_scheduled_at,wm_us_scheduled_at&status=in.(draft,active)&kind=eq.monthly&order=id.desc",
+  );
+  // Promotions ended in the last two days: the first run of a boundary ends
+  // the previous one, and a continuation run (or the second nightly cron)
+  // still owes its members their return to regular prices. They never count
+  // as a target — only as "members leaving the sale".
+  const endedSince = new Date(Date.now() - 48 * 3600_000).toISOString();
+  const recentlyEnded = await restGet<PromoRow[]>(
+    `promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at,wm_ca_scheduled_at,wm_us_scheduled_at&status=eq.ended&kind=eq.monthly&ended_at=gte.${encodeURIComponent(endedSince)}`,
   );
   // The promotion whose window on a market contains a day — custom dates
   // when the promotion carries them, else its month's market calendar.
@@ -388,11 +512,34 @@ async function run(dryRun: boolean, reconcile: boolean) {
   // The prep pass always (re)schedules Best Buy — it overwrites idempotently,
   // and an earlier schedule may carry an outdated window (e.g.
   // pre-calendar-change). Walmart is scheduled once (stamped).
-  const doPrep = prepTarget != null || prepUsTarget != null;
+  // A continuation run only finishes the Wix changes — the prep sends
+  // (Best Buy re-schedules on every prep pass) already went out.
+  const doPrep = chain === 0 && (prepTarget != null || prepUsTarget != null);
 
   if (!doUS && !doCA && !doPrep) {
     return { ...report, skipped: "no promo boundary today" };
   }
+
+  // Wix pacing context: today's progress (a manual reconcile starts fresh,
+  // its continuations and the cron reuse it), a lock so the second nightly
+  // cron does not push over a chain still running, and this run's budget.
+  // The progress record only saves Wix calls: if it cannot be read or saved
+  // the run goes on without it (everything is pushed again, idempotently).
+  const freshProgress = (): WixProgress => ({ day: today, done: new Set<string>(), lock_until: null });
+  const progress: WixProgress = dryRun
+    ? freshProgress()
+    : await loadWixProgress(today, reconcile && chain === 0).catch((err) => {
+      errors.push(`wix progress: ${(err as Error).message}`);
+      return freshProgress();
+    });
+  const lockedByOther = !dryRun && chain === 0 && !reconcile && progress.lock_until != null && Date.parse(progress.lock_until) > Date.now();
+  const wixCtx: PushCtx = { deadline: startedAt + WIX_BUDGET_MS, progress, skip: lockedByOther };
+  if (!dryRun && !lockedByOther && (doUS || doCA)) {
+    progress.lock_until = new Date(Date.now() + 170_000).toISOString();
+    await saveWixProgress(progress).catch((err) => errors.push(`wix progress: ${(err as Error).message}`));
+  }
+  let wixOwed = 0; // changes still owed to Wix after this run
+  if (lockedByOther) report.wix_skipped = "another run is still pushing to Wix";
 
   // -- 3. US pass: SinksDirect US to this month's promo USD ------------------
   if (doUS && settings.wix !== false) {
@@ -400,7 +547,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
     // Members of the promotions whose US window is over leave the sale
     // (unless carried into the new list).
     const prevRows: { sku: string }[] = [];
-    for (const p of promos.filter((p) => p.id !== usTarget?.id && win(p, "us").end < today)) prevRows.push(...await promoPrices(p.id));
+    for (const p of [...promos, ...recentlyEnded].filter((p) => p.id !== usTarget?.id && win(p, "us").end < today)) prevRows.push(...await promoPrices(p.id));
     const promoUsd = new Map(targetRows.filter((r) => r.promo_price_usd != null).map((r) => [r.sku, r.promo_price_usd]));
     const affected = [...new Set([...promoUsd.keys(), ...prevRows.map((r) => r.sku)])];
 
@@ -421,10 +568,14 @@ async function run(dryRun: boolean, reconcile: boolean) {
       if (expected == null) continue;
       jobs.push({ sku, site: "sinksdirect_us", only: ["priceData"], fields: { map_usd: expected } });
     }
-    const wixUs = await pushWixJobs(jobs, dryRun, errors);
+    const wixUs = await pushWixJobs(jobs, dryRun, errors, wixCtx);
     report.us = { members: promoUsd.size, linked: linkedUs.size, ...wixUs.sinksdirect_us };
+    const usOwed = wixPending(wixUs, ["sinksdirect_us"]);
+    wixOwed += usOwed;
 
-    if (!dryRun && usTarget) {
+    // Stamped only once every change reached Wix — until then the chain
+    // (and the next nightly run) keep pushing what is left.
+    if (!dryRun && usTarget && usOwed === 0) {
       await restPatch(`promotions?id=eq.${usTarget.id}`, {
         us_applied_at: nowIso,
         ...(usTarget.status === "draft" ? { status: "active", activated_at: nowIso } : {}),
@@ -434,7 +585,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
   // Walmart USA safety net: the day-before prep normally schedules it; if it
   // did not (promo loaded late / toggle off), schedule for the rest of the
   // window (the function starts a window already open in a few minutes).
-  if (doUS && settings.walmart_us !== false && usTarget && !usTarget.wm_us_scheduled_at) {
+  if (chain === 0 && doUS && settings.walmart_us !== false && usTarget && !usTarget.wm_us_scheduled_at) {
     try {
       const rows = (await promoPrices(usTarget.id)).filter((r) => r.promo_price_usd != null);
       if (rows.length) report.walmart_us = await scheduleWalmart("us", usTarget.id, dryRun);
@@ -444,6 +595,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
   }
 
   // -- 4. CA pass: store pricing + SinksDirect CA on the first Thursday ------
+  let caOwed = 0;
   if (doCA) {
     const targetRows = caTarget ? await promoPrices(caTarget.id) : [];
     const cadRows = targetRows.filter((r) => r.promo_price_cad != null);
@@ -455,7 +607,8 @@ async function run(dryRun: boolean, reconcile: boolean) {
       p.status === "active" && p.id !== caTarget?.id && win(p, "ca").end < today
     );
     const endSkus = new Set<string>();
-    for (const p of toEnd) {
+    const leaving = [...toEnd, ...recentlyEnded.filter((p) => p.id !== caTarget?.id && win(p, "ca").end < today)];
+    for (const p of leaving) {
       for (const r of await promoPrices(p.id)) endSkus.add(r.sku);
     }
     const clearSkus = [...endSkus].filter((s) => !targetCadSkus.has(s));
@@ -493,8 +646,9 @@ async function run(dryRun: boolean, reconcile: boolean) {
       }
       // PIM row already holds the truth (post-apply): MAP base + sale fields.
       const jobs: WixJob[] = [...linkedCa].map((sku) => ({ sku, site: "sinksdirect_ca", only: ["priceData", "discount"] }));
-      const wixCa = await pushWixJobs(jobs, dryRun, errors);
+      const wixCa = await pushWixJobs(jobs, dryRun, errors, wixCtx);
       report.ca = { members: cadRows.length, linked: linkedCa.size, ...wixCa.sinksdirect_ca };
+      caOwed += wixPending(wixCa, ["sinksdirect_ca"]);
 
       // Azuni store (Azuni products only, sells at MAP CAD, no sale fields):
       // the promo travels as the price itself — promo MAP while the Canada
@@ -514,15 +668,16 @@ async function run(dryRun: boolean, reconcile: boolean) {
         const azJobs: WixJob[] = [...linkedAz]
           .map((sku) => ({ sku, site: "azuni_ca", only: ["priceData"], fields: { map_cad: promoCad.get(sku) ?? mapCad.get(sku) ?? null } }))
           .filter((j) => (j.fields as { map_cad: number | null }).map_cad != null);
-        const wixAz = await pushWixJobs(azJobs, dryRun, errors);
+        const wixAz = await pushWixJobs(azJobs, dryRun, errors, wixCtx);
         report.azuni_ca = { linked: linkedAz.size, ...wixAz.azuni_ca };
+        caOwed += wixPending(wixAz, ["azuni_ca"]);
       }
     }
 
     // Safety net: the day-before prep normally schedules Best Buy. If it
     // didn't (promo loaded late / toggle off), schedule from tomorrow —
     // Mirakl drops start dates that are not in the future.
-    if (settings.bestbuy !== false && caTarget && cadRows.length && !caTarget.bb_scheduled_at) {
+    if (chain === 0 && settings.bestbuy !== false && caTarget && cadRows.length && !caTarget.bb_scheduled_at) {
       try {
         const w = win(caTarget, "ca");
         const start = w.start > today ? w.start : tomorrow;
@@ -539,7 +694,7 @@ async function run(dryRun: boolean, reconcile: boolean) {
       }
     }
     // Same safety net for Walmart Canada.
-    if (settings.walmart_ca !== false && caTarget && cadRows.length && !caTarget.wm_ca_scheduled_at) {
+    if (chain === 0 && settings.walmart_ca !== false && caTarget && cadRows.length && !caTarget.wm_ca_scheduled_at) {
       try {
         report.walmart_ca = await scheduleWalmart("ca", caTarget.id, dryRun);
       } catch (err) {
@@ -547,7 +702,8 @@ async function run(dryRun: boolean, reconcile: boolean) {
       }
     }
 
-    if (!dryRun && caTarget) {
+    wixOwed += caOwed;
+    if (!dryRun && caTarget && caOwed === 0) {
       await restPatch(`promotions?id=eq.${caTarget.id}`, {
         ca_applied_at: nowIso,
         ...(caTarget.status === "draft" ? { status: "active", activated_at: nowIso } : {}),
@@ -592,14 +748,45 @@ async function run(dryRun: boolean, reconcile: boolean) {
     }
   }
 
+  // -- 6. Wix changes still owed: the next run of the chain finishes them ----
+  if (!dryRun && !lockedByOther && (doUS || doCA)) {
+    progress.lock_until = null;
+    try {
+      await saveWixProgress(progress);
+    } catch (err) {
+      errors.push(`wix progress: ${(err as Error).message}`);
+    }
+    if (wixOwed > 0) {
+      report.wix_owed = wixOwed;
+      if (chain < WIX_MAX_CHAIN) {
+        try {
+          const resp = await fetch(`${SUPABASE_URL}/functions/v1/promo-apply`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ chain: chain + 1, reconcile }),
+          });
+          if (!resp.ok) throw new Error(`${resp.status} ${(await resp.text()).slice(0, 200)}`);
+          report.wix_continuing = chain + 1;
+        } catch (err) {
+          errors.push(`wix continuation: ${(err as Error).message} — the next nightly run (or Run now) finishes the ${wixOwed} left`);
+        }
+      } else {
+        errors.push(`wix: ${wixOwed} changes still refused after ${WIX_MAX_CHAIN} continuation runs — use Run now in Settings`);
+      }
+    }
+  }
+
   report.errors = errors;
   report.ok = errors.length === 0;
 
-  // -- 6. audit trail --------------------------------------------------------
+  // -- 7. audit trail --------------------------------------------------------
   if (!dryRun) {
     const parts: string[] = [];
+    if (chain > 0) parts.push(`Wix continuation ${chain}`);
     if (doUS) parts.push(usTarget ? `USA on promo "${usTarget.name}"` : "USA back to regular prices");
     if (doCA) parts.push(caTarget ? `Canada on promo "${caTarget.name}"` : "Canada back to regular prices");
+    if (lockedByOther) parts.push("Wix left to the run still pushing");
+    else if (report.wix_owed) parts.push(`Wix: ${report.wix_owed} changes left${report.wix_continuing ? ", continuing" : ""}`);
     if (doPrep && prepTarget && settings.bestbuy !== false) parts.push(`Best Buy scheduled for "${prepTarget.name}" (starts tomorrow)`);
     const sent = (r: unknown) => r && !(r as Record<string, unknown>).skipped;
     if (sent(report.walmart_ca_prep)) parts.push(`Walmart Canada scheduled for "${prepTarget?.name}" (starts tomorrow)`);
@@ -653,11 +840,23 @@ Deno.serve(async (req) => {
 
     let sync = false;
     let dryRun = false;
+    let chain = 0;
+    let chainReconcile = false;
     try {
       const body = await req.json();
       sync = body?.sync === true;
       dryRun = body?.dryRun === true;
+      chain = Math.max(0, Math.min(WIX_MAX_CHAIN, Math.floor(Number(body?.chain) || 0)));
+      chainReconcile = body?.reconcile === true;
     } catch { /* empty body → cron background mode */ }
+
+    // A continuation run (chained by a run that left Wix changes owed):
+    // in the background, same mode as the run that started the chain.
+    if (chain > 0 && !dryRun) {
+      // @ts-ignore — EdgeRuntime is provided by the Supabase runtime
+      EdgeRuntime.waitUntil(run(false, chainReconcile, { chain }).catch((err) => console.error("[promo-apply] chain FAILED:", (err as Error).message)));
+      return json({ ok: true, started: true, chain }, 202);
+    }
 
     // Manual runs reconcile (re-apply today's truth); cron runs are
     // boundary-triggered and stamped.
