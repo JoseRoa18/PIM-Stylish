@@ -1811,7 +1811,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
             <span className="text-body-sm text-error">{pushAll.message}</span>
           ) : (
             <span className="text-body-sm text-on-surface-variant">
-              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? (r.media === 'ok' ? 'ok' : 'content ok, media failed') : r.skipped === 'excluded' ? 'excluded, not sent' : 'failed'}`).join(' · ')}
+              {/* r.media is "ok (N live)", "warning: …" or "failed: …" (wixSync). */}
+              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? (String(r.media ?? '').startsWith('ok') ? r.media : String(r.media ?? '').startsWith('warning') ? `content ok, images ${r.media.replace(/^warning:\s*/, '')}` : `content ok, media ${r.media ?? 'failed'}`) : r.skipped === 'excluded' ? 'excluded, not sent' : 'failed'}`).join(' · ')}
             </span>
           )
         )}

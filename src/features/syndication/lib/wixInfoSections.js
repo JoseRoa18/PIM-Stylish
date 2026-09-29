@@ -122,6 +122,43 @@ function pickDoc(docs, type, label) {
   );
 }
 
+// The file name a link points at ('…/C233_drop_in_installation.dxf?rlkey=…'
+// → 'c233_drop_in_installation.dxf').
+function linkFileName(href) {
+  try {
+    const path = new URL(href, 'https://x.invalid').pathname;
+    return decodeURIComponent(path.slice(path.lastIndexOf('/') + 1)).toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+// The PIM document behind one link. A generic label ("INSTALLATION GUIDE",
+// "DXF FILE") says nothing about the mount, and most sinks only carry the
+// per-mount types — so the linked file tells: first a PIM file with the very
+// same name, then the mount its name mentions ("Azuni-dualmount-installation-
+// guide.pdf" → installation_dual_mount), then the family's only type.
+// Found 2026-09-29 on C233: both links still went to Dropbox after pushes.
+function docForLink(docs, label, href) {
+  const file = linkFileName(href);
+  if (file) {
+    const same = docs.find((d) => String(d.file_name ?? '').toLowerCase() === file);
+    if (same) return same;
+  }
+  const type = docTypeForLabel(label);
+  if (!type) return null;
+  const direct = pickDoc(docs, type, label);
+  if (direct || (type !== 'installation_manual' && type !== 'dxf_file')) return direct;
+  const family = type === 'dxf_file' ? 'dxf_' : 'installation_';
+  const mount = /under.?mount/.test(file) ? 'undermount' : /drop.?in/.test(file) ? 'drop_in' : /dual.?mount/.test(file) ? 'dual_mount' : null;
+  if (mount) {
+    const hinted = pickDoc(docs, `${family}${mount}`, label);
+    if (hinted) return hinted;
+  }
+  const types = [...new Set(docs.map((d) => d.document_type).filter((t) => t?.startsWith(family)))];
+  return types.length === 1 ? pickDoc(docs, types[0], label) : null;
+}
+
 // Repoint <a href> values inside the documents section at PIM files where a
 // matching document exists; leave everything else (labels, order, unmatched
 // links) exactly as it was. Returns { html, replaced, kept }.
@@ -132,8 +169,7 @@ export function rewriteDocumentLinks(html, docs) {
   let replaced = 0;
   let kept = 0;
   for (const a of anchors) {
-    const type = docTypeForLabel(a.textContent);
-    const match = type ? pickDoc(docs, type, a.textContent) : null;
+    const match = docForLink(docs, a.textContent, a.getAttribute('href'));
     if (match?.storage_path && /^https?:\/\//i.test(match.storage_path)) {
       if (a.getAttribute('href') !== match.storage_path) replaced += 1;
       a.setAttribute('href', match.storage_path);
