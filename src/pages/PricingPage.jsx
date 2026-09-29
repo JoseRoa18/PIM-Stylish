@@ -55,7 +55,8 @@ import { fillWayfairPriceChangeFile, fillWayfairPriceChangeFromSaved, summarizeW
 import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
 import { fillBBBPromoTemplate, summarizeBBBFill } from '@/features/pricing/lib/bbbPromoFill';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
-import { promoWindow } from '@/features/pricing/lib/promoCalendar';
+import { promoWindow, etToday } from '@/features/pricing/lib/promoCalendar';
+import { getAppSetting } from '@/features/settings/api/appSettings';
 import { fillPromoTemplate, summarizePromoFill } from '@/features/pricing/lib/genericPromoFill';
 import { fillAmazonPromoTemplate, summarizeAmazonFill } from '@/features/pricing/lib/amazonPromoFill';
 import { fillMiraklPromoTemplate, summarizeMiraklFill } from '@/features/pricing/lib/miraklPromoFill';
@@ -86,6 +87,13 @@ const fmt = (v) => (v == null ? '—' : `$${Number(v).toFixed(2)}`);
 // Stock states of the price table's filter (each market reads its own
 // ShipStation warehouse). A SKU without a row is unknown, not zero.
 const STOCK_STATES = ['In stock', 'Out of stock', 'Not tracked'];
+
+// 'YYYY-MM-DD' moved by n days.
+function shiftDay(ymd, n) {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 
 // The markets a promotion's card shows. A flash deal / special event only
 // the markets of the portals it goes to (BB&B + Overstock → USA only, Rona →
@@ -1901,6 +1909,14 @@ function PromoDates({ promo, canEdit, onChanged }) {
 function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defaultOpen = false }) {
   const { templates } = useTemplates();
   const [history, setHistory] = useState({}); // audit target → last export time
+  // The automation switches (Settings): Walmart rows say when promo-apply
+  // sends them by itself — the day before the market's window opens.
+  const [automation, setAutomation] = useState(null);
+  useEffect(() => {
+    let active = true;
+    getAppSetting('promo_automation', {}).then((s) => { if (active) setAutomation(s ?? {}); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
   const [busy, setBusy] = useState(null);
   const [market, setMarket] = useState('all');
   const [open, setOpen] = useState(defaultOpen);
@@ -1987,6 +2003,22 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           status = sch ? `${sent} scheduled` : 'Not scheduled';
           tone = sch ? (sch.itemsFailed ? 'warn' : 'ok') : 'muted';
           if (sch) detail += ` Sent ${day(promo[ch.stamp])}, feed ${sch.feed_id ?? '?'}${sch.itemsFailed ? `, ${sch.itemsFailed} rejected` : ''}${sch.not_listed ? `, ${sch.not_listed} not listed there` : ''}.`;
+          else if (promo.status !== 'ended' && (promo.kind ?? 'monthly') === 'monthly') {
+            // Not sent yet: promo-apply sends it the day before the window opens.
+            const auto = automation && automation.enabled !== false && automation[ch.schedule] !== false;
+            const sendDay = shiftDay(promoWindow(promo, ch.market).start, -1);
+            const today = etToday();
+            if (auto && sendDay >= today) {
+              status = sendDay === today ? 'Sends today' : `Sends ${dayOf(sendDay)}`;
+              detail += ` Sent automatically on ${dayOf(sendDay)}, the day before the window opens, with the Pricing levels of that day. Send now sends it right away.`;
+            } else if (auto) {
+              status = 'Not scheduled';
+              tone = 'warn';
+              detail += ' The automatic send has not gone out — use Send now.';
+            } else if (automation) {
+              detail += ' The automatic send is off in Settings — use Send now.';
+            }
+          }
         } else if (promo[ch.stamp]) {
           status = `Live since ${day(promo[ch.stamp])}`;
           tone = 'ok';
@@ -2074,7 +2106,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
               {canEdit && ch.kind === 'api' && ch.schedule && promo.status !== 'ended' && (
                 <button type="button" onClick={() => schedule(ch)} disabled={busy === ch.key} className={actionCls}>
                   {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                  {promo[ch.stamp] ? 'Re-send' : 'Schedule'}
+                  {promo[ch.stamp] ? 'Re-send' : 'Send now'}
                 </button>
               )}
               {canEdit && ch.kind === 'portal_file' && (
