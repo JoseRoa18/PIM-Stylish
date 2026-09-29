@@ -23,6 +23,7 @@ export async function listProducts() {
       msrp_cad,
       created_at,
       wix_product_id,
+      factory_code,
       product_media (storage_path, alt_text, is_primary),
       product_aliases (marketplace, alias),
       amazon_links (marketplace, seller_sku, asin)
@@ -55,6 +56,13 @@ export async function listProducts() {
       created_at: p.created_at,
       wix_product_id: p.wix_product_id,
       primary_image: primary,
+      // The catalog search matches these too (a Home Depot article number, a
+      // Rona id, an Amazon seller SKU / ASIN, the factory code). They were
+      // loaded but dropped here, so that search never found anything
+      // (fixed 2026-09-29).
+      factory_code: p.factory_code ?? null,
+      product_aliases: p.product_aliases ?? [],
+      amazon_links: p.amazon_links ?? [],
     };
   });
 }
