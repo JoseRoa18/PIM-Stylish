@@ -1,4 +1,4 @@
-import { useState, useRef, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { FileText, ExternalLink, Eye, Trash2, Loader2, Upload, ChevronDown } from 'lucide-react';
 import { MorphIcon } from 'morphicons/react';
 import { Link as LinkGlyph, Check as CheckGlyph } from 'lucide';
@@ -8,6 +8,7 @@ import { formatFileSize } from '@/lib/format';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
+import { getBrandWarranties, brandWarrantyFor } from '@/features/settings/api/brandWarranty';
 
 // Heavy (bundles PDF.js) — loaded only when a user previews a PDF.
 const PdfPreviewModal = lazy(() => import('./PdfPreviewModal'));
@@ -105,8 +106,17 @@ const LANG_AWARE = new Set([
 // for stone fabricators cutting countertops for sinks.
 const FAUCET_HIDDEN_TYPES = new Set(['dxf_file', 'cut_out_template']);
 
-export default function DocumentsSection({ sku, category, familyNumber = null, installationType = null }) {
+export default function DocumentsSection({ sku, category, familyNumber = null, installationType = null, brand = null }) {
   const confirm = useConfirm();
+  // The warranty is general per brand (Settings → Warranty documents): once
+  // the brand has one, the product's Warranty row shows it read-only.
+  const [warranties, setWarranties] = useState(null);
+  useEffect(() => {
+    let active = true;
+    getBrandWarranties().then((w) => { if (active) setWarranties(w); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const generalWarranty = brandWarrantyFor(warranties, brand);
   // Documents are family-shared: uploads land on every variant of the family
   // (replacing the slot family-wide) and removals clear them family-wide.
   // EXCEPT sinks — their variants differ in gauge/mount, so documents stay
@@ -215,6 +225,19 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
   const renderSlot = (docType, language) => {
     const key = slotKey(docType.id, language);
     const langLabel = language ? LANGUAGES.find((l) => l.id === language)?.label : null;
+    if (docType.id === 'warranty_file' && generalWarranty) {
+      return (
+        <DocumentRow
+          key={key}
+          label={`${docType.label} — general ${brand}`}
+          description={`The general ${brand} warranty — change it in Settings → Warranty documents`}
+          doc={docsBySlot[key]}
+          canEdit={false}
+          canPreview={isPdfDoc(docsBySlot[key])}
+          onPreview={() => setPreviewDoc(docsBySlot[key])}
+        />
+      );
+    }
     return (
       <DocumentRow
         key={key}
@@ -228,12 +251,26 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
         onPreview={() => setPreviewDoc(docsBySlot[key])}
         onUploadFile={(file) => handleUploadFile(docType, language, file)}
         onRemove={() => handleRemove(docsBySlot[key], langLabel ?? docType.label)}
+        onReject={(file) =>
+          setErrorMessage(`${file.name} can't go in ${langLabel ? `${docType.label} — ${langLabel}` : docType.label}: it takes ${docType.extensions.join(' or ')} files.`)}
       />
     );
   };
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+    <section
+      className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden"
+      // A file dropped between rows must not make the browser open it (and
+      // leave the page): outside a slot the drop is simply refused.
+      onDragOver={(e) => {
+        if (e.defaultPrevented || !draggingFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'none';
+      }}
+      onDrop={(e) => {
+        if (!e.defaultPrevented && draggingFiles(e)) e.preventDefault();
+      }}
+    >
       <div className="px-6 py-4 border-b border-outline-variant">
         <div className="flex items-center gap-3 flex-wrap">
           <h2 className="text-title-lg text-on-surface">Documents</h2>
@@ -331,7 +368,14 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
 function LanguageGroup({ docType, linkedLangs, children }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-lg border border-outline-variant bg-surface-container-low overflow-hidden">
+    <div
+      className="rounded-lg border border-outline-variant bg-surface-container-low overflow-hidden"
+      // Dragging a file over a closed group opens it so its language rows
+      // can take the drop.
+      onDragEnter={(e) => {
+        if (!open && draggingFiles(e)) setOpen(true);
+      }}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -372,10 +416,47 @@ function LanguageGroup({ docType, linkedLangs, children }) {
   );
 }
 
-function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accept, onPreview, onUploadFile, onRemove }) {
+// Is a file (not text or a link) being dragged?
+const draggingFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
+// Does the file's extension match the slot's accept list (".pdf,.dxf")?
+const acceptsFile = (accept, file) => {
+  const exts = String(accept ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const name = String(file?.name ?? '').toLowerCase();
+  return !exts.length || exts.some((x) => name.endsWith(x));
+};
+
+export function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accept, onPreview, onUploadFile, onRemove, onReject, canRemove = true }) {
   const fileRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const linked = !!doc;
+
+  // Drag & drop: a file dropped on the row uploads into this slot, exactly
+  // like the Upload / Replace button. The row only lights up while a file
+  // hovers it; at rest it looks the same.
+  const dropProps = canEdit && !busy
+    ? {
+        onDragOver: (e) => {
+          if (!draggingFiles(e)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          if (!dragOver) setDragOver(true);
+        },
+        onDragLeave: (e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false);
+        },
+        onDrop: (e) => {
+          if (!draggingFiles(e)) return;
+          e.preventDefault();
+          setDragOver(false);
+          const file = e.dataTransfer.files?.[0];
+          if (!file) return;
+          if (acceptsFile(accept, file)) onUploadFile(file);
+          else onReject?.(file);
+        },
+      }
+    : {};
 
   const openInNewTab = () => {
     if (doc) window.open(getMediaUrl(doc.storage_path), '_blank', 'noopener,noreferrer');
@@ -410,7 +491,10 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
   if (!linked) {
     return (
       <div
-        className="flex items-center gap-3 px-3 py-2 rounded-lg border border-dashed border-outline-variant text-on-surface-variant"
+        {...dropProps}
+        className={`flex items-center gap-3 px-3 py-2 rounded-lg border border-dashed transition-colors ${
+          dragOver ? 'border-primary bg-primary-container/30 text-primary' : 'border-outline-variant text-on-surface-variant'
+        }`}
         title={description}
       >
         <FileText className="w-4 h-4 flex-shrink-0 opacity-60" strokeWidth={1.5} />
@@ -422,7 +506,7 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={busy}
-              title="Upload from your computer"
+              title="Upload from your computer — or drop the file on this row"
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-outline-variant text-label-md text-on-surface-variant hover:text-primary hover:border-primary transition-colors disabled:opacity-50 whitespace-nowrap"
             >
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
@@ -436,7 +520,10 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
 
   // Filled slot: solid card, file name first, full action set.
   return (
-    <div className="rounded-lg border border-outline-variant bg-surface-container-low">
+    <div
+      {...dropProps}
+      className={`rounded-lg border bg-surface-container-low transition-colors ${dragOver ? 'border-primary ring-2 ring-primary/40' : 'border-outline-variant'}`}
+    >
       <div className="flex items-center gap-3 p-2.5">
         <div className="w-9 h-9 rounded-md flex items-center justify-center flex-shrink-0 bg-primary-container text-on-primary-container">
           <FileText className="w-4 h-4" strokeWidth={1.5} />
@@ -479,11 +566,11 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
                 onClick={() => fileRef.current?.click()}
                 disabled={busy}
                 className={iconBtn}
-                title="Replace — upload from your computer"
+                title="Replace — upload from your computer, or drop the file on this row"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
               </button>
-              <button
+              {canRemove && <button
                 type="button"
                 onClick={onRemove}
                 disabled={busy}
@@ -491,7 +578,7 @@ function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accep
                 title="Remove"
               >
                 <Trash2 className="w-4 h-4" />
-              </button>
+              </button>}
             </>
           )}
         </div>

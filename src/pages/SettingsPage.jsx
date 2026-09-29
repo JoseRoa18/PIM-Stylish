@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, Upload, UserCheck } from 'lucide-react';
+import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, Upload, UserCheck, ShieldCheck } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
 import { getInventoryReport, refreshInventory, uploadCanadaInventory, describeInventoryPull, stockAge } from '@/features/pricing/api/inventory';
@@ -7,6 +7,8 @@ import { listPromotions } from '@/features/pricing/api/promotions';
 import { listTaskOwners } from '@/features/pricing/api/promoTasks';
 import { TASK_CHANNELS } from '@/features/pricing/lib/promoTasks';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { WARRANTY_BRANDS, getBrandWarranties, setBrandWarranty, countBrandProducts } from '@/features/settings/api/brandWarranty';
+import { DocumentRow } from '@/features/media/components/DocumentsSection';
 import { Link } from 'react-router-dom';
 
 function monthLabel(period) {
@@ -157,6 +159,85 @@ function PromoOwnersSection() {
         ))}
         {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
       </div>
+    </section>
+  );
+}
+
+// General warranty per brand (user rule 2026-09-29): one PDF for Stylish and
+// one for Azuni; every product of the brand carries it, new ones included.
+function WarrantySection() {
+  const confirm = useConfirm();
+  const [warranties, setWarranties] = useState(null);
+  const [busy, setBusy] = useState(null); // brand being uploaded
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    getBrandWarranties().then((w) => setWarranties(w)).catch((err) => { setWarranties({}); setMsg({ tone: 'error', text: err.message }); });
+  }, []);
+
+  async function upload(brand, file) {
+    setMsg(null);
+    const count = await countBrandProducts(brand).catch(() => null);
+    const ok = await confirm({
+      title: `Use ${file.name} as the ${brand} warranty?`,
+      message: `It goes on ${count != null ? `all ${count}` : 'every'} ${brand} product${count === 1 ? '' : 's'} and replaces the warranty file each one has today. New ${brand} products get it automatically.`,
+      confirmLabel: 'Use it',
+    });
+    if (!ok) return;
+    setBusy(brand);
+    try {
+      const r = await setBrandWarranty(brand, file);
+      setWarranties(await getBrandWarranties());
+      setMsg({ tone: 'success', text: `${file.name} is now the warranty of all ${r.products} ${brand} products.` });
+    } catch (err) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
+          <ShieldCheck className="w-5 h-5" strokeWidth={2} />
+        </div>
+        <div>
+          <h2 className="text-title-md text-on-surface font-semibold">Warranty documents</h2>
+          <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
+            One warranty per brand. It goes on every product of the brand — new ones too — and travels wherever the product's warranty does.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl bg-surface-container-low/60 p-4 space-y-2">
+        {warranties === null ? (
+          <p className="text-body-sm text-on-surface-variant">
+            <Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading…
+          </p>
+        ) : WARRANTY_BRANDS.map((brand) => (
+          <DocumentRow
+            key={brand}
+            label={`${brand} warranty`}
+            description={`The warranty PDF of every ${brand} product`}
+            doc={warranties[brand]?.storage_path ? warranties[brand] : null}
+            canEdit
+            canRemove={false}
+            canPreview={false}
+            busy={busy === brand}
+            accept=".pdf"
+            onUploadFile={(file) => upload(brand, file)}
+            onReject={(file) => setMsg({ tone: 'error', text: `${file.name} is not a PDF.` })}
+          />
+        ))}
+      </div>
+
+      {msg && (
+        <p className={`mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+          {msg.tone === 'error' ? <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+          {msg.text}
+        </p>
+      )}
     </section>
   );
 }
@@ -490,6 +571,8 @@ export default function SettingsPage() {
       </section>
 
       <PromoOwnersSection />
+
+      <WarrantySection />
 
       <InventorySection />
     </div>

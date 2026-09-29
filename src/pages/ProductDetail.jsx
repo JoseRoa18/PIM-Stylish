@@ -692,6 +692,7 @@ export default function ProductDetail() {
             category={product.category}
             familyNumber={product.family_number}
             installationType={product.attributes?.installation_type}
+            brand={product.brand}
           />
         )}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
@@ -1612,11 +1613,11 @@ function PricingTab({ product, edit, onAddPricing }) {
 
 // ===================== Media & Marketplaces =====================
 
-function MediaTab({ sku, category, familyNumber, installationType }) {
+function MediaTab({ sku, category, familyNumber, installationType, brand }) {
   return (
     <div className="space-y-6">
       <MediaSection sku={sku} familyNumber={familyNumber} category={category} />
-      <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} installationType={installationType} />
+      <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} installationType={installationType} brand={brand} />
     </div>
   );
 }
