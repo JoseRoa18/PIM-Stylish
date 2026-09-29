@@ -925,6 +925,29 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     return () => { active = false; };
   }, [monthly, startsOn, endsOn, skuList.skus]);
 
+  // Stock check (user idea 2026-09-29): products with 0 units in a market the
+  // promotion reaches (a monthly promotion both, a flash deal / special event
+  // the markets of its portals) are flagged before it is created — a warning,
+  // not a block. "Not tracked" (no stock row) is not 0 and is not flagged.
+  const stockSkus = useMemo(() => (monthly && mode === 'file' ? mergedFileRows.map((r) => r.sku) : skuList.skus), [monthly, mode, mergedFileRows, skuList.skus]);
+  const stockMarkets = useMemo(() => promoMarkets({ kind, marketplaces: monthly ? [] : portals }), [kind, monthly, portals]);
+  const [zeroStock, setZeroStock] = useState(null); // { key, ca: [skus], us: [skus] }
+  const stockKey = `${stockMarkets.join(',')}|${stockSkus.join(',')}`;
+  useEffect(() => {
+    if (!stockSkus.length) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      getStockFor(stockSkus).then((stock) => {
+        if (!active) return;
+        const zero = { key: stockKey };
+        for (const m of stockMarkets) zero[m] = stockSkus.filter((s) => stock[m]?.[s] && Number(stock[m][s].available) <= 0);
+        setZeroStock(zero);
+      }).catch(() => {});
+    }, 400);
+    return () => { active = false; clearTimeout(timer); };
+  }, [stockKey, stockSkus, stockMarkets]);
+  const zeroNow = zeroStock?.key === stockKey && stockSkus.length ? stockMarkets.filter((m) => zeroStock[m]?.length) : [];
+
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
       <div className="flex items-center justify-between">
@@ -1084,6 +1107,20 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           Create promotion
         </button>
       </div>
+      {zeroNow.length > 0 && (
+        <div className="flex items-start gap-2.5 text-body-sm text-on-surface bg-error-container/35 rounded-lg px-3 py-2.5">
+          <AlertTriangle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />
+          <div className="space-y-0.5 min-w-0">
+            {zeroNow.map((m) => (
+              <p key={m}>
+                <span className="font-medium">{zeroStock[m].length} with 0 stock in {m === 'ca' ? 'Canada' : 'the USA'}:</span>{' '}
+                {zeroStock[m].slice(0, 12).join(', ')}{zeroStock[m].length > 12 ? ` and ${zeroStock[m].length - 12} more` : ''}
+              </p>
+            ))}
+            <p className="text-on-surface-variant">You can still create it — they show in red on its table.</p>
+          </div>
+        </div>
+      )}
       {overlap?.skus?.length > 0 && (
         <p className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">
           {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). A {PROMOTION_KINDS[kind].toLowerCase()} adds nothing for them.
@@ -1442,6 +1479,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
               return !s ? 'Not tracked' : s.available > 0 ? 'In stock' : 'Out of stock';
             };
             const stockSyncedAt = Object.values(stockRows).reduce((latest, s) => (s.synced_at > (latest ?? '') ? s.synced_at : latest), null);
+            const outCount = marketRows.filter((r) => stockStateOf(r) === 'Out of stock').length;
             const visibleRows = marketRows.filter((r) =>
               (!q || r.sku.toUpperCase().includes(q)) &&
               (!catFilter.length || catFilter.includes(catOf(r))) &&
@@ -1511,6 +1549,22 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                     <FilterDropdown label="Category" options={categories} selected={catFilter} onChange={setCatFilter} />
                     <FilterDropdown label="Brand" options={brands} selected={brandFilter} onChange={setBrandFilter} />
                     <FilterDropdown label="Stock" options={STOCK_STATES} selected={stockFilter} onChange={setStockFilter} />
+                    {outCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setStockFilter(stockFilter.length === 1 && stockFilter[0] === 'Out of stock' ? [] : ['Out of stock'])}
+                        aria-pressed={stockFilter.length === 1 && stockFilter[0] === 'Out of stock'}
+                        title={`Show only the products with 0 units in ${market === 'ca' ? 'Canada' : 'the USA'}`}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-label-md font-medium whitespace-nowrap transition-colors ${
+                          stockFilter.length === 1 && stockFilter[0] === 'Out of stock'
+                            ? 'bg-error text-on-error'
+                            : 'bg-error-container/50 text-on-error-container hover:bg-error-container'
+                        }`}
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        {outCount} out of stock
+                      </button>
+                    )}
                     <span className="text-body-sm text-on-surface-variant tabular-nums whitespace-nowrap">
                       {filtering ? `${visibleRows.length} of ${marketRows.length}` : `${marketRows.length} products`}
                       {filtering && (
@@ -1590,8 +1644,13 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
                       <tbody>
                         {visibleRows.map((r) => {
                           const p = mapBySku?.[r.sku];
+                          const out = stockStateOf(r) === 'Out of stock';
                           return (
-                            <tr key={r.id} className="border-t border-outline-variant/40 odd:bg-surface-container-low/30">
+                            <tr
+                              key={r.id}
+                              className={`border-t border-outline-variant/40 ${out ? 'bg-error-container/30' : 'odd:bg-surface-container-low/30'}`}
+                              title={out ? `0 units in ${market === 'ca' ? 'Canada' : 'the USA'}` : undefined}
+                            >
                               <td className="px-4 py-2 font-mono text-on-surface">{r.sku}</td>
                               <td className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
                               <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[mapKey])}</td>
