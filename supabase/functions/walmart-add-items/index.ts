@@ -37,6 +37,10 @@
 //   setup?: "match",                           preview / submit: an OFFER on the listing Walmart
 //                                              already has for the UPC (feed MP_ITEM_MATCH, any
 //                                              category) instead of a new item — see buildMatch
+//         | "maintenance",                     preview / submit: the PIM's content (same build as a
+//                                              new item) as a CONTENT UPDATE of an item we already
+//                                              have (feed MP_MAINTENANCE) — model = the PIM SKU,
+//                                              title, description, images, attributes
 //   path?: string,                             get: the Walmart GET path
 // }
 // Caller: authenticated admin/editor.
@@ -477,7 +481,13 @@ Deno.serve(async (req) => {
     const skipped: { sku: string; reason: string }[] = [];
     // setup "match": an offer on the listing Walmart's catalog already has for
     // the UPC (feed MP_ITEM_MATCH) — any category, no content sent.
+    // setup "maintenance": the PIM's content as an update of an item we
+    // already have (feed MP_MAINTENANCE, same layout as MP_ITEM): the listing
+    // a match landed on carries Walmart Canada's content (model "S-307XG-1",
+    // 2026-09-30) and this replaces it with the PIM's (model "S-307XG").
     const matchSetup = body.setup === "match";
+    const maintenance = body.setup === "maintenance";
+    const setupName = matchSetup ? "match" : maintenance ? "maintenance" : "item";
     for (const sku of skus) {
       const p = ((products ?? []) as Product[]).find((x) => x.sku === sku);
       if (!p) { skipped.push({ sku, reason: "not in the PIM" }); continue; }
@@ -502,19 +512,46 @@ Deno.serve(async (req) => {
       if (!built.missing.length) items.push(built.item);
     }
 
+    // A content update carries only what the MP_MAINTENANCE schema accepts:
+    // setup-only fields (condition, the compliance flags) are dropped and
+    // named, read from Walmart's own schema so nothing is guessed.
+    if (maintenance && items.length) {
+      const PCID = Deno.env.get("WALMART_US_PROD_CLIENT_ID"), PSEC = Deno.env.get("WALMART_US_PROD_CLIENT_SECRET");
+      if (!PCID || !PSEC) return json({ error: "Walmart US production secrets are not set (needed to read the spec)." }, 500);
+      const prodBase = "https://marketplace.walmartapis.com";
+      const wmSpec = await getToken(prodBase, PCID, PSEC);
+      const types = [...new Set((report as { productType: string; ready: boolean }[]).filter((r) => r.ready).map((r) => r.productType))];
+      // deno-lint-ignore no-explicit-any
+      const spec = await fetchSpec(prodBase, wmSpec, types, "MP_MAINTENANCE") as any;
+      const mp = spec?.properties?.MPItem?.items?.properties ?? {};
+      const readyRows = (report as Record<string, unknown>[]).filter((r) => r.ready);
+      (items as Record<string, Record<string, Record<string, unknown>>>[]).forEach((it, i) => {
+        const dropped: string[] = [];
+        for (const [type, vis] of Object.entries(it.Visible ?? {})) {
+          const allow = mp.Visible?.properties?.[type]?.properties ?? {};
+          for (const k of Object.keys(vis)) if (!(k in allow)) { delete vis[k]; dropped.push(k); }
+        }
+        const allowO = mp.Orderable?.properties ?? {};
+        for (const k of Object.keys(it.Orderable ?? {})) if (!(k in allowO)) { delete it.Orderable[k]; dropped.push(k); }
+        const row = readyRows[i];
+        if (row && dropped.length) row.warnings = [...((row.warnings as string[]) ?? []), `not updatable by a content update, left out: ${dropped.join(", ")}`];
+      });
+    }
+
     const feed = matchSetup
       ? { MPItemFeedHeader: MATCH_HEADER, MPItem: items }
       : { MPItemFeedHeader: { businessUnit: "WALMART_US", locale: "en", version: SPEC_VERSION }, MPItem: items };
     if (mode === "preview") {
       let validation: Record<string, unknown> | undefined;
       // No spec check for a match offer: Get Spec serves no MP_ITEM_MATCH schema.
+      // A content update is checked against the MP_MAINTENANCE schema.
       if (body.validate === true && items.length && !matchSetup) {
         const PCID = Deno.env.get("WALMART_US_PROD_CLIENT_ID"), PSEC = Deno.env.get("WALMART_US_PROD_CLIENT_SECRET");
         if (!PCID || !PSEC) return json({ error: "Walmart US production secrets are not set (needed to read the spec)." }, 500);
         const prodBase = "https://marketplace.walmartapis.com";
         const wm = await getToken(prodBase, PCID, PSEC);
         const types = [...new Set((report as { productType: string; ready: boolean }[]).filter((r) => r.ready).map((r) => r.productType))];
-        const schema = await fetchSpec(prodBase, wm, types);
+        const schema = await fetchSpec(prodBase, wm, types, maintenance ? "MP_MAINTENANCE" : "MP_ITEM");
         // Validate each item on its own so errors point at a SKU.
         const readyRows = (report as { sku: string; ready: boolean }[]).filter((r) => r.ready);
         const perSku: Record<string, { path: string; message: string }[]> = {};
@@ -524,14 +561,14 @@ Deno.serve(async (req) => {
           const one = validateFeed(schema, { MPItemFeedHeader: feed.MPItemFeedHeader, MPItem: [item] });
           if (!one.valid) { allValid = false; perSku[r.sku] = one.errors.map((e) => ({ ...e, path: e.path.replace(/^\/MPItem\/0/, "") })); }
         });
-        validation = { valid: allValid, specVersion: SPEC_VERSION, checked: readyRows.length, errors: perSku };
+        validation = { valid: allValid, specVersion: SPEC_VERSION, feedType: maintenance ? "MP_MAINTENANCE" : "MP_ITEM", checked: readyRows.length, errors: perSku };
         for (const r of report) {
           const errs = perSku[String(r.sku)];
           if (errs) (r as Record<string, unknown>).specErrors = errs;
         }
       }
       const shown = body.trim === "required" && !matchSetup ? { ...feed, MPItem: (items as MPItem[]).map(trimToRequired) } : feed;
-      return json({ ok: true, env, preview: true, setup: matchSetup ? "match" : "item", trimmed: body.trim === "required" && !matchSetup, products: report, skipped, validation, payload: body.debug ? shown : undefined });
+      return json({ ok: true, env, preview: true, setup: setupName, trimmed: body.trim === "required" && !matchSetup, products: report, skipped, validation, payload: body.debug ? shown : undefined });
     }
 
     // --- submit ---------------------------------------------------------------
@@ -544,9 +581,9 @@ Deno.serve(async (req) => {
     // from one of the optional fields (ERR_PDI_0001, 2026-09-28).
     const trimmed = body.trim === "required" && !matchSetup;
     const sendFeed = trimmed ? { ...feed, MPItem: (items as MPItem[]).map(trimToRequired) } : feed;
-    const feedType = matchSetup ? "MP_ITEM_MATCH" : "MP_ITEM";
+    const feedType = matchSetup ? "MP_ITEM_MATCH" : maintenance ? "MP_MAINTENANCE" : "MP_ITEM";
     const form = new FormData();
-    form.append("file", new Blob([JSON.stringify(sendFeed)], { type: "application/json" }), matchSetup ? "mp_item_match.json" : "mp_item.json");
+    form.append("file", new Blob([JSON.stringify(sendFeed)], { type: "application/json" }), `${feedType.toLowerCase()}.json`);
     const res = await fetch(`${base}/v3/feeds?feedType=${feedType}`, {
       method: "POST",
       headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm }),
@@ -574,10 +611,10 @@ Deno.serve(async (req) => {
     const submitted = (report as { sku: string; ready: boolean }[]).filter((r) => r.ready).map((r) => r.sku);
     await admin.from("audit_log").insert({
       actor_id: caller.id, actor_email: caller.email ?? null, actor_name: null, action: "push", entity_type: "channel", entity_id: "walmart_us", target: "walmart",
-      summary: `${sandbox ? "Sandbox test:" : "Submitted"} ${submitted.length} Walmart US ${matchSetup ? "offer(s) by match" : "item(s)"}${trimmed ? " (required fields only)" : ""}: ${submitted.slice(0, 8).join(", ")}${submitted.length > 8 ? "…" : ""} — feed ${feedId ?? "?"}${outcome.feedStatus ? `, ${outcome.feedStatus}` : ""}`,
+      summary: `${sandbox ? "Sandbox test:" : "Submitted"} ${submitted.length} Walmart US ${matchSetup ? "offer(s) by match" : maintenance ? "content update(s)" : "item(s)"}${trimmed ? " (required fields only)" : ""}: ${submitted.slice(0, 8).join(", ")}${submitted.length > 8 ? "…" : ""} — feed ${feedId ?? "?"}${outcome.feedStatus ? `, ${outcome.feedStatus}` : ""}`,
       metadata: { env, feedId, feedType, skus: submitted, trimmed, ...outcome, items: undefined },
     }).then(() => {}, () => {});
-    return json({ ok: true, env, feedId, feedType, setup: matchSetup ? "match" : "item", submitted, trimmed, products: report, skipped, ...outcome, sent: trimmed ? sendFeed : undefined });
+    return json({ ok: true, env, feedId, feedType, setup: setupName, submitted, trimmed, products: report, skipped, ...outcome, sent: trimmed ? sendFeed : undefined });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[walmart-add-items] FAILED:", message);
