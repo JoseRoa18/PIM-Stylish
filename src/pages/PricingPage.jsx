@@ -45,7 +45,7 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
-import { PROMOTION_KINDS, monthlyOverlap, KIND_LEVEL, levelLabel, promotionLevel } from '@/features/pricing/api/promotions';
+import { PROMOTION_KINDS, monthlyOverlap, KIND_LEVEL, levelLabel, promotionLevel, onMarketList } from '@/features/pricing/api/promotions';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
@@ -884,15 +884,19 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
+  // Each market's list is the SKUs of its own file (rule 2026-09-30: the USA
+  // and the Canada promotions are independent); `markets` carries which file
+  // a SKU came from, and each file only contributes its own market's price.
   const mergedFileRows = useMemo(() => {
     const bySku = new Map();
-    for (const part of [files.ca, files.us]) {
+    for (const [market, part] of [['ca', files.ca], ['us', files.us]]) {
       for (const r of part?.rows ?? []) {
         const prev = bySku.get(r.sku);
         bySku.set(r.sku, {
           sku: r.sku,
-          promo_price_cad: r.promo_price_cad ?? prev?.promo_price_cad ?? null,
-          promo_price_usd: r.promo_price_usd ?? prev?.promo_price_usd ?? null,
+          markets: [...new Set([...(prev?.markets ?? []), market])],
+          promo_price_cad: market === 'ca' ? r.promo_price_cad ?? null : prev?.promo_price_cad ?? null,
+          promo_price_usd: market === 'us' ? r.promo_price_usd ?? null : prev?.promo_price_usd ?? null,
           promo_costs: { ...(prev?.promo_costs ?? {}), ...(r.promo_costs ?? {}) },
         });
       }
@@ -915,9 +919,9 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         starts_on: customDates ? startsOn : null,
         ends_on: customDates ? endsOn : null,
       };
-      // Prices always come from the products' levels (the database derives
-      // every promotion row from them); a pasted list only contributes its
-      // SKUs, and a price file its SKUs too.
+      // A price file's values ARE the promotion — each market's list at the
+      // file's prices, the level only where the file leaves a price blank
+      // (rule 2026-09-30); a pasted SKU list takes everything from the level.
       const res = monthly && mode === 'file'
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
         : await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: monthly ? [] : portals });
@@ -1484,7 +1488,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
               .sort();
             const priceKey = market === 'ca' ? 'promo_price_cad' : 'promo_price_usd';
             const mapKey = market === 'ca' ? 'map_cad' : 'map_usd';
-            const marketRows = rows.filter((r) => r[priceKey] != null || costKeys.some((k) => r.promo_costs?.[k] != null));
+            // Each market shows its own list (rule 2026-09-30).
+            const marketRows = rows.filter((r) => onMarketList(r, market));
             const q = skuQuery.trim().toUpperCase();
             const catOf = (r) => mapBySku?.[r.sku]?.category ?? null;
             const brandOf = (r) => mapBySku?.[r.sku]?.brand ?? null;
@@ -2568,13 +2573,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const marketCount = (m) => {
-    const priceField = m === 'us' ? 'promo_price_usd' : 'promo_price_cad';
-    return (rows ?? []).filter((r) =>
-      r[priceField] != null ||
-      MARKET_FIELDS[m].some((f) => f.startsWith('cost:') && r.promo_costs?.[f.slice(5)] != null),
-    ).length;
-  };
+  const marketCount = (m) => (rows ?? []).filter((r) => onMarketList(r, m)).length;
   const counts = { ca: marketCount('ca'), us: marketCount('us') };
   const loaded = market ? counts[market] > 0 : false;
   const marketLabel = market === 'us' ? 'USA' : 'Canada';
@@ -2590,9 +2589,12 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
         const other = market === 'us' ? 'Canada' : 'USA';
         throw new Error(`This file has no ${marketLabel} price columns — it looks like a ${other} file. Download the ${marketLabel} template from this dialog.`);
       }
-      const r = await addFileToPromotion(promo, parsed.rows);
+      // The file IS this market's list: its SKUs at its prices; the SKUs not
+      // in it leave the list. The other market is not touched.
+      const r = await addFileToPromotion(promo, parsed.rows, market);
       onImported(
-        `${marketLabel}: imported ${r.added} SKUs from ${file.name}` +
+        `${marketLabel}: ${r.added} SKUs on the list from ${file.name}` +
+        (r.left ? ` · ${r.left} not in the file left the ${marketLabel} list` : '') +
         (r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''),
       );
     } catch (err) {
@@ -2637,7 +2639,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
             {loaded ? (
               <p className="text-body-sm text-on-surface-variant">
                 <span className="font-semibold text-on-surface">{marketLabel} is already loaded</span> ({counts[market]} SKUs).
-                Download the current data, edit it, and upload it back to update.
+                A new file replaces the {marketLabel} list: its SKUs at its prices, and the SKUs not in it leave the list.
               </p>
             ) : (
               <p className="text-body-sm text-on-surface-variant">

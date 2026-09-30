@@ -212,18 +212,20 @@ async function buildWorkbook(template, promotion, channel) {
     if (categories.size && !categories.has(p.category)) { otherCategory.push(m.sku); continue; }
     const a = alias.get(m.sku);
     if (!a) { noAlias.push(m.sku); continue; }
+    // The promotion's row is the truth — the file's price, or the level where
+    // the file left it blank (rule 2026-09-30); the level only fills a gap.
     const listed = m.promo_price_cad != null ? Number(m.promo_price_cad) : null;
     const level = p[promoMapField] != null ? Number(p[promoMapField]) : null;
-    const promoMap = level ?? listed;
+    const promoMap = listed ?? level;
     if (promoMap == null) { noPromoMap.push(m.sku); continue; }
-    if (level == null) fromList += 1;
-    else if (listed != null && listed !== level) listDiffers.push(`${m.sku} (list ${listed}, ${levelLabel(tier)} ${level})`);
+    if (listed != null) fromList += 1;
+    if (listed != null && level != null && listed !== level) listDiffers.push(`${m.sku} (list ${listed}, ${levelLabel(tier)} ${level})`);
     const map = p.map_cad != null ? Number(p.map_cad) : null;
     if (map == null) noMap.push(m.sku);
     else if (promoMap >= map) atOrAbove.push(m.sku);
     const regularCost = p.cost_cad_rona_hd != null ? Number(p.cost_cad_rona_hd) : null;
     const listedCost = m.promo_costs?.rona_hd_cad;
-    const promoCost = p[promoCostField] != null ? Number(p[promoCostField]) : listedCost != null ? Number(listedCost) : null;
+    const promoCost = listedCost != null ? Number(listedCost) : p[promoCostField] != null ? Number(p[promoCostField]) : null;
     if (regularCost == null) noCost.push(m.sku);
     if (promoCost == null) noPromoCost.push(m.sku);
     const tracked = stock[m.sku];
@@ -370,8 +372,8 @@ export async function fillHomeDepotCaPromoTemplates(templates, promotion, channe
 function describeFile(r) {
   const extra = (r.family ?? []).filter((c) => !r.categories.includes(c)).map((c) => labelOf(c).toLowerCase());
   const cats = r.categories.length ? r.categories.map(labelOf).join(' / ') + (extra.length ? ` incl. ${extra.join(', ')}` : '') : 'every category';
-  const parts = [`${cats}: ${r.rows} articles from row ${r.firstRow} of "${r.sheet}" (${r.layout}${r.quarter ? `, ${r.quarter}, notes "${r.notes}"` : ''}); prices = the products' MAP / WC ${levelLabel(r.tier)}${r.fromList ? ` (${r.fromList} from the promotion's list, no level price)` : ''}, forecast = ${r.forecastShare === 1 ? 'the Canada stock' : `${Math.round(r.forecastShare * 100)}% of the Canada stock`}${r.atZero ? ` (${r.atZero} at 0)` : ''}`];
-  if (r.listDiffers?.length) parts.push(`${r.listDiffers.length} where the promotion's list differs from the ${levelLabel(r.tier)} level (the level went in): ${few(r.listDiffers, 4)}`);
+  const parts = [`${cats}: ${r.rows} articles from row ${r.firstRow} of "${r.sheet}" (${r.layout}${r.quarter ? `, ${r.quarter}, notes "${r.notes}"` : ''}); prices = the promotion's promo MAP / WC (the file's values; the ${levelLabel(r.tier)} level where it has none), forecast = ${r.forecastShare === 1 ? 'the Canada stock' : `${Math.round(r.forecastShare * 100)}% of the Canada stock`}${r.atZero ? ` (${r.atZero} at 0)` : ''}`];
+  if (r.listDiffers?.length) parts.push(`${r.listDiffers.length} where the promotion's list differs from the ${levelLabel(r.tier)} level (the promotion's price went in): ${few(r.listDiffers, 4)}`);
   if (r.otherCategory.length) parts.push(`${r.otherCategory.length} promo products of other categories left out`);
   if (r.noAlias.length) parts.push(`no Home Depot Canada id in Aliases, left out: ${few(r.noAlias)}`);
   if (r.noPromoMap.length) parts.push(`no MAP ${levelLabel(r.tier)} in the PIM, left out: ${few(r.noPromoMap)}`);

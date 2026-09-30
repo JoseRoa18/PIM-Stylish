@@ -120,6 +120,15 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
     if (error) throw error;
     for (const p of data ?? []) values.set(p.sku, { cost: withCost ? numOrNull(p.cost) : null, map: numOrNull(p.map), usdMap: numOrNull(p.usdMap) });
   }
+  // Promo MAP day: the promotion's own promo MAP (the file's, rule
+  // 2026-09-30) wins over the level. Back to Blue always takes Blue.
+  if (start) {
+    const priceKey = usa ? 'promo_price_usd' : 'promo_price_cad';
+    for (const m of members) {
+      const own = m[priceKey];
+      if (own != null && values.has(m.sku)) values.get(m.sku).map = Number(own);
+    }
+  }
 
   const money = await ensureNumberFormat(zip, MONEY, 0);
   const firstData = hit.headerRow + 3; // labels, instructions, then data

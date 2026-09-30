@@ -36,11 +36,28 @@ export async function listPromotions() {
 export async function getPromotionPrices(promotionId) {
   const { data, error } = await supabase
     .from('promotion_prices')
-    .select('id, sku, promo_price_cad, promo_price_usd, promo_costs')
+    .select('id, sku, promo_price_cad, promo_price_usd, promo_costs, in_ca, in_us, set_price_cad, set_price_usd, set_costs')
     .eq('promotion_id', promotionId)
     .order('sku');
   if (error) throw error;
   return data ?? [];
+}
+
+// The market each promotion channel sells in. The USA and the Canada
+// promotions are independent lists (user rule 2026-09-30): a channel only
+// ever gets the products on its own market's list.
+const CA_CHANNELS = new Set(['wix_sinksdirect_ca', 'wix_azuni_ca', 'wix_stylish_ca', 'bestbuy', 'wayfair_ca', 'homedepot_ca', 'rona', 'amazon_ca', 'walmart_ca']);
+const US_CHANNELS = new Set(['wix_sinksdirect_us', 'wix_stylish_us', 'wayfair_us', 'walmart_us', 'amazon_us', 'homedepot_us', 'lowes_us', 'menards', 'bbb', 'overstock']);
+export function channelMarket(channelKey) {
+  if (CA_CHANNELS.has(channelKey)) return 'ca';
+  if (US_CHANNELS.has(channelKey)) return 'us';
+  return null;
+}
+/** Is the row on that market's list? (in_ca / in_us; older rows: a price there) */
+export function onMarketList(row, market) {
+  const flag = market === 'us' ? row.in_us : row.in_ca;
+  if (flag != null) return flag;
+  return (market === 'us' ? row.promo_price_usd : row.promo_price_cad) != null;
 }
 
 /**
@@ -62,9 +79,14 @@ export async function excludedSkus(channelKey, skus) {
   return out;
 }
 
-/** The promotion's price rows minus the products excluded on `channelKey`. */
+/**
+ * The promotion's rows for a channel: only its market's list (a Canada
+ * channel never gets a USA-only product, and the reverse), minus the
+ * products excluded on `channelKey`.
+ */
 export async function promotionMembersFor(promotion, channelKey) {
-  const prices = await getPromotionPrices(promotion.id);
+  const market = channelMarket(channelKey);
+  const prices = (await getPromotionPrices(promotion.id)).filter((r) => !market || onMarketList(r, market));
   const ex = channelKey ? await excludedSkus(channelKey, prices.map((r) => r.sku)) : new Set();
   return { rows: prices.filter((r) => !ex.has(r.sku)), excluded: [...ex].sort() };
 }
@@ -184,7 +206,9 @@ async function levelPriceRows(skus, tier) {
     const p = found.get(sku);
     const costs = {};
     for (const [slug, col] of Object.entries(level.costs)) if (num(p[col]) != null) costs[slug] = num(p[col]);
-    const row = { sku, promo_price_cad: num(p[level.promo_price_cad]), promo_price_usd: num(p[level.promo_price_usd]), promo_costs: costs };
+    // A SKU-only list: on both markets, every price from the level (no
+    // given values — the rows keep following the level in Pricing).
+    const row = { sku, in_ca: true, in_us: true, promo_price_cad: num(p[level.promo_price_cad]), promo_price_usd: num(p[level.promo_price_usd]), promo_costs: costs };
     if (row.promo_price_cad == null && row.promo_price_usd == null && !Object.keys(costs).length) noLevel.push(sku);
     return row;
   });
@@ -339,34 +363,63 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
     .single();
   if (error) throw error;
 
-  const priceRows = valid.map((r) => ({
-    promotion_id: promo.id,
-    sku: r.sku,
-    promo_price_cad: r.promo_price_cad ?? null,
-    promo_price_usd: r.promo_price_usd ?? null,
-    promo_costs: r.promo_costs ?? {},
-  }));
+  // The file's values ARE the promotion (rule 2026-09-30): each market's list
+  // is the SKUs of its own file, at the prices and costs the file gives; the
+  // level only fills what the file leaves blank. `markets` says which file a
+  // row came from (the form merges the Canada and the USA file).
+  const priceRows = valid.map((r) => {
+    const inCa = r.markets ? r.markets.includes('ca') : (r.promo_price_cad != null || hasMarketCost(r.promo_costs, 'ca'));
+    const inUs = r.markets ? r.markets.includes('us') : (r.promo_price_usd != null || hasMarketCost(r.promo_costs, 'us'));
+    return {
+      promotion_id: promo.id,
+      sku: r.sku,
+      in_ca: inCa,
+      in_us: inUs,
+      set_price_cad: inCa ? r.promo_price_cad ?? null : null,
+      set_price_usd: inUs ? r.promo_price_usd ?? null : null,
+      set_costs: r.promo_costs ?? {},
+    };
+  });
   for (let i = 0; i < priceRows.length; i += 200) {
     const { error: insErr } = await supabase.from('promotion_prices').insert(priceRows.slice(i, i + 200));
     if (insErr) throw insErr;
   }
+  const counts = { ca: priceRows.filter((r) => r.in_ca).length, us: priceRows.filter((r) => r.in_us).length };
 
   logActivity({
     action: 'create',
     entityType: 'promotion',
     entityId: String(promo.id),
-    summary: `Created promotion "${name}" from file (${valid.length} SKUs)`,
+    summary: `Created promotion "${name}" from file (${valid.length} SKUs — Canada ${counts.ca}, USA ${counts.us})`,
     metadata: { period, skus: valid.length, not_in_pim: notInPim.length },
   });
   return { promotion: promo, added: valid.length, notInPim };
 }
 
+// Which promo cost slugs belong to each market's file.
+const MARKET_COST_SLUGS = {
+  ca: ['rona_hd_cad', 'sod_cad', 'wayfair_ca_usd'],
+  us: ['lowes_sod_bbb_usd', 'wayfair_usd', 'menards_usd'],
+};
+function hasMarketCost(costs, market) {
+  return MARKET_COST_SLUGS[market].some((slug) => costs?.[slug] != null);
+}
+function withoutMarketCosts(costs, market) {
+  const out = { ...(costs ?? {}) };
+  for (const slug of MARKET_COST_SLUGS[market]) delete out[slug];
+  return out;
+}
+
 /**
- * Merge full row objects (a market file) into an existing promotion. Values
- * present in the file win; everything else on the row is preserved — so the
- * Canada file and the USA file can arrive at different times.
+ * Import one market's file into an existing promotion: the file IS that
+ * market's list (rule 2026-09-30 — the USA and the Canada promotions are
+ * independent). Its SKUs go on the market's list at the file's prices and
+ * costs (the level only fills what the file leaves blank); SKUs of the
+ * promotion that are not in the file leave that market's list, and a row on
+ * neither list is removed. The other market is never touched.
  */
-export async function addFileToPromotion(promotion, rows) {
+export async function addFileToPromotion(promotion, rows, market) {
+  if (market !== 'ca' && market !== 'us') throw new Error('Pick the market this file is for.');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
@@ -375,32 +428,70 @@ export async function addFileToPromotion(promotion, rows) {
 
   const existing = await getPromotionPrices(promotion.id);
   const bySku = new Map(existing.map((r) => [r.sku, r]));
+  const inFile = new Set(valid.map((r) => r.sku));
+  const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
+  const flag = market === 'us' ? 'in_us' : 'in_ca';
+  const setKey = market === 'us' ? 'set_price_usd' : 'set_price_cad';
+  const otherFlag = market === 'us' ? 'in_ca' : 'in_us';
+  const otherSetKey = market === 'us' ? 'set_price_cad' : 'set_price_usd';
+  const other = market === 'us' ? 'ca' : 'us';
 
-  const upserts = valid.map((r) => {
-    const prev = bySku.get(r.sku);
-    return {
-      promotion_id: promotion.id,
-      sku: r.sku,
-      promo_price_cad: r.promo_price_cad ?? prev?.promo_price_cad ?? null,
-      promo_price_usd: r.promo_price_usd ?? prev?.promo_price_usd ?? null,
-      promo_costs: { ...(prev?.promo_costs ?? {}), ...(r.promo_costs ?? {}) },
-    };
+  // One shape for every upserted row (PostgREST needs the same columns).
+  const rowOf = (sku, prev, patch) => ({
+    promotion_id: promotion.id,
+    sku,
+    in_ca: prev ? onMarketList(prev, 'ca') : false,
+    in_us: prev ? onMarketList(prev, 'us') : false,
+    set_price_cad: prev?.set_price_cad ?? null,
+    set_price_usd: prev?.set_price_usd ?? null,
+    set_costs: prev?.set_costs ?? {},
+    ...patch,
   });
+
+  const upserts = [];
+  for (const r of valid) {
+    const prev = bySku.get(r.sku);
+    const fileCosts = Object.fromEntries(Object.entries(r.promo_costs ?? {}).filter(([slug]) => MARKET_COST_SLUGS[market].includes(slug)));
+    upserts.push(rowOf(r.sku, prev, {
+      [flag]: true,
+      [setKey]: r[priceKey] ?? null,
+      set_costs: { ...withoutMarketCosts(prev?.set_costs, market), ...fileCosts },
+    }));
+  }
+  const toDelete = [];
+  let left = 0;
+  for (const prev of existing) {
+    if (inFile.has(prev.sku) || !onMarketList(prev, market)) continue;
+    left += 1;
+    if (!onMarketList(prev, other)) { toDelete.push(prev.id); continue; }
+    upserts.push(rowOf(prev.sku, prev, {
+      [flag]: false,
+      [setKey]: null,
+      [otherFlag]: true,
+      [otherSetKey]: prev[otherSetKey] ?? null,
+      set_costs: withoutMarketCosts(prev.set_costs, market),
+    }));
+  }
   for (let i = 0; i < upserts.length; i += 200) {
     const { error } = await supabase
       .from('promotion_prices')
       .upsert(upserts.slice(i, i + 200), { onConflict: 'promotion_id,sku' });
     if (error) throw error;
   }
+  for (let i = 0; i < toDelete.length; i += 200) {
+    const { error } = await supabase.from('promotion_prices').delete().in('id', toDelete.slice(i, i + 200));
+    if (error) throw error;
+  }
 
+  const label = market === 'us' ? 'USA' : 'Canada';
   logActivity({
     action: 'update',
     entityType: 'promotion',
     entityId: String(promotion.id),
-    summary: `Imported file into promotion "${promotion.name}" (${valid.length} SKUs)`,
-    metadata: { skus: valid.length, not_in_pim: notInPim.length },
+    summary: `Imported the ${label} file into promotion "${promotion.name}" (${valid.length} SKUs on the ${label} list${left ? `, ${left} left it` : ''})`,
+    metadata: { market, skus: valid.length, left_the_list: left, removed_rows: toDelete.length, not_in_pim: notInPim.length },
   });
-  return { added: valid.length, notInPim };
+  return { added: valid.length, left, removed: toDelete.length, notInPim };
 }
 
 /**

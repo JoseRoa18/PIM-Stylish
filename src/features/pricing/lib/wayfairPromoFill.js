@@ -101,16 +101,22 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
 
   const { rows: prices, excluded } = await promotionMembersFor(promotion, usa ? 'wayfair_us' : 'wayfair_ca');
   const tier = promotionLevel(promotion);
-  // The base cost per member, from the product's level in Pricing: WC Wayfair
-  // (USA) or WC Wayfair Canada in USD (Canada).
+  // The base cost per member: the promotion's own (the file's WC Wayfair /
+  // WC Wayfair Canada USD, rule 2026-09-30), else the product's level in
+  // Pricing.
   const costBySku = new Map();
   const costName = usa ? 'WC Wayfair' : 'WC Wayfair Canada (USD)';
   const field = usa ? `cost_usd_wayfair_${tier}` : `cost_usd_wayfair_ca_${tier}`;
+  const costSlug = usa ? 'wayfair_usd' : 'wayfair_ca_usd';
   const skus = prices.map((r) => r.sku);
   for (let i = 0; i < skus.length; i += 100) {
     const { data, error } = await supabase.from('products').select(`sku, cost:${field}`).in('sku', skus.slice(i, i + 100));
     if (error) throw error;
     for (const p of data ?? []) if (p.cost != null) costBySku.set(p.sku, Number(p.cost));
+  }
+  for (const r of prices) {
+    const own = r.promo_costs?.[costSlug];
+    if (own != null) costBySku.set(r.sku, Number(own));
   }
   const noCost = prices.map((r) => r.sku).filter((s) => !costBySku.has(s)).sort();
   if (!costBySku.size) throw new Error(`No member of this promotion has a ${costName} ${levelLabel(tier)} in Pricing.`);
