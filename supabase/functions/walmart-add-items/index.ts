@@ -48,6 +48,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import Ajv from "https://esm.sh/ajv@8.17.1";
 import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
+import { isServiceRole } from "../_shared/serviceRole.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -366,15 +367,20 @@ Deno.serve(async (req) => {
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // --- caller: admin/editor session ---------------------------------------
+    // --- caller: admin/editor session, or the service-role key (maintenance
+    // and diagnostics from the PIM's scripts, like walmart-push-promo) --------
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
     if (!token) return json({ error: "Missing Authorization header." }, 401);
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
-    const callerClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } });
-    const { data: { user: caller } } = await callerClient.auth.getUser();
-    if (!caller) return json({ error: "Invalid or expired session." }, 401);
-    const { data: profile } = await admin.from("profiles").select("role").eq("id", caller.id).maybeSingle();
-    if (!["admin", "editor"].includes(profile?.role ?? "")) return json({ error: "Only admins and editors can create Walmart listings." }, 403);
+    let caller: { id: string | null; email: string | null } = { id: null, email: "service role" };
+    if (!(await isServiceRole(SUPABASE_URL, token, SERVICE_ROLE))) {
+      const callerClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } });
+      const { data: { user } } = await callerClient.auth.getUser();
+      if (!user) return json({ error: "Invalid or expired session." }, 401);
+      const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
+      if (!["admin", "editor"].includes(profile?.role ?? "")) return json({ error: "Only admins and editors can create Walmart listings." }, 403);
+      caller = { id: user.id, email: user.email ?? null };
+    }
 
     const body = await req.json().catch(() => ({}));
     const mode: string = body.mode ?? "preview";
