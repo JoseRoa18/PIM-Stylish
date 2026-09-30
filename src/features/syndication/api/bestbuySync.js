@@ -40,9 +40,12 @@ async function invokeBestBuy(body = {}) {
  * carries only price and/or a scheduled discount; content, stock and state
  * are never touched. `dryRun: true` returns the exact Mirakl payload without
  * submitting anything — the preview the alignment tab shows before a push.
+ * `protectRunning: { start, end }` leaves out offers running another
+ * promotion's discount right now (one began outside that window); an update
+ * with `clear_discount: { start, end }` drops a discount that began in it.
  */
-export async function pushBestBuyPrices(updates, { dryRun = false } = {}) {
-  const data = await invokeFn('bestbuy-push-price', { updates, dryRun });
+export async function pushBestBuyPrices(updates, { dryRun = false, protectRunning = null } = {}) {
+  const data = await invokeFn('bestbuy-push-price', { updates, dryRun, ...(protectRunning ? { protect_running: protectRunning } : {}) });
   if (!dryRun) {
     logActivity({
       action: 'push',

@@ -13,7 +13,9 @@
 //       window: the 1st 00:00 ET → month end 23:59:59 ET.
 //
 // Body: {
-//   mode?: "push" | "status" | "promo"   (default push)
+//   mode?: "push" | "status" | "promo" | "delete"   (default push; delete:
+//                                          Canada, the promotion's promo off
+//                                          `skus` — dryRun previews)
 //   market?: "ca" | "us"                  (default ca)
 //   promotionId: number,                   push: which promotion
 //   skus?: string[],                       push: subset (controlled tests)
@@ -154,6 +156,61 @@ Deno.serve(async (req) => {
       }
       const failed = items.filter((it) => (it as Record<string, unknown>).ingestionStatus !== "SUCCESS");
       return json({ ok: true, market, ...summary, failed });
+    }
+
+    // --- delete (Canada) ----------------------------------------------------
+    // Takes a promotion's promo off SKUs that left its list (a new file
+    // replaces a market's list; found 2026-09-30: 39 USA-only SKUs held
+    // October's Canada promo). Each SKU's live promo is read first and only
+    // the one ending on this promotion's last minute is deleted, with the
+    // exact dates and prices Walmart holds (promotionSettingAction "Delete").
+    if (mode === "delete") {
+      if (market !== "ca") return json({ error: "delete is only wired for Walmart Canada." }, 400);
+      const promotionId = Number(body.promotionId);
+      const skusIn: string[] = Array.isArray(body.skus) ? body.skus.map(String) : [];
+      if (!promotionId || !skusIn.length) return json({ error: "promotionId and skus[] are required." }, 400);
+      const { data: promo } = await admin.from("promotions").select("id, name, period, starts_on, ends_on").eq("id", promotionId).maybeSingle();
+      if (!promo) return json({ error: `Promotion ${promotionId} not found.` }, 404);
+      const endMs = Date.parse(etInstant(promoWindow(promo, market).end, "23:59:59"));
+      const { data: aliasRows } = await admin.from("product_aliases").select("alias, sku").eq("marketplace", cfg.alias).in("sku", skusIn);
+      const walmartSku = new Map<string, string>((aliasRows ?? []).map((r: { alias: string; sku: string }) => [r.sku, r.alias]));
+      const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+      const lines: Record<string, unknown>[] = [];
+      const noPromo: string[] = [];
+      for (const sku of skusIn) {
+        const wsku = walmartSku.get(sku) ?? sku;
+        const r = await wmGet(`/v3/promo/sku/${encodeURIComponent(wsku)}`);
+        const pricing = ((((r.data as Record<string, unknown>)?.payload as Record<string, unknown>)?.pricingList as Record<string, unknown>)?.pricing ?? []) as Record<string, unknown>[];
+        const hit = pricing.find((p) => p.currentPriceType === "REDUCED" && Number(p.expirationDate) === endMs);
+        if (!hit) { noPromo.push(sku); continue; }
+        const amount = (k: string) => Number(((hit[k] as Record<string, unknown>)?.value as Record<string, unknown>)?.amount);
+        lines.push({
+          Price: {
+            sku: wsku,
+            price: amount("comparisonPrice"),
+            promotionInformation: {
+              promotionSettingAction: "Delete", promotionType: "Reduced", promotionPrice: amount("currentPrice"),
+              promotionPriceStartDateTime: iso(Number(hit.effectiveDate)), promotionPriceEndDateTime: iso(Number(hit.expirationDate)),
+            },
+          },
+        });
+      }
+      const payload = {
+        MPItemFeedHeader: { subCategory: "price-mp", mart: "WALMART_CA", feedType: "PRICE_AND_PROMOTION", processMode: "REPLACE", locale: ["en", "fr"], version: CA_FEED_VERSION, subset: "EXTERNAL", tenant: "WALMART_CA" },
+        MPItem: lines,
+      };
+      const report = { market, promotion: promo.name, requested: skusIn.length, to_delete: lines.length, no_promo: noPromo };
+      if (body.dryRun === true || !lines.length) return json({ ok: true, dryRun: body.dryRun === true, ...report, payload });
+      const res = await fetch(`${BASE}/v3/feeds?feedType=PRICE_AND_PROMOTION`, {
+        method: "POST",
+        headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm, "Content-Type": "application/json" }, cfg.wmMarket),
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text();
+      if (!res.ok) return json({ error: `Walmart feed ${res.status}: ${text.slice(0, 400)}`, ...report }, 502);
+      let feedId: string | null = null;
+      try { feedId = JSON.parse(text).feedId ?? null; } catch { /* keep null */ }
+      return json({ ok: true, feedId, ...report });
     }
 
     // --- push ---------------------------------------------------------------

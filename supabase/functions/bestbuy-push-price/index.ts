@@ -10,9 +10,18 @@
 //     discount_price?: number,      // promo price (scheduled discount)
 //     discount_start_date?: string, // ISO date — promo month start
 //     discount_end_date?: string,   // ISO date — promo month end
+//     clear_discount?: true | { start, end }, // drop the live discount (a
+//                                     // window: only one that began in it)
 //   }],
+//   protect_running?: { start, end }, // leave out lines whose offer runs a
+//                                     // discount right now that began outside
+//                                     // this window (another promotion's)
 //   dryRun?: boolean, // true → return the exact Mirakl payload, POST nothing
 // }
+//
+// The discount travels as Mirakl's nested `discount` object (see
+// _shared/bestbuyDiscount.ts): the flat CSV names were ignored in JSON and
+// every line cleared the offer's discount until 2026-09-30.
 //
 // Mirakl runs OF24 in NORMAL mode (import_mode in the JSON body is ignored on
 // this instance): fields missing from a line are BLANKED. On 2026-08-28 a
@@ -28,6 +37,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { excludedSet } from "../_shared/exclusions.ts";
+import { bbDiscount, carryDiscount, discountRunning, etDayOf } from "../_shared/bestbuyDiscount.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -51,6 +61,8 @@ interface PriceUpdate {
   discount_start_date?: string;
   discount_end_date?: string;
   quantity?: number; // only for stock RESTORES — never sent by the price flows
+  clear_discount?: true | { start: string; end: string };
+  live_discount?: Record<string, unknown> | null; // set by the merge, never by callers
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -65,7 +77,7 @@ function buildOfferLine(u: PriceUpdate): Record<string, unknown> | string {
   const hasDiscount = typeof u.discount_price === "number" &&
     Number.isFinite(u.discount_price) && u.discount_price > 0;
   const hasQty = typeof u.quantity === "number" && Number.isInteger(u.quantity) && u.quantity >= 0;
-  if (!hasPrice && !hasDiscount && !hasQty) return `${u.sku}: nothing to update (no price, no discount, no quantity)`;
+  if (!hasPrice && !hasDiscount && !hasQty && !u.clear_discount) return `${u.sku}: nothing to update (no price, no discount, no quantity)`;
   if (hasPrice) line.price = u.price;
   if (hasQty) line.quantity = u.quantity;
   if (hasDiscount) {
@@ -77,13 +89,11 @@ function buildOfferLine(u: PriceUpdate): Record<string, unknown> | string {
     if (hasPrice && (u.discount_price as number) >= (u.price as number)) {
       return `${u.sku}: discount_price (${u.discount_price}) must be below price (${u.price})`;
     }
-    // Best Buy's Mirakl runs volume pricing: a discount is stored as ranges
-    // ({price, quantity_threshold}) and a bare discount_price is silently
-    // ignored (verified 2026-08-28). Send both — ranges carry the value.
-    line.discount_price = u.discount_price;
-    line.discount_ranges = [{ price: u.discount_price, quantity_threshold: 1 }];
-    if (u.discount_start_date) line.discount_start_date = u.discount_start_date;
-    if (u.discount_end_date) line.discount_end_date = u.discount_end_date;
+    if (!u.discount_start_date || !u.discount_end_date) return `${u.sku}: a discount needs its start and end dates`;
+    line.discount = bbDiscount(u.discount_price as number, u.discount_start_date, u.discount_end_date);
+  } else if (u.live_discount) {
+    // No new discount: the offer keeps the one it has (NORMAL mode would clear it).
+    line.discount = u.live_discount;
   }
   return line;
 }
@@ -115,6 +125,9 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     let updates: PriceUpdate[] = Array.isArray(body.updates) ? body.updates : [];
     const dryRun = body.dryRun === true;
+    const protect = body.protect_running && typeof body.protect_running.start === "string" && typeof body.protect_running.end === "string"
+      ? { start: String(body.protect_running.start), end: String(body.protect_running.end) }
+      : null;
     if (!updates.length) return json({ error: "updates[] is required." }, 400);
     // Marketplace exclusion (rule 2026-09-22): products switched off for Best Buy are left out.
     const excludedBb = await excludedSet(admin, updates.map((u) => u.sku), "bestbuy");
@@ -146,7 +159,21 @@ Deno.serve(async (req) => {
       offset += 100;
       if (!data.offers?.length || offset >= (data.total_count ?? 0)) break;
     }
-    const isoDate = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : undefined);
+    // A running discount of ANOTHER promotion is left alone when the caller
+    // asks (an offer holds one discount: next month's list loaded early must
+    // not end this month's promo on Best Buy).
+    const keptRunning: string[] = [];
+    if (protect) {
+      updates = updates.filter((u) => {
+        const d = live.get(String(u.sku).trim())?.discount;
+        if (typeof u.discount_price !== "number" || !d || !discountRunning(d)) return true;
+        const began = typeof d.start_date === "string" ? etDayOf(d.start_date) : null;
+        if (began && began >= protect.start && began <= protect.end) return true;
+        keptRunning.push(u.sku);
+        return false;
+      });
+      if (!updates.length) return json({ ok: true, pushed: 0, kept_running: keptRunning.sort() });
+    }
     const merged: PriceUpdate[] = updates.map((u) => {
       const cur = live.get(String(u.sku).trim());
       if (!cur) return u; // unknown at Best Buy — Mirakl will report the line
@@ -154,11 +181,10 @@ Deno.serve(async (req) => {
       if (typeof out.quantity !== "number") out.quantity = cur.quantity;
       if (typeof out.price !== "number" && cur.price != null) out.price = cur.price;
       const d = cur.discount;
-      if (typeof out.discount_price !== "number" && d && typeof d.discount_price === "number") {
-        out.discount_price = d.discount_price as number;
-        out.discount_start_date = isoDate(d.start_date);
-        out.discount_end_date = isoDate(d.end_date);
-      }
+      const began = d && typeof d.start_date === "string" ? etDayOf(d.start_date) : null;
+      const cw = typeof u.clear_discount === "object" ? u.clear_discount : null;
+      const clear = u.clear_discount === true || (!!cw && !!began && began >= cw.start && began <= cw.end);
+      if (typeof out.discount_price !== "number" && !clear) out.live_discount = carryDiscount(d);
       return out;
     });
 
@@ -174,7 +200,7 @@ Deno.serve(async (req) => {
     }
 
     if (dryRun) {
-      return json({ ok: true, dryRun: true, count: offers.length, payload: { import_mode: "PARTIAL_UPDATE", offers } });
+      return json({ ok: true, dryRun: true, count: offers.length, kept_running: keptRunning.sort(), payload: { import_mode: "PARTIAL_UPDATE", offers } });
     }
 
     // --- submit the OF24 import --------------------------------------------
@@ -225,6 +251,7 @@ Deno.serve(async (req) => {
       lines_read: linesRead,
       lines_in_error: linesInError,
       error_report: errorReport,
+      kept_running: keptRunning.sort(),
       still_processing: status !== "COMPLETE" && status !== "FAILED",
     });
   } catch (err) {

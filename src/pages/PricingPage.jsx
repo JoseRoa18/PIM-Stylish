@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Tag,
   Plus,
@@ -35,6 +35,7 @@ import {
   addFileToPromotion,
   autoScheduleBestBuyPromo,
   scheduleWalmartPromo,
+  syncWalmartCaList,
   readWalmartPromo,
   WALMART_MARKETS,
   markPromotionActive,
@@ -145,6 +146,9 @@ export default function PricingPage() {
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [autoOpenId, setAutoOpenId] = useState(null); // the promotion just created, opened on its Marketplaces panel
+  // One promotion card open at a time (user request 2026-09-30): opening a
+  // card closes the one that was open.
+  const [openCardId, setOpenCardId] = useState(null);
   const [portalFilter, setPortalFilter] = useState('all'); // flash deals / special events history, by marketplace
   const [creatorFilter, setCreatorFilter] = useState('all'); // …and by who created them
 
@@ -163,6 +167,7 @@ export default function PricingPage() {
       setTab(target.kind ?? 'monthly');
       setPortalFilter('all');
       setCreatorFilter('all');
+      setOpenCardId(target.id);
     }
   }
   useEffect(() => {
@@ -238,7 +243,10 @@ export default function PricingPage() {
             setShowNew(false);
             // A new flash deal or special event opens right away on its
             // Marketplaces panel: the next step is picking where it goes.
-            if (promo && promo.kind !== 'monthly') setAutoOpenId(promo.id);
+            if (promo && promo.kind !== 'monthly') {
+              setAutoOpenId(promo.id);
+              setOpenCardId(promo.id);
+            }
             reload();
             // Fire-and-forget for the MONTHLY promotion only: schedule the
             // month's discounts on Best Buy (honors the /settings switches).
@@ -288,6 +296,8 @@ export default function PricingPage() {
               canEdit={canEdit}
               confirm={confirm}
               onChanged={reload}
+              open={openCardId === promo.id}
+              onToggle={() => setOpenCardId((cur) => (cur === promo.id ? null : promo.id))}
               defaultOpen={promo.id === autoOpenId}
               initialFill={deepLink?.id === promo.id ? deepLink.fill : null}
             />
@@ -1158,8 +1168,15 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
 
 // ============================== Promotion card ==============================
 
-function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false, initialFill = null }) {
-  const [open, setOpen] = useState(defaultOpen || Boolean(initialFill));
+function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onToggle, defaultOpen = false, initialFill = null }) {
+  // Opening this card may close a taller one above it: keep its header in
+  // view once the layout settles.
+  const headerRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => headerRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+    return () => cancelAnimationFrame(id);
+  }, [open]);
   const [rows, setRows] = useState(null);
   const [mapBySku, setMapBySku] = useState(null);
   // Flash deals / special events: the SKU list can be changed after creation.
@@ -1286,8 +1303,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
   return (
     <div className="rounded-2xl bg-surface overflow-hidden border border-transparent hover:border-outline-variant transition-colors">
       <button
+        ref={headerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         className="w-full px-5 py-4 flex items-center justify-between gap-4 text-left"
       >
         <div className="flex items-center gap-4 min-w-0">
@@ -1446,15 +1464,23 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, defaultOpen = false
               promo={promo}
               rows={rows}
               onClose={() => setImportModal(false)}
-              onImported={(text) => {
+              onImported={(text, info) => {
                 setImportModal(false);
                 setMsg({ tone: 'success', text });
                 setRows(null);
                 setMapBySku(null);
                 onChanged();
                 // An updated list re-schedules the Best Buy discounts (the
-                // OF24 import overwrites the previous ones).
+                // OF24 import overwrites the previous ones and clears the
+                // SKUs that left).
                 autoScheduleBestBuyPromo(promo).then(onChanged).catch(() => {});
+                // Walmart Canada already scheduled: the SKUs that left the
+                // Canada list lose its promo there, the ones that joined get it.
+                if (info?.market === 'ca' && promo.wm_ca_scheduled_at && (info.leftSkus?.length || info.joinedSkus?.length)) {
+                  syncWalmartCaList(promo, info)
+                    .then(onChanged)
+                    .catch((err) => setMsg({ tone: 'error', text: `Walmart Canada: ${err.message}` }));
+                }
               }}
             />
           )}
@@ -2596,6 +2622,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
         `${marketLabel}: ${r.added} SKUs on the list from ${file.name}` +
         (r.left ? ` · ${r.left} not in the file left the ${marketLabel} list` : '') +
         (r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''),
+        { market, ...r },
       );
     } catch (err) {
       setError(err.message);

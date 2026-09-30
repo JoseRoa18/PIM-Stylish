@@ -459,10 +459,12 @@ export async function addFileToPromotion(promotion, rows, market) {
     }));
   }
   const toDelete = [];
+  const leftSkus = [];
   let left = 0;
   for (const prev of existing) {
     if (inFile.has(prev.sku) || !onMarketList(prev, market)) continue;
     left += 1;
+    leftSkus.push(prev.sku);
     if (!onMarketList(prev, other)) { toDelete.push(prev.id); continue; }
     upserts.push(rowOf(prev.sku, prev, {
       [flag]: false,
@@ -491,7 +493,10 @@ export async function addFileToPromotion(promotion, rows, market) {
     summary: `Imported the ${label} file into promotion "${promotion.name}" (${valid.length} SKUs on the ${label} list${left ? `, ${left} left it` : ''})`,
     metadata: { market, skus: valid.length, left_the_list: left, removed_rows: toDelete.length, not_in_pim: notInPim.length },
   });
-  return { added: valid.length, left, removed: toDelete.length, notInPim };
+  // Joined = on this market's list now and not before (what an API channel
+  // already scheduled still lacks); left = the reverse.
+  const joinedSkus = valid.filter((r) => { const prev = bySku.get(r.sku); return !prev || !onMarketList(prev, market); }).map((r) => r.sku);
+  return { added: valid.length, left, removed: toDelete.length, notInPim, leftSkus, joinedSkus };
 }
 
 /**
@@ -697,9 +702,9 @@ export async function autoScheduleBestBuyPromo(promotion) {
   }
 
   // Canada window (first Thursday → day before the next first Thursday). A
-  // window that already began is scheduled from tomorrow — Mirakl drops a
-  // discount whose start date is not strictly in the future.
-  const start = window.start > etToday() ? window.start : etToday(1);
+  // window that already began goes live right away (bestbuy-push-price moves
+  // its start to a couple of minutes from now).
+  const start = window.start > etToday() ? window.start : etToday();
   const end = window.end;
   const updates = [];
   const skippedAtOrAboveMap = [];
@@ -716,25 +721,42 @@ export async function autoScheduleBestBuyPromo(promotion) {
     });
   }
   const notListed = members.length - updates.length - skippedAtOrAboveMap.length;
+  // SKUs this promotion scheduled before that left its Canada list (a new
+  // file replaces the list) lose the discount — only one that began in this
+  // promotion's window, so another promotion's discount stays.
+  const sending = new Set(updates.map((u) => u.sku));
+  const left = (promotion.bb_schedule?.skus ?? []).filter((s) => !sending.has(s));
+  const clears = left.map((sku) => ({ sku, clear_discount: { start: window.start, end: window.end } }));
 
+  // An offer holds ONE discount: offers still running another promotion's
+  // discount (next month's list loaded early) keep it — promo-apply sends
+  // them the day before this window, or on its first day.
   let res = null;
-  if (updates.length) res = await pushBestBuyPrices(updates);
+  if (updates.length || clears.length) {
+    res = await pushBestBuyPrices([...updates, ...clears], { protectRunning: { start: window.start, end: window.end } });
+  }
+  const kept = new Set(res?.kept_running ?? []);
 
   const report = {
     at: new Date().toISOString(),
     period: promotion.period,
     start,
     end,
-    scheduled: Math.max(0, updates.length - (res?.lines_in_error ?? 0)),
+    scheduled: Math.max(0, updates.length - kept.size - (res?.lines_in_error ?? 0)),
     attempted: updates.length,
     not_listed: notListed,
     skipped_at_or_above_map: skippedAtOrAboveMap,
+    kept_running: [...kept],
+    cleared: clears.length,
+    skus: updates.map((u) => u.sku).filter((s) => !kept.has(s)),
     import_id: res?.import_id ?? null,
     lines_in_error: res?.lines_in_error ?? 0,
   };
+  // With offers left for later the promotion stays unstamped, so the
+  // automation's pass sends them.
   const { error: upErr } = await supabase
     .from('promotions')
-    .update({ bb_scheduled_at: report.at, bb_schedule: report })
+    .update({ bb_scheduled_at: kept.size ? null : report.at, bb_schedule: report })
     .eq('id', promotion.id);
   if (upErr) throw upErr;
 
@@ -744,7 +766,9 @@ export async function autoScheduleBestBuyPromo(promotion) {
     entityId: String(promotion.id),
     target: 'bestbuy',
     summary: `Scheduled "${promotion.name}" on Best Buy — ${report.scheduled} discounts for ${start} → ${end}` +
-      (notListed ? ` · ${notListed} not listed there` : ''),
+      (notListed ? ` · ${notListed} not listed there` : '') +
+      (kept.size ? ` · ${kept.size} still running another promotion (sent when this one starts)` : '') +
+      (clears.length ? ` · discount removed from ${clears.length} no longer on the list` : ''),
     metadata: report,
   });
   return report;
@@ -787,6 +811,42 @@ export async function scheduleWalmartPromo(promotion, market = 'ca', { skus = nu
     });
   }
   return data;
+}
+
+/**
+ * Takes the promotion's Walmart Canada promo off SKUs that left its Canada
+ * list — the function reads each SKU's live promo and deletes only the one
+ * of this promotion's window. `dryRun` returns the payload.
+ */
+export async function removeWalmartPromo(promotion, skus, { dryRun = false } = {}) {
+  const { data, error } = await supabase.functions.invoke('walmart-push-promo', {
+    body: { mode: 'delete', market: 'ca', promotionId: promotion.id, skus, dryRun },
+  });
+  if (error) throw new Error(error.message ?? 'walmart-push-promo failed');
+  if (data?.error) throw new Error(data.error);
+  if (!dryRun && data.to_delete) {
+    logActivity({
+      action: 'push',
+      entityType: 'promotion',
+      entityId: String(promotion.id),
+      target: 'walmart_ca',
+      summary: `Removed "${promotion.name}" from ${data.to_delete} SKU${data.to_delete === 1 ? '' : 's'} on Walmart Canada (no longer on the Canada list, feed ${data.feedId ?? '?'})`,
+      metadata: { feed_id: data.feedId, skus, no_promo: data.no_promo },
+    });
+  }
+  return data;
+}
+
+/**
+ * After a new Canada file replaced the list of a promotion already scheduled
+ * on Walmart Canada: SKUs that left lose its promo there, SKUs that joined
+ * get it (a subset push — the promotion's stamp stays).
+ */
+export async function syncWalmartCaList(promotion, { leftSkus = [], joinedSkus = [] } = {}) {
+  const out = {};
+  if (leftSkus.length) out.removed = await removeWalmartPromo(promotion, leftSkus);
+  if (joinedSkus.length) out.added = await scheduleWalmartPromo(promotion, 'ca', { skus: joinedSkus });
+  return out;
 }
 
 /**

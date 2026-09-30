@@ -51,6 +51,7 @@ import {
   windowContains,
 } from "../_shared/promoCalendar.ts";
 import { isServiceRole } from "../_shared/serviceRole.ts";
+import { bbDiscount, discountRunning, etDayOf } from "../_shared/bestbuyDiscount.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -312,8 +313,9 @@ const wixPending = (out: WixOut, sites: string[]) =>
 // on the offer (2026-08-28: a price-only import zeroed the stock of 127 live
 // offers). Read the live offers first and carry quantity (and price when the
 // PIM has no MAP) on every line.
-async function readLiveOffers(bbKey: string): Promise<Map<string, { price: number | null; quantity: number }>> {
-  const live = new Map<string, { price: number | null; quantity: number }>();
+type LiveOffer = { price: number | null; quantity: number; discount: Record<string, unknown> | null };
+async function readLiveOffers(bbKey: string): Promise<Map<string, LiveOffer>> {
+  const live = new Map<string, LiveOffer>();
   let offset = 0;
   for (;;) {
     const res = await fetch(`${MIRAKL_BASE}/api/offers?max=100&offset=${offset}`, {
@@ -321,7 +323,7 @@ async function readLiveOffers(bbKey: string): Promise<Map<string, { price: numbe
     });
     if (!res.ok) throw new Error(`Best Buy live offers read failed (${res.status}) — promo NOT sent to Best Buy`);
     const data = await res.json();
-    for (const o of data.offers ?? []) live.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0 });
+    for (const o of data.offers ?? []) live.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0, discount: o.discount ?? null });
     offset += 100;
     if (!data.offers?.length || offset >= (data.total_count ?? 0)) break;
   }
@@ -333,6 +335,9 @@ async function scheduleBestBuy(
   start: string,
   end: string,
   dryRun: boolean,
+  // The day before a window: an offer still running the ending promotion's
+  // discount keeps it (one discount per offer) — the boundary-day pass sends it.
+  deferRunning = false,
 ): Promise<Record<string, unknown>> {
   const BB_KEY = Deno.env.get("BESTBUY_API_KEY");
   if (!BB_KEY) return { skipped: "no BESTBUY_API_KEY" };
@@ -349,9 +354,11 @@ async function scheduleBestBuy(
   const offers: Record<string, unknown>[] = [];
   let skipped = 0;
   let notListed = 0;
+  let deferred = 0;
   for (const r of cadRows) {
     const cur = liveOffers.get(r.sku);
     if (!cur) { notListed += 1; continue; }
+    if (deferRunning && discountRunning(cur.discount) && etDayOf(String(cur.discount?.start_date ?? "")) < start) { deferred += 1; continue; }
     const map = mapCad.get(r.sku);
     if (map != null && (r.promo_price_cad as number) >= map) { skipped += 1; continue; }
     const price = map ?? cur.price;
@@ -361,11 +368,9 @@ async function scheduleBestBuy(
       update_delete: "update",
       price,
       quantity: cur.quantity,
-      discount_price: r.promo_price_cad,
-      // volume-pricing instance: the discount value lives in ranges
-      discount_ranges: [{ price: r.promo_price_cad, quantity_threshold: 1 }],
-      discount_start_date: start,
-      discount_end_date: end,
+      // Mirakl's nested discount object (the flat CSV names were ignored in
+      // JSON and cleared the discount — see _shared/bestbuyDiscount.ts).
+      discount: bbDiscount(r.promo_price_cad as number, start, end),
     });
   }
   const report: Record<string, unknown> = {
@@ -373,6 +378,8 @@ async function scheduleBestBuy(
     listed: offers.length,
     not_listed: notListed,
     skipped_at_or_above_map: skipped,
+    ...(deferRunning ? { deferred_running: deferred } : {}),
+    skus: offers.map((o) => o.shop_sku),
   };
   if (!dryRun && offers.length) {
     const submit = await fetch(`${MIRAKL_BASE}/api/offers`, {
@@ -416,6 +423,8 @@ function bbScheduleRecord(promo: PromoRow, report: Record<string, unknown>, nowI
     skipped_at_or_above_map: Number(report.skipped_at_or_above_map ?? 0),
     import_id: report.import_id ?? null,
     lines_in_error: failed,
+    // what went out, so a re-send from the app can clear SKUs that left the list
+    skus: Array.isArray(report.skus) ? report.skus : [],
     by: "automation",
   };
 }
@@ -675,12 +684,13 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
     }
 
     // Safety net: the day-before prep normally schedules Best Buy. If it
-    // didn't (promo loaded late / toggle off), schedule from tomorrow —
-    // Mirakl drops start dates that are not in the future.
+    // didn't (promo loaded late / toggle off / offers still running the
+    // ending promotion), send it now — a window that already began starts
+    // in a couple of minutes (bbDiscount).
     if (chain === 0 && settings.bestbuy !== false && caTarget && cadRows.length && !caTarget.bb_scheduled_at) {
       try {
         const w = win(caTarget, "ca");
-        const start = w.start > today ? w.start : tomorrow;
+        const start = w.start > today ? w.start : today;
         report.bestbuy = await scheduleBestBuy(await withoutExcluded(cadRows, "bestbuy"), start, w.end, dryRun);
         if (!dryRun) {
           const sent = report.bestbuy as Record<string, unknown>;
@@ -717,11 +727,14 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
       const rows = await withoutExcluded((await promoPrices(prepTarget.id)).filter((r) => r.promo_price_cad != null), "bestbuy");
       if (rows.length) {
         const w = win(prepTarget, "ca");
-        report.prep = await scheduleBestBuy(rows, w.start, w.end, dryRun);
+        report.prep = await scheduleBestBuy(rows, w.start, w.end, dryRun, true);
         if (!dryRun) {
           const sent = report.prep as Record<string, unknown>;
+          // Offers still running the ending promotion were left for the
+          // boundary-day pass: stamping now would skip them.
+          const deferred = Number(sent.deferred_running ?? 0) > 0;
           await restPatch(`promotions?id=eq.${prepTarget.id}`, {
-            bb_scheduled_at: nowIso,
+            ...(deferred ? {} : { bb_scheduled_at: nowIso }),
             ...(!sent.skipped && Number(sent.listed ?? 0) > 0 ? { bb_schedule: bbScheduleRecord(prepTarget, sent, nowIso) } : {}),
           });
         }
