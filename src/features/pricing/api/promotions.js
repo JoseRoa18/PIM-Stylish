@@ -839,14 +839,20 @@ export async function removeWalmartPromo(promotion, skus, { dryRun = false } = {
 
 /**
  * After a new Canada file replaced the list of a promotion already scheduled
- * on Walmart Canada: SKUs that left lose its promo there, SKUs that joined
- * get it (a subset push — the promotion's stamp stays).
+ * on Walmart Canada: SKUs that left lose its promo there. SKUs that joined
+ * are NOT sent from here — after a list was emptied every SKU "joins" and
+ * Walmart already holds most of them; they go from the Walmart row of the
+ * Marketplaces panel (preview first). The removal runs only once
+ * walmart-push-promo knows the delete mode (a dry run answers `to_delete`).
  */
-export async function syncWalmartCaList(promotion, { leftSkus = [], joinedSkus = [] } = {}) {
-  const out = {};
-  if (leftSkus.length) out.removed = await removeWalmartPromo(promotion, leftSkus);
-  if (joinedSkus.length) out.added = await scheduleWalmartPromo(promotion, 'ca', { skus: joinedSkus });
-  return out;
+export async function syncWalmartCaList(promotion, { leftSkus = [] } = {}) {
+  if (!leftSkus.length) return {};
+  // An older walmart-push-promo reads mode "delete" as a push: its dry run
+  // fails or answers without `to_delete` — nothing is sent either way.
+  const probe = await removeWalmartPromo(promotion, leftSkus, { dryRun: true }).catch((err) => ({ probeError: err.message }));
+  if (probe?.to_delete === undefined) return { skipped: probe?.probeError ?? 'walmart-push-promo has no delete mode yet' };
+  if (!probe.to_delete) return { removed: probe };
+  return { removed: await removeWalmartPromo(promotion, leftSkus) };
 }
 
 /**

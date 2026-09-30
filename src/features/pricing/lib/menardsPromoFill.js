@@ -25,7 +25,10 @@
 // started — at the Blue level: F = H = MAP Blue USD (map_usd), G = WC Menards
 // Blue (cost_usd_menards). The rows of other products are removed (header,
 // totals and notes stay); a sheet with formulas or merged cells is not
-// reshaped — its other rows are left as they came, and the report says so.
+// reshaped (Menards' own file has formulas on every row) — its other rows
+// stay and ALSO go back at Blue, so no row keeps a promo price whatever the
+// uploaded file held; only rows not in the PIM or without a Blue price are
+// left as they came, and the report names them.
 // The file uploaded at the start is kept 60 days, so Back to Blue can be
 // generated from it without another upload.
 
@@ -224,9 +227,27 @@ export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false
   });
   if (!back.length && !noBlue.length) throw new Error('No product of this promotion is in the file. Check that it is the Menards file of this promotion.');
 
+  // Rows of other products are removed; when the sheet can't lose rows
+  // (Menards' file carries formulas on every row: the PIM ID in A, the margin
+  // in I) they stay and go back at Blue too — left as they came they carried
+  // whatever the uploaded file held (51 rows still at Orange, 2026-09-30).
   let xml = mergeRows(hit.xml, cellsByRow, true);
   const removal = removeRowsSafely(xml, drop);
-  if (removal) xml = removal.xml;
+  const othersBlue = [];
+  const othersNoBlue = []; // not in the PIM or without a Blue price: left as they came
+  if (removal) {
+    xml = removal.xml;
+  } else {
+    const blueCells = new Map();
+    for (const rn of drop) {
+      const sku = String(hit.grid[rn - 1]?.[hit.col] ?? '').trim();
+      const p = pim.get(sku);
+      if (p?.map_usd == null || p?.cost_usd_menards == null) { othersNoBlue.push(sku); continue; }
+      writeFGH(blueCells, rn, { map: Number(p.map_usd), cost: Number(p.cost_usd_menards) });
+      othersBlue.push(sku);
+    }
+    xml = mergeRows(xml, blueCells, true);
+  }
   zip.file(hit.path, xml);
   const day = String(promotion.ends_on ?? promotion.period).slice(0, 10);
   await downloadZip(zip, `Menards_Back_to_Blue_${day}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
@@ -239,11 +260,11 @@ export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: 'menards_price_change',
-    summary: `Filled Menards back to Blue for "${promotion.name}" (${back.length} promotion products at Blue, ${removed} other rows removed${fromSaved ? ', from the saved file' : ''})`,
-    metadata: { file: file.name, back: back.length, removed, kept_others: keptOthers, no_blue: noBlue.length, not_in_file: notInFile.length, from_saved: fromSaved },
+    summary: `Filled Menards back to Blue for "${promotion.name}" (${back.length} promotion products at Blue, ${removed ? `${removed} other rows removed` : `${othersBlue.length} other rows also at Blue`}${fromSaved ? ', from the saved file' : ''})`,
+    metadata: { file: file.name, back: back.length, removed, kept_others: keptOthers, others_blue: othersBlue.length, others_no_blue: othersNoBlue.length, no_blue: noBlue.length, not_in_file: notInFile.length, from_saved: fromSaved },
   });
   await markPromotionTask(promotion.id, 'menards:price_change', { rows: back.length, skus: back.slice().sort(), ...(fromSaved ? { from_saved: true } : {}) });
-  return { back, removed, keptOthers, noBlue, notInFile, excluded, fileRows: fileSkus.size, fromSaved, onlySent: Boolean(sentAtStart?.length) };
+  return { back, removed, keptOthers, othersBlue, othersNoBlue, noBlue, notInFile, excluded, fileRows: fileSkus.size, fromSaved, onlySent: Boolean(sentAtStart?.length) };
 }
 
 /** Back to Blue from the Menards file kept when the promotion started. */
@@ -256,7 +277,10 @@ export async function fillMenardsBackToBlueFromSaved(promotion) {
 export function summarizeMenardsBackToBlue(r) {
   const parts = [`Menards file ready, back at Blue${r.fromSaved ? ' from the saved file' : ''}. ${r.back.length} products of the promotion got MAP Blue USD and WC Menards Blue (columns F, G, H)`];
   if (r.removed) parts.push(`${r.removed} rows of other products removed`);
-  if (r.keptOthers) parts.push(`${r.keptOthers} rows of other products left as they came: the sheet has formulas or merged cells, so rows were not moved`);
+  if (r.keptOthers) {
+    parts.push(`the sheet has formulas, so its ${r.keptOthers} rows of other products stay — ${r.othersBlue?.length ?? 0} of them also set to MAP Blue USD and WC Menards Blue`);
+    if (r.othersNoBlue?.length) parts.push(`${r.othersNoBlue.length} of those are not in the PIM or have no Blue price, left as they came: ${few(r.othersNoBlue)}`);
+  }
   if (r.onlySent) parts.push('only the products that went out when the promotion started');
   if (r.noBlue.length) parts.push(`${r.noBlue.length} promotion products have no Blue price in the PIM, left as they came: ${few(r.noBlue)}`);
   if (r.notInFile.length) parts.push(`MISSING from the file, ${r.notInFile.length} products of the promotion: ${few(r.notInFile, 12)}`);

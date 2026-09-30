@@ -1475,8 +1475,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                 // SKUs that left).
                 autoScheduleBestBuyPromo(promo).then(onChanged).catch(() => {});
                 // Walmart Canada already scheduled: the SKUs that left the
-                // Canada list lose its promo there, the ones that joined get it.
-                if (info?.market === 'ca' && promo.wm_ca_scheduled_at && (info.leftSkus?.length || info.joinedSkus?.length)) {
+                // Canada list lose its promo there (joined ones are sent by
+                // hand from the Walmart row).
+                if (info?.market === 'ca' && promo.wm_ca_scheduled_at && info.leftSkus?.length) {
                   syncWalmartCaList(promo, info)
                     .then(onChanged)
                     .catch((err) => setMsg({ tone: 'error', text: `Walmart Canada: ${err.message}` }));
