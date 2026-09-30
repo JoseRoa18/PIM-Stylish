@@ -53,15 +53,34 @@ export function marketWindow(period: string, market: Market): Window {
 
 export const windowContains = (w: Window, day: string): boolean => day >= w.start && day <= w.end;
 
-export interface PromoLike { period: string; starts_on?: string | null; ends_on?: string | null }
+export interface PromoLike {
+  period: string;
+  starts_on?: string | null;
+  ends_on?: string | null;
+  ca_starts_on?: string | null;
+  ca_ends_on?: string | null;
+  us_starts_on?: string | null;
+  us_ends_on?: string | null;
+}
 
-/** A promotion's live days on a market: its custom dates when set, else the market calendar. */
+/**
+ * A promotion's live days on a market (dates are per country, rule
+ * 2026-09-30): the market's own custom dates, else the promotion-wide ones
+ * (flash deals / special events), else the market calendar.
+ */
 export function promoWindow(promo: PromoLike, market: Market): Window & { custom: boolean } {
-  const s = promo.starts_on ? String(promo.starts_on).slice(0, 10) : null;
-  const e = promo.ends_on ? String(promo.ends_on).slice(0, 10) : null;
+  const day = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : null);
+  const ms = day(market === "ca" ? promo.ca_starts_on : promo.us_starts_on);
+  const me = day(market === "ca" ? promo.ca_ends_on : promo.us_ends_on);
+  if (ms && me) return { start: ms, end: me, custom: true };
+  const s = day(promo.starts_on);
+  const e = day(promo.ends_on);
   if (s && e) return { start: s, end: e, custom: true };
   return { ...marketWindow(promo.period, market), custom: false };
 }
+
+/** The promotion-date columns every promoWindow() reader selects (PostgREST form). */
+export const PROMO_DATE_COLUMNS = "starts_on,ends_on,ca_starts_on,ca_ends_on,us_starts_on,us_ends_on";
 
 export function activePeriodFor(market: Market, day = etToday()): string | null {
   for (const p of [periodOfDay(day), prevPeriod(periodOfDay(day))]) {

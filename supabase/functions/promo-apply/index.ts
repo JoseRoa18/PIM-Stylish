@@ -137,6 +137,10 @@ interface PromoRow {
   status: string;
   starts_on: string | null;
   ends_on: string | null;
+  ca_starts_on?: string | null;
+  ca_ends_on?: string | null;
+  us_starts_on?: string | null;
+  us_ends_on?: string | null;
   us_applied_at: string | null;
   ca_applied_at: string | null;
   bb_scheduled_at: string | null;
@@ -479,7 +483,7 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
   // -- 1. promos on the board ------------------------------------------------
   const promos = await restGet<PromoRow[]>(
     // Only the MONTHLY promotions are automated; flash deals and special events run by hand.
-    "promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at,wm_ca_scheduled_at,wm_us_scheduled_at&status=in.(draft,active)&kind=eq.monthly&order=id.desc",
+    "promotions?select=id,name,period,status,starts_on,ends_on,ca_starts_on,ca_ends_on,us_starts_on,us_ends_on,us_applied_at,ca_applied_at,bb_scheduled_at,wm_ca_scheduled_at,wm_us_scheduled_at&status=in.(draft,active)&kind=eq.monthly&order=id.desc",
   );
   // Promotions ended in the last two days: the first run of a boundary ends
   // the previous one, and a continuation run (or the second nightly cron)
@@ -487,7 +491,7 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
   // as a target — only as "members leaving the sale".
   const endedSince = new Date(Date.now() - 48 * 3600_000).toISOString();
   const recentlyEnded = await restGet<PromoRow[]>(
-    `promotions?select=id,name,period,status,starts_on,ends_on,us_applied_at,ca_applied_at,bb_scheduled_at,wm_ca_scheduled_at,wm_us_scheduled_at&status=eq.ended&kind=eq.monthly&ended_at=gte.${encodeURIComponent(endedSince)}`,
+    `promotions?select=id,name,period,status,starts_on,ends_on,ca_starts_on,ca_ends_on,us_starts_on,us_ends_on,us_applied_at,ca_applied_at,bb_scheduled_at,wm_ca_scheduled_at,wm_us_scheduled_at&status=eq.ended&kind=eq.monthly&ended_at=gte.${encodeURIComponent(endedSince)}`,
   );
   // The promotion whose window on a market contains a day — custom dates
   // when the promotion carries them, else its month's market calendar.

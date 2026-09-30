@@ -22,7 +22,7 @@ import { getAppSetting } from '@/features/settings/api/appSettings';
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, ca_applied_at, us_applied_at, wm_ca_scheduled_at, wm_ca_schedule, wm_us_scheduled_at, wm_us_schedule, file_tasks, promotion_prices(count), creator:profiles(full_name, email)')
+    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, ca_applied_at, us_applied_at, wm_ca_scheduled_at, wm_ca_schedule, wm_us_scheduled_at, wm_us_schedule, file_tasks, promotion_prices(count), creator:profiles(full_name, email)')
     .order('period', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -263,7 +263,7 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, marketplaces: portals.length ? portals : null, created_by: getActivityActor()?.id ?? null })
+    .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), marketplaces: portals.length ? portals : null, created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;
@@ -307,6 +307,16 @@ export const PROMOTION_KINDS = { monthly: 'Monthly promotion', flash: 'Flash dea
 function assertKindDates(kind, starts_on, ends_on) {
   if (kind !== 'monthly' && !(starts_on && ends_on)) throw new Error(`A ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} needs a first and a last day.`);
 }
+// Dates are per country (rule 2026-09-30): a monthly promotion created with
+// custom dates gets them on both markets (each is changed on its card) and
+// on the promotion-wide pair (older readers of that pair see the same days);
+// flash deals / special events keep one pair — the portal's dates.
+function dateColumns(kind, starts_on, ends_on) {
+  if (kind === 'monthly' && starts_on && ends_on) {
+    return { starts_on, ends_on, ca_starts_on: starts_on, ca_ends_on: ends_on, us_starts_on: starts_on, us_ends_on: ends_on };
+  }
+  return { starts_on, ends_on };
+}
 
 export async function createPromotion({ name, period, currency, rows, kind = 'monthly', starts_on = null, ends_on = null }) {
   assertKindDates(kind, starts_on, ends_on);
@@ -320,7 +330,7 @@ export async function createPromotion({ name, period, currency, rows, kind = 'mo
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, created_by: getActivityActor()?.id ?? null })
+    .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;
@@ -358,7 +368,7 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
 
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, starts_on, ends_on, created_by: getActivityActor()?.id ?? null })
+    .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;
@@ -504,9 +514,44 @@ export async function addFileToPromotion(promotion, rows, market) {
  * promotions that were already uploaded to the marketplaces outside the PIM.
  */
 /**
- * Custom dates for a promotion (both or none). They replace the market
- * calendar on every channel: files, Wix pricing, Best Buy, Walmart and the
- * activation cron. Pass nulls to go back to the calendar.
+ * A monthly promotion's days PER MARKET (user rule 2026-09-30: "las fechas de
+ * las promo son por país" — October: Canada Oct 1–21, USA Oct 1–31). `dates`
+ * = { us, ca }, each { starts_on, ends_on } or null for that market's
+ * calendar. A market's dates rule every channel of that market: files, Wix
+ * pricing, Best Buy, Walmart and the activation cron.
+ */
+export async function updatePromotionMarketDates(promotion, dates) {
+  // The promotion-wide pair carries Canada's days (else the USA's) for code
+  // that reads only that pair — deployed edge functions until they know the
+  // per-market pairs; promoWindow() prefers each market's own.
+  const wide = dates?.ca ?? dates?.us ?? null;
+  const patch = { starts_on: wide?.starts_on ?? null, ends_on: wide?.ends_on ?? null };
+  const parts = [];
+  for (const [m, label] of [['us', 'USA'], ['ca', 'Canada']]) {
+    const d = dates?.[m] ?? null;
+    const both = Boolean(d?.starts_on) && Boolean(d?.ends_on);
+    if ((d?.starts_on || d?.ends_on) && !both) throw new Error(`${label}: set both dates, or leave it on the calendar.`);
+    if (both && d.ends_on < d.starts_on) throw new Error(`${label}: the end date is before the start date.`);
+    patch[`${m}_starts_on`] = both ? d.starts_on : null;
+    patch[`${m}_ends_on`] = both ? d.ends_on : null;
+    parts.push(`${label} ${both ? `${d.starts_on} to ${d.ends_on}` : 'on its calendar'}`);
+  }
+  const { error } = await supabase.from('promotions').update(patch).eq('id', promotion.id);
+  if (error) throw error;
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    target: 'pim',
+    summary: `"${promotion.name}" dates: ${parts.join(' · ')}`,
+    metadata: patch,
+  });
+}
+
+/**
+ * Custom dates for a flash deal / special event (both or none) — one pair,
+ * the portal's dates, for every market. Pass nulls to go back to the
+ * calendar. Monthly promotions use updatePromotionMarketDates.
  */
 export async function updatePromotionDates(promotion, { starts_on, ends_on }) {
   const both = Boolean(starts_on) && Boolean(ends_on);
@@ -535,7 +580,7 @@ export async function updatePromotionDates(promotion, { starts_on, ends_on }) {
 export async function monthlyOverlap(startsOn, endsOn, skus) {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, starts_on, ends_on, promotion_prices(sku)')
+    .select('id, name, period, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku)')
     .eq('kind', 'monthly')
     .in('status', ['draft', 'active']);
   if (error) throw error;

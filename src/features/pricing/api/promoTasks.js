@@ -92,8 +92,8 @@ export async function listTaskPromotions() {
   const since = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, kind, period, status, marketplaces, starts_on, ends_on, file_tasks')
-    .or(`status.neq.ended,ends_on.gte.${since}`)
+    .select('id, name, kind, period, status, marketplaces, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, file_tasks')
+    .or(`status.neq.ended,ends_on.gte.${since},ca_ends_on.gte.${since},us_ends_on.gte.${since}`)
     .gte('period', since.slice(0, 8) + '01');
   if (error) throw error;
   return data ?? [];

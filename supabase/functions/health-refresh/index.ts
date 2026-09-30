@@ -162,12 +162,12 @@ async function refreshWix(site: WixSite) {
   const promoBySku = new Map<string, number>();
   if (site.promoAware) {
     const activePromos = await restSelect(
-      `promotions?select=period,starts_on,ends_on,promotion_prices(sku,${promoField})&status=eq.active&kind=eq.monthly&order=period.asc`,
+      `promotions?select=period,starts_on,ends_on,ca_starts_on,ca_ends_on,us_starts_on,us_ends_on,promotion_prices(sku,${promoField})&status=eq.active&kind=eq.monthly&order=period.asc`,
     );
     // Market calendar: USA runs the 1st → month end; Canada runs first
     // Thursday → the day before the next first Thursday.
     const day = etToday();
-    for (const promo of activePromos as { period: string; starts_on?: string | null; ends_on?: string | null; promotion_prices: Record<string, unknown>[] }[]) {
+    for (const promo of activePromos as { period: string; starts_on?: string | null; ends_on?: string | null; ca_starts_on?: string | null; ca_ends_on?: string | null; us_starts_on?: string | null; us_ends_on?: string | null; promotion_prices: Record<string, unknown>[] }[]) {
       if (!windowContains(promoWindow(promo, site.market as "us" | "ca"), day)) continue;
       for (const row of promo.promotion_prices ?? []) {
         const v = row[promoField] as number | null;

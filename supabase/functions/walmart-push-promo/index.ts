@@ -169,7 +169,7 @@ Deno.serve(async (req) => {
       const promotionId = Number(body.promotionId);
       const skusIn: string[] = Array.isArray(body.skus) ? body.skus.map(String) : [];
       if (!promotionId || !skusIn.length) return json({ error: "promotionId and skus[] are required." }, 400);
-      const { data: promo } = await admin.from("promotions").select("id, name, period, starts_on, ends_on").eq("id", promotionId).maybeSingle();
+      const { data: promo } = await admin.from("promotions").select("id, name, period, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on").eq("id", promotionId).maybeSingle();
       if (!promo) return json({ error: `Promotion ${promotionId} not found.` }, 404);
       const endMs = Date.parse(etInstant(promoWindow(promo, market).end, "23:59:59"));
       const { data: aliasRows } = await admin.from("product_aliases").select("alias, sku").eq("marketplace", cfg.alias).in("sku", skusIn);
@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
     const dryRun = body.dryRun === true;
     const only: string[] | null = Array.isArray(body.skus) && body.skus.length ? body.skus : null;
 
-    const { data: promo, error: pErr } = await admin.from("promotions").select("id, name, period, status, starts_on, ends_on").eq("id", promotionId).maybeSingle();
+    const { data: promo, error: pErr } = await admin.from("promotions").select("id, name, period, status, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on").eq("id", promotionId).maybeSingle();
     if (pErr) throw pErr;
     if (!promo) return json({ error: `Promotion ${promotionId} not found.` }, 404);
     const { data: prices, error: prErr } = await admin.from("promotion_prices").select(`sku, ${cfg.promoField}`).eq("promotion_id", promotionId).not(cfg.promoField, "is", null);

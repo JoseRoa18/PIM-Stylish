@@ -39,6 +39,7 @@ import {
 import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pricing/api/promotions';
 import { markPromotionTask, savePromoFile, loadPromoFile } from '@/features/pricing/api/promoTasks';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 
 const MONEY = '"$"#,##0.00';
 const COLUMNS = {
@@ -166,7 +167,9 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   zip.file(path, kept.xml);
   const notInFile = memberSkus.filter((s) => !fileSkus.has(s)).sort();
 
-  const day = String((start ? promotion.starts_on : promotion.ends_on) ?? promotion.period).slice(0, 10);
+  // The market's own days (dates are per country): first day for Promo MAP, last for Blue.
+  const w = promoWindow(promotion, usa ? 'us' : 'ca');
+  const day = start ? w.start : w.end;
   await downloadZip(zip, `Wayfair_${usa ? 'USA' : 'Canada'}_Price_Change_${start ? 'Promo' : 'Blue'}_${day}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
 
   logActivity({

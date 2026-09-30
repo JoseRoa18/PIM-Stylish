@@ -58,17 +58,25 @@ export function marketWindow(period, market) {
 export const windowContains = (w, day) => day >= w.start && day <= w.end;
 
 /**
- * The days a PROMOTION is live on a market: its custom dates when the
- * promotion carries them (starts_on / ends_on, set at creation or edited
- * later — they apply to every market and channel), otherwise the market
- * calendar of its period.
+ * The days a PROMOTION is live on a market (dates are per country, user rule
+ * 2026-09-30): the market's own custom dates (ca_starts_on / ca_ends_on,
+ * us_starts_on / us_ends_on — monthly promotions), else the promotion-wide
+ * ones (starts_on / ends_on — flash deals and special events, the portal's
+ * dates), else the market calendar of its period.
  */
 export function promoWindow(promo, market) {
-  const s = promo?.starts_on ? String(promo.starts_on).slice(0, 10) : null;
-  const e = promo?.ends_on ? String(promo.ends_on).slice(0, 10) : null;
+  const day = (v) => (v ? String(v).slice(0, 10) : null);
+  const ms = day(promo?.[`${market}_starts_on`]);
+  const me = day(promo?.[`${market}_ends_on`]);
+  if (ms && me) return { start: ms, end: me, custom: true };
+  const s = day(promo?.starts_on);
+  const e = day(promo?.ends_on);
   if (s && e) return { start: s, end: e, custom: true };
   return { ...marketWindow(promo.period, market), custom: false };
 }
+
+/** The promotion-date columns every promoWindow() reader selects. */
+export const PROMO_DATE_COLUMNS = 'starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on';
 
 /**
  * The promo period whose window for `market` contains `day` — the current

@@ -375,7 +375,7 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
   if (cfg.promoAware) {
     const { data: activePromos, error: promoErr } = await supabase
       .from('promotions')
-      .select(`period, starts_on, ends_on, promotion_prices(sku, ${promoField})`)
+      .select(`period, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku, ${promoField})`)
       .eq('status', 'active')
       .eq('kind', 'monthly')
       .order('period', { ascending: true });

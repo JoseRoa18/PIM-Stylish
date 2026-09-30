@@ -48,6 +48,7 @@ import {
 import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { markPromotionTask, savePromoFile, loadPromoFile } from '@/features/pricing/api/promoTasks';
+import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 
 // 0-based columns Menards reserves for us: F, G, H.
 export const MENARDS_COLUMNS = { map: 5, cost: 6, map2: 7 };
@@ -249,7 +250,7 @@ export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false
     xml = mergeRows(xml, blueCells, true);
   }
   zip.file(hit.path, xml);
-  const day = String(promotion.ends_on ?? promotion.period).slice(0, 10);
+  const day = promoWindow(promotion, 'us').end; // Menards is a USA channel: its last day
   await downloadZip(zip, `Menards_Back_to_Blue_${day}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
 
   const notInFile = promoSkus.filter((s) => !fileSkus.has(s)).sort();

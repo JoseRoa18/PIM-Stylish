@@ -40,6 +40,7 @@ import {
   WALMART_MARKETS,
   markPromotionActive,
   updatePromotionDates,
+  updatePromotionMarketDates,
   deletePromotion,
   applyPromotion,
   endPromotion,
@@ -53,7 +54,7 @@ import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
-import { promoWindow, etToday } from '@/features/pricing/lib/promoCalendar';
+import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promoCalendar';
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -119,6 +120,17 @@ function promoMarkets(promo) {
   const markets = ['ca', 'us'].filter((m) => wanted.has(m));
   return markets.length ? markets : ['ca', 'us'];
 }
+// " · custom dates …" for the card header: per market for monthly
+// promotions (dates are per country), one pair for flash deals / events.
+function customDatesLabel(promo) {
+  if ((promo.kind ?? 'monthly') !== 'monthly') return promo.starts_on && promo.ends_on ? ` · custom dates ${promo.starts_on} to ${promo.ends_on}` : '';
+  const parts = [['us', 'USA'], ['ca', 'Canada']]
+    .map(([m, label]) => ({ label, w: promoWindow(promo, m), cal: marketWindow(promo.period, m) }))
+    .filter(({ w, cal }) => w.start !== cal.start || w.end !== cal.end)
+    .map(({ label, w }) => `${label} ${w.start} to ${w.end}`);
+  return parts.length ? ` · custom dates ${parts.join(', ')}` : '';
+}
+
 const marketsLabel = (promo) => {
   const m = promoMarkets(promo);
   return m.length === 2 ? 'every market' : m[0] === 'us' ? 'USA only' : 'Canada only';
@@ -1013,7 +1025,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             />
           )}
           {monthly && (
-          <label className="mt-2 inline-flex items-center gap-2 text-label-md text-on-surface-variant cursor-pointer" title="By default the promotion follows the market calendar: USA the 1st to month end, Canada first Thursday to the day before the next. Custom dates apply to every market and channel.">
+          <label className="mt-2 inline-flex items-center gap-2 text-label-md text-on-surface-variant cursor-pointer" title="By default the promotion follows the market calendar: USA the 1st to month end, Canada first Thursday to the day before the next. Custom dates start on both markets; each country's dates can then be changed on the card.">
             <input type="checkbox" checked={customDates} onChange={(e) => setCustomDates(e.target.checked)} className="accent-primary" />
             Custom dates
           </label>
@@ -1332,7 +1344,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             </div>
             <p className="text-body-sm text-on-surface-variant mt-0.5">
               {monthLabel(promo.period)} · {promo.sku_count} SKU{promo.sku_count === 1 ? '' : 's'}
-              {promo.starts_on && promo.ends_on ? ` · custom dates ${promo.starts_on} to ${promo.ends_on}` : ''}
+              {customDatesLabel(promo)}
               {promo.created_by_name ? ` · by ${promo.created_by_name}` : ''}
             </p>
           </div>
@@ -1894,9 +1906,95 @@ const FILE_STEPS = {
 
 // One line per channel: name, a status chip, and the one action that applies.
 // The long explanation of how each channel gets the promo lives on hover.
-// The days the promotion runs on each market, and the switch between the
-// market calendar and custom dates (which apply to every market and channel).
-function PromoDates({ promo, canEdit, onChanged }) {
+// The days the promotion runs on each market. Monthly promotions have them
+// PER COUNTRY (user rule 2026-09-30 — October: Canada Oct 1–21, USA Oct 1–31);
+// flash deals and special events keep one pair, the portal's dates.
+function PromoDates(props) {
+  return (props.promo.kind ?? 'monthly') === 'monthly' ? <PromoMarketDates {...props} /> : <PromoWideDates {...props} />;
+}
+
+// USA and Canada shown and edited apart. Saving writes both markets' days;
+// a market shows as custom only where its days differ from its calendar.
+function PromoMarketDates({ promo, canEdit, onChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(null); // { us: { start, end }, ca: { start, end } }
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const win = { us: promoWindow(promo, 'us'), ca: promoWindow(promo, 'ca') };
+  const cal = { us: marketWindow(promo.period, 'us'), ca: marketWindow(promo.period, 'ca') };
+  const differs = (m) => win[m].start !== cal[m].start || win[m].end !== cal[m].end;
+  const anyCustom = differs('us') || differs('ca');
+  const fmt = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+  const MARKETS = [['us', 'USA'], ['ca', 'Canada']];
+
+  function startEditing() {
+    setDraft({ us: { start: win.us.start, end: win.us.end }, ca: { start: win.ca.start, end: win.ca.end } });
+    setError(null);
+    setEditing(true);
+  }
+  const setDay = (m, k, v) => setDraft((d) => ({ ...d, [m]: { ...d[m], [k]: v } }));
+
+  async function save(toCalendar = false) {
+    setBusy(true);
+    setError(null);
+    try {
+      const dates = {};
+      for (const [m] of MARKETS) dates[m] = toCalendar ? null : { starts_on: draft[m].start, ends_on: draft[m].end };
+      await updatePromotionMarketDates(promo, dates);
+      setEditing(false);
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const input = 'px-2.5 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40';
+  return (
+    <div className="flex items-center gap-3 flex-wrap text-body-sm">
+      <span className="text-on-surface-variant">Runs</span>
+      {!editing && (
+        <span className="text-on-surface">
+          {MARKETS.map(([m, label], i) => (
+            <span key={m}>
+              {i > 0 && <span className="text-on-surface-variant"> · </span>}
+              {label} {fmt(win[m].start)} to {fmt(win[m].end)}
+              {anyCustom && <span className="text-on-surface-variant">{differs(m) ? ' (custom)' : ' (calendar)'}</span>}
+            </span>
+          ))}
+          {!anyCustom && <span className="text-on-surface-variant"> · market calendar</span>}
+        </span>
+      )}
+      {canEdit && !editing && (
+        <button type="button" onClick={startEditing} className="text-label-md font-medium text-primary hover:underline">
+          {anyCustom ? 'Change dates' : 'Set custom dates'}
+        </button>
+      )}
+      {editing && draft && (
+        <span className="inline-flex items-center gap-x-4 gap-y-2 flex-wrap">
+          {MARKETS.map(([m, label]) => (
+            <span key={m} className="inline-flex items-center gap-2">
+              <span className="text-on-surface-variant">{label}</span>
+              <input type="date" value={draft[m].start} onChange={(e) => setDay(m, 'start', e.target.value)} className={input} aria-label={`${label} first day`} />
+              <span className="text-on-surface-variant">to</span>
+              <input type="date" value={draft[m].end} min={draft[m].start || undefined} onChange={(e) => setDay(m, 'end', e.target.value)} className={input} aria-label={`${label} last day`} />
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-2">
+            <button type="button" onClick={() => save(false)} disabled={busy || MARKETS.some(([m]) => !draft[m].start || !draft[m].end)} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">Save</button>
+            {anyCustom && <button type="button" onClick={() => save(true)} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Back to calendar</button>}
+            <button type="button" onClick={() => { setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
+          </span>
+        </span>
+      )}
+      {error && <span className="text-error">{error}</span>}
+    </div>
+  );
+}
+
+// Flash deals / special events: one pair of dates for every market.
+function PromoWideDates({ promo, canEdit, onChanged }) {
   const [editing, setEditing] = useState(false);
   const [startsOn, setStartsOn] = useState(promo.starts_on ?? '');
   const [endsOn, setEndsOn] = useState(promo.ends_on ?? '');
