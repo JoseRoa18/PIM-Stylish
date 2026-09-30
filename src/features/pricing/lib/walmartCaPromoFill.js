@@ -41,6 +41,24 @@ import { logActivity } from '@/features/activity/api/activityLog';
 const ACTION = 'Create';
 const norm = (v) => String(v ?? '').trim().toLowerCase();
 
+// An Eastern wall time — `day` plus `secs` after 00:00 ET — as the Excel
+// serial of the same instant in UTC (DST-aware: EDT +4 h, EST +5 h).
+function etToUtcSerial(day, secs) {
+  const [y, m, d] = day.split('-').map(Number);
+  const wall = Date.UTC(y, m - 1, d) + secs * 1000;
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Toronto', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const offsetAt = (t) => {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - t;
+  };
+  let t = wall - offsetAt(wall);
+  t = wall - offsetAt(t); // a second pass settles a DST boundary
+  return excelSerial(new Date(t).toISOString().slice(0, 10)) + Math.round((t % 86400000) / 1000) / 86400;
+}
+
 // Walmart's flash-deal upload ("DEAL_ITEM.xlsx"): sheet "Upload Template",
 // row 1 section titles, row 2 headers, data from row 3. Only A and B are
 // ours: SKU and Promo Price; Suggested / Comparison / Promo Referral Price
@@ -159,8 +177,11 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
   const style = (c) => styles.get(indexToCol(c + 1)) ?? null;
 
   const existingRows = new Set([...hit.xml.matchAll(/<row r="(\d+)"/g)].map((m) => Number(m[1])));
-  const startSerial = excelSerial(window.start);
-  const endSerial = excelSerial(window.end) + (23 * 3600 + 59 * 60 + 59) / 86400;
+  // Walmart reads the file's date-times as UTC (seen 2026-09-30: a file with
+  // 00:00:00 put October at 00:00 UTC = 8 p.m. ET the day before), so they go
+  // as the UTC time of 00:00:00 / 23:59:59 Eastern — what the API sends.
+  const startSerial = etToUtcSerial(window.start, 0);
+  const endSerial = etToUtcSerial(window.end, 23 * 3600 + 59 * 60 + 59);
   const cellsByRow = new Map();
   let appended = '';
   for (const [idx, l] of lines.entries()) {
@@ -280,7 +301,7 @@ const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? 
 export function summarizeWalmartCaFill(channel, r) {
   const parts = [r.deal
     ? `${channel.label} deal file ready. ${r.rows} products (SKU + promo price = MAP ${r.tierLabel}${r.fromList ? `, ${r.fromList} from the promotion's own list` : ''}), ${r.aliased} under their Walmart SKU. The dates go in the portal: ${r.window.start} to ${r.window.end}`
-    : `${channel.label} file ready. ${r.rows} products, ${r.window.start} 00:00:00 to ${r.window.end} 23:59:59, promo price = MAP ${r.tierLabel}${r.fromList ? ` (${r.fromList} from the promotion's own list)` : ''}, ${r.aliased} under their Walmart SKU`];
+    : `${channel.label} file ready. ${r.rows} products, ${r.window.start} 00:00:00 to ${r.window.end} 23:59:59 Eastern (written in UTC, the way Walmart reads the file), promo price = MAP ${r.tierLabel}${r.fromList ? ` (${r.fromList} from the promotion's own list)` : ''}, ${r.aliased} under their Walmart SKU`];
   if (r.noMap.length) parts.push(`no MAP CAD in the PIM, left out: ${few(r.noMap)}`);
   if (r.noPromo.length) parts.push(`no MAP ${r.tierLabel} in the PIM, left out: ${few(r.noPromo)}`);
   if (r.atOrAbove.length) parts.push(`promo not below the MAP, left out: ${few(r.atOrAbove)}`);
