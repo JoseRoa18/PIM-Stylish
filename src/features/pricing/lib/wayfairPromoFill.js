@@ -134,6 +134,9 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
     put(cols.baseCost, cost, costStyle);
     put(cols.b2bRecommended, 0);
     put(cols.b2bDiscount, 0);
+    // Promotional MAP and B2B base cost go out EMPTY (the rule above), even
+    // if Partner Home ever pre-fills them: an empty cell clears the value.
+    for (const c of [cols.promoMap, cols.b2bBaseCost]) if (c != null) cells.set(c + 1, '');
     return cells;
   };
 

@@ -36,6 +36,7 @@ import {
   autoScheduleBestBuyPromo,
   scheduleWalmartPromo,
   syncWalmartCaList,
+  refreshPromotion,
   readWalmartPromo,
   WALMART_MARKETS,
   markPromotionActive,
@@ -2096,33 +2097,35 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   async function generate(channel, template) {
     setBusy(channel.key);
     try {
+      // Files are made from the promotion as it is now, not the page's copy.
+      const current = await refreshPromotion(promo);
       let text;
       if (channel.fill === 'amazon') {
         const m = await LIBS.amazon.load();
-        text = m.summarizeAmazonFill(channel, await m.fillAmazonPromoTemplate(template, promo, channel));
+        text = m.summarizeAmazonFill(channel, await m.fillAmazonPromoTemplate(template, current, channel));
       } else if (channel.fill === 'mirakl') {
         const m = await LIBS.mirakl.load();
-        text = m.summarizeMiraklFill(channel, await m.fillMiraklPromoTemplate(template, promo, channel));
+        text = m.summarizeMiraklFill(channel, await m.fillMiraklPromoTemplate(template, current, channel));
       } else if (channel.fill === 'rona') {
         const m = await LIBS.rona.load();
-        text = m.summarizeRonaFill(channel, await m.fillRonaPromoTemplate(template, promo, channel));
+        text = m.summarizeRonaFill(channel, await m.fillRonaPromoTemplate(template, current, channel));
       } else if (channel.fill === 'homedepot_ca') {
         // Home Depot Canada hands out one file per product family: every
         // promotions template of the marketplace is filled in one go.
         const m = await LIBS.homeDepotCa.load();
-        text = m.summarizeHomeDepotCaFill(channel, await m.fillHomeDepotCaPromoTemplates(channel.templates?.length ? channel.templates : [template], promo, channel));
+        text = m.summarizeHomeDepotCaFill(channel, await m.fillHomeDepotCaPromoTemplates(channel.templates?.length ? channel.templates : [template], current, channel));
       } else if (channel.fill === 'walmart_ca') {
         const m = await LIBS.walmartCa.load();
-        text = m.summarizeWalmartCaFill(channel, await m.fillWalmartCaPromoTemplate(template, promo, channel));
+        text = m.summarizeWalmartCaFill(channel, await m.fillWalmartCaPromoTemplate(template, current, channel));
       } else if (channel.fill === 'lowes') {
         const m = await LIBS.lowes.load();
-        text = m.summarizeLowesFill(channel, await m.fillLowesPromoTemplate(template, promo, channel));
+        text = m.summarizeLowesFill(channel, await m.fillLowesPromoTemplate(template, current, channel));
       } else if (channel.fill === 'bbb') {
         const m = await LIBS.bbb.load();
-        text = m.summarizeBBBFill(channel, await m.fillBBBPromoTemplate(template, promo, channel));
+        text = m.summarizeBBBFill(channel, await m.fillBBBPromoTemplate(template, current, channel));
       } else {
         const m = await LIBS.generic.load();
-        text = m.summarizePromoFill(channel, await m.fillPromoTemplate(template, promo, channel));
+        text = m.summarizePromoFill(channel, await m.fillPromoTemplate(template, current, channel));
       }
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
       onMsg({ tone: 'success', text });
@@ -2515,7 +2518,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await def.saved.fill(promo);
+      const r = await def.saved.fill(await refreshPromotion(promo));
       onDone({ tone: 'success', text: def.summarize(r) });
     } catch (err) {
       setError(err.message);
@@ -2527,7 +2530,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await def.fill(file, promo, opts);
+      const r = await def.fill(file, await refreshPromotion(promo), opts);
       onDone({ tone: 'success', text: def.summarize(r) });
     } catch (err) {
       setError(err.message);
@@ -2542,7 +2545,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
     setBusy(true);
     setError(null);
     try {
-      const plan = await def.analyze(file, promo);
+      const plan = await def.analyze(file, await refreshPromotion(promo));
       if (plan.notInFile?.length) { setPending({ file, plan }); setBusy(false); return; }
       await finish(file, { plan });
     } catch (err) {

@@ -33,6 +33,22 @@ export async function listPromotions() {
   }));
 }
 
+/**
+ * The promotion as the database holds it NOW (dates, kind, portals, file
+ * tasks), over the page's copy — every file is generated from this, so a
+ * change made in another session since the page loaded is never missed.
+ */
+export async function refreshPromotion(promotion) {
+  const { data, error } = await supabase
+    .from('promotions')
+    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, file_tasks, bb_scheduled_at, wm_ca_scheduled_at, wm_us_scheduled_at')
+    .eq('id', promotion.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error(`"${promotion.name}" no longer exists — reload the page.`);
+  return { ...promotion, ...data };
+}
+
 export async function getPromotionPrices(promotionId) {
   const { data, error } = await supabase
     .from('promotion_prices')

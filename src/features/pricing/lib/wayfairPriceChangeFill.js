@@ -37,7 +37,7 @@ import {
   downloadZip,
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pricing/api/promotions';
-import { markPromotionTask, savePromoFile, loadPromoFile } from '@/features/pricing/api/promoTasks';
+import { markPromotionTask, savePromoFile, loadPromoFile, freshFileTasks } from '@/features/pricing/api/promoTasks';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 
@@ -99,12 +99,15 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   if (mapCol == null) throw new Error(`The file has no ${usa ? 'NewMapUSD' : 'NewMapCAD'} column — is it the ${label} pricing file from Partner Home?`);
 
   // Back to Blue carries exactly the products that went out when the
-  // promotion started (recorded by the promotions file, else by the Promo MAP
-  // file); only a promotion without that record falls back to its members.
+  // promotion started — those of the promotions file AND those of the Promo
+  // MAP file (a product can be in one only: no WC Wayfair of the level, or
+  // not listed there yet its MAP went down), read from the database now;
+  // only a promotion without that record falls back to its members.
   const channel = usa ? 'wayfair_us' : 'wayfair_ca';
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel);
-  const sentAtStart = promotion.file_tasks?.[`${channel}:promo_file`]?.skus ?? promotion.file_tasks?.[`${channel}:price_start`]?.skus ?? null;
-  const memberSkus = !start && sentAtStart?.length ? sentAtStart : members.map((r) => r.sku);
+  const tasks = start ? {} : await freshFileTasks(promotion);
+  const sentAtStart = [...new Set([...(tasks[`${channel}:promo_file`]?.skus ?? []), ...(tasks[`${channel}:price_start`]?.skus ?? [])])];
+  const memberSkus = !start && sentAtStart.length ? sentAtStart : members.map((r) => r.sku);
   if (!memberSkus.length) throw new Error(`This promotion has no products for ${label}.`);
   const memberSet = new Set(memberSkus);
 
@@ -123,11 +126,16 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   }
   // Promo MAP day: the promotion's own promo MAP (the file's, rule
   // 2026-09-30) wins over the level. Back to Blue always takes Blue.
+  // Wayfair Canada's USD MAP is its CAD MAP / 1.38 (how its levels are
+  // stored): a promo price of the promotion's own moves the USD one with it.
   if (start) {
     const priceKey = usa ? 'promo_price_usd' : 'promo_price_cad';
     for (const m of members) {
       const own = m[priceKey];
-      if (own != null && values.has(m.sku)) values.get(m.sku).map = Number(own);
+      const v = values.get(m.sku);
+      if (own == null || !v) continue;
+      if (!usa && Number(own) !== v.map) v.usdMap = Math.round((Number(own) / 1.38) * 100) / 100;
+      v.map = Number(own);
     }
   }
 
@@ -158,8 +166,10 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
     }
     cellsByRow.set(rn, cells);
     written.push(sku);
+    // A saved file's "Current" columns are Wayfair's snapshot of the Promo
+    // MAP day, not of today: no "already at the target" note from them.
     const same = (col, v) => v == null || col == null || Number(grid[i][col]) === v;
-    if (same(cols.currentBaseCost, cost) && same(currentMapCol, map)) already.push(sku);
+    if (!fromSaved && same(cols.currentBaseCost, cost) && same(currentMapCol, map)) already.push(sku);
   }
   if (!cellsByRow.size) throw new Error(`None of the promotion's products is in this file with ${levelName} values in Pricing — check it is the ${label} pricing file.`);
 
@@ -185,12 +195,12 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   const saved = start && !fromSaved ? await savePromoFile(promotion, `${channel}:price_start`, file) : {};
   await markPromotionTask(promotion.id, `${channel}:${start ? 'price_start' : 'price_change'}`, { rows: cellsByRow.size, tier, skus: written.sort(), ...saved, ...(fromSaved ? { from_saved: true } : {}) });
 
-  return { supplier, target, levelName, rows: cellsByRow.size, removed: kept.removed, already, missing, notInFile, excluded, usdRows, fromSaved, saved: Boolean(saved.file), onlySent: !start && Boolean(sentAtStart?.length) };
+  return { supplier, target, levelName, rows: cellsByRow.size, removed: kept.removed, already, missing, notInFile, excluded, usdRows, fromSaved, saved: Boolean(saved.file), onlySent: !start && sentAtStart.length > 0 };
 }
 
 /** Back to Blue from the pricing file kept on the Promo MAP day. */
 export async function fillWayfairPriceChangeFromSaved(promotion, supplier = 'USA') {
-  const entry = promotion.file_tasks?.[`${supplier === 'USA' ? 'wayfair_us' : 'wayfair_ca'}:price_start`];
+  const entry = (await freshFileTasks(promotion))[`${supplier === 'USA' ? 'wayfair_us' : 'wayfair_ca'}:price_start`];
   const file = await loadPromoFile(entry);
   if (!file) throw new Error('No pricing file is saved for this promotion (it is kept 60 days after the Promo MAP day) — upload a fresh one from Partner Home.');
   return fillWayfairPriceChangeFile(file, promotion, supplier, 'blue', { fromSaved: true });

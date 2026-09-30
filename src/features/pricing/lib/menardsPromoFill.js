@@ -47,8 +47,20 @@ import {
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { markPromotionTask, savePromoFile, loadPromoFile } from '@/features/pricing/api/promoTasks';
+import { markPromotionTask, savePromoFile, loadPromoFile, freshFileTasks } from '@/features/pricing/api/promoTasks';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
+
+// The whole catalog with the given columns, read now in pages of 1,000 (the
+// API's cap per request) so no product is ever missing from a fill.
+async function catalog(columns) {
+  const all = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from('products').select(columns).order('sku').range(from, from + 999);
+    if (error) throw error;
+    all.push(...(data ?? []));
+    if (!data || data.length < 1000) return all;
+  }
+}
 
 // 0-based columns Menards reserves for us: F, G, H.
 export const MENARDS_COLUMNS = { map: 5, cost: 6, map2: 7 };
@@ -96,9 +108,8 @@ export async function analyzeMenardsPromoFile(file, promotion) {
   const bySku = new Map(members.map((m) => [m.sku, m]));
 
   // Every product's Blue and level prices: rows outside the promotion need
-  // Blue too, so the whole catalog is read (a few hundred rows).
-  const { data: prods, error } = await supabase.from('products').select(`sku, map_usd, cost_usd_menards, ${mapField}, ${costField}`).range(0, 4999);
-  if (error) throw error;
+  // Blue too, so the whole catalog is read.
+  const prods = await catalog(`sku, map_usd, cost_usd_menards, ${mapField}, ${costField}`);
   const pim = new Map((prods ?? []).map((p) => [p.sku, p]));
   const pimSkus = new Set(pim.keys());
 
@@ -198,12 +209,12 @@ function writeFGH(cellsByRow, rn, f) {
  */
 export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false } = {}) {
   const { rows: members, excluded } = await promotionMembersFor(promotion, 'menards');
-  const sentAtStart = promotion.file_tasks?.['menards:promo_file']?.skus ?? null;
+  // The products that went out at the start, as the database holds them now.
+  const sentAtStart = (await freshFileTasks(promotion))['menards:promo_file']?.skus ?? null;
   const promoSkus = sentAtStart?.length ? sentAtStart : members.map((m) => m.sku);
   if (!promoSkus.length) throw new Error('This promotion has no products for Menards.');
   const promoSet = new Set(promoSkus);
-  const { data: prods, error } = await supabase.from('products').select('sku, map_usd, cost_usd_menards').range(0, 4999);
-  if (error) throw error;
+  const prods = await catalog('sku, map_usd, cost_usd_menards');
   const pim = new Map((prods ?? []).map((p) => [p.sku, p]));
 
   const { zip, shared } = await openFile(file);
@@ -270,7 +281,7 @@ export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false
 
 /** Back to Blue from the Menards file kept when the promotion started. */
 export async function fillMenardsBackToBlueFromSaved(promotion) {
-  const file = await loadPromoFile(promotion.file_tasks?.['menards:promo_file']);
+  const file = await loadPromoFile((await freshFileTasks(promotion))['menards:promo_file']);
   if (!file) throw new Error('The Menards file of this promotion is no longer saved (files are kept 60 days) — upload it.');
   return fillMenardsBackToBlue(file, promotion, { fromSaved: true });
 }

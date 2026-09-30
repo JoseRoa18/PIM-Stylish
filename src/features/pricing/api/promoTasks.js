@@ -35,6 +35,17 @@ export const PROMO_FILE_DAYS = 60;
 const DAY_MS = 86400000;
 
 /**
+ * A promotion's file tasks as the database holds them NOW — the page's copy
+ * dates from when it loaded, and someone else may have filled a start file
+ * since. Back to Blue reads its product list and saved file through this.
+ */
+export async function freshFileTasks(promotion) {
+  const { data, error } = await supabase.from('promotions').select('file_tasks').eq('id', promotion.id).maybeSingle();
+  if (error) throw error;
+  return data?.file_tasks ?? promotion.file_tasks ?? {};
+}
+
+/**
  * Keep the file of `task` ("<channel>:<task>"); replaces the one saved before
  * for the same task. Returns { file, file_name, saved_at } to merge into the
  * task entry, or {} when it could not be saved (the fill itself still stands).
@@ -46,7 +57,7 @@ export async function savePromoFile(promotion, task, file) {
     const body = new Blob([await file.arrayBuffer()], { type: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const { error } = await supabase.storage.from(BUCKET).upload(path, body, { upsert: false });
     if (error) throw error;
-    const previous = promotion.file_tasks?.[task]?.file;
+    const previous = (await freshFileTasks(promotion).catch(() => promotion.file_tasks ?? {}))?.[task]?.file;
     if (previous && previous !== path) await supabase.storage.from(BUCKET).remove([previous]).catch(() => {});
     return { file: path, file_name: file.name ?? safe, saved_at: new Date().toISOString() };
   } catch {
