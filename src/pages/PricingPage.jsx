@@ -1950,43 +1950,44 @@ function PromoMarketDates({ promo, canEdit, onChanged }) {
     }
   }
 
-  const input = 'px-2.5 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40';
+  // Each country in its own block so the two ranges can't be read as one
+  // (user request 2026-09-30): a chip per market when shown, a row per market
+  // when edited, with the market's calendar as a reference.
+  const input = 'px-2.5 py-1.5 rounded-lg bg-surface border border-outline-variant text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40';
   return (
     <div className="flex items-center gap-3 flex-wrap text-body-sm">
       <span className="text-on-surface-variant">Runs</span>
-      {!editing && (
-        <span className="text-on-surface">
-          {MARKETS.map(([m, label], i) => (
-            <span key={m}>
-              {i > 0 && <span className="text-on-surface-variant"> · </span>}
-              {label} {fmt(win[m].start)} to {fmt(win[m].end)}
-              {anyCustom && <span className="text-on-surface-variant">{differs(m) ? ' (custom)' : ' (calendar)'}</span>}
-            </span>
-          ))}
-          {!anyCustom && <span className="text-on-surface-variant"> · market calendar</span>}
+      {!editing && MARKETS.map(([m, label]) => (
+        <span key={m} className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-1">
+          <span className="text-label-md font-semibold text-on-surface">{label}</span>
+          <span className="text-on-surface">{fmt(win[m].start)} to {fmt(win[m].end)}</span>
+          <span className={differs(m) ? 'text-label-md font-medium text-primary' : 'text-label-md text-on-surface-variant'}>
+            {differs(m) ? 'custom' : 'calendar'}
+          </span>
         </span>
-      )}
+      ))}
       {canEdit && !editing && (
         <button type="button" onClick={startEditing} className="text-label-md font-medium text-primary hover:underline">
           {anyCustom ? 'Change dates' : 'Set custom dates'}
         </button>
       )}
       {editing && draft && (
-        <span className="inline-flex items-center gap-x-4 gap-y-2 flex-wrap">
+        <div className="basis-full flex flex-col gap-2">
           {MARKETS.map(([m, label]) => (
-            <span key={m} className="inline-flex items-center gap-2">
-              <span className="text-on-surface-variant">{label}</span>
+            <div key={m} className="flex items-center gap-3 flex-wrap rounded-xl bg-surface-container-low px-3 py-2">
+              <span className="w-16 text-label-lg font-semibold text-on-surface">{label}</span>
               <input type="date" value={draft[m].start} onChange={(e) => setDay(m, 'start', e.target.value)} className={input} aria-label={`${label} first day`} />
               <span className="text-on-surface-variant">to</span>
               <input type="date" value={draft[m].end} min={draft[m].start || undefined} onChange={(e) => setDay(m, 'end', e.target.value)} className={input} aria-label={`${label} last day`} />
-            </span>
+              <span className="text-label-md text-on-surface-variant">Calendar: {fmt(cal[m].start)} to {fmt(cal[m].end)}</span>
+            </div>
           ))}
-          <span className="inline-flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button type="button" onClick={() => save(false)} disabled={busy || MARKETS.some(([m]) => !draft[m].start || !draft[m].end)} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">Save</button>
             {anyCustom && <button type="button" onClick={() => save(true)} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Back to calendar</button>}
             <button type="button" onClick={() => { setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
-          </span>
-        </span>
+          </div>
+        </div>
       )}
       {error && <span className="text-error">{error}</span>}
     </div>
