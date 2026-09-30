@@ -689,8 +689,8 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
 
     // Safety net: the day-before prep normally schedules Best Buy. If it
     // didn't (promo loaded late / toggle off / offers still running the
-    // ending promotion), send it now — a window that already began starts
-    // in a couple of minutes (bbDiscount).
+    // ending promotion), send it now — a window that already began goes
+    // live as soon as Mirakl imports it (whole days, see bbDiscount).
     if (chain === 0 && settings.bestbuy !== false && caTarget && cadRows.length && !caTarget.bb_scheduled_at) {
       try {
         const w = win(caTarget, "ca");
