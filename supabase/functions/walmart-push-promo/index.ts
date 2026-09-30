@@ -171,7 +171,14 @@ Deno.serve(async (req) => {
       if (!promotionId || !skusIn.length) return json({ error: "promotionId and skus[] are required." }, 400);
       const { data: promo } = await admin.from("promotions").select("id, name, period, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on").eq("id", promotionId).maybeSingle();
       if (!promo) return json({ error: `Promotion ${promotionId} not found.` }, 404);
-      const endMs = Date.parse(etInstant(promoWindow(promo, market).end, "23:59:59"));
+      // This promotion's promo = a REDUCED one starting and ending within a
+      // day of the window's first and last minute (Eastern): the API's exact
+      // instants and a Seller Center file's (read as UTC, 4–5 h off —
+      // 2026-09-30) both match; another month's promo never does.
+      const w = promoWindow(promo, market);
+      const startMs = Date.parse(etInstant(w.start, "00:00:00"));
+      const endMs = Date.parse(etInstant(w.end, "23:59:59"));
+      const near = (ms: number, target: number) => Math.abs(ms - target) <= 24 * 3600_000;
       const { data: aliasRows } = await admin.from("product_aliases").select("alias, sku").eq("marketplace", cfg.alias).in("sku", skusIn);
       const walmartSku = new Map<string, string>((aliasRows ?? []).map((r: { alias: string; sku: string }) => [r.sku, r.alias]));
       const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -181,19 +188,21 @@ Deno.serve(async (req) => {
         const wsku = walmartSku.get(sku) ?? sku;
         const r = await wmGet(`/v3/promo/sku/${encodeURIComponent(wsku)}`);
         const pricing = ((((r.data as Record<string, unknown>)?.payload as Record<string, unknown>)?.pricingList as Record<string, unknown>)?.pricing ?? []) as Record<string, unknown>[];
-        const hit = pricing.find((p) => p.currentPriceType === "REDUCED" && Number(p.expirationDate) === endMs);
-        if (!hit) { noPromo.push(sku); continue; }
-        const amount = (k: string) => Number(((hit[k] as Record<string, unknown>)?.value as Record<string, unknown>)?.amount);
-        lines.push({
-          Price: {
-            sku: wsku,
-            price: amount("comparisonPrice"),
-            promotionInformation: {
-              promotionSettingAction: "Delete", promotionType: "Reduced", promotionPrice: amount("currentPrice"),
-              promotionPriceStartDateTime: iso(Number(hit.effectiveDate)), promotionPriceEndDateTime: iso(Number(hit.expirationDate)),
+        const hits = pricing.filter((p) => p.currentPriceType === "REDUCED" && near(Number(p.effectiveDate), startMs) && near(Number(p.expirationDate), endMs));
+        if (!hits.length) { noPromo.push(sku); continue; }
+        for (const hit of hits) {
+          const amount = (k: string) => Number(((hit[k] as Record<string, unknown>)?.value as Record<string, unknown>)?.amount);
+          lines.push({
+            Price: {
+              sku: wsku,
+              price: amount("comparisonPrice"),
+              promotionInformation: {
+                promotionSettingAction: "Delete", promotionType: "Reduced", promotionPrice: amount("currentPrice"),
+                promotionPriceStartDateTime: iso(Number(hit.effectiveDate)), promotionPriceEndDateTime: iso(Number(hit.expirationDate)),
+              },
             },
-          },
-        });
+          });
+        }
       }
       const payload = {
         MPItemFeedHeader: { subCategory: "price-mp", mart: "WALMART_CA", feedType: "PRICE_AND_PROMOTION", processMode: "REPLACE", locale: ["en", "fr"], version: CA_FEED_VERSION, subset: "EXTERNAL", tenant: "WALMART_CA" },
