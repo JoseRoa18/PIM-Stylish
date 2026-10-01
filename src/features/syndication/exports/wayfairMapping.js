@@ -218,6 +218,8 @@ export const WAYFAIR_RULES = {
   'Spout/Faucet Height - Top to Bottom': (p) => num(attr(p).faucet_height_in || attr(p).spout_height_in),
   'Faucet Centers': (p) => num(attr(p).faucet_centers),
   'Number of Installation Holes': (p) => num(attr(p).number_of_installation_holes),
+  // The bathroom faucet template names the same required field differently.
+  'Number of Mounting Holes': (p) => num(attr(p).number_of_installation_holes),
   'Installation Hole Diameter': (p) => num(attr(p).install_hole_diameter_in),
   'Number of Handles': (p) => num(attr(p).number_of_handles),
   'Maximum Deck Thickness': (p) => num(attr(p).max_deck_thickness_in),
