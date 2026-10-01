@@ -34,8 +34,14 @@ export default function DonutChart({
 
   let acc = 0;
 
+  // What the picture shows, for screen readers: the center figure and each slice.
+  const summary = [
+    [centerValue, centerLabel].filter((x) => x != null && x !== '').join(' '),
+    visible.map((d) => `${d.label}: ${d.value}`).join(', '),
+  ].filter(Boolean).join(' — ');
+
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" role="img" aria-label={summary || 'No data'}>
       {/* Track */}
       <circle
         cx={cx}

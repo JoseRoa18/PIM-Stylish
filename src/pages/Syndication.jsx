@@ -59,13 +59,13 @@ export default function Syndication() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                  <p className="text-title-md text-on-surface font-medium truncate">{c.name}</p>
+                  <p className="text-title-md text-on-surface font-medium truncate" title={c.name}>{c.name}</p>
                   <span className={`px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap flex-shrink-0 ${c.envClass}`}>{c.env}</span>
                   {c.mode && (
                     <span className={`px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap flex-shrink-0 ${c.modeClass}`}>{c.mode}</span>
                   )}
                 </div>
-                <p className="text-body-sm text-on-surface-variant truncate">{c.tagline}</p>
+                <p className="text-body-sm text-on-surface-variant truncate" title={c.tagline}>{c.tagline}</p>
                 {stats[c.id] && (
                   <p className="sm:hidden text-body-sm text-on-surface-variant tabular-nums">
                     {stats[c.id].value} · {stats[c.id].label}
@@ -100,7 +100,7 @@ export default function Syndication() {
           (select products → Export Template) and manage the blank templates in Templates.
         </p>
         {fileChannels === null ? (
-          <div className="flex items-center gap-2 text-body-sm text-on-surface-variant py-4">
+          <div role="status" className="flex items-center gap-2 text-body-sm text-on-surface-variant py-4">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading channels…
           </div>
         ) : fileChannels.length === 0 ? (
@@ -128,7 +128,7 @@ export default function Syndication() {
                   <FileSpreadsheet className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-body-md text-on-surface font-medium truncate">{f.marketplace}</p>
+                  <p className="text-body-md text-on-surface font-medium truncate" title={f.marketplace}>{f.marketplace}</p>
                   <p className="text-body-sm text-on-surface-variant">
                     {f.templates} template{f.templates === 1 ? '' : 's'}
                   </p>

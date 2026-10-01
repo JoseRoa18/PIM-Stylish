@@ -53,10 +53,11 @@ function BlankTemplateMenu({ onDownload }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative shrink-0" onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-on-surface/8 transition-colors"
       >
         <Download className="w-4 h-4" />
@@ -219,21 +220,15 @@ export default function ImportProducts() {
       </header>
 
       {phase === 'upload' && (
+        // The "Choose file" button inside is the keyboard path; the zone itself
+        // only takes clicks and drops.
         <div
-          role="button"
-          tabIndex={0}
           className={`rounded-2xl border-2 border-dashed py-20 px-6 text-center cursor-pointer transition-colors ${
             isDragging
               ? 'border-primary bg-primary-container/20'
               : 'border-outline bg-surface-container-lowest'
           }`}
           onClick={() => fileRef.current?.click()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              fileRef.current?.click();
-            }
-          }}
           onDragEnter={(e) => {
             e.preventDefault();
             dragDepth.current += 1;
@@ -282,7 +277,7 @@ export default function ImportProducts() {
             Choose file
           </button>
           {parseError && (
-            <div className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">
+            <div role="alert" className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               {parseError}
             </div>
@@ -303,6 +298,7 @@ export default function ImportProducts() {
                   onClick={reset}
                   className="p-1 rounded-full text-on-surface-variant hover:bg-on-surface/8 transition-colors"
                   title="Choose another file"
+                  aria-label="Choose another file"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -335,12 +331,12 @@ export default function ImportProducts() {
             <table className="w-full">
               <thead>
                 <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md font-medium text-on-surface-variant">
-                  <th className="text-left px-5 py-3">Row</th>
-                  <th className="text-left px-5 py-3">SKU</th>
-                  <th className="text-left px-5 py-3">Name</th>
-                  <th className="text-left px-5 py-3">Action</th>
-                  <th className="text-left px-5 py-3">Completeness</th>
-                  <th className="px-5 py-3"></th>
+                  <th scope="col" className="text-left px-5 py-3">Row</th>
+                  <th scope="col" className="text-left px-5 py-3">SKU</th>
+                  <th scope="col" className="text-left px-5 py-3">Name</th>
+                  <th scope="col" className="text-left px-5 py-3">Action</th>
+                  <th scope="col" className="text-left px-5 py-3">Completeness</th>
+                  <th scope="col" className="px-5 py-3"><span className="sr-only">Details</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
@@ -366,7 +362,7 @@ export default function ImportProducts() {
       )}
 
       {phase === 'importing' && (
-        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest py-20 px-6 text-center">
+        <div role="status" className="rounded-2xl border border-outline-variant bg-surface-container-lowest py-20 px-6 text-center">
           <Loader2 className="w-8 h-8 mx-auto mb-4 animate-spin text-primary" />
           <p className="text-body-lg text-on-surface">
             Importing {progress.done}/{progress.total}…
@@ -375,7 +371,7 @@ export default function ImportProducts() {
       )}
 
       {phase === 'done' && result && (
-        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest py-16 px-6 text-center">
+        <div role={result.ok ? 'status' : 'alert'} className="rounded-2xl border border-outline-variant bg-surface-container-lowest py-16 px-6 text-center">
           {result.ok ? (
             <>
               <CheckCircle2 className="w-10 h-10 mx-auto mb-4 text-success" />
@@ -446,7 +442,7 @@ function RowGroup({ row, hasErrors, isUpdate, isExpanded, onToggle }) {
       >
         <td className="px-5 py-3 text-body-sm text-on-surface-variant">{row.rowNumber}</td>
         <td className="px-5 py-3 text-body-sm font-mono text-on-surface">{row.sku ?? '—'}</td>
-        <td className="px-5 py-3 text-body-md text-on-surface truncate max-w-xs">
+        <td className="px-5 py-3 text-body-md text-on-surface truncate max-w-xs" title={row.columns.model_name ?? undefined}>
           {row.columns.model_name ?? '—'}
         </td>
         <td className="px-5 py-3">
@@ -472,9 +468,17 @@ function RowGroup({ row, hasErrors, isUpdate, isExpanded, onToggle }) {
           )}
         </td>
         <td className="px-5 py-3 text-right">
-          <ChevronDown
-            className={`w-4 h-4 text-on-surface-variant inline-block transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-          />
+          {/* No handler: the click bubbles to the row's onToggle. */}
+          <button
+            type="button"
+            aria-expanded={isExpanded}
+            aria-label={`Show details for row ${row.rowNumber}`}
+            className="inline-flex align-middle rounded"
+          >
+            <ChevronDown
+              className={`w-4 h-4 text-on-surface-variant inline-block transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+            />
+          </button>
         </td>
       </tr>
       {isExpanded && (

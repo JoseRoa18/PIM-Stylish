@@ -22,7 +22,7 @@ import { formatCategory } from '@/lib/format';
 const IS_MAC =
   typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
-export default function Topbar({ onMenuClick }) {
+export default function Topbar({ onMenuClick, menuOpen = false }) {
   const { signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -77,6 +77,8 @@ export default function Topbar({ onMenuClick }) {
     function onKey(e) {
       const isShortcut = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
       if (isShortcut) {
+        // Not while a modal is open: focus must stay inside it.
+        if (document.querySelector('[aria-modal="true"]')) return;
         e.preventDefault();
         inputRef.current?.focus();
         inputRef.current?.select();
@@ -149,14 +151,28 @@ export default function Topbar({ onMenuClick }) {
       <button
         type="button"
         onClick={onMenuClick}
-        className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors lg:hidden flex-shrink-0"
+        className="relative p-2 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors lg:hidden flex-shrink-0 after:absolute after:-inset-1"
         aria-label="Open menu"
+        aria-expanded={menuOpen}
+        aria-controls="app-sidebar"
       >
         <Menu className="w-5 h-5" />
       </button>
 
       {/* Search */}
-      <div ref={wrapperRef} className="flex items-center flex-1 max-w-xl relative">
+      <div
+        ref={wrapperRef}
+        className="flex items-center flex-1 max-w-xl relative"
+        // Tabbing out of the search closes its results (relatedTarget is
+        // null on a click in Safari — the click-outside handler covers that).
+        onBlur={(e) => {
+          if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setIsOpen(false);
+        }}
+      >
+        {/* One live region, always mounted, announces what the panel shows. */}
+        <span className="sr-only" role="status">
+          {!showDropdown ? '' : loading && !results.length ? 'Searching…' : error ? '' : results.length ? `${results.length} result${results.length === 1 ? '' : 's'}` : `No products match ${trimmed}`}
+        </span>
         <div className="relative w-full group">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant group-focus-within:text-primary transition-colors pointer-events-none" />
           <input
@@ -170,9 +186,13 @@ export default function Topbar({ onMenuClick }) {
             onFocus={() => trimmed && setIsOpen(true)}
             onKeyDown={handleKeyDown}
             placeholder={compact ? 'Search…' : 'Search by SKU, name or marketplace id…'}
+            role="combobox"
             aria-label="Search products"
             aria-autocomplete="list"
             aria-expanded={showDropdown}
+            aria-controls={showResults ? 'global-search-results' : undefined}
+            aria-activedescendant={showResults && activeIndex >= 0 ? `global-search-option-${activeIndex}` : undefined}
+            aria-keyshortcuts="Control+K Meta+K"
             className="w-full pl-10 pr-10 sm:pr-20 py-2 bg-surface-container border border-outline-variant rounded-full text-body-md placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
           />
           {/* Right-side affordances inside the input */}
@@ -206,7 +226,6 @@ export default function Topbar({ onMenuClick }) {
           // On phones the input is too narrow to host readable rows, so the
           // panel breaks out to near-full viewport width below the topbar.
           <div
-            role="listbox"
             className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-0 sm:top-full mt-2 rounded-2xl border border-outline-variant bg-surface shadow-lg overflow-hidden z-40 animate-menu-in"
           >
             {showLoadingOnly && (
@@ -217,7 +236,7 @@ export default function Topbar({ onMenuClick }) {
             )}
 
             {showError && (
-              <div className="px-4 py-5 text-center">
+              <div role="alert" className="px-4 py-5 text-center">
                 <p className="text-body-sm text-error font-semibold">Search failed</p>
                 <p className="text-body-sm text-on-surface-variant mt-1 break-words">
                   {error.message ?? String(error)}
@@ -239,15 +258,21 @@ export default function Topbar({ onMenuClick }) {
             {showResults && (
               <>
                 {/* max-h = 6 exact rows (67px each) + py-1, so no row is cut mid-height */}
-                <ul className="max-h-[25.625rem] overflow-y-auto py-1">
+                <ul id="global-search-results" role="listbox" aria-label="Search results" className="max-h-[25.625rem] overflow-y-auto py-1">
                   {results.map((p, i) => {
                     // Without a model name the title falls back to the SKU, so
                     // repeating it in the subtitle would just be noise.
                     const hasModelName = Boolean(p.model_name);
                     return (
-                      <li key={p.sku} role="option" aria-selected={i === activeIndex}>
+                      <li key={p.sku} role="presentation">
+                        {/* The option itself; the input keeps focus and moves
+                            through the options with the arrow keys. */}
                         <button
+                          id={`global-search-option-${i}`}
                           type="button"
+                          role="option"
+                          aria-selected={i === activeIndex}
+                          tabIndex={-1}
                           onClick={() => goToProduct(p)}
                           onMouseEnter={() => {
                             setActiveIndex(i);

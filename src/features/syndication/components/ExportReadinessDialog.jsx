@@ -55,7 +55,7 @@ export default function ExportReadinessDialog({ reports, onClose }) {
           const full = r.columns.length - empty.length - partial.length;
           return (
             <section key={r.file}>
-              <h4 className="text-title-md text-on-surface mb-1 break-all">{r.file}</h4>
+              <h3 className="text-title-md text-on-surface mb-1 break-all">{r.file}</h3>
               <p className="text-body-sm text-on-surface-variant mb-3">
                 {r.rows} row{r.rows === 1 ? '' : 's'} · {full} of {r.columns.length} columns fully
                 filled{partial.length > 0 && `, ${partial.length} partial`}

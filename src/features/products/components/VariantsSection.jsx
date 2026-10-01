@@ -169,7 +169,8 @@ function VariantCard({ variant, current, onRemove }) {
         to={`/catalog/${variant.sku}`}
         className="flex gap-3 p-3 rounded-xl border border-outline-variant bg-surface hover:border-primary/40 hover:shadow-sm transition-all"
       >
-        <Thumb image={variant.primary_image} alt={variant.model_name} />
+        {/* Decorative: the card's text already names the variant. */}
+        <Thumb image={variant.primary_image} alt="" />
         <div className="min-w-0 flex-1">
           <div className="text-body-md text-on-surface font-medium truncate pr-6">
             {variant.model_name || variant.sku}
@@ -199,8 +200,9 @@ function VariantCard({ variant, current, onRemove }) {
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(); }}
-        className="absolute top-2 right-2 p-1 rounded-full bg-surface text-on-surface-variant opacity-0 group-hover:opacity-100 hover:bg-error-container hover:text-on-error-container transition-all"
+        className="absolute top-2 right-2 p-1 rounded-full bg-surface text-on-surface-variant opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-error-container hover:text-on-error-container transition-all"
         title="Remove from variant family"
+        aria-label={`Remove ${variant.sku} from variant family`}
       >
         <X className="w-3.5 h-3.5" />
       </button>
@@ -285,7 +287,7 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
       }
     >
       {error && (
-        <div className="mb-4 px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm animate-banner-in">
+        <div role="alert" className="mb-4 px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm animate-banner-in">
           {error}
         </div>
       )}
@@ -307,6 +309,7 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
                       type="button"
                       onClick={() => handleRemove(v.sku)}
                       disabled={busy === v.sku}
+                      aria-label={`Remove ${v.sku}`}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-label-md text-error hover:bg-error-container/40 transition-colors disabled:opacity-50"
                     >
                       {busy === v.sku ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
@@ -328,6 +331,7 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
                 value={query}
                 onChange={(e) => runSearch(e.target.value)}
                 placeholder="Search by SKU or name…"
+                aria-label="Search products by SKU or name"
                 autoFocus
                 className="w-full pl-9 pr-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
               />
@@ -364,6 +368,7 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
                       type="button"
                       onClick={() => handleAdd(r.sku)}
                       disabled={busy === r.sku}
+                      aria-label={`Add ${r.sku}`}
                       className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-label-md font-medium text-on-primary bg-primary hover:opacity-90 transition-opacity disabled:opacity-50"
                     >
                       {busy === r.sku ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
@@ -469,6 +474,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
             <button
               type="button"
               onClick={() => setTab('existing')}
+              aria-pressed={tab === 'existing'}
               className={`px-4 py-3 text-body-sm border-b-2 -mb-px transition-colors ${
                 tab === 'existing'
                   ? 'border-primary text-primary font-semibold'
@@ -480,6 +486,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
             <button
               type="button"
               onClick={() => setTab('new')}
+              aria-pressed={tab === 'new'}
               className={`px-4 py-3 text-body-sm border-b-2 -mb-px transition-colors ${
                 tab === 'new'
                   ? 'border-primary text-primary font-semibold'
@@ -504,6 +511,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
                   value={query}
                   onChange={(e) => runSearch(e.target.value)}
                   placeholder="Search by SKU or name…"
+                  aria-label="Search products by SKU or name"
                   autoFocus
                   className="w-full pl-9 pr-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
@@ -540,6 +548,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
                         type="button"
                         onClick={() => handleLinkToExisting(r.sku)}
                         disabled={busy}
+                        aria-label={`Link to ${r.sku}`}
                         className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-label-md font-medium text-on-primary bg-primary hover:opacity-90 transition-opacity disabled:opacity-50"
                       >
                         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
@@ -561,6 +570,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
                   value={newFamily}
                   onChange={(e) => setNewFamily(e.target.value)}
                   placeholder="e.g. 14"
+                  aria-label="Family number"
                   min="1"
                   autoFocus
                   className="flex-1 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
@@ -579,7 +589,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
           )}
 
           {error && (
-            <p className="text-body-sm text-error mt-3">{error}</p>
+            <p role="alert" className="text-body-sm text-error mt-3">{error}</p>
           )}
         </div>
     </Dialog>

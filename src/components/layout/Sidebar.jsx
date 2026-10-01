@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -37,6 +37,7 @@ export default function Sidebar({ open = false, onClose }) {
   const navigate = useNavigate();
   const { isAdmin, canEdit } = useAuth();
   const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+  const closeRef = useRef(null);
 
   // Escape closes the mobile drawer
   useEffect(() => {
@@ -47,6 +48,20 @@ export default function Sidebar({ open = false, onClose }) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  // The opened drawer takes focus (its close button) and gives it back to
+  // "Open menu" when it closes.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement;
+    // One frame later: on the first frame the drawer is still `invisible`
+    // (its visibility flips as the slide starts) and can't take focus.
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => closeRef.current?.focus()));
+    return () => {
+      cancelAnimationFrame(id);
+      if (prev instanceof HTMLElement) prev.focus();
+    };
+  }, [open]);
 
   return (
     <>
@@ -60,10 +75,17 @@ export default function Sidebar({ open = false, onClose }) {
       )}
 
       <aside
+        id="app-sidebar"
+        aria-label="Main menu"
+        // Below lg the open drawer is a modal over the page.
+        role={open ? 'dialog' : undefined}
+        aria-modal={open || undefined}
         className={cn(
-          'fixed left-0 top-0 h-full flex flex-col w-64 bg-surface-container-low border-r border-outline-variant z-50 transition-transform duration-200',
+          'fixed left-0 top-0 h-full flex flex-col w-64 bg-surface-container-low border-r border-outline-variant z-50 transition-[transform,visibility] duration-200',
           'lg:translate-x-0',
-          open ? 'translate-x-0' : '-translate-x-full',
+          // Closed below lg: also invisible, so its links leave the Tab
+          // order (visibility flips at the end of the slide — same look).
+          open ? 'translate-x-0' : '-translate-x-full max-lg:invisible',
         )}
       >
       {/* Brand */}
@@ -76,9 +98,10 @@ export default function Sidebar({ open = false, onClose }) {
           </div>
         </div>
         <button
+          ref={closeRef}
           type="button"
           onClick={onClose}
-          className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors lg:hidden flex-shrink-0"
+          className="relative p-2 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors lg:hidden flex-shrink-0 after:absolute after:-inset-1"
           aria-label="Close menu"
         >
           <X className="w-5 h-5" />
@@ -121,6 +144,7 @@ export default function Sidebar({ open = false, onClose }) {
       {canEdit && (
         <div className="p-4">
           <button
+            type="button"
             onClick={() => {
               onClose?.();
               navigate('/catalog?new=1');

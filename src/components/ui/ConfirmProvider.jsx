@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useId, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import Dialog from './Dialog';
 
@@ -19,6 +19,8 @@ const ConfirmContext = createContext(null);
 export function ConfirmProvider({ children }) {
   const [request, setRequest] = useState(null);
   const resolverRef = useRef(null);
+  // The message is read with the title ("This cannot be undone", …).
+  const messageId = useId();
 
   const confirm = useCallback((options) => {
     return new Promise((resolve) => {
@@ -46,6 +48,7 @@ export function ConfirmProvider({ children }) {
         <Dialog
           onClose={() => settle(false)}
           ariaLabel={request.title}
+          ariaDescribedby={request.message ? messageId : undefined}
           maxWidth="max-w-md"
           footer={
             <>
@@ -81,9 +84,9 @@ export function ConfirmProvider({ children }) {
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div className="min-w-0 pt-1">
-              <h3 className="text-title-md text-on-surface">{request.title}</h3>
+              <h2 className="text-title-md text-on-surface">{request.title}</h2>
               {request.message && (
-                <p className="text-body-sm text-on-surface-variant mt-1.5 whitespace-pre-line">
+                <p id={messageId} className="text-body-sm text-on-surface-variant mt-1.5 whitespace-pre-line">
                   {request.message}
                 </p>
               )}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useId } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -395,7 +395,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
       )}
 
       {linkLoading ? (
-        <div className="px-8 pb-8 text-body-sm text-on-surface-variant">Checking link…</div>
+        <div role="status" className="px-8 pb-8 text-body-sm text-on-surface-variant">Checking link…</div>
       ) : !linked ? (
         <div className="px-8 pb-8">
           <NotLinkedNotice
@@ -500,7 +500,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
                 </button>
               )}
               {mediaMsg && (
-                <span className={`text-body-sm ${mediaMsg.tone === 'error' ? 'text-error' : 'text-on-surface-variant'}`}>
+                <span role={mediaMsg.tone === 'error' ? 'alert' : 'status'} className={`text-body-sm ${mediaMsg.tone === 'error' ? 'text-error' : 'text-on-surface-variant'}`}>
                   {mediaMsg.text}
                 </span>
               )}
@@ -565,6 +565,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
                 type="button"
                 onClick={handlePush}
                 disabled={busy || !dirty}
+                aria-busy={busy}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/95 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               >
                 {busy ? (
@@ -591,6 +592,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
 
 function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen, onToggle, dirtyCount, pimDiffCount, sectionsRebuild }) {
   const Icon = group.icon;
+  const panelId = useId();
   return (
     <div
       className={`rounded-xl bg-surface overflow-hidden border transition-colors ${
@@ -600,6 +602,8 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
       <button
         type="button"
         onClick={onToggle}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
         className="w-full px-5 py-4 flex items-center justify-between gap-4 text-left group hover:bg-surface-container-low/60 transition-colors"
       >
         <div className="flex items-center gap-4 min-w-0">
@@ -643,11 +647,13 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
         />
       </button>
       <div
+        id={panelId}
         className={`grid transition-all duration-200 ease-out ${
           isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
         }`}
       >
-        <div className="overflow-hidden">
+        {/* inert keeps a collapsed group's fields out of the tab order. */}
+        <div className="overflow-hidden" inert={!isOpen}>
           <div className="mx-5 border-t border-outline-variant/60" />
           <div className="px-5 pt-5 pb-5 space-y-5">
             {group.fields.map((field) => (
@@ -673,6 +679,8 @@ function FieldGroup({ group, form, product, baseline, onChange, disabled, isOpen
 // ============================== Field renderers ==============================
 
 function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChange, disabled, sectionsRebuild }) {
+  // Ties the visible label to its control (before the boolean early return).
+  const id = useId();
   const isEdited = !valuesEqual(value, baselineValue);
   const pimDiffers = field.type === 'richtext'
     ? textOfHtml(value) !== textOfHtml(pimValue)
@@ -684,7 +692,7 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-body-md text-on-surface">{field.label}</span>
+              <span id={id} className="text-body-md text-on-surface">{field.label}</span>
               {field.notPushed && <LocalOnlyTag />}
               {isEdited && <DirtyDot />}
             </div>
@@ -698,6 +706,7 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
             checked={Boolean(value)}
             onChange={onChange}
             disabled={disabled}
+            aria-labelledby={id}
           />
         </div>
         {pimDiffers && <PimHint value={pimValue} type="boolean" symbol={field.symbol} />}
@@ -711,9 +720,11 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
         label={field.label}
         notPushed={field.notPushed}
         isDirty={isEdited}
+        htmlFor={['text', 'textarea', 'number', 'currency'].includes(field.type) ? id : undefined}
       />
       {field.type === 'text' && (
         <input
+          id={id}
           type="text"
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value)}
@@ -723,6 +734,7 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
       )}
       {field.type === 'textarea' && (
         <textarea
+          id={id}
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value)}
           rows={field.rows ?? 4}
@@ -738,12 +750,14 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
             disabled={disabled}
             placeholder="Type here…"
             minRows={field.rows ?? 5}
+            ariaLabel={typeof field.label === 'string' ? field.label : undefined}
           />
           <AiFormatButton value={value} pimValue={pimValue} headline={aiHeadline} onChange={onChange} disabled={disabled} />
         </div>
       )}
       {field.type === 'number' && (
         <input
+          id={id}
           type="number"
           step="0.001"
           value={value ?? ''}
@@ -758,6 +772,7 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
             {field.symbol ?? 'C$'}
           </span>
           <input
+            id={id}
             type="number"
             step="0.01"
             value={value ?? ''}
@@ -788,7 +803,7 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
                 Rebuild from PIM
               </button>
               {sectionsRebuild.msg && (
-                <span className="text-body-sm text-on-surface-variant">
+                <span role="status" className="text-body-sm text-on-surface-variant">
                   {sectionsRebuild.msg}
                 </span>
               )}
@@ -871,7 +886,7 @@ function AiFormatButton({ value, pimValue, headline, onChange, disabled }) {
         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />}
         Auto-format
       </button>
-      {msg && <span className="text-body-sm text-on-surface-variant">{msg}</span>}
+      {msg && <span role="status" className="text-body-sm text-on-surface-variant">{msg}</span>}
     </div>
   );
 }
@@ -898,10 +913,10 @@ function PimHint({ value, type, symbol }) {
   );
 }
 
-function FieldLabel({ label, notPushed, isDirty }) {
+function FieldLabel({ label, notPushed, isDirty, htmlFor }) {
   return (
     <div className="flex items-baseline justify-between mb-2 gap-2">
-      <label className="block text-body-sm text-on-surface font-medium">
+      <label htmlFor={htmlFor} className="block text-body-sm text-on-surface font-medium">
         {label}
         {notPushed && (
           <span className="ml-1.5">
@@ -939,7 +954,7 @@ const inputClass =
 
 // ============================== Toggle ==============================
 
-function ToggleSwitch({ checked, onChange, disabled }) {
+function ToggleSwitch({ checked, onChange, disabled, ...rest }) {
   return (
     <button
       type="button"
@@ -947,6 +962,7 @@ function ToggleSwitch({ checked, onChange, disabled }) {
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       disabled={disabled}
+      {...rest}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-surface ${
         checked ? 'bg-primary' : 'bg-surface-container-highest'
       }`}
@@ -990,11 +1006,11 @@ function CollectionsPicker({ value, onChange, disabled }) {
   }
 
   if (loading) {
-    return <p className="text-body-sm text-on-surface-variant">Loading Wix categories…</p>;
+    return <p role="status" className="text-body-sm text-on-surface-variant">Loading Wix categories…</p>;
   }
   if (error) {
     return (
-      <p className="text-body-sm text-error">
+      <p role="alert" className="text-body-sm text-error">
         Failed to load Wix categories: {error.message}
       </p>
     );
@@ -1045,6 +1061,7 @@ function CollectionsPicker({ value, onChange, disabled }) {
         type="button"
         onClick={() => setPickerOpen((v) => !v)}
         disabled={disabled}
+        aria-expanded={pickerOpen}
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors disabled:opacity-50"
       >
         <Plus className={`w-3.5 h-3.5 transition-transform ${pickerOpen ? 'rotate-45' : ''}`} />
@@ -1059,9 +1076,10 @@ function CollectionsPicker({ value, onChange, disabled }) {
             <input
               type="text"
               placeholder="Search categories…"
+              aria-label="Search Wix categories"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-3 py-2.5 bg-transparent text-body-md text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none"
+              className="w-full pl-10 pr-3 py-2.5 bg-transparent text-body-md text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               disabled={disabled}
             />
           </div>
@@ -1138,6 +1156,7 @@ function SectionsEditor({ value, onChange, disabled, pimSections }) {
             <input
               type="text"
               placeholder="Section title (e.g. Dimensions)"
+              aria-label={`Section ${i + 1} title`}
               value={section.title ?? ''}
               onChange={(e) => update(i, 'title', e.target.value)}
               disabled={disabled}
@@ -1149,6 +1168,7 @@ function SectionsEditor({ value, onChange, disabled, pimSections }) {
               disabled={disabled}
               className="p-1.5 rounded-lg text-on-surface-variant hover:bg-error-container/40 hover:text-error transition-colors disabled:opacity-50"
               title="Remove section"
+              aria-label={`Remove section ${section.title || i + 1}`}
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -1160,6 +1180,7 @@ function SectionsEditor({ value, onChange, disabled, pimSections }) {
               disabled={disabled}
               placeholder="Section content…"
               minRows={4}
+              ariaLabel={`Section ${section.title || i + 1} content`}
             />
           </div>
           {(() => {
@@ -1401,7 +1422,7 @@ function NotLinkedNotice({ product, site, canEdit, onLinked }) {
             </Link>{' '}
             and run <em>Preview Link with Wix</em> if it already exists on the site.
           </p>
-          {error && <p className="text-body-sm text-error mt-2">{error}</p>}
+          {error && <p role="alert" className="text-body-sm text-error mt-2">{error}</p>}
           {canEdit && (
             <button
               type="button"
@@ -1429,7 +1450,7 @@ function FeedbackBanner({ tone, icon: Icon, children }) {
     success: 'text-on-tertiary-container',
   };
   return (
-    <div className={`rounded-lg border p-3 text-body-sm mb-3 ${tones[tone]}`}>
+    <div role={tone === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-body-sm mb-3 ${tones[tone]}`}>
       <div className="flex items-start gap-2">
         <Icon className={`w-4 h-4 flex-shrink-0 mt-0.5 ${iconTones[tone]}`} />
         <span>{children}</span>

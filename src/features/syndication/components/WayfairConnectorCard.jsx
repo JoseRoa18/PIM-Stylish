@@ -122,18 +122,18 @@ export default function WayfairConnectorCard() {
               disabled={attrsBusy || !sku.trim()}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
             >
-              {attrsBusy ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+              {attrsBusy ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" aria-hidden="true" /> : <ShieldCheck className="w-4 h-4" />}
               Validate
             </button>
           </div>
           {attrs?.error && (
-            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
+            <div role="alert" className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span className="break-words">{attrs.error}</span>
             </div>
           )}
           {attrs && !attrs.error && (
-            <div className="rounded-lg border border-outline-variant text-body-sm">
+            <div role="status" className="rounded-lg border border-outline-variant text-body-sm">
               <div className="px-3 py-2 border-b border-outline-variant text-on-surface">
                 {attrs.updates} attributes mapped · {attrs.changedCount} would change
                 {attrs.mutation?.requestId && <span className="text-on-surface-variant"> · validated (request {attrs.mutation.requestId.slice(0, 8)}…)</span>}
@@ -164,18 +164,18 @@ export default function WayfairConnectorCard() {
               disabled={pull?.busy}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
             >
-              {pull?.busy ? <ThinkingOrb state="searching" size={20} className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
+              {pull?.busy ? <ThinkingOrb state="searching" size={20} className="w-4 h-4" aria-hidden="true" /> : <DownloadCloud className="w-4 h-4" />}
               {pull?.busy && pull.total > 0 ? `Importing… ${pull.done}/${pull.total}` : 'Import item-group IDs'}
             </button>
           </div>
           {pull?.error && (
-            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
+            <div role="alert" className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span className="break-words">{pull.error}</span>
             </div>
           )}
           {pull?.summary && (
-            <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-surface-container-high text-on-surface animate-banner-in">
+            <div role="status" className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-surface-container-high text-on-surface animate-banner-in">
               <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-primary" />
               <span>
                 {pull.summary.applied} IDs imported ({pull.summary.matched} matched)

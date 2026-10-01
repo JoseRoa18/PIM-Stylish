@@ -321,6 +321,11 @@ export default function Catalog() {
         )}
       </header>
 
+      {/* Screen readers hear the result count change as search/filters narrow it. */}
+      <p className="sr-only" role="status">
+        {loading || error ? '' : `${sortedProducts.length} ${sortedProducts.length === 1 ? 'product matches' : 'products match'}`}
+      </p>
+
       {!loading && !error && totalCount > 0 && (
         <CatalogStats
           total={totalCount}
@@ -352,6 +357,7 @@ export default function Catalog() {
           {!loading && !error && (
             <Pagination
               compact
+              label="Pagination, top"
               page={currentPage}
               pageSize={pageSize}
               total={sortedProducts.length}
@@ -380,6 +386,7 @@ export default function Catalog() {
           />
           {!loading && !error && (
             <Pagination
+              label="Pagination, bottom"
               page={currentPage}
               pageSize={pageSize}
               total={sortedProducts.length}

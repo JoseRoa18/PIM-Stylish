@@ -47,14 +47,23 @@ export default function AppShell({ children }) {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Keyboard users skip the menu and the top bar on every page. Hidden
+          until focused; preventDefault keeps the router off the hash. */}
+      <a
+        href="#main-content"
+        onClick={(e) => { e.preventDefault(); mainRef.current?.focus(); }}
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-full focus:bg-primary focus:text-on-primary focus:text-label-lg"
+      >
+        Skip to main content
+      </a>
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <Suspense fallback={null}>
         <PromoNudge />
         <PromoTaskNudge />
       </Suspense>
       <div className="lg:ml-64 h-screen flex flex-col">
-        <Topbar onMenuClick={() => setSidebarOpen(true)} />
-        <main ref={mainRef} className="flex-1 overflow-y-auto">
+        <Topbar onMenuClick={() => setSidebarOpen(true)} menuOpen={sidebarOpen} />
+        <main ref={mainRef} id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none">
           <div ref={contentRef} className="max-w-[1400px] mx-auto px-4 sm:px-8 py-8">
             {children}
           </div>

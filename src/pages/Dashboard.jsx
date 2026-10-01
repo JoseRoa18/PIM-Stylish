@@ -3,6 +3,7 @@ import { useDashboardData } from '@/features/dashboard/hooks/useDashboardData';
 import ActionNeededCard from '@/features/dashboard/components/ActionNeededCard';
 import MarketplaceHealthGrid from '@/features/dashboard/components/MarketplaceHealthGrid';
 import CatalogStatusCard from '@/features/dashboard/components/CatalogStatusCard';
+import PriceAlignmentCard from '@/features/dashboard/components/PriceAlignmentCard';
 import ContentGapsCard from '@/features/dashboard/components/ContentGapsCard';
 import RecentActivityCard from '@/features/dashboard/components/RecentActivityCard';
 
@@ -19,14 +20,14 @@ export default function Dashboard() {
       </header>
 
       {loading && (
-        <div className="flex items-center justify-center py-24 text-on-surface-variant">
+        <div role="status" className="flex items-center justify-center py-24 text-on-surface-variant">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
           Loading dashboard…
         </div>
       )}
 
       {error && (
-        <div className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
+        <div role="alert" className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>
@@ -39,7 +40,11 @@ export default function Dashboard() {
             refreshing={data.healthRefreshing}
           />
 
-          <CatalogStatusCard data={data} />
+          {/* Price Alignment sits next to the catalog (user, 2026-10-01). */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <CatalogStatusCard data={data} />
+            <PriceAlignmentCard />
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ContentGapsCard

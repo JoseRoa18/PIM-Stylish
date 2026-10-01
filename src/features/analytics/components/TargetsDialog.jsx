@@ -46,7 +46,7 @@ export default function TargetsDialog({ targets, categories, onClose, onSaved })
       subtitle="Share of products at 100% to reach, and by when. Leave a category blank to track it without a target."
       footer={(
         <>
-          {error && <span className="text-body-sm text-error mr-auto">{error}</span>}
+          {error && <span role="alert" className="text-body-sm text-error mr-auto">{error}</span>}
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
           <button type="submit" disabled={saving} className="px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 disabled:opacity-50">{saving ? 'Saving…' : 'Save targets'}</button>
         </>

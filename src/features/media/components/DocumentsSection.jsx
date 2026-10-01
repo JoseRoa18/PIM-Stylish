@@ -242,6 +242,7 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
       <DocumentRow
         key={key}
         label={langLabel ?? docType.label}
+        name={langLabel ? `${docType.label} — ${langLabel}` : docType.label}
         description={langLabel ? `${docType.label} — ${langLabel}` : docType.description}
         doc={docsBySlot[key]}
         canEdit={canEdit}
@@ -286,7 +287,7 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
       </div>
 
       {errorMessage && (
-        <div className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant animate-banner-in">
+        <div role="alert" className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant animate-banner-in">
           {errorMessage}
         </div>
       )}
@@ -301,7 +302,7 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
             <Skeleton className="h-16 w-full rounded-lg" />
           </>
         ) : error ? (
-          <p className="text-body-md text-error p-4">
+          <p role="alert" className="text-body-md text-error p-4">
             Failed to load documents: {error.message}
           </p>
         ) : (
@@ -398,6 +399,7 @@ function LanguageGroup({ docType, linkedLangs, children }) {
                 className="px-1 py-px rounded-sm bg-primary-container text-on-primary-container text-[10px] leading-4 font-semibold tracking-wide"
               >
                 {l.short}
+                <span className="sr-only"> uploaded</span>
               </span>
             ) : (
               <span
@@ -406,6 +408,7 @@ function LanguageGroup({ docType, linkedLangs, children }) {
                 className="px-1 py-px rounded-sm border border-outline-variant text-on-surface-variant/70 text-[10px] leading-4 tracking-wide"
               >
                 {l.short}
+                <span className="sr-only"> missing</span>
               </span>
             ),
           )}
@@ -426,7 +429,9 @@ const acceptsFile = (accept, file) => {
   return !exts.length || exts.some((x) => name.endsWith(x));
 };
 
-export function DocumentRow({ label, description, doc, canEdit, canPreview, busy, accept, onPreview, onUploadFile, onRemove, onReject, canRemove = true }) {
+// `name` is the slot's full name for the buttons' accessible labels ("Spec
+// Sheet — English"), where the visible `label` may be just the language.
+export function DocumentRow({ label, name = label, description, doc, canEdit, canPreview, busy, accept, onPreview, onUploadFile, onRemove, onReject, canRemove = true }) {
   const fileRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -507,6 +512,7 @@ export function DocumentRow({ label, description, doc, canEdit, canPreview, busy
               onClick={() => fileRef.current?.click()}
               disabled={busy}
               title="Upload from your computer — or drop the file on this row"
+              aria-label={`Upload ${name}`}
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-outline-variant text-label-md text-on-surface-variant hover:text-primary hover:border-primary transition-colors disabled:opacity-50 whitespace-nowrap"
             >
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
@@ -544,11 +550,11 @@ export function DocumentRow({ label, description, doc, canEdit, canPreview, busy
         <div className="flex items-center flex-shrink-0">
           {fileInput}
           {canPreview && (
-            <button type="button" onClick={onPreview} className={iconBtn} title="Preview PDF">
+            <button type="button" onClick={onPreview} className={iconBtn} title="Preview PDF" aria-label={`Preview ${name}`}>
               <Eye className="w-4 h-4" />
             </button>
           )}
-          <button type="button" onClick={openInNewTab} className={iconBtn} title="Open in new tab">
+          <button type="button" onClick={openInNewTab} className={iconBtn} title="Open in new tab" aria-label={`Open ${name} in new tab`}>
             <ExternalLink className="w-4 h-4" />
           </button>
           <button
@@ -556,9 +562,11 @@ export function DocumentRow({ label, description, doc, canEdit, canPreview, busy
             onClick={copyLink}
             className={copied ? 'p-2 rounded-full bg-primary text-on-primary' : iconBtn}
             title={copied ? 'Link copied!' : 'Copy link'}
+            aria-label={`Copy link to ${name}`}
           >
             <MorphIcon icon={copied ? CheckGlyph : LinkGlyph} size={16} reducedMotion="user" />
           </button>
+          <span className="sr-only" role="status">{copied ? 'Link copied' : ''}</span>
           {canEdit && (
             <>
               <button
@@ -567,6 +575,7 @@ export function DocumentRow({ label, description, doc, canEdit, canPreview, busy
                 disabled={busy}
                 className={iconBtn}
                 title="Replace — upload from your computer, or drop the file on this row"
+                aria-label={`Replace ${name}`}
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
               </button>
@@ -576,6 +585,7 @@ export function DocumentRow({ label, description, doc, canEdit, canPreview, busy
                 disabled={busy}
                 className="p-2 rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-colors disabled:opacity-50"
                 title="Remove"
+                aria-label={`Remove ${name}`}
               >
                 <Trash2 className="w-4 h-4" />
               </button>}

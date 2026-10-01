@@ -26,6 +26,7 @@ export default function AccountMenu() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
+  const triggerRef = useRef(null);
 
   const displayName = profile?.full_name?.trim() || nameFromEmail(user?.email);
   const avatarUrl = profile?.avatar_url ?? null;
@@ -33,7 +34,8 @@ export default function AccountMenu() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
-      if (e.key === 'Escape') setOpen(false);
+      // Back to the chip, so keyboard focus isn't lost with the panel.
+      if (e.key === 'Escape') { setOpen(false); triggerRef.current?.focus(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -72,9 +74,10 @@ export default function AccountMenu() {
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Account menu"
+        aria-label={`Account menu, ${displayName}`}
         aria-expanded={open}
         title={user?.email}
         className="flex items-center gap-2 p-1 pr-3 rounded-full hover:bg-surface-container-high transition-colors"
@@ -104,8 +107,9 @@ export default function AccountMenu() {
                 <Avatar name={profile?.full_name} email={user?.email} src={avatarUrl} size="xl" />
                 {/* Fixed dark scrim over the photo in both themes (overlay exception). */}
                 {busy && (
-                  <span className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center">
+                  <span role="status" className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center">
                     <Loader2 className="w-5 h-5 animate-spin text-white" />
+                    <span className="sr-only">Updating photo…</span>
                   </span>
                 )}
               </div>
@@ -117,7 +121,7 @@ export default function AccountMenu() {
             </div>
 
             {error && (
-              <p className="mx-4 mb-2 px-3 py-2 rounded-lg bg-error-container/50 text-error text-body-sm flex items-center gap-2">
+              <p role="alert" className="mx-4 mb-2 px-3 py-2 rounded-lg bg-error-container/50 text-error text-body-sm flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 {error}
               </p>

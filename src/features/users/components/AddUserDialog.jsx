@@ -57,6 +57,7 @@ export default function AddUserDialog({ onClose, onCreated }) {
           <button
             type="submit"
             disabled={submitting || !email}
+            aria-busy={submitting}
             className="px-5 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -66,7 +67,7 @@ export default function AddUserDialog({ onClose, onCreated }) {
       }
     >
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-error-container/40 border border-error/30 flex items-start gap-2 animate-banner-in">
+        <div role="alert" className="mb-4 p-3 rounded-lg bg-error-container/40 border border-error/30 flex items-start gap-2 animate-banner-in">
           <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
           <p className="text-body-sm text-error">{error}</p>
         </div>
@@ -124,6 +125,7 @@ export default function AddUserDialog({ onClose, onCreated }) {
               type="button"
               onClick={() => setPassword(generatePassword())}
               title="Generate a new password"
+              aria-label="Generate a new password"
               className="p-2.5 rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors"
             >
               <RefreshCw className="w-4 h-4" />
@@ -132,6 +134,7 @@ export default function AddUserDialog({ onClose, onCreated }) {
               type="button"
               onClick={copyPassword}
               title="Copy password"
+              aria-label={copied ? 'Password copied' : 'Copy password'}
               className="p-2.5 rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors"
             >
               <MorphIcon icon={copied ? Check : Copy} size={16} reducedMotion="user" className={copied ? 'text-primary' : ''} />

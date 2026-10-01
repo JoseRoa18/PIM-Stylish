@@ -143,7 +143,7 @@ export default function Users() {
       )}
 
       {actionError && (
-        <div className="mb-4 p-3 rounded-lg bg-error-container/40 border border-error/30 flex items-start gap-2 animate-banner-in">
+        <div role="alert" className="mb-4 p-3 rounded-lg bg-error-container/40 border border-error/30 flex items-start gap-2 animate-banner-in">
           <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
           <p className="text-body-sm text-error">{actionError}</p>
         </div>
@@ -152,7 +152,7 @@ export default function Users() {
       {/* Table */}
       <div className="bg-surface border border-outline-variant rounded-2xl overflow-x-auto">
         {loading ? (
-          <div className="py-16 flex items-center justify-center text-on-surface-variant text-body-sm">
+          <div role="status" className="py-16 flex items-center justify-center text-on-surface-variant text-body-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading users…
           </div>
         ) : error ? (
@@ -298,6 +298,7 @@ function UserIdentity({ user, isMe, busy, onRename }) {
               type="submit"
               disabled={busy}
               title="Save name"
+              aria-label="Save name"
               className="p-1.5 rounded-full text-primary hover:bg-primary-container/50 transition-colors disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -306,6 +307,7 @@ function UserIdentity({ user, isMe, busy, onRename }) {
               type="button"
               onClick={() => setEditing(false)}
               title="Cancel"
+              aria-label="Cancel"
               className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
             >
               <X className="w-4 h-4" />
@@ -356,6 +358,7 @@ function RoleControl({ user, isMe, busy, onChange }) {
   return (
     <select
       value={user.role}
+      aria-label={`Role for ${user.email}`}
       disabled={busy}
       onChange={(e) => onChange(user, e.target.value)}
       className="px-2.5 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
@@ -377,6 +380,7 @@ function RowActions({ user, isMe, busy, onReset, onDelete }) {
         onClick={() => onReset(user)}
         disabled={busy}
         title="Reset password"
+        aria-label={`Reset password for ${user.email}`}
         className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors disabled:opacity-50"
       >
         <KeyRound className="w-4 h-4" />
@@ -385,6 +389,7 @@ function RowActions({ user, isMe, busy, onReset, onDelete }) {
         onClick={() => onDelete(user)}
         disabled={busy || isMe}
         title={isMe ? "You can't remove yourself" : 'Remove user'}
+        aria-label={isMe ? "You can't remove yourself" : `Remove ${user.email}`}
         className="p-2 rounded-full text-on-surface-variant hover:bg-error-container/50 hover:text-error transition-colors disabled:opacity-30"
       >
         <Trash2 className="w-4 h-4" />
@@ -404,7 +409,7 @@ function CredentialsBanner({ email, password, onDismiss }) {
       });
   }
   return (
-    <div className="mb-4 p-4 rounded-xl bg-primary-container/40 border border-primary/30">
+    <div role="status" className="mb-4 p-4 rounded-xl bg-primary-container/40 border border-primary/30">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-label-md text-on-surface font-semibold">
@@ -422,6 +427,7 @@ function CredentialsBanner({ email, password, onDismiss }) {
           <button
             onClick={copy}
             title="Copy"
+            aria-label={copied ? 'Copied' : 'Copy credentials'}
             className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
           >
             <MorphIcon icon={copied ? CheckGlyph : CopyGlyph} size={16} reducedMotion="user" className={copied ? 'text-primary' : ''} />
@@ -429,6 +435,7 @@ function CredentialsBanner({ email, password, onDismiss }) {
           <button
             onClick={onDismiss}
             title="Dismiss"
+            aria-label="Dismiss"
             className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
           >
             <X className="w-4 h-4" />

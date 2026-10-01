@@ -68,10 +68,10 @@ export default function RecentActivityCard({ data }) {
           to="/activity"
           className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-2 hover:bg-surface-container-low/40 transition-colors group"
         >
-          <span className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <History className="w-4 h-4 text-on-surface-variant" />
-            <span className="text-title-md text-on-surface">Recent Activity</span>
-          </span>
+            <h2 className="text-title-md text-on-surface">Recent Activity</h2>
+          </div>
           <span className="inline-flex items-center gap-1 text-label-md text-primary">
             View all
             <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
@@ -96,8 +96,8 @@ export default function RecentActivityCard({ data }) {
                   <meta.Icon className="w-4 h-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-body-md text-on-surface truncate">{displaySummary(e.summary) || e.action}</p>
-                  <p className="text-body-sm text-on-surface-variant mt-0.5 truncate">
+                  <p className="text-body-md text-on-surface truncate" title={displaySummary(e.summary) || e.action}>{displaySummary(e.summary) || e.action}</p>
+                  <p className="text-body-sm text-on-surface-variant mt-0.5 truncate" title={`${who} · ${formatTimeAgo(e.occurred_at)}`}>
                     {who} · {formatTimeAgo(e.occurred_at)}
                   </p>
                 </div>

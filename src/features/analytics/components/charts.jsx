@@ -83,6 +83,8 @@ export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLab
   const path = valid.map((p, k) => `${k === 0 ? 'M' : 'L'}${x(p.i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
   const area = valid.length > 1 ? `${path} L${x(valid[valid.length - 1].i).toFixed(1)},${y(0)} L${x(valid[0].i).toFixed(1)},${y(0)} Z` : null;
   const last = valid[valid.length - 1];
+  // Screen readers get the values the line shows, not just its title.
+  const spoken = `${ariaLabel ? `${ariaLabel}: ` : ''}${valid.length ? valid.map((p) => `${p.label} ${p.value}${unit}`).join(', ') : 'no data yet'}`;
 
   function onMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -101,7 +103,7 @@ export function LineTrend({ points, max = 100, unit = '%', height = 220, ariaLab
         viewBox={`0 0 ${width} ${height}`}
         className="w-full h-auto text-on-surface-variant"
         role="img"
-        aria-label={ariaLabel}
+        aria-label={spoken}
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
       >
@@ -167,9 +169,11 @@ export function Columns({ points, height = 96, ariaLabel, format = (v) => v }) {
   const bw = Math.min(24, band - 4);
   const ih = height - pad.t - pad.b;
   const y = (v) => pad.t + ih - (v / max) * ih;
+  // Screen readers get every column's value, not just the chart's title.
+  const spoken = `${ariaLabel ? `${ariaLabel}: ` : ''}${points.length ? points.map((p) => `${p.label} ${format(p.value ?? 0)}`).join(', ') : 'no data yet'}`;
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto text-on-surface-variant" role="img" aria-label={ariaLabel} onPointerLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto text-on-surface-variant" role="img" aria-label={spoken} onPointerLeave={() => setHover(null)}>
         <line x1={pad.l} x2={width - pad.r} y1={pad.t + ih} y2={pad.t + ih} stroke="var(--color-outline-variant)" strokeWidth="1" />
         {points.map((p, i) => {
           const v = p.value ?? 0;

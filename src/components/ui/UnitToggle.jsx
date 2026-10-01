@@ -18,6 +18,9 @@ export default function UnitToggle({ value, onChange, disabled = false }) {
             key={unit}
             type="button"
             onClick={() => onChange(unit)}
+            // Really disabled while editing (pointer-events-none alone left
+            // the buttons focusable and switchable with Enter / Space).
+            disabled={disabled}
             aria-pressed={active}
             className={`px-2.5 py-1 rounded-md text-label-md transition-colors ${
               active

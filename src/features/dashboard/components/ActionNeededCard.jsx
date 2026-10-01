@@ -59,10 +59,10 @@ export default function ActionNeededCard({ actions, hasChannelSnapshots }) {
                   {a.count}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-body-md text-on-surface font-medium truncate">
+                  <span className="block text-body-md text-on-surface font-medium truncate" title={a.title}>
                     {a.title}
                   </span>
-                  <span className="block text-body-sm text-on-surface-variant truncate">
+                  <span className="block text-body-sm text-on-surface-variant truncate" title={a.runAt ? `${a.detail} · checked ${formatTimeAgo(a.runAt)}` : a.detail}>
                     {a.detail}
                     {a.runAt && <span> · checked {formatTimeAgo(a.runAt)}</span>}
                   </span>

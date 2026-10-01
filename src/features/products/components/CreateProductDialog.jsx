@@ -116,6 +116,7 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                 key={key}
                 type="button"
                 onClick={() => { setMode(key); setError(null); }}
+                aria-pressed={mode === key}
                 className={`flex-1 px-3 py-1.5 rounded-md text-label-lg font-medium transition-colors ${
                   mode === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
                 }`}
@@ -140,6 +141,7 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                     onClick={() => { setSource(null); setQuery(''); setForm((f) => ({ ...f, model_name: '' })); }}
                     className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant flex-shrink-0"
                     title="Choose another product"
+                    aria-label="Choose another product"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -158,6 +160,7 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Search by SKU or name…"
                         autoFocus
+                        aria-required="true"
                         className={`${inputClass} pl-9`}
                       />
                     </div>
@@ -198,6 +201,7 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                 onChange={(e) => setField('sku', e.target.value)}
                 placeholder="e.g. S-845W"
                 autoFocus={mode === 'new'}
+                aria-required="true"
                 className={`${inputClass} font-mono`}
               />
             </label>
@@ -222,6 +226,7 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                   <select
                     value={form.brand}
                     onChange={(e) => setField('brand', e.target.value)}
+                    aria-required="true"
                     className={inputClass}
                   >
                     {BRAND_OPTIONS.map((o) => (
@@ -237,6 +242,7 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                   <select
                     value={form.category}
                     onChange={(e) => setField('category', e.target.value)}
+                    aria-required="true"
                     className={inputClass}
                   >
                     {CATEGORY_OPTIONS.map((o) => (
@@ -281,7 +287,7 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
           )}
 
           {error && (
-            <div className="px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm flex items-center gap-2 animate-banner-in">
+            <div role="alert" className="px-3 py-2.5 rounded-lg bg-error-container text-on-error-container text-body-sm flex items-center gap-2 animate-banner-in">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               {error}
             </div>

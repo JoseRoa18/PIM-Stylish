@@ -172,7 +172,7 @@ export default function Analytics() {
             Export week
           </button>
           {canEdit && (
-            <button type="button" onClick={snapshotNow} disabled={snapping} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:opacity-60">
+            <button type="button" onClick={snapshotNow} disabled={snapping} aria-busy={snapping} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:opacity-60">
               <Camera className={`w-4 h-4 ${snapping ? 'animate-pulse' : ''}`} />
               {snapping ? 'Taking snapshot…' : 'Take snapshot'}
             </button>
@@ -181,13 +181,13 @@ export default function Analytics() {
       </div>
 
       {snapMsg && (
-        <div className={`mb-4 px-4 py-3 rounded-xl text-body-sm flex items-center gap-2 animate-banner-in ${snapMsg.tone === 'ok' ? 'bg-success-container text-on-success-container' : 'bg-error-container text-on-error-container'}`}>
+        <div role={snapMsg.tone === 'ok' ? 'status' : 'alert'} className={`mb-4 px-4 py-3 rounded-xl text-body-sm flex items-center gap-2 animate-banner-in ${snapMsg.tone === 'ok' ? 'bg-success-container text-on-success-container' : 'bg-error-container text-on-error-container'}`}>
           <Info className="w-4 h-4 flex-shrink-0" />
           {snapMsg.text}
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
+        <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>

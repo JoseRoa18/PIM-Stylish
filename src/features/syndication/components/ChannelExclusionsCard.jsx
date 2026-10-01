@@ -78,7 +78,7 @@ export default function ChannelExclusionsCard({ product, onUpdate }) {
           </div>
         ))}
       </div>
-      {error && <p className="px-8 pb-4 text-body-sm text-error">{error}</p>}
+      {error && <p role="alert" className="px-8 pb-4 text-body-sm text-error">{error}</p>}
     </section>
   );
 }

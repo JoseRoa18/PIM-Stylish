@@ -62,15 +62,17 @@ export default function CategoryProgress({ index, week, targets, canEditTargets,
               const isOpen = open === r.cat;
               return (
                 <Fragment key={r.cat}>
-                  <tr onClick={() => setOpen(isOpen ? null : r.cat)} aria-expanded={isOpen} className={`cursor-pointer transition-colors ${isOpen ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}>
+                  <tr onClick={() => setOpen(isOpen ? null : r.cat)} className={`cursor-pointer transition-colors ${isOpen ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}>
                     <td className="px-6 py-3">
-                      <div className="flex items-center gap-2">
+                      {/* A button so the row opens from the keyboard too (its click
+                          reaches the row's onClick); plain look, no press sink. */}
+                      <button type="button" aria-expanded={isOpen} className="w-full flex items-center gap-2 text-left cursor-pointer active:scale-none!">
                         <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                         <div>
                           <div className="text-body-md text-on-surface font-medium">{r.label}</div>
                           <div className="text-body-sm text-on-surface-variant tabular-nums">{m ? `${m.complete} of ${m.total}` : 'no snapshot'}</div>
                         </div>
-                      </div>
+                      </button>
                     </td>
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-3">

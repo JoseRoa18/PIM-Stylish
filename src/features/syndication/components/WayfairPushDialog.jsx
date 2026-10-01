@@ -21,6 +21,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
   const [progress, setProgress] = useState([]); // [{ key, label, state, requestId, error, count }]
   const [status, setStatus] = useState({});
   const [lead, setLead] = useState(null); // null | 'busy' | { requestId } | { error }
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -92,12 +93,17 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
   }
 
   async function refreshStatus() {
-    const out = {};
-    const ids = [...progress.map((p) => p.requestId), lead?.requestId].filter(Boolean);
-    for (const id of ids) {
-      try { out[id] = await checkWayfairRequestStatus(id, { supplier }); } catch (e) { out[id] = { error: e.message }; }
+    setChecking(true);
+    try {
+      const out = {};
+      const ids = [...progress.map((p) => p.requestId), lead?.requestId].filter(Boolean);
+      for (const id of ids) {
+        try { out[id] = await checkWayfairRequestStatus(id, { supplier }); } catch (e) { out[id] = { error: e.message }; }
+      }
+      setStatus(out);
+    } finally {
+      setChecking(false);
     }
-    setStatus(out);
   }
   const leadStatus = lead?.requestId ? status[lead.requestId] : null;
 
@@ -118,7 +124,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
           )}
           {phase === 'done' && (
             <span className="mr-auto inline-flex items-center gap-2 flex-wrap">
-              <button type="button" onClick={refreshStatus} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low"><RefreshCw className="w-4 h-4" />Check what Wayfair did</button>
+              <button type="button" onClick={refreshStatus} disabled={checking} aria-busy={checking} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low"><RefreshCw className="w-4 h-4" />Check what Wayfair did</button>
               {imagesDone && (
                 <button type="button" onClick={forceLead} disabled={lead === 'busy'} className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-60" title="Asks Wayfair to lead with the white main. Wayfair applies it in 15 minutes to a few hours, and only if the image passes its white-background check; confirm in Partner Home">
                   {lead === 'busy' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
@@ -126,7 +132,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
                 </button>
               )}
               {lead && lead !== 'busy' && (
-                <span className={`text-label-md ${lead.error || leadStatus?.problems?.length ? 'text-error' : 'text-success'}`}>
+                <span role="status" className={`text-label-md ${lead.error || leadStatus?.problems?.length ? 'text-error' : 'text-success'}`}>
                   {lead.error ?? (leadStatus ? `lead ${leadStatus.status ?? leadStatus.error ?? ''}${leadStatus.problems?.length ? ` · ${leadStatus.problems.length} problems` : ''}` : `lead requested (${String(lead.requestId).slice(0, 8)}…)`)}
                 </span>
               )}
@@ -141,8 +147,8 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
         </>
       )}
     >
-      {error && <p className="text-body-sm text-error flex items-center gap-2"><AlertCircle className="w-4 h-4" />{error}</p>}
-      {!plan && !error && <p className="text-body-sm text-on-surface-variant flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Preparing the push plan…</p>}
+      {error && <p role="alert" className="text-body-sm text-error flex items-center gap-2"><AlertCircle className="w-4 h-4" />{error}</p>}
+      {!plan && !error && <p role="status" className="text-body-sm text-on-surface-variant flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Preparing the push plan…</p>}
 
       {plan && phase === 'review' && (
         <ol className="space-y-3">
@@ -160,7 +166,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
                 </label>
                 {s.key === 'specs' && specAll.length > 0 && (
                   <div className="border-t border-outline-variant px-4 py-2 overflow-x-auto">
-                    <button type="button" onClick={() => setShowAllSpecs(!showAllSpecs)} className="text-label-md text-primary hover:underline">
+                    <button type="button" onClick={() => setShowAllSpecs(!showAllSpecs)} aria-expanded={showAllSpecs} className="text-label-md text-primary hover:underline">
                       {showAllSpecs ? 'Show only the changes' : `Show all ${specAll.length} mapped attributes${specSkipped.length ? ` (+${specSkipped.length} without PIM value)` : ''}`}
                     </button>
                     {showAllSpecs && specs?.unmapped && Object.keys(specs.unmapped).length > 0 && (
@@ -170,7 +176,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
                     )}
                     {(showAllSpecs || specChanges.length > 0) && (
                       <table className="w-full text-body-sm mt-1">
-                        <thead><tr className="text-label-md text-on-surface-variant"><th className="text-left py-1 font-medium">Attribute</th><th className="text-left py-1 font-medium">Wayfair now</th><th className="text-left py-1 font-medium">PIM{showAllSpecs ? '' : ' (will be sent)'}</th>{showAllSpecs && <th className="text-left py-1 font-medium">Status</th>}</tr></thead>
+                        <thead><tr className="text-label-md text-on-surface-variant"><th scope="col" className="text-left py-1 font-medium">Attribute</th><th scope="col" className="text-left py-1 font-medium">Wayfair now</th><th scope="col" className="text-left py-1 font-medium">PIM{showAllSpecs ? '' : ' (will be sent)'}</th>{showAllSpecs && <th scope="col" className="text-left py-1 font-medium">Status</th>}</tr></thead>
                         <tbody>
                           {(showAllSpecs ? specAll : specChanges).map(([title, v]) => (
                             <tr key={title} className="border-t border-outline-variant/60">
@@ -212,7 +218,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
       )}
 
       {phase !== 'review' && (
-        <ol className="space-y-2">
+        <ol className="space-y-2" aria-live="polite">
           {progress.map((p) => (
             <li key={p.key} className="flex items-center gap-3 text-body-sm rounded-xl border border-outline-variant px-4 py-3">
               {p.state === 'running' ? <Loader2 className="w-4 h-4 animate-spin text-on-surface-variant" /> : p.state === 'sent' ? <CheckCircle2 className="w-4 h-4 text-success" /> : p.state === 'error' ? <AlertCircle className="w-4 h-4 text-error" /> : <span className="w-4 h-4" />}

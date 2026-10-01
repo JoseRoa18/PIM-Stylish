@@ -35,7 +35,7 @@ export default function PimCompletenessPanel() {
   }
   if (error) {
     return (
-      <div className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
+      <div role="alert" className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
         <AlertCircle className="w-4 h-4 flex-shrink-0" />
         {error.message}
       </div>
@@ -58,6 +58,7 @@ export default function PimCompletenessPanel() {
             type="button"
             onClick={reload}
             disabled={loading}
+            aria-busy={loading}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -99,14 +100,15 @@ export default function PimCompletenessPanel() {
                   <tr
                     key={c.category}
                     onClick={() => { setOpenCat(active ? null : c.category); setExpandedSku(null); }}
-                    aria-expanded={active}
                     className={`cursor-pointer transition-colors ${active ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}
                   >
                     <td className="px-6 py-3">
-                      <div className="flex items-center gap-2">
+                      {/* A button so the row opens from the keyboard too (its click
+                          reaches the row's onClick); plain look, no press sink. */}
+                      <button type="button" aria-expanded={active} className="w-full flex items-center gap-2 text-left cursor-pointer active:scale-none!">
                         <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${active ? 'rotate-180' : ''}`} />
                         <span className="text-body-md text-on-surface font-medium">{c.label}</span>
-                      </div>
+                      </button>
                     </td>
                     <td className="px-6 py-3 text-right text-body-md text-on-surface tabular-nums">{c.total}</td>
                     <td className="px-6 py-3 text-right text-body-md text-on-surface tabular-nums">{c.complete}</td>
@@ -148,6 +150,7 @@ export default function PimCompletenessPanel() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by SKU or name…"
+                  aria-label="Search products by SKU or name"
                   className="pl-9 pr-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary w-64"
                 />
               </div>
@@ -179,7 +182,7 @@ export default function PimCompletenessPanel() {
                     <th className="text-left px-6 py-3 font-medium">Brand</th>
                     <th className="text-right px-6 py-3 font-medium">Missing</th>
                     <th className="text-right px-6 py-3 font-medium">Score</th>
-                    <th className="px-6 py-3"></th>
+                    <th className="px-6 py-3"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
@@ -189,17 +192,16 @@ export default function PimCompletenessPanel() {
                       <Fragment key={p.sku}>
                         <tr
                           onClick={() => setExpandedSku(isOpen ? null : p.sku)}
-                          aria-expanded={isOpen}
                           className={`cursor-pointer transition-colors ${isOpen ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}
                         >
                           <td className="px-6 py-3">
-                            <div className="flex items-center gap-2">
+                            <button type="button" aria-expanded={isOpen} className="w-full flex items-center gap-2 text-left cursor-pointer active:scale-none!">
                               <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                               <div>
                                 <div className="text-body-md text-on-surface font-medium truncate max-w-md">{p.model_name || p.sku}</div>
                                 <div className="text-body-sm text-on-surface-variant font-mono mt-0.5">{p.sku}</div>
                               </div>
-                            </div>
+                            </button>
                           </td>
                           <td className="px-6 py-3 text-body-md text-on-surface-variant">{p.brand ?? '—'}</td>
                           <td className="px-6 py-3 text-right tabular-nums">
@@ -209,7 +211,7 @@ export default function PimCompletenessPanel() {
                             <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-label-md font-semibold ${SCORE_BADGE_STYLES[categorizeScore(p.result.score)]}`}>{p.result.score}</span>
                           </td>
                           <td className="px-6 py-3 text-right">
-                            <Link to={`/catalog/${p.sku}`} onClick={(e) => e.stopPropagation()} title="Open product" className="inline-flex items-center text-on-surface-variant hover:text-primary transition-colors">
+                            <Link to={`/catalog/${p.sku}`} onClick={(e) => e.stopPropagation()} title="Open product" aria-label={`Open ${p.sku}`} className="inline-flex items-center text-on-surface-variant hover:text-primary transition-colors">
                               <ArrowRight className="w-4 h-4" />
                             </Link>
                           </td>

@@ -56,9 +56,10 @@ function Cell({ links }) {
   return worst.url ? (
     <a href={worst.url} target="_blank" rel="noreferrer" title={title} className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-surface-container-high" onClick={(e) => e.stopPropagation()}>
       {dot}
+      <span className="sr-only">{v.label}</span>
     </a>
   ) : (
-    <span title={title} className="inline-flex items-center justify-center w-7 h-7">{dot}</span>
+    <span title={title} className="inline-flex items-center justify-center w-7 h-7">{dot}<span className="sr-only">{v.label}</span></span>
   );
 }
 
@@ -160,6 +161,7 @@ export default function WhereToBuyPanel() {
                   type="button"
                   onClick={runScan}
                   disabled={busy != null}
+                  aria-busy={busy === 'scan'}
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container disabled:opacity-40"
                   title="Re-read the WHERE TO BUY sections of both sites"
                 >
@@ -170,6 +172,7 @@ export default function WhereToBuyPanel() {
                   type="button"
                   onClick={runCheck}
                   disabled={busy != null}
+                  aria-busy={busy === 'check'}
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-40"
                   title="Probe the pending links now instead of waiting for the hourly pass"
                 >
@@ -192,7 +195,7 @@ export default function WhereToBuyPanel() {
       </div>
 
       {error && (
-        <div className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
+        <div role="alert" className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>
@@ -214,10 +217,11 @@ export default function WhereToBuyPanel() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="SKU"
+                aria-label="Filter by SKU"
                 className="pl-8 pr-3 py-1.5 rounded-lg bg-surface-container text-body-sm text-on-surface w-40 focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
             </label>
-            <select value={retailerFilter} onChange={(e) => setRetailerFilter(e.target.value)} className="px-3 py-1.5 rounded-lg bg-surface-container text-body-sm text-on-surface">
+            <select value={retailerFilter} onChange={(e) => setRetailerFilter(e.target.value)} aria-label="Retailer" className="px-3 py-1.5 rounded-lg bg-surface-container text-body-sm text-on-surface">
               <option value="all">All retailers</option>
               {columns.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
@@ -237,7 +241,7 @@ export default function WhereToBuyPanel() {
                   ))}
                   <th className="px-2 py-2 font-semibold text-center">Docs</th>
                   <th className="px-3 py-2 font-semibold text-right">Issues</th>
-                  <th className="w-8" />
+                  <th className="w-8"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -261,7 +265,13 @@ export default function WhereToBuyPanel() {
                           </span>
                         </td>
                         <td className={`px-3 py-1.5 text-right tabular-nums ${g.problems ? 'text-error font-semibold' : 'text-on-surface-variant'}`}>{g.problems}</td>
-                        <td className="px-2 py-1.5 text-on-surface-variant"><ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} /></td>
+                        <td className="px-2 py-1.5 text-on-surface-variant">
+                          {/* The row opens on click; this button lets the keyboard do it too
+                              (its click reaches the row's onClick). Plain look, no press sink. */}
+                          <button type="button" aria-expanded={open} aria-label={`Links of ${g.sku}`} className="block cursor-pointer active:scale-none!">
+                            <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+                          </button>
+                        </td>
                       </tr>
                       {open && (
                         <tr className="border-t border-outline-variant bg-surface-container-low/60">

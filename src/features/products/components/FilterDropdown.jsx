@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { formatCategory } from '@/lib/format';
@@ -12,6 +12,15 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
   const ref = useRef(null);
   const menuRef = useRef(null);
   const triggerRef = useRef(null);
+  const menuId = useId();
+
+  // The menu lives at the end of <body>, so Tab from the trigger never
+  // reached it: move focus to the first option when it opens (a mouse
+  // click shows no ring — programmatic focus isn't :focus-visible).
+  const shown = open && Boolean(pos);
+  useEffect(() => {
+    if (shown) menuRef.current?.querySelector('input')?.focus();
+  }, [shown]);
 
   useEffect(() => {
     if (!open) return;
@@ -64,8 +73,8 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen(!open)}
-        aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-body-sm border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
           count > 0
             ? 'bg-primary-container text-on-primary-container border-primary-container'
@@ -78,7 +87,7 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
             a filter is applied. */}
         {count > 0 && (
           <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-on-primary text-label-sm font-semibold flex items-center justify-center pointer-events-none">
-            {count}
+            {count}<span className="sr-only"> selected</span>
           </span>
         )}
         <ChevronDown
@@ -90,6 +99,7 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
       {open && pos && createPortal(
         <div
           ref={menuRef}
+          id={menuId}
           role="group"
           aria-label={`${label} filter options`}
           style={{ position: 'fixed', top: pos.top, left: pos.left }}
@@ -98,6 +108,17 @@ export default function FilterDropdown({ label, options, selected, onChange }) {
             if (e.key === 'Escape') {
               e.stopPropagation();
               close(true);
+            }
+            // Tabbing past the first / last option closes the menu and
+            // returns to the trigger, like leaving an in-place menu.
+            if (e.key === 'Tab') {
+              const inputs = menuRef.current?.querySelectorAll('input') ?? [];
+              const first = inputs[0];
+              const last = inputs[inputs.length - 1];
+              if ((!e.shiftKey && document.activeElement === last) || (e.shiftKey && document.activeElement === first)) {
+                e.preventDefault();
+                close(true);
+              }
             }
           }}
         >

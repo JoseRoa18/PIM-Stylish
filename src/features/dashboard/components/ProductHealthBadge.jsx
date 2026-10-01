@@ -110,6 +110,7 @@ export default function ProductHealthBadge({ product, media, overrides }) {
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className={`w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-black/[0.02] transition-colors text-left ${CATEGORY_HEADER_TINT[category]}`}
       >
         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -151,7 +152,7 @@ export default function ProductHealthBadge({ product, media, overrides }) {
                     <li key={i.key} className="flex items-center justify-between gap-2 text-body-sm">
                       <div className="flex items-center gap-2 min-w-0">
                         <X className="w-3.5 h-3.5 text-error flex-shrink-0" />
-                        <span className="text-on-surface">{i.label}</span>
+                        <span className="text-on-surface"><span className="sr-only">Not met: </span>{i.label}</span>
                       </div>
                       <span className="inline-flex items-center gap-1 text-label-md whitespace-nowrap">
                         <span className={`w-1.5 h-1.5 rounded-full ${SEVERITY_DOT[i.severity]}`} />
@@ -162,7 +163,7 @@ export default function ProductHealthBadge({ product, media, overrides }) {
                   {passed.map((p) => (
                     <li key={p.key} className="flex items-center gap-2 text-body-sm">
                       <Check className="w-3.5 h-3.5 text-success flex-shrink-0" />
-                      <span className="text-on-surface-variant">{p.label}</span>
+                      <span className="text-on-surface-variant"><span className="sr-only">Passed: </span>{p.label}</span>
                     </li>
                   ))}
                 </ul>

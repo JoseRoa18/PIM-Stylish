@@ -65,8 +65,12 @@ export default function TeamActivity({ activity, prevActivity, week, onOpen, scr
               {rows.map((person) => (
                 <tr key={person.email} onClick={() => onOpen?.({ actor: person.email, label: person.name || nameFromEmail(person.email) || 'System' })} className="cursor-pointer hover:bg-surface-container-low/40 transition-colors" title="See everything this person did this week">
                   <td className="px-6 py-3">
-                    <div className="text-body-md text-on-surface font-medium">{person.name || nameFromEmail(person.email) || 'System'}</div>
-                    <div className="text-body-sm text-on-surface-variant">{person.email}</div>
+                    {/* A button so the row opens from the keyboard too (its click
+                        reaches the row's onClick); plain look, no press sink. */}
+                    <button type="button" className="block w-full text-left cursor-pointer active:scale-none!">
+                      <div className="text-body-md text-on-surface font-medium">{person.name || nameFromEmail(person.email) || 'System'}</div>
+                      <div className="text-body-sm text-on-surface-variant">{person.email}</div>
+                    </button>
                   </td>
                   <td className="px-6 py-3 text-right tabular-nums text-on-surface">{screen ? hm(screen.get(person.email)?.minutes ?? 0) : '—'}</td>
                   <td className="px-6 py-3 text-right tabular-nums text-on-surface">{person.touched}</td>

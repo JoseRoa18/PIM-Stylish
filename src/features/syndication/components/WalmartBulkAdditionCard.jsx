@@ -111,7 +111,7 @@ export default function WalmartBulkAdditionCard() {
         </div>
         <label className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="SKU or name" className="pl-9 pr-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm w-56" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="SKU or name" aria-label="Search sinks by SKU or name" className="pl-9 pr-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm w-56" />
         </label>
       </div>
 
@@ -147,12 +147,12 @@ export default function WalmartBulkAdditionCard() {
         )}
 
         {result?.error && (
-          <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container">
+          <div role="alert" className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span className="break-words">{result.error}</span>
           </div>
         )}
         {result?.validation && (
-          <p className={`text-body-sm ${result.validation.valid ? 'text-success' : 'text-error'}`}>
+          <p role="status" className={`text-body-sm ${result.validation.valid ? 'text-success' : 'text-error'}`}>
             {result.validation.valid ? `Spec check passed for ${result.validation.checked} product${result.validation.checked === 1 ? '' : 's'}` : `Spec errors on ${Object.keys(result.validation.errors ?? {}).length} product(s) — hover the red rows`}
           </p>
         )}
@@ -163,7 +163,7 @@ export default function WalmartBulkAdditionCard() {
           </p>
         )}
         {status && (
-          <div className="text-body-sm space-y-1">
+          <div role="status" className="text-body-sm space-y-1">
             {status.error ? <span className="text-error">{status.error}</span> : (
               <>
                 <div className="text-on-surface-variant">Feed {status.feedStatus ?? '—'} · received {status.itemsReceived ?? 0} · succeeded {status.itemsSucceeded ?? 0} · failed {status.itemsFailed ?? 0} · processing {status.itemsProcessing ?? 0}</div>
@@ -176,7 +176,7 @@ export default function WalmartBulkAdditionCard() {
         )}
 
         {products === null ? (
-          <p className="text-body-sm text-on-surface-variant">Loading products…</p>
+          <p role="status" className="text-body-sm text-on-surface-variant">Loading products…</p>
         ) : candidates.length === 0 ? (
           <p className="text-body-sm text-on-surface-variant">Every sink is already on Walmart USA.</p>
         ) : (
@@ -184,11 +184,11 @@ export default function WalmartBulkAdditionCard() {
             <table className="w-full text-body-sm">
               <thead className="bg-surface-container-low text-label-sm text-on-surface-variant">
                 <tr>
-                  <th className="px-3 py-2 text-left w-8"><input type="checkbox" checked={shown.length > 0 && shown.every((p) => selected.has(p.sku))} onChange={toggleAll} className="accent-primary" /></th>
-                  <th className="px-3 py-2 text-left">SKU</th>
-                  <th className="px-3 py-2 text-left">Product</th>
-                  <th className="px-3 py-2 text-left">Brand</th>
-                  <th className="px-3 py-2 text-left">Mapping</th>
+                  <th scope="col" className="px-3 py-2 text-left w-8"><input type="checkbox" checked={shown.length > 0 && shown.every((p) => selected.has(p.sku))} onChange={toggleAll} aria-label="Select all shown" className="accent-primary" /></th>
+                  <th scope="col" className="px-3 py-2 text-left">SKU</th>
+                  <th scope="col" className="px-3 py-2 text-left">Product</th>
+                  <th scope="col" className="px-3 py-2 text-left">Brand</th>
+                  <th scope="col" className="px-3 py-2 text-left">Mapping</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/60">
@@ -196,13 +196,13 @@ export default function WalmartBulkAdditionCard() {
                   const r = bySku.get(p.sku);
                   return (
                     <tr key={p.sku} className={selected.has(p.sku) ? 'bg-primary-container/15' : ''}>
-                      <td className="px-3 py-1.5"><input type="checkbox" checked={selected.has(p.sku)} onChange={() => toggle(p.sku)} className="accent-primary" /></td>
+                      <td className="px-3 py-1.5"><input type="checkbox" checked={selected.has(p.sku)} onChange={() => toggle(p.sku)} aria-label={`Select ${p.sku}`} className="accent-primary" /></td>
                       <td className="px-3 py-1.5 font-mono"><Link to={`/catalog/${encodeURIComponent(p.sku)}?tab=marketplaces`} className="text-primary hover:underline">{p.sku}</Link></td>
                       <td className="px-3 py-1.5 text-on-surface">{p.model_name}</td>
                       <td className="px-3 py-1.5 text-on-surface-variant">{p.brand}</td>
                       <td className="px-3 py-1.5">
                         {!r ? <span className="text-on-surface-variant">—</span>
-                          : r.specErrors?.length ? <span className="inline-flex items-center gap-1 text-error" title={r.specErrors.map((e) => `${e.path || '/'}: ${e.message}`).join(String.fromCharCode(10))}><AlertCircle className="w-3.5 h-3.5" /> {r.specErrors.length} spec error{r.specErrors.length === 1 ? '' : 's'}</span>
+                          : r.specErrors?.length ? <span className="inline-flex items-center gap-1 text-error" title={r.specErrors.map((e) => `${e.path || '/'}: ${e.message}`).join(String.fromCharCode(10))}><AlertCircle className="w-3.5 h-3.5" /> {r.specErrors.length} spec error{r.specErrors.length === 1 ? '' : 's'}<span className="sr-only">: {r.specErrors.map((e) => e.message).filter(Boolean).join('; ')}</span></span>
                           : r.ready ? <span className="inline-flex items-center gap-1 text-success"><CheckCircle2 className="w-3.5 h-3.5" /> {r.fields} fields{r.warnings?.length ? ` · ${r.warnings.length} warning${r.warnings.length === 1 ? '' : 's'}` : ''}</span>
                           : <span className="inline-flex items-center gap-1 text-error" title={r.missing.join(', ')}><AlertCircle className="w-3.5 h-3.5" /> missing {r.missing.join(', ')}</span>}
                       </td>

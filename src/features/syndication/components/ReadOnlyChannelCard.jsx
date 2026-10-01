@@ -92,7 +92,7 @@ export default function ReadOnlyChannelCard({ channel }) {
         </div>
 
         {error && (
-          <p className="px-3 py-2 rounded-lg bg-error-container text-on-error-container text-body-sm animate-banner-in">
+          <p role="alert" className="px-3 py-2 rounded-lg bg-error-container text-on-error-container text-body-sm animate-banner-in">
             {error}
           </p>
         )}

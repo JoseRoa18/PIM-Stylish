@@ -7,6 +7,7 @@ import { formatTimeAgo, formatCategory } from '@/lib/format';
 import { latestSnapshot, insertSnapshot } from '../lib/channels';
 import { pushWayfairAttributes } from '../api/wayfairSync';
 import Dialog from '@/components/ui/Dialog';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 // Catalog-wide spec-attributes audit: runs the per-SKU attribute diff
 // (dryRun — reads Wayfair, changes nothing) across the WHOLE catalog and
@@ -25,6 +26,7 @@ const TARGETS = {
 const CONCURRENCY = 3;
 
 export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
+  const confirm = useConfirm();
   const [target, setTarget] = useState(defaultTarget);
   const [run, setRun] = useState(null); // { busy, done, total, rows, errors }
   const [push, setPush] = useState(null); // { busy, done, total, ok, failed }
@@ -57,6 +59,9 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
   // SKU the audit flagged. (Against the sandbox this is processed by Wayfair
   // as validation — production credentials are what make it stick.)
   async function pushAllDiffs(diffRows) {
+    // Writes to the live Wayfair catalog — ask first.
+    const n = diffRows.length;
+    if (!(await confirm({ title: `Push ${n} SKUs' spec attributes to Wayfair?`, message: "Overwrites Wayfair's values with the PIM's.", confirmLabel: `Push ${n}` }))) return;
     cancelRef.current = false;
     const { supplier, market } = TARGETS[target];
     const targets = diffRows.map((r) => r.sku);
@@ -209,7 +214,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
         className="px-6 pt-5 pb-4 flex items-start justify-between gap-4 flex-wrap cursor-pointer"
       >
         <div>
-          <h3 className="text-title-lg text-on-surface">Spec attributes audit</h3>
+          <h2 className="text-title-lg text-on-surface">Spec attributes audit</h2>
           <p className="text-body-sm text-on-surface-variant mt-1 max-w-lg">
             Compares every product's spec attributes against Wayfair — all categories,
             each audited on its own Wayfair class — and lists the differences.
@@ -230,6 +235,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
             value={target}
             onChange={(e) => setTarget(e.target.value)}
             disabled={run?.busy}
+            aria-label="Wayfair storefront"
             className="px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           >
             {Object.entries(TARGETS).map(([key, t]) => (
@@ -242,7 +248,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
               onClick={() => { cancelRef.current = true; }}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
             >
-              <ThinkingOrb state="searching" size={20} className="w-4 h-4" />
+              <ThinkingOrb state="searching" size={20} className="w-4 h-4" aria-hidden="true" />
               Stop ({run.done}/{run.total})
             </button>
           ) : (
@@ -283,6 +289,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
               value={snapQuery}
               onChange={(e) => setSnapQuery(e.target.value)}
               placeholder="Filter by SKU or attribute…"
+              aria-label="Filter by SKU or attribute"
               className="px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm w-56 focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             <select
@@ -298,7 +305,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
             </select>
             <span className="ml-auto inline-flex items-center gap-3">
               {push && !push.busy && (
-                <span className="text-body-sm text-on-surface animate-banner-in">
+                <span role="status" className="text-body-sm text-on-surface animate-banner-in">
                   Pushed {push.ok}/{push.total}
                   {push.failed.length > 0 && <span className="text-error"> · {push.failed.length} failed</span>}
                 </span>
@@ -309,7 +316,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
                   onClick={() => { cancelRef.current = true; }}
                   className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
                 >
-                  <ThinkingOrb state="working" size={20} className="w-4 h-4" />
+                  <ThinkingOrb state="working" size={20} className="w-4 h-4" aria-hidden="true" />
                   <span className="tabular-nums">
                     Pushing… {push.done}/{push.total}
                     {pushEta && <span> · ~{pushEta} left</span>}
@@ -395,7 +402,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
             {!run.busy && withDiffs.length > 0 && (
               <span className="ml-auto inline-flex items-center gap-3">
                 {push && !push.busy && (
-                  <span className="text-body-sm text-on-surface animate-banner-in">
+                  <span role="status" className="text-body-sm text-on-surface animate-banner-in">
                     Pushed {push.ok}/{push.total}
                     {push.failed.length > 0 && <span className="text-error"> · {push.failed.length} failed</span>}
                   </span>
@@ -406,7 +413,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
                     onClick={() => { cancelRef.current = true; }}
                     className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
                   >
-                    <ThinkingOrb state="working" size={20} className="w-4 h-4" />
+                    <ThinkingOrb state="working" size={20} className="w-4 h-4" aria-hidden="true" />
                     <span className="tabular-nums">
                       Pushing… {push.done}/{push.total}
                       {pushEta && <span> · ~{pushEta} left</span>}
@@ -427,7 +434,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
 
           {/* Progress bar */}
           {run.busy && (
-            <div className="h-1 bg-surface-container-high" role="progressbar" aria-valuemin={0} aria-valuemax={run.total} aria-valuenow={run.done}>
+            <div className="h-1 bg-surface-container-high" role="progressbar" aria-label="Audit progress" aria-valuemin={0} aria-valuemax={run.total} aria-valuenow={run.done}>
               <div
                 className="h-full bg-primary transition-[width] duration-500 [transition-timing-function:var(--ease-out-cubic)]"
                 style={{ width: `${(run.done / Math.max(run.total, 1)) * 100}%` }}
@@ -459,7 +466,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
           )}
 
           {!run.busy && rows.length > 0 && withDiffs.length === 0 && (
-            <p className="px-6 py-4 text-body-sm text-on-surface animate-banner-in">
+            <p role="status" className="px-6 py-4 text-body-sm text-on-surface animate-banner-in">
               Every audited product matches the PIM. Nothing to fix.
             </p>
           )}
@@ -506,12 +513,12 @@ function DiffDetailDialog({ sku, supplier, market, onClose }) {
       maxWidth="max-w-lg"
     >
       {state.busy ? (
-        <p className="text-body-sm text-on-surface-variant inline-flex items-center gap-2 py-2">
-          <ThinkingOrb state="searching" size={20} className="w-4 h-4" />
+        <p role="status" className="text-body-sm text-on-surface-variant inline-flex items-center gap-2 py-2">
+          <ThinkingOrb state="searching" size={20} className="w-4 h-4" aria-hidden="true" />
           Reading current values from Wayfair…
         </p>
       ) : state.error ? (
-        <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{state.error}</p>
+        <p role="alert" className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{state.error}</p>
       ) : (
         <div className="space-y-3">
           {changes.length === 0 ? (
@@ -541,17 +548,17 @@ function DiffDetailDialog({ sku, supplier, market, onClose }) {
             </Link>
             {changes.length > 0 && (
               pushState === 'ok' ? (
-                <span className="inline-flex items-center gap-1.5 text-body-sm text-on-surface animate-banner-in">
+                <span role="status" className="inline-flex items-center gap-1.5 text-body-sm text-on-surface animate-banner-in">
                   <CheckCircle2 className="w-4 h-4 text-success" /> Pushed from PIM
                 </span>
               ) : pushState === 'busy' ? (
                 <span className="inline-flex items-center gap-2 text-body-sm text-on-surface-variant">
-                  <ThinkingOrb state="working" size={20} className="w-4 h-4" /> Pushing…
+                  <ThinkingOrb state="working" size={20} className="w-4 h-4" aria-hidden="true" /> Pushing…
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-2">
                   {typeof pushState === 'string' && pushState !== 'ok' && pushState !== 'busy' && (
-                    <span className="text-body-sm text-error">{pushState}</span>
+                    <span role="alert" className="text-body-sm text-error">{pushState}</span>
                   )}
                   <button
                     type="button"
@@ -592,7 +599,8 @@ function AuditRow({ row }) {
         <ChevronDown className={`w-4 h-4 text-on-surface-variant transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       <div className={`grid transition-[grid-template-rows] ${open ? 'grid-rows-[1fr] duration-300 [transition-timing-function:var(--ease-out-quint)]' : 'grid-rows-[0fr] duration-200 ease-in'}`}>
-        <div className="overflow-hidden min-h-0">
+        {/* inert keeps the collapsed row's link out of the tab order. */}
+        <div className="overflow-hidden min-h-0" inert={!open}>
           <div className="px-6 pb-3 text-body-sm">
             <ul className="space-y-0.5 text-on-surface-variant">
               {changes.map(([title, d]) => (

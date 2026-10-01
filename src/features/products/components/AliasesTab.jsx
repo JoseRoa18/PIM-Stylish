@@ -38,7 +38,7 @@ export default function AliasesTab({ product }) {
       title: `Remove ${row.alias}?`,
       message: `${product.sku} will no longer be recognized as ${row.alias} on ${row.marketplace}. Files for that marketplace stop using it.`,
       confirmLabel: 'Remove',
-      danger: true,
+      destructive: true,
     });
     if (!ok) return;
     setBusy(row.id);
@@ -72,7 +72,7 @@ export default function AliasesTab({ product }) {
       </header>
 
       <div className="px-8 py-5">
-        {error && <p className="text-body-sm text-error mb-3">{error}</p>}
+        {error && <p role="alert" className="text-body-sm text-error mb-3">{error}</p>}
         {rows === null ? (
           <p className="text-body-sm text-on-surface-variant"><Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading…</p>
         ) : rows.length === 0 ? (
@@ -106,9 +106,9 @@ export default function AliasesTab({ product }) {
                     <td className="py-2.5 pr-4 text-body-sm text-on-surface-variant">{r.note ?? ''}</td>
                     <td className="py-2.5 text-right whitespace-nowrap">
                       {r.locked ? (
-                        <span className="inline-flex items-center gap-1 text-label-sm text-on-surface-variant" title={r.note}><Lock className="w-3.5 h-3.5" /></span>
+                        <span role="img" aria-label={`Locked${r.note ? `: ${r.note}` : ''}`} className="inline-flex items-center gap-1 text-label-sm text-on-surface-variant" title={r.note}><Lock className="w-3.5 h-3.5" /></span>
                       ) : canEdit ? (
-                        <button type="button" onClick={() => handleRemove(r)} disabled={busy === r.id} className="p-1.5 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors disabled:opacity-50" title="Remove alias">
+                        <button type="button" onClick={() => handleRemove(r)} disabled={busy === r.id} aria-label={`Remove alias ${r.alias}`} className="p-1.5 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors disabled:opacity-50" title="Remove alias">
                           {busy === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                         </button>
                       ) : null}
@@ -160,6 +160,7 @@ function ListingTitleCell({ sku, row, canEdit, onSaved, onError }) {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') cancel(); }}
           autoFocus
+          aria-label="Name on the marketplace"
           placeholder="Name as the marketplace lists it"
           className={`flex-1 min-w-[200px] py-1 ${inputCls}`}
         />
@@ -233,7 +234,7 @@ function AddAliasDialog({ sku, onClose, onAdded }) {
             <input id="alias-note" value={note} onChange={(e) => setNote(e.target.value)} className={`mt-1 w-full ${inputCls}`} />
           </label>
         )}
-        {error && <p className="text-body-sm text-error">{error}</p>}
+        {error && <p role="alert" className="text-body-sm text-error">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
           <button type="submit" disabled={busy || !alias.trim()} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50">
@@ -273,7 +274,7 @@ function ImportAliasesDialog({ onClose, onImported }) {
       <form onSubmit={submit} className="space-y-3">
         <div className="inline-flex rounded-full border border-outline-variant p-0.5">
           {[['aliases', 'Aliases'], ['names', 'Names on the marketplace']].map(([key, label]) => (
-            <button key={key} type="button" onClick={() => { setMode(key); setResult(null); if (key === 'names' && AMAZON.includes(marketplace)) setMarketplace(ALIAS_MARKETPLACES[0]); }} className={`px-3.5 py-1.5 rounded-full text-label-md transition-colors ${mode === key ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-surface-container-low'}`}>
+            <button key={key} type="button" aria-pressed={mode === key} onClick={() => { setMode(key); setResult(null); if (key === 'names' && AMAZON.includes(marketplace)) setMarketplace(ALIAS_MARKETPLACES[0]); }} className={`px-3.5 py-1.5 rounded-full text-label-md transition-colors ${mode === key ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-surface-container-low'}`}>
               {label}
             </button>
           ))}
@@ -299,11 +300,12 @@ function ImportAliasesDialog({ onClose, onImported }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={10}
+          aria-label={mode === 'names' ? 'Listing names, one per line' : 'Aliases, one per line'}
           placeholder={mode === 'names' ? 'S-300XG\tSTYLISH 28 inch Double Bowl Undermount Stainless Steel Kitchen Sink\nA-802N\tSingle Hole 9.75-inch Kitchen Faucet Plate in Matte Black' : 'S-300XG-CAN\tS-300XG\n3P-LVMJ-40J0\tA-802N'}
           className={`w-full font-mono text-body-sm ${inputCls}`}
         />
         {result && (
-          <div className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant space-y-1">
+          <div role="status" className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant space-y-1">
             <p>{result.written} {mode === 'names' ? 'names' : 'aliases'} saved.{result.notInPim.length ? ` Not in the PIM, skipped: ${result.notInPim.slice(0, 12).join(', ')}${result.notInPim.length > 12 ? ` and ${result.notInPim.length - 12} more` : ''}.` : ''}</p>
             {result.noAlias?.length > 0 && (
               <p>No {marketplace} alias yet, add it first: {result.noAlias.slice(0, 12).join(', ')}{result.noAlias.length > 12 ? ` and ${result.noAlias.length - 12} more` : ''}.</p>
@@ -316,7 +318,7 @@ function ImportAliasesDialog({ onClose, onImported }) {
             )}
           </div>
         )}
-        {error && <p className="text-body-sm text-error">{error}</p>}
+        {error && <p role="alert" className="text-body-sm text-error">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={result ? onImported : onClose} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">{result ? 'Done' : 'Cancel'}</button>
           {!result && (

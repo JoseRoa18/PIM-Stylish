@@ -59,6 +59,7 @@ import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promo
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import DealsOverview from '@/features/pricing/components/DealsOverview';
+import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 // The promotion file tools load the first time a file of their kind is
@@ -153,8 +154,13 @@ function monthLabel(period) {
 export default function PricingPage() {
   const { canEdit } = useAuth();
   const confirm = useConfirm();
+  const location = useLocation();
+  const navigate = useNavigate();
   // 'monthly' | 'flash' | 'special' — one section per promotion kind — and 'alignment'.
-  const [tab, setTab] = useState('monthly');
+  // The Dashboard's Price Alignment card lands on the alignment tab, on the
+  // channel picked there (router state { pricingTab, alignSite }).
+  const [tab, setTab] = useState(() => (location.state?.pricingTab === 'alignment' ? 'alignment' : 'monthly'));
+  const [alignSite] = useState(() => location.state?.alignSite ?? null);
   const kindTab = tab !== 'alignment';
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
@@ -168,8 +174,6 @@ export default function PricingPage() {
   // the file to fill: switch to its tab and open its card on the upload
   // dialog. Handled once per click (nonce), then the router state is dropped
   // so a refresh doesn't reopen it.
-  const location = useLocation();
-  const navigate = useNavigate();
   const link = location.state?.promoTask ?? null;
   const [deepLink, setDeepLink] = useState(null);
   if (link && promotions && deepLink?.nonce !== link.nonce) {
@@ -218,11 +222,13 @@ export default function PricingPage() {
         </p>
       </div>
 
-      <div className="inline-flex rounded-full bg-surface-container p-1">
+      <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label="Pricing sections">
         {[['monthly', 'Monthly Promotions'], ['flash', 'Flash Deals'], ['special', 'Special Events'], ['alignment', 'Price Alignment']].map(([key, label]) => (
           <button
             key={key}
             type="button"
+            role="tab"
+            aria-selected={tab === key}
             onClick={() => setTab(key)}
             className={`px-5 py-2 rounded-full text-label-lg font-medium transition-colors ${
               tab === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
@@ -234,18 +240,19 @@ export default function PricingPage() {
       </div>
 
       {error && (
-        <div className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-3 text-body-sm">
+        <div role="alert" className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-3 text-body-sm">
           {error}
         </div>
       )}
 
-      {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} />}
+      {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} initialSite={alignSite} />}
 
       {kindTab && canEdit && (
         <div>
           <button
             type="button"
             onClick={() => setShowNew((v) => !v)}
+            aria-expanded={showNew}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
           >
             <Plus className="w-4 h-4" />
@@ -349,23 +356,13 @@ const STATUS_TEXT = {
 };
 
 // ---- Alignment overview (the % chart) ----
-// Status segments in a fixed order; every segment is also named in the
-// legend and in the row tooltip, so identity never rides on color alone.
-// Colors alternate lightness (dark-light-dark-light in BOTH themes) so
-// adjacent segments stay separable under color-vision deficiency —
-// validated with the palette checker, worst adjacent ΔE ≈ 38.
-const OVERVIEW_SEGMENTS = [
-  { key: 'aligned', label: 'Aligned', cls: 'bg-success', of: (c) => (c.promo_ok ?? 0) + (c.map_ok ?? 0) },
-  { key: 'promo_missing', label: 'Promo missing', cls: 'bg-warning-container', of: (c) => c.promo_missing ?? 0 },
-  { key: 'misaligned', label: 'Misaligned / broken', cls: 'bg-error', of: (c) => (c.misaligned ?? 0) + (c.missing ?? 0) },
-  { key: 'no_map', label: 'No price in PIM', cls: 'bg-outline-variant', of: (c) => c.no_map ?? 0 },
-];
-
+// Segments and the % come from alignmentSummary (shared with the Dashboard
+// card).
 function AlignmentOverview({ overview, site, onSelect }) {
   return (
     <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-4 py-3">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
-        <h3 className="text-label-lg font-medium text-on-surface">Alignment by channel</h3>
+        <h2 className="text-label-lg font-medium text-on-surface">Alignment by channel</h2>
         <div className="flex items-center gap-3 flex-wrap">
           {OVERVIEW_SEGMENTS.map((s) => (
             <span key={s.key} className="inline-flex items-center gap-1.5 text-label-md text-on-surface-variant">
@@ -378,15 +375,7 @@ function AlignmentOverview({ overview, site, onSelect }) {
       <div className="space-y-1">
         {ALIGN_TARGET_KEYS.map((key) => {
           const t = ALIGN_TARGETS[key];
-          const report = overview?.[key];
-          const counts = report && !report.legacy ? report.counts : null;
-          const parts = counts ? OVERVIEW_SEGMENTS.map((s) => ({ ...s, n: s.of(counts) })) : [];
-          const total = parts.reduce((a, p) => a + p.n, 0);
-          // % over what's comparable — a SKU with no price in the PIM says
-          // nothing about the channel being right or wrong.
-          const comparable = total - (counts?.no_map ?? 0);
-          const aligned = parts.find((p) => p.key === 'aligned')?.n ?? 0;
-          const pct = comparable > 0 ? Math.round((aligned / comparable) * 100) : null;
+          const { counts, parts, total, comparable, aligned, pct } = alignmentSummary(overview?.[key]);
           const tooltip = counts
             ? `${t.label} — ${parts.filter((p) => p.n > 0).map((p) => `${p.label}: ${p.n}`).join(' · ')}`
             : `${t.label} — no saved report yet`;
@@ -412,6 +401,7 @@ function AlignmentOverview({ overview, site, onSelect }) {
                     ))
                   : <span className="h-full w-full bg-surface-container" />}
               </span>
+              <span className="sr-only">{tooltip}</span>
               <span className="w-24 flex-shrink-0 text-right tabular-nums text-label-lg text-on-surface">
                 {pct != null ? `${pct}%` : '—'}
                 <span className="block text-label-md text-on-surface-variant font-normal">
@@ -426,8 +416,8 @@ function AlignmentOverview({ overview, site, onSelect }) {
   );
 }
 
-function PriceAlignmentCard({ canEdit, confirm }) {
-  const [site, setSite] = useState(DEFAULT_WIX_SITE);
+function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
+  const [site, setSite] = useState(initialSite && ALIGN_TARGETS[initialSite] ? initialSite : DEFAULT_WIX_SITE);
   const cfg = ALIGN_TARGETS[site];
   const money = (v) => `${cfg.symbol}${Number(v).toFixed(2)}`;
   const [result, setResult] = useState(null);
@@ -575,6 +565,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
           type="button"
           onClick={analyze}
           disabled={running}
+          aria-busy={running}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
           {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
@@ -596,12 +587,12 @@ function PriceAlignmentCard({ canEdit, confirm }) {
       )}
 
       {msg && (
-        <p className={`text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+        <p role={msg.tone === 'error' ? 'alert' : 'status'} className={`text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
           {msg.tone === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
           {msg.text}
         </p>
       )}
-      {progress && <p className="text-body-sm text-on-surface-variant">Pushing… {progress.done}/{progress.total}</p>}
+      {progress && <p role="progressbar" aria-label="Pushing prices" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done} className="text-body-sm text-on-surface-variant">Pushing… {progress.done}/{progress.total}</p>}
 
       {result && !result.legacy && (
         <>
@@ -639,6 +630,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                     type="button"
                     onClick={fixAll}
                     disabled={fixing !== null}
+                    aria-busy={fixing === 'all'}
                     className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
                   >
                     {fixing === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
@@ -658,7 +650,7 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Expected</th>
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">Source</th>
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Δ</th>
-                      {canEdit && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-4 py-2.5" />}
+                      {canEdit && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-4 py-2.5"><span className="sr-only">Actions</span></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -688,10 +680,11 @@ function PriceAlignmentCard({ canEdit, confirm }) {
                                 type="button"
                                 onClick={() => fixOne(p)}
                                 disabled={fixing !== null}
+                                aria-busy={fixing === p.sku}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-label-md font-medium text-primary hover:bg-primary-container/50 transition-colors disabled:opacity-40"
                               >
                                 {fixing === p.sku ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                                Push
+                                Push<span className="sr-only"> {p.sku}</span>
                               </button>
                             )}
                           </td>
@@ -718,7 +711,7 @@ function PortalPicker({ value, onChange }) {
   return (
     <div className="space-y-2">
       {['ca', 'us'].map((m) => (
-        <div key={m} className="flex items-center gap-1.5 flex-wrap">
+        <div key={m} role="group" aria-label={m === 'ca' ? 'Canada' : 'USA'} className="flex items-center gap-1.5 flex-wrap">
           <span className="w-14 text-label-md text-on-surface-variant">{m === 'ca' ? 'Canada' : 'USA'}</span>
           {PROMO_CHANNELS.filter((ch) => ch.market === m).map((ch) => {
             const on = value.includes(ch.key);
@@ -771,7 +764,7 @@ function PromoPortals({ promo, canEdit, onChanged }) {
         <span className="inline-flex items-center gap-3">
           <button type="button" onClick={save} disabled={busy || !value.length} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
           <button type="button" onClick={() => { setValue(promo.marketplaces ?? []); setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
-          {error && <span className="text-error">{error}</span>}
+          {error && <span role="alert" className="text-error">{error}</span>}
         </span>
       </div>
     );
@@ -921,7 +914,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
       <div className="flex items-center justify-between">
         <h2 className="text-title-md text-on-surface font-semibold">New {PROMOTION_KINDS[kind].toLowerCase()}</h2>
-        <button type="button" onClick={onClose} className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant">
+        <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -943,6 +936,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
               type="month"
               value={month}
               onChange={(e) => setMonth(e.target.value)}
+              aria-label="Month"
               className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
           )}
@@ -991,6 +985,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
               <button
                 key={key}
                 type="button"
+                aria-pressed={mode === key}
                 onClick={() => setMode(key)}
                 className={`flex-1 px-3 py-1.5 rounded-md text-label-lg font-medium transition-colors ${
                   mode === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
@@ -1031,13 +1026,14 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
                 </button>
               </div>
               <p className="text-body-sm text-on-surface-variant">{hint}. Each market has its own product list — upload one or both.</p>
-              <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer">
+              <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-primary/40">
                 <Plus className="w-3.5 h-3.5" />
                 Choose file (.xlsx / .csv)
                 <input
                   type="file"
                   accept=".xlsx,.csv"
-                  className="hidden"
+                  className="sr-only"
+                  disabled={busy}
                   onChange={(e) => handleFile(market, e.target.files?.[0])}
                 />
               </label>
@@ -1069,6 +1065,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         <button
           type="button"
           disabled={busy || !canCreate}
+          aria-busy={busy}
           onClick={handleCreate}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
@@ -1095,7 +1092,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). A {PROMOTION_KINDS[kind].toLowerCase()} adds nothing for them.
         </p>
       )}
-      {error && <p className="text-body-sm text-on-error-container bg-error-container/60 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p role="alert" className="text-body-sm text-on-error-container bg-error-container/60 rounded-lg px-3 py-2">{error}</p>}
     </div>
   );
 }
@@ -1240,6 +1237,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         ref={headerRef}
         type="button"
         onClick={onToggle}
+        aria-expanded={open}
         className="w-full px-5 py-4 flex items-center justify-between gap-4 text-left"
       >
         <div className="flex items-center gap-4 min-w-0">
@@ -1344,7 +1342,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                     title: `End "${promo.name}"?`,
                     message: 'Clears the sale price on every SKU in the list (in the PIM). Push to Wix afterwards to update the store.',
                     confirmLabel: 'End promotion',
-                    danger: true,
+                    destructive: true,
                   })}
                 />
               )}
@@ -1368,7 +1366,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                     title: `Delete "${promo.name}"?`,
                     message: 'Removes the promotion and its price list. Product pricing is not touched.',
                     confirmLabel: 'Delete',
-                    danger: true,
+                    destructive: true,
                   })}
                 />
               )}
@@ -1421,12 +1419,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
           )}
 
           {progress && (
-            <p className="text-body-sm text-on-surface-variant">
+            <p role="progressbar" aria-label="Pushing prices" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done} className="text-body-sm text-on-surface-variant">
               Pushing… {progress.done}/{progress.total}
             </p>
           )}
           {msg && (
-            <p className={`text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+            <p role={msg.tone === 'error' ? 'alert' : 'status'} className={`text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
               {msg.tone === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
               {msg.text}
             </p>
@@ -1489,6 +1487,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       <button
                         key={key}
                         type="button"
+                        aria-pressed={market === key}
                         onClick={() => setMarket(key)}
                         className={`px-4 py-1.5 rounded-full text-label-lg font-medium transition-colors ${
                           market === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
@@ -1527,7 +1526,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         className="w-full pl-10 pr-10 py-2 rounded-full bg-surface-container-lowest text-body-md text-on-surface placeholder:text-on-surface-variant border border-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-shadow"
                       />
                       {skuQuery && (
-                        <button type="button" onClick={() => setSkuQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors" title="Clear search">
+                        <button type="button" onClick={() => setSkuQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors" title="Clear search" aria-label="Clear search">
                           <X className="w-4 h-4" />
                         </button>
                       )}
@@ -1561,6 +1560,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       type="button"
                       onClick={refreshStock}
                       disabled={busy === 'stock'}
+                      aria-busy={busy === 'stock'}
                       title="Pull both markets' stock now — ShipStation for the USA, the Canada inventory file for Canada (it also refreshes every hour)"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md font-medium text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50 whitespace-nowrap"
                     >
@@ -1577,6 +1577,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       value={skuText}
                       onChange={(e) => setSkuText(e.target.value)}
                       rows={8}
+                      aria-label="Products, one SKU per line"
                       className="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
                     />
                     <div className="flex items-center gap-3 flex-wrap">
@@ -1911,7 +1912,7 @@ function PromoMarketDates({ promo, canEdit, onChanged }) {
           </div>
         </div>
       )}
-      {error && <span className="text-error">{error}</span>}
+      {error && <span role="alert" className="text-error">{error}</span>}
     </div>
   );
 }
@@ -1966,7 +1967,7 @@ function PromoWideDates({ promo, canEdit, onChanged }) {
           <button type="button" onClick={() => { setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
         </span>
       )}
-      {error && <span className="text-error">{error}</span>}
+      {error && <span role="alert" className="text-error">{error}</span>}
     </div>
   );
 }
@@ -2185,6 +2186,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
             <button
               key={key}
               type="button"
+              aria-pressed={market === key}
               onClick={() => setMarket(key)}
               className={`px-3 py-1 rounded-full text-label-md transition-colors ${market === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
             >
@@ -2201,26 +2203,27 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
             <span className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-sm font-bold flex-shrink-0">{ch.monogram}</span>
             <span className="text-body-md text-on-surface min-w-0 truncate">{ch.label}</span>
             <span className={`ml-auto px-2 py-0.5 rounded-full text-label-sm whitespace-nowrap ${chip[ch.tone]}`}>{ch.status}</span>
+            {ch.detail && <span className="sr-only">{ch.detail}</span>}
             <span className="min-w-32 flex flex-wrap items-center justify-end gap-1.5 flex-shrink-0">
               {canEdit && ch.kind === 'api' && ch.schedule && ch.sendAction && (
-                <button type="button" onClick={() => schedule(ch)} disabled={busy === ch.key} className={actionCls}>
+                <button type="button" onClick={() => schedule(ch)} disabled={busy === ch.key} aria-busy={busy === ch.key} className={actionCls}>
                   {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   {ch.sendAction === 'retry' ? (promo[ch.stamp] ? 'Re-send' : 'Send') : promo[ch.stamp] ? 'Re-send' : 'Schedule'}
                 </button>
               )}
               {canEdit && ch.kind === 'portal_file' && (
-                <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file</button>
+                <button type="button" onClick={() => onFillFile(ch.filler)} className={actionCls}>Fill file<span className="sr-only"> {ch.label}</span></button>
               )}
               {canEdit && ch.priceStart && (
-                <button type="button" onClick={() => onFillFile(ch.priceStart)} className={actionCls}>Promo MAP</button>
+                <button type="button" onClick={() => onFillFile(ch.priceStart)} className={actionCls}>Promo MAP<span className="sr-only"> {ch.label}</span></button>
               )}
               {canEdit && ch.priceChange && (
-                <button type="button" onClick={() => onFillFile(ch.priceChange)} className={actionCls}>Back to Blue</button>
+                <button type="button" onClick={() => onFillFile(ch.priceChange)} className={actionCls}>Back to Blue<span className="sr-only"> {ch.label}</span></button>
               )}
               {canEdit && ch.template && (
-                <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} className={actionCls}>
+                <button type="button" onClick={() => generate(ch, ch.template)} disabled={busy === ch.key} aria-busy={busy === ch.key} className={actionCls}>
                   {busy === ch.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                  Generate
+                  Generate<span className="sr-only"> {ch.label}</span>
                 </button>
               )}
               {canEdit && ch.kind === 'template' && !ch.template && (
@@ -2318,11 +2321,11 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
       footer={(
         <>
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-full text-label-lg text-on-surface-variant hover:bg-surface-container-low">Close</button>
-          <button type="button" onClick={runPreview} disabled={busy != null} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant text-label-lg text-on-surface hover:bg-surface-container-low disabled:opacity-50">
+          <button type="button" onClick={runPreview} disabled={busy != null} aria-busy={busy === 'preview'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant text-label-lg text-on-surface hover:bg-surface-container-low disabled:opacity-50">
             {busy === 'preview' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             Preview
           </button>
-          <button type="button" onClick={send} disabled={busy != null || !preview || !lines.length || result} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-50">
+          <button type="button" onClick={send} disabled={busy != null || !preview || !lines.length || result} aria-busy={busy === 'send'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-50">
             {busy === 'send' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             {lines.length ? `Send ${lines.length} to Walmart` : 'Send to Walmart'}
           </button>
@@ -2358,7 +2361,7 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
                       <th className="text-right px-3 py-1.5">Promo</th>
                       <th className="text-left px-3 py-1.5">Start</th>
                       <th className="text-left px-3 py-1.5">End</th>
-                      <th className="px-3 py-1.5" />
+                      <th className="px-3 py-1.5"><span className="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2372,7 +2375,7 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
                         <td className="px-3 py-1.5 whitespace-nowrap">{day(l.end)}</td>
                         <td className="px-3 py-1.5 text-right">
                           <button type="button" onClick={() => readLive(l.sku)} disabled={busy != null} className="text-label-md text-primary hover:underline disabled:opacity-50" title="Read what Walmart holds for this SKU right now">
-                            {live[l.sku] === null ? 'Reading…' : 'Read live'}
+                            {live[l.sku] === null ? 'Reading…' : 'Read live'}<span className="sr-only"> {l.sku}</span>
                           </button>
                         </td>
                       </tr>
@@ -2410,7 +2413,7 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
         )}
 
         {error && (
-          <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
+          <p role="alert" className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
         )}
       </div>
     </Dialog>
@@ -2488,7 +2491,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
           <p className="text-body-sm rounded-lg px-3 py-2 bg-tertiary-container/40 text-on-surface">
             <span className="font-medium">Missing from the file:</span> {plan.notInFile.slice(0, 20).join(', ')}{plan.notInFile.length > 20 ? ` and ${plan.notInFile.length - 20} more` : ''}. Ask Menards to add them, or continue without them.
           </p>
-          {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
+          {error && <p role="alert" className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setPending(null)} disabled={busy} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
             <button type="button" onClick={() => finish(file, { plan })} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50">
@@ -2606,7 +2609,7 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
         )}
 
         {error && (
-          <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
+          <p role="alert" className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
         )}
       </div>
     </Dialog>
@@ -2669,6 +2672,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
               <button
                 key={key}
                 type="button"
+                aria-pressed={market === key}
                 onClick={() => { setMarket(key); setError(null); }}
                 className={`rounded-xl border px-4 py-3 text-left transition-colors ${
                   market === key
@@ -2720,7 +2724,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
         )}
 
         {error && (
-          <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
+          <p role="alert" className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>
         )}
       </div>
     </Dialog>
@@ -2733,6 +2737,7 @@ function ActionButton({ icon: Icon, label, busy, onClick }) {
       type="button"
       onClick={onClick}
       disabled={busy}
+      aria-busy={busy}
       className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
     >
       {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" strokeWidth={2} />}

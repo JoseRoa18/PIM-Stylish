@@ -103,10 +103,10 @@ export default function BestBuyContentPushCard() {
 
       <div className="px-6 py-5 space-y-4">
         {error && (
-          <p className="px-3 py-2 rounded-lg bg-error-container text-on-error-container text-body-sm">{error}</p>
+          <p role="alert" className="px-3 py-2 rounded-lg bg-error-container text-on-error-container text-body-sm">{error}</p>
         )}
         {data === undefined && !error && (
-          <p className="text-body-sm text-on-surface-variant flex items-center gap-2">
+          <p role="status" className="text-body-sm text-on-surface-variant flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading candidates…
           </p>
         )}
@@ -118,7 +118,9 @@ export default function BestBuyContentPushCard() {
               <span>· <span className="font-semibold text-on-surface">{withDiff.length}</span> with a different title on Best Buy</span>
               <span>· {data.excluded.length} not pushable yet</span>
               <label className="inline-flex items-center gap-1.5 ml-auto cursor-pointer select-none">
-                <Checkbox checked={showAll} onChange={() => setShowAll(!showAll)} />
+                {/* Checkbox renders its own (empty) label, so the outer one
+                    doesn't name it — the aria-label does. */}
+                <Checkbox checked={showAll} onChange={() => setShowAll(!showAll)} aria-label="Show all pushable, not just title diffs" />
                 show all pushable, not just title diffs
               </label>
             </div>
@@ -144,6 +146,8 @@ export default function BestBuyContentPushCard() {
                 type="button"
                 onClick={handlePush}
                 disabled={busy || !selected.size}
+                aria-label={busy && progress ? `Pushing ${progress.done} of ${progress.total}` : undefined}
+                aria-busy={busy}
                 className="ml-auto inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
@@ -152,7 +156,7 @@ export default function BestBuyContentPushCard() {
             </div>
 
             {result && (
-              <div className={`px-3 py-2 rounded-lg text-body-sm flex items-start gap-2 ${
+              <div role={result.type === 'error' ? 'alert' : 'status'} className={`px-3 py-2 rounded-lg text-body-sm flex items-start gap-2 ${
                 result.type === 'success'
                   ? 'bg-secondary-container/60 text-on-secondary-container'
                   : 'bg-error-container text-on-error-container'
@@ -175,7 +179,7 @@ export default function BestBuyContentPushCard() {
               {listed.map((c) => (
                 <li key={c.sku} className="flex items-start gap-3 px-4 py-2.5">
                   <div className="pt-0.5">
-                    <Checkbox checked={selected.has(c.sku)} onChange={() => toggle(c.sku)} disabled={busy} />
+                    <Checkbox checked={selected.has(c.sku)} onChange={() => toggle(c.sku)} disabled={busy} aria-label={`Select ${c.sku}`} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <span className="text-body-md text-on-surface font-mono">{c.sku}</span>
@@ -200,6 +204,7 @@ export default function BestBuyContentPushCard() {
                 <button
                   type="button"
                   onClick={() => setShowExcluded(!showExcluded)}
+                  aria-expanded={showExcluded}
                   className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-on-surface transition-colors"
                 >
                   <ChevronDown className={`w-4 h-4 transition-transform ${showExcluded ? 'rotate-180' : ''}`} />

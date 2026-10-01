@@ -149,6 +149,7 @@ export default function ListingHealthActions({ stats, products, marketplaceLabel
                     <button
                       type="button"
                       onClick={() => setOpenIssue(issue)}
+                      aria-label={`View ${issue.count} products: ${issue.label}`}
                       className="text-label-md text-primary font-medium hover:underline whitespace-nowrap"
                     >
                       View {issue.count} →

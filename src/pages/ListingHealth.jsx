@@ -306,7 +306,7 @@ export default function ListingHealth() {
         return (
           <div className="mb-6 space-y-3">
             <div className="border-b border-outline-variant">
-              <nav className="flex flex-wrap gap-x-1" role="tablist">
+              <nav className="flex flex-wrap gap-x-1" role="tablist" aria-label="Channels">
                 <button
                   type="button"
                   role="tab"
@@ -388,7 +388,7 @@ export default function ListingHealth() {
       )}
 
       {isChannel && error && (
-        <div className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
+        <div role="alert" className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>
@@ -492,12 +492,14 @@ export default function ListingHealth() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search by SKU or name…"
+                    aria-label="Search products by SKU or name"
                     className="pl-9 pr-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary w-64"
                   />
                 </div>
                 <select
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
+                  aria-label="Filter by score"
                   className="px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 >
                   {FILTER_OPTIONS.map((f) => (
@@ -507,6 +509,7 @@ export default function ListingHealth() {
                 <select
                   value={sort}
                   onChange={(e) => setSort(e.target.value)}
+                  aria-label="Sort products"
                   className="px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 >
                   {SORT_OPTIONS.map((s) => (
@@ -527,12 +530,12 @@ export default function ListingHealth() {
               <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">
-                    <th className="text-left px-6 py-3 font-medium">Product</th>
-                    <th className="text-left px-6 py-3 font-medium">Brand</th>
-                    <th className="text-left px-6 py-3 font-medium">Source</th>
-                    <th className="text-right px-6 py-3 font-medium">Critical Issues</th>
-                    <th className="text-right px-6 py-3 font-medium">Score</th>
-                    <th className="px-6 py-3"></th>
+                    <th scope="col" className="text-left px-6 py-3 font-medium">Product</th>
+                    <th scope="col" className="text-left px-6 py-3 font-medium">Brand</th>
+                    <th scope="col" className="text-left px-6 py-3 font-medium">Source</th>
+                    <th scope="col" className="text-right px-6 py-3 font-medium">Critical Issues</th>
+                    <th scope="col" className="text-right px-6 py-3 font-medium">Score</th>
+                    <th scope="col" className="px-6 py-3"><span className="sr-only">Open</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
@@ -551,14 +554,17 @@ export default function ListingHealth() {
                       <Fragment key={p.sku}>
                         <tr
                           onClick={() => setExpandedSku(isOpen ? null : p.sku)}
-                          aria-expanded={isOpen}
                           className={`cursor-pointer transition-colors ${isOpen ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}
                         >
                           <td className="px-6 py-3">
                             <div className="flex items-center gap-2">
-                              <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                              {/* No handler: the click bubbles to the row; the button
+                                  is the keyboard path and carries the state. */}
+                              <button type="button" aria-expanded={isOpen} aria-label={`Show issues for ${p.sku}`} className="flex flex-shrink-0 rounded">
+                                <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                              </button>
                               <div>
-                                <div className="text-body-md text-on-surface font-medium truncate max-w-md">{p.model_name || p.sku}</div>
+                                <div className="text-body-md text-on-surface font-medium truncate max-w-md" title={p.model_name || undefined}>{p.model_name || p.sku}</div>
                                 <div className="text-body-sm text-on-surface-variant font-mono mt-0.5">{p.sku}</div>
                               </div>
                             </div>
@@ -586,6 +592,7 @@ export default function ListingHealth() {
                               to={`/catalog/${p.sku}?tab=marketplaces`}
                               onClick={(e) => e.stopPropagation()}
                               title="Open product"
+                              aria-label={`Open ${p.sku}`}
                               className="inline-flex items-center text-on-surface-variant hover:text-primary transition-colors"
                             >
                               <ArrowRight className="w-4 h-4" />

@@ -58,14 +58,16 @@ export default function FileDropzone({ onFile, onFiles, multiple = false, accept
           setDragging(false);
           if (!disabled) acceptFiles(multiple ? e.dataTransfer.files : [e.dataTransfer.files?.[0]]);
         }}
-        className={`${className} ${dragging ? 'ring-2 ring-primary border-primary bg-primary-container/20' : ''} ${disabled ? 'opacity-40 pointer-events-none' : 'cursor-pointer'}`}
+        className={`${className} ${dragging ? 'ring-2 ring-primary border-primary bg-primary-container/20' : ''} ${disabled ? 'opacity-40 pointer-events-none' : 'cursor-pointer'} has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-primary/40`}
       >
         {children}
+        {/* Visually hidden but still reachable with Tab (Enter / Space opens
+            the browse dialog); `hidden` made every drop zone mouse-only. */}
         <input
           type="file"
           accept={accept}
           multiple={multiple}
-          className="hidden"
+          className="sr-only"
           disabled={disabled}
           onChange={(e) => {
             const picked = multiple ? [...e.target.files] : [e.target.files?.[0]];
@@ -75,7 +77,7 @@ export default function FileDropzone({ onFile, onFiles, multiple = false, accept
         />
       </label>
       {dropError && (
-        <p className="mt-1.5 text-body-sm text-error">{dropError}</p>
+        <p role="alert" className="mt-1.5 text-body-sm text-error">{dropError}</p>
       )}
     </div>
   );

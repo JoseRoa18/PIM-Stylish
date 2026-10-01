@@ -594,7 +594,7 @@ export default function ProductDetail() {
 
       {/* Hero */}
       <div className="flex flex-col sm:flex-row gap-6 mb-6 items-start">
-        <ProductHeroImage primary={primary} />
+        <ProductHeroImage primary={primary} name={product.model_name || `SKU ${product.sku}`} />
         <div className="flex-1 min-w-0 w-full">
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container text-body-sm font-mono text-on-surface-variant">
@@ -604,6 +604,7 @@ export default function ProductDetail() {
               <select
                 value={form.workflow_status}
                 onChange={(e) => setField('workflow_status', e.target.value)}
+                aria-label="Workflow status"
                 className="px-2.5 py-1 rounded-md bg-surface-container border border-outline-variant text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
                 {WORKFLOW_OPTIONS.map((o) => (
@@ -623,6 +624,7 @@ export default function ProductDetail() {
               value={form.model_name}
               onChange={(e) => setField('model_name', e.target.value)}
               placeholder="Product name"
+              aria-label="Product name"
               className="w-full text-display-md text-on-surface leading-tight mb-2 bg-transparent border-b-2 border-outline-variant focus:border-primary focus:outline-none transition-colors"
             />
           ) : (
@@ -679,7 +681,7 @@ export default function ProductDetail() {
       </div>
 
       {saveError && (
-        <div className="mb-4 px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">{saveError}</div>
+        <div role="alert" className="mb-4 px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm animate-banner-in">{saveError}</div>
       )}
 
       <Suspense fallback={null}>
@@ -693,7 +695,7 @@ export default function ProductDetail() {
 
       <TabBar tabs={TABS} active={activeTab} onChange={setTab} variants={familyVariants} />
 
-      <div className="mt-6">
+      <div className="mt-6" role="tabpanel" aria-label={TABS.find((t) => t.key === activeTab)?.label}>
         <Suspense fallback={<TabFallback />}>
         {activeTab === 'overview' && (
           <OverviewTab
@@ -836,7 +838,7 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
       ) : variants.length === 0 ? (
         <p className="text-body-sm text-on-surface-variant py-2">This product has no other variants in its family.</p>
       ) : result?.ok != null ? (
-        <p className="text-body-md text-on-surface py-2">
+        <p role="status" className="text-body-md text-on-surface py-2">
           ✓ Applied to {result.ok} of {result.total} variant{result.total === 1 ? '' : 's'}.
         </p>
       ) : (
@@ -852,7 +854,7 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
                     <input type="checkbox" checked={selKeys.has(c.key)} onChange={() => toggleKey(c.key)} className="mt-1 accent-primary" />
                     <span className="min-w-0 flex-1">
                       <span className="text-body-md text-on-surface">{c.label}</span>
-                      <span className="block text-body-sm text-on-surface-variant truncate">→ {formatChangeValue(c.value)}</span>
+                      <span className="block text-body-sm text-on-surface-variant truncate" title={formatChangeValue(c.value)}>→ {formatChangeValue(c.value)}</span>
                       {diff && (
                         diff.length === 0 ? (
                           <span className="block text-label-sm text-success">✓ all selected variants already match</span>
@@ -874,7 +876,7 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
               {variants.map((v) => {
                 const on = chosenSkus.has(v.sku);
                 return (
-                  <button key={v.sku} type="button" onClick={() => toggleSku(v.sku)}
+                  <button key={v.sku} type="button" onClick={() => toggleSku(v.sku)} aria-pressed={on}
                     className={`px-3 py-1.5 rounded-full border text-label-md transition-colors ${on ? 'bg-primary text-on-primary border-primary' : 'border-outline-variant text-on-surface hover:bg-surface-container-low'}`}>
                     {v.model_name ? `${v.model_name} · ` : ''}{v.sku}
                   </button>
@@ -882,7 +884,7 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
               })}
             </div>
           </div>
-          {result?.error && <p className="text-body-sm text-error">{result.error}</p>}
+          {result?.error && <p role="alert" className="text-body-sm text-error">{result.error}</p>}
         </div>
       )}
     </Dialog>
@@ -944,7 +946,10 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
         scrolledPast ? 'shadow-md shadow-black/5 min-[1820px]:shadow-none' : ''
       }`}>
         <div ref={stripRef} onScroll={updateEdges} className="overflow-x-auto scrollbar-hide px-6">
-        <nav className="flex min-w-max gap-1 items-center" role="tablist">
+        <nav className="flex min-w-max gap-1 items-center" aria-label="Product sections">
+          {/* display: contents — the tablist groups only the tabs (the
+              variant links below are not tabs) without touching the layout. */}
+          <div role="tablist" aria-label="Product sections" className="contents">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = active === tab.key;
@@ -961,6 +966,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
               </button>
             );
           })}
+          </div>
 
           {/* On screens without room for the side rail, family variants live
               at the end of the strip as compact pills. */}
@@ -1028,10 +1034,10 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
       {/* Vertical rail — docks in the left gutter once the strip is out of view. */}
       {scrolledPast && (
         <nav
-          role="tablist"
           aria-label="Product sections"
           className="hidden min-[1820px]:flex fixed left-[calc(50vw-640px)] top-24 z-20 w-44 flex-col gap-0.5 rounded-2xl border border-outline-variant bg-surface/90 backdrop-blur-md shadow-lg p-1.5 animate-fade-in"
         >
+          <div role="tablist" aria-label="Product sections" aria-orientation="vertical" className="contents">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = active === tab.key;
@@ -1048,6 +1054,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
               </button>
             );
           })}
+          </div>
 
           {/* Family variants — quick switch, keeping the current tab open. */}
           {sortedVariants.length > 0 && (
@@ -1510,7 +1517,7 @@ function GenerateKeywordsButton({ product, edit, onGenerated }) {
 
   return (
     <span className="inline-flex items-center gap-2">
-      {error && <span className="text-label-sm text-error max-w-56 truncate" title={error}>{error}</span>}
+      {error && <span role="alert" className="text-label-sm text-error max-w-56 truncate" title={error}>{error}</span>}
       <button
         type="button"
         onClick={run}
@@ -1844,9 +1851,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
         )}
         {pushAll && pushAll !== 'busy' && (
           pushAll instanceof Error ? (
-            <span className="text-body-sm text-error">{pushAll.message}</span>
+            <span role="alert" className="text-body-sm text-error">{pushAll.message}</span>
           ) : (
-            <span className="text-body-sm text-on-surface-variant">
+            <span role="status" className="text-body-sm text-on-surface-variant">
               {/* r.media is "ok (N live)", "warning: …" or "failed: …" (wixSync). */}
               {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? (String(r.media ?? '').startsWith('ok') ? r.media : String(r.media ?? '').startsWith('warning') ? `content ok, images ${r.media.replace(/^warning:\s*/, '')}` : `content ok, media ${r.media ?? 'failed'}`) : r.skipped === 'excluded' ? 'excluded, not sent' : 'failed'}`).join(' · ')}
             </span>
@@ -1854,9 +1861,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
         )}
         {autoLink && autoLink !== 'busy' && (
           autoLink instanceof Error ? (
-            <span className="text-body-sm text-error">{autoLink.message}</span>
+            <span role="alert" className="text-body-sm text-error">{autoLink.message}</span>
           ) : (
-            <span className="text-body-sm text-on-surface-variant">
+            <span role="status" className="text-body-sm text-on-surface-variant">
               Wix links: {Object.values(autoLink.wix ?? {}).reduce((a, b) => a + b, 0)}/{wixSitesFor(product).length} sites
               {' '}· Wayfair CA: {autoLink.wayfair ? 'linked' : 'not found'}
               {' '}· Wayfair USA: {autoLink.wayfair_usa ? 'linked' : 'not found'}
@@ -1936,7 +1943,7 @@ function ChannelTile({ label, avatar, avatarClass, active = false, linked, linke
           : 'border-outline-variant bg-surface hover:bg-surface-container-low'
       }`}
     >
-      <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-label-lg font-bold flex-shrink-0 ${avatarClass}`}>
+      <span aria-hidden="true" className={`w-8 h-8 rounded-lg flex items-center justify-center text-label-lg font-bold flex-shrink-0 ${avatarClass}`}>
         {avatar}
       </span>
       <span className="min-w-0">
@@ -2088,7 +2095,7 @@ function ExportTemplatesCard({ product, media }) {
               disabled={exporting === entry.key}
               className="group flex items-center gap-3 px-3.5 py-3 rounded-xl border border-outline-variant bg-surface hover:border-primary/40 hover:bg-surface-container-low transition-colors text-left disabled:opacity-60"
             >
-              <span className="w-9 h-9 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-lg font-bold flex-shrink-0">
+              <span aria-hidden="true" className="w-9 h-9 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-lg font-bold flex-shrink-0">
                 {marketplaceInitials(entry.marketplace)}
               </span>
               <span className="min-w-0 flex-1">
@@ -2106,7 +2113,7 @@ function ExportTemplatesCard({ product, media }) {
           ))}
         </div>
         {error && (
-          <p className="text-body-sm text-error mt-3 animate-banner-in">{error}</p>
+          <p role="alert" className="text-body-sm text-error mt-3 animate-banner-in">{error}</p>
         )}
       </div>
       {asking && (
@@ -2158,6 +2165,8 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
   const formKey = '_' + attrKey;
   const shownUnit = unit ? (isEditing ? 'in' : unit) : null;
   if (shownUnit) label = withUnit(label, shownUnit);
+  // The controls' accessible name — the plain text, before HelpTip wraps it.
+  const name = typeof label === 'string' ? label : undefined;
   const helpText = help ?? FIELD_HELP[attrKey];
   if (helpText) label = <>{label}<HelpTip text={helpText} /></>;
 
@@ -2182,6 +2191,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
           <span className="text-label-md text-on-surface-variant">{label}</span>
           <a href={val} target="_blank" rel="noopener noreferrer" title={val} className="inline-flex items-center gap-1.5 text-body-md text-primary hover:underline w-fit">
             {pretty}
+            <span className="sr-only"> (opens in new tab)</span>
             <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
           </a>
         </div>
@@ -2211,6 +2221,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
           onChange={(v) => setField(formKey, v)}
           suggestions={edit.suggestions?.[attrKey] ?? []}
           inputBase={inputBase}
+          ariaLabel={name}
         />
       </div>
     );
@@ -2220,7 +2231,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <select value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} className={inputBase}>
+        <select value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} aria-label={name} className={inputBase}>
           <option value="">—</option>
           {(value && !options.includes(value) ? [value, ...options] : options).map((o) => (<option key={o} value={o}>{o}</option>))}
         </select>
@@ -2236,6 +2247,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
           value={value ?? ''}
           onChange={(e) => setField(formKey, e.target.value)}
           rows={6}
+          aria-label={name}
           className={inputBase + ' resize-y'}
           placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`}
         />
@@ -2247,7 +2259,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     return (
       <div className="flex items-center justify-between">
         <span className="text-body-md text-on-surface">{label}</span>
-        <button type="button" role="switch" aria-checked={!!value} onClick={() => setField(formKey, !value)}
+        <button type="button" role="switch" aria-checked={!!value} aria-label={name} onClick={() => setField(formKey, !value)}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${value ? 'bg-primary' : 'bg-outline-variant'}`}>
           <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${value ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
@@ -2259,7 +2271,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <input type="number" step="any" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} placeholder="0" className={inputBase} />
+        <input type="number" step="any" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} placeholder="0" aria-label={name} className={inputBase} />
       </div>
     );
   }
@@ -2267,7 +2279,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
   return (
     <div className="flex flex-col gap-1">
       <span className="text-label-md text-on-surface-variant">{label}</span>
-      <input type="text" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)}
+      <input type="text" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} aria-label={name}
         placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
     </div>
   );
@@ -2303,7 +2315,7 @@ function AttrDimensionsField({ label, attrKey, keys, labels, product, edit, unit
         {keys.map((k, i) => (
           <div key={k} className="flex-1">
             <input type="number" step="any" value={dims[k] ?? ''} onChange={(e) => updateDim(k, e.target.value)}
-              placeholder={labels[i]}
+              placeholder={labels[i]} aria-label={`${withUnit(label, shownUnit)} — ${labels[i]}`}
               className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors" />
             <span className="text-label-md text-on-surface-variant mt-0.5 block text-center">{labels[i]}</span>
           </div>
@@ -2399,6 +2411,7 @@ function AttrListField({ label, attrKey, product, edit, hint, linkSkus = false }
         type="text"
         value={typeof value === 'string' ? value : joinList(value)}
         onChange={(e) => setField(formKey, e.target.value)}
+        aria-label={typeof label === 'string' ? label : undefined}
         placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`}
         className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
       />
@@ -2447,8 +2460,9 @@ function BulletPointsEditor({ product, edit, attrKey = 'bullet_points' }) {
         <div key={i} className="flex items-center gap-2">
           <span className="text-label-md text-on-surface-variant w-5 text-right flex-shrink-0">{i + 1}.</span>
           <input type="text" value={b} onChange={(e) => updateBullet(i, e.target.value)} placeholder={`Feature ${i + 1}`}
+            aria-label={`Bullet point ${i + 1}`}
             className="flex-1 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors" />
-          <button type="button" onClick={() => removeBullet(i)}
+          <button type="button" onClick={() => removeBullet(i)} aria-label={`Remove bullet point ${i + 1}`}
             className="p-1.5 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors" title="Remove">
             <Trash2 className="w-4 h-4" />
           </button>
@@ -2480,7 +2494,7 @@ const PRICE_TIERS = [
 ];
 function PriceTierTable({ product, edit, msrpKey, columns }) {
   const { isEditing, form, setField } = edit;
-  const cell = (key) => {
+  const cell = (key, name) => {
     if (!isEditing) {
       const v = product[key];
       return <span className={v == null || v === '' ? 'text-on-surface-variant' : 'text-on-surface'}>{v == null || v === '' ? '—' : formatCAD(v)}</span>;
@@ -2492,7 +2506,7 @@ function PriceTierTable({ product, edit, msrpKey, columns }) {
         value={form[key] ?? ''}
         onChange={(e) => setField(key, e.target.value)}
         placeholder="—"
-        aria-label={key}
+        aria-label={name}
         className="w-24 px-2 py-1 rounded-md border border-outline-variant bg-surface text-body-sm text-on-surface text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
       />
     );
@@ -2528,7 +2542,7 @@ function PriceTierTable({ product, edit, msrpKey, columns }) {
                   </span>
                 </td>
                 {columns.map((c) => (
-                  <td key={c.label} className="py-2 pl-4 text-right tabular-nums">{cell(c.keys[i])}</td>
+                  <td key={c.label} className="py-2 pl-4 text-right tabular-nums">{cell(c.keys[i], `${c.label} — ${tier.label}`)}</td>
                 ))}
               </tr>
             ))}
@@ -2548,6 +2562,8 @@ function DerivedCost({ label, baseKey, factor, product, edit, help }) {
 
 function EditableField({ label, fieldKey, type = 'text', product, edit, mono, options, suggest, help }) {
   const { isEditing, form, setField } = edit;
+  // The controls' accessible name — the plain text, before HelpTip wraps it.
+  const name = typeof label === 'string' ? label : undefined;
   const helpText = help ?? FIELD_HELP[fieldKey];
   if (helpText) label = <>{label}<HelpTip text={helpText} /></>;
 
@@ -2600,6 +2616,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
           onChange={(v) => setField(fieldKey, v)}
           suggestions={edit.suggestions?.[fieldKey] ?? []}
           inputBase={inputBase}
+          ariaLabel={name}
         />
       </div>
     );
@@ -2609,7 +2626,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <RichTextEditor value={value} onChange={(html) => setField(fieldKey, html)} placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} minRows={4} />
+        <RichTextEditor value={value} onChange={(html) => setField(fieldKey, html)} placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} minRows={4} ariaLabel={name} />
       </div>
     );
   }
@@ -2617,7 +2634,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <textarea value={value} onChange={(e) => setField(fieldKey, e.target.value)} rows={3} className={inputBase + ' resize-y'} placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} />
+        <textarea value={value} onChange={(e) => setField(fieldKey, e.target.value)} rows={3} aria-label={name} className={inputBase + ' resize-y'} placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} />
       </div>
     );
   }
@@ -2625,7 +2642,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     return (
       <div className="flex items-center justify-between">
         <span className="text-body-md text-on-surface">{label}</span>
-        <button type="button" role="switch" aria-checked={!!value} onClick={() => setField(fieldKey, !value)}
+        <button type="button" role="switch" aria-checked={!!value} aria-label={name} onClick={() => setField(fieldKey, !value)}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${value ? 'bg-primary' : 'bg-outline-variant'}`}>
           <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${value ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
@@ -2636,7 +2653,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <select value={value} onChange={(e) => setField(fieldKey, e.target.value)} className={inputBase}>
+        <select value={value} onChange={(e) => setField(fieldKey, e.target.value)} aria-label={name} className={inputBase}>
           <option value="">—</option>
           {options.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
         </select>
@@ -2647,7 +2664,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <input type="date" value={value ? value.slice(0, 10) : ''} onChange={(e) => setField(fieldKey, e.target.value || null)} className={inputBase} />
+        <input type="date" value={value ? value.slice(0, 10) : ''} onChange={(e) => setField(fieldKey, e.target.value || null)} aria-label={name} className={inputBase} />
       </div>
     );
   }
@@ -2655,14 +2672,14 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <input type="number" step={type === 'currency' ? '0.01' : 'any'} value={value} onChange={(e) => setField(fieldKey, e.target.value)} placeholder="0" className={inputBase} />
+        <input type="number" step={type === 'currency' ? '0.01' : 'any'} value={value} onChange={(e) => setField(fieldKey, e.target.value)} placeholder="0" aria-label={name} className={inputBase} />
       </div>
     );
   }
   return (
     <div className="flex flex-col gap-1">
       <span className="text-label-md text-on-surface-variant">{label}</span>
-      <input type="text" value={value} onChange={(e) => setField(fieldKey, e.target.value)}
+      <input type="text" value={value} onChange={(e) => setField(fieldKey, e.target.value)} aria-label={name}
         placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
     </div>
   );
@@ -2677,6 +2694,7 @@ function HelpTip({ text }) {
     <span
       className="inline-flex align-text-bottom ml-1 text-on-surface-variant/60 hover:text-on-surface cursor-help"
       title={text}
+      role="img"
       aria-label={text}
     >
       <Info className="w-3.5 h-3.5" />
@@ -2686,7 +2704,7 @@ function HelpTip({ text }) {
 
 // Dropdown fed by the values the catalog already uses, with an "Other…"
 // escape hatch that switches to free text so new values stay possible.
-function SuggestInput({ value, onChange, suggestions, inputBase }) {
+function SuggestInput({ value, onChange, suggestions, inputBase, ariaLabel }) {
   const isKnown = !value || suggestions.includes(value);
   const [custom, setCustom] = useState(false);
   if (custom || (!isKnown && suggestions.length === 0)) {
@@ -2697,6 +2715,7 @@ function SuggestInput({ value, onChange, suggestions, inputBase }) {
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value)}
           autoFocus
+          aria-label={ariaLabel}
           className={inputBase}
         />
         <button
@@ -2717,6 +2736,7 @@ function SuggestInput({ value, onChange, suggestions, inputBase }) {
         if (e.target.value === '__other__') setCustom(true);
         else onChange(e.target.value);
       }}
+      aria-label={ariaLabel}
       className={inputBase}
     >
       <option value="">—</option>
@@ -2752,13 +2772,14 @@ function Section({ title, children, defaultOpen = true, action }) {
           <h2 className="text-title-lg text-on-surface">{title}</h2>
         </button>
         {action ? <div className="shrink-0 pl-3">{action}</div> : null}
-        <button type="button" onClick={toggle} aria-expanded={isOpen}
-          aria-label={isOpen ? `Collapse ${title}` : `Expand ${title}`}
+        {/* Same toggle as the title button — kept out of the tab order and the
+            accessibility tree so it isn't announced twice. */}
+        <button type="button" onClick={toggle} tabIndex={-1} aria-hidden="true"
           className="shrink-0 px-6 py-4">
           <ChevronDown className={`w-5 h-5 text-on-surface-variant transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </button>
       </div>
-      <div className={`grid transition-all duration-200 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+      <div className={`grid transition-all duration-200 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`} inert={!isOpen}>
         <div className="overflow-hidden">
           <div className="px-6 pb-6 pt-1 space-y-3">{children}</div>
         </div>
@@ -2780,11 +2801,11 @@ function WixLinkBadge({ product }) {
   );
 }
 
-function ProductHeroImage({ primary }) {
+function ProductHeroImage({ primary, name }) {
   if (primary) {
     return (
       <div className="w-full sm:w-60 max-w-[240px] aspect-square rounded-xl overflow-hidden bg-surface-container flex-shrink-0 mx-auto sm:mx-0 border border-outline-variant">
-        <img src={getThumbnailUrl(primary.storage_path, 480)} onError={thumbFallback(primary.storage_path)} alt={primary.alt_text || ''} className="w-full h-full object-cover" />
+        <img src={getThumbnailUrl(primary.storage_path, 480)} onError={thumbFallback(primary.storage_path)} alt={primary.alt_text || name || ''} className="w-full h-full object-cover" />
       </div>
     );
   }

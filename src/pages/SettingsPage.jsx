@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, Upload, UserCheck, ShieldCheck } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
@@ -21,13 +21,14 @@ function periodOf(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
 }
 
-function Switch({ checked, disabled, onChange, label }) {
+function Switch({ checked, disabled, onChange, label, describedBy }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative w-11 h-6 rounded-full flex-shrink-0 transition-colors disabled:opacity-40 ${
@@ -44,13 +45,14 @@ function Switch({ checked, disabled, onChange, label }) {
 }
 
 function SettingRow({ title, description, checked, disabled, onChange }) {
+  const descriptionId = useId();
   return (
     <div className="flex items-start justify-between gap-4 py-3">
       <div className="min-w-0">
         <p className="text-body-md text-on-surface font-medium">{title}</p>
-        <p className="text-body-sm text-on-surface-variant mt-0.5">{description}</p>
+        <p id={descriptionId} className="text-body-sm text-on-surface-variant mt-0.5">{description}</p>
       </div>
-      <Switch checked={checked} disabled={disabled} onChange={onChange} label={title} />
+      <Switch checked={checked} disabled={disabled} onChange={onChange} label={title} describedBy={descriptionId} />
     </div>
   );
 }
@@ -157,7 +159,7 @@ function PromoOwnersSection() {
             </span>
           </label>
         ))}
-        {error && <p className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
+        {error && <p role="alert" className="text-body-sm rounded-lg px-3 py-2 bg-error-container/60 text-on-error-container">{error}</p>}
       </div>
     </section>
   );
@@ -233,7 +235,7 @@ function WarrantySection() {
       </div>
 
       {msg && (
-        <p className={`mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+        <p role={msg.tone === 'error' ? 'alert' : 'status'} className={`mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
           {msg.tone === 'error' ? <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />}
           {msg.text}
         </p>
@@ -329,25 +331,27 @@ function InventorySection() {
           type="button"
           onClick={refresh}
           disabled={busy !== null}
+          aria-busy={busy === 'refresh'}
           className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
         >
           {busy === 'refresh' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
           Refresh now
         </button>
-        <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer ${busy !== null ? 'opacity-40 pointer-events-none' : ''}`}>
+        <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-primary/40 ${busy !== null ? 'opacity-40 pointer-events-none' : ''}`}>
           {busy === 'upload' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
           Upload the Canada file (.xlsx)
           <input
             type="file"
             accept=".xlsx"
-            className="hidden"
+            className="sr-only"
+            disabled={busy !== null}
             onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ''; }}
           />
         </label>
       </div>
 
       {msg && (
-        <p className={`mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+        <p role={msg.tone === 'error' ? 'alert' : 'status'} className={`mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 ${msg.tone === 'error' ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
           {msg.tone === 'error' ? <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />}
           {msg.text}
         </p>
@@ -460,7 +464,7 @@ export default function SettingsPage() {
       </div>
 
       {error && (
-        <div className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-3 text-body-sm">
+        <div role="alert" className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-3 text-body-sm">
           {error}
         </div>
       )}
@@ -551,6 +555,7 @@ export default function SettingsPage() {
             type="button"
             onClick={runNow}
             disabled={running || settings?.enabled === false}
+            aria-busy={running}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
           >
             {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
@@ -563,7 +568,7 @@ export default function SettingsPage() {
         </div>
 
         {runReport && (
-          <p className={`mt-2 text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${runReport.errors?.length ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
+          <p role={runReport.errors?.length ? 'alert' : 'status'} className={`mt-2 text-body-sm rounded-lg px-3 py-2 inline-flex items-center gap-2 ${runReport.errors?.length ? 'bg-error-container/60 text-on-error-container' : 'bg-surface-container text-on-surface-variant'}`}>
             {runReport.errors?.length ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
             {summarizeRun(runReport)}
           </p>

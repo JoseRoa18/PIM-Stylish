@@ -68,9 +68,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
   async function handleStatusChange(status) {
     if (!status) return;
+    const statusLabel = WORKFLOW_OPTIONS.find((o) => o.value === status)?.label ?? status;
     const ok = await confirm({
       title: 'Change workflow status?',
-      message: `Set status to "${status}" for ${count} product${count === 1 ? '' : 's'}.`,
+      message: `Set status to "${statusLabel}" for ${count} product${count === 1 ? '' : 's'}.`,
       confirmLabel: 'Change Status',
     });
     if (!ok) return;
@@ -485,9 +486,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         pointer-events-none would swallow its clicks. */}
     <div className="fixed bottom-4 left-0 right-0 lg:left-64 z-30 px-4 sm:px-8 flex justify-center pointer-events-none">
       {/* No overflow-hidden here — the dropdown menus open above the bar. */}
-      <div className="w-full max-w-5xl pointer-events-auto rounded-2xl border border-outline-variant bg-surface shadow-lg">
+      <div role="region" aria-label="Bulk actions" className="w-full max-w-5xl pointer-events-auto rounded-2xl border border-outline-variant bg-surface shadow-lg">
         {result && (
           <div
+            role={result.type === 'error' ? 'alert' : 'status'}
             className={`px-5 py-2 rounded-t-2xl text-body-sm flex items-center gap-2 animate-banner-in ${
               result.type === 'error'
                 ? 'bg-error-container text-on-error-container'
@@ -521,7 +523,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
               </button>
             )}
             {busy && (
-              <span className="text-body-sm text-on-surface-variant inline-flex items-center gap-1.5">
+              <span role="status" className="text-body-sm text-on-surface-variant inline-flex items-center gap-1.5">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 {progress.total > 0 ? `${progress.done}/${progress.total}` : 'Working…'}
               </span>
@@ -665,11 +667,13 @@ function ExportTemplateDropdown({ disabled, busy, count, onSelect }) {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
       <button
         type="button"
         onClick={toggle}
         disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="true"
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
       >
         {busy ? <ThinkingOrb state="composing" size={20} className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
@@ -729,11 +733,13 @@ function StatusDropdown({ disabled, onChange }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="relative">
+    <div className="relative" onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
+        aria-expanded={open && !disabled}
+        aria-haspopup="true"
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
       >
         <Tag className="w-3.5 h-3.5" />

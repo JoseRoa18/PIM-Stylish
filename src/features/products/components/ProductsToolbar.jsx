@@ -57,6 +57,7 @@ export default function ProductsToolbar({
           <input
             ref={searchRef}
             type="text"
+            aria-label="Filter products"
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value);
@@ -121,6 +122,7 @@ export function ActiveFilters({ filters, onFiltersChange, onClearAll }) {
           key={`${field}-${value}`}
           type="button"
           onClick={() => removePill(field, value)}
+          aria-label={`Remove filter ${label}: ${formatCategory(value)}`}
           className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-primary-container text-on-primary-container text-body-sm hover:bg-primary hover:text-on-primary transition-colors"
         >
           <span className="font-semibold">{label}:</span>

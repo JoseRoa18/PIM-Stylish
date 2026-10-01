@@ -12,7 +12,7 @@ export default function RequireRole({ allowed, children }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24 text-on-surface-variant">
+      <div role="status" className="flex items-center justify-center py-24 text-on-surface-variant">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
         Loading…
       </div>

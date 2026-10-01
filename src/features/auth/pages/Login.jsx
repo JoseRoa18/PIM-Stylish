@@ -54,7 +54,7 @@ export default function Login() {
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
-      <div className="w-full max-w-md">
+      <main className="w-full max-w-md">
         {/* Brand header */}
         <div className="mb-8 text-center">
           {/* Icon pair toggled via the app's .dark class — the `dark:` variant
@@ -75,9 +75,9 @@ export default function Login() {
           </p>
 
           {error && (
-            <div className="mb-4 p-3 rounded-lg bg-error-container border border-error-container flex items-start gap-2 animate-banner-in">
+            <div role="alert" className="mb-4 p-3 rounded-lg bg-error-container border border-error-container flex items-start gap-2 animate-banner-in">
               <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
-              <p className="text-body-sm text-on-error-container">{error}</p>
+              <p id="login-error" className="text-body-sm text-on-error-container">{error}</p>
             </div>
           )}
 
@@ -96,6 +96,8 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={submitting}
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? 'login-error' : undefined}
                   className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
                   placeholder="you@stylishkb.com"
                 />
@@ -116,6 +118,8 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={submitting}
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? 'login-error' : undefined}
                   className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-surface-container-low disabled:text-on-surface-variant"
                   placeholder="Enter your password"
                 />
@@ -123,7 +127,9 @@ export default function Login() {
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                  // 24px target around the 16px eye: p-1 with right-2 keeps
+                  // the icon exactly where right-3 put it.
+                  className="absolute right-2 p-1 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
                 >
                   <MorphIcon icon={showPassword ? EyeOff : Eye} size={16} reducedMotion="user" />
                 </button>
@@ -163,7 +169,7 @@ export default function Login() {
         <p className="text-center text-label-md text-on-surface-variant mt-6">
           Stylish International Inc. · Internal product management system
         </p>
-      </div>
+      </main>
     </div>
   );
 }

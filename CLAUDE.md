@@ -46,7 +46,35 @@ React 19 + Vite + Tailwind CSS v4 (via `@tailwindcss/vite`; theme tokens follow 
 - **Heavy code loads on demand.** The description editor goes through [LazyRichTextEditor](src/components/ui/LazyRichTextEditor.jsx) (TipTap is ~370 kB); ProductDetail's Media / Marketplaces / Aliases tabs, marketplace cards and dialogs are `lazy()` under a local `<Suspense>`; exporters (BulkActionsBar, ProductDetail), the PIM export, the Wix push and Pricing's promo fill libraries (`LIBS` in PricingPage) are `await import()`-ed on click. Never import an exporter or a fill library statically from a page. `vite.config.js` puts React/router and Supabase in vendor chunks — keep the `node_modules/<name>/`-anchored patterns (a loose one pulled @tiptap/react into every page).
 - **The API returns at most 1,000 rows per request**, filtered or not. Batch `.in()` reads so one batch can't reach it (`getProducts`, `listMediaFor` in media.js, `imagesForSkus` in bestbuySync.js — a product has at most ~46 media rows), page with `.range()`, or let the database count (`promotion_prices(count)`). Two bugs came from this (Best Buy push got 1–4 of 5 images).
 - **Image thumbnails are our own**: bucket `product-thumbs` holds `<product-images path>.w200.webp` and `.w480.webp` (square cover crop, [20260929_product_thumbs.sql](supabase/migrations/20260929_product_thumbs.sql)). `getThumbnailUrl` returns them (≤200 px → w200, else w480); `thumbFallback` walks own → weserv (`default=` redirects to the original) → original → placeholder — put `onError={thumbFallback(path)}` on every thumbnail `<img>`. Uploads make them in the browser (`makeThumbnails`), deletions remove them (`deleteStorageObjects`); images added any other way are covered by `node scripts/backfill-thumbnails.mjs` (needs `sharp`, safe to re-run).
-- **channel_health** has the `(channel, run_at desc)` index, a daily prune (`channel_health_prune()`, cron `channel-health-prune-daily`: older than 30 days, the latest per channel/target always kept) and `channel_health_item(channel, sku)` for one SKU's item. In the app: `latestSnapshotCounters` for tiles, `latestSnapshotItem` for one SKU, `latestSnapshot` (full `results`) is shared for 5 s — write snapshots with `insertSnapshot` so the next read is fresh. Listing Health and PIM completeness share one catalog load (`loadCatalogWithMedia`), Price Alignment shares its products/promotions reads (`sharedLoad`).
+- **channel_health** has the `(channel, run_at desc)` index, a daily prune (`channel_health_prune()`, cron `channel-health-prune-daily`: older than 30 days, the latest per channel/target always kept) and `channel_health_item(channel, sku)` for one SKU's item. In the app: `latestSnapshotCounters` for tiles, `latestSnapshotItem` for one SKU, `latestSnapshot` (full `results`) is shared for 5 s — write snapshots with `insertSnapshot` so the next read is fresh. Listing Health and PIM completeness share one catalog load (`loadCatalogWithMedia`), Price Alignment shares its products/promotions reads (`sharedLoad`). The Dashboard's Price Alignment card (next to Catalog, user 2026-10-01) reads the SAME saved reports (`loadLatestAlignment` per target, dynamic-imported with the card — nothing is pulled) and both it and the Pricing overview summarize them with [alignmentSummary.js](src/features/pricing/lib/alignmentSummary.js); its rows open Pricing on that channel (router state `{ pricingTab: 'alignment', alignSite }`).
+
+### Accessibility conventions (pass of 2026-10-01 — keep them)
+
+An axe-core scan of every route went from 1,107 violations to 10 with no visual change. The 10 left need a look change the user hasn't decided on: the Activity "Wix" chip contrast and an inline Settings link that is distinguished only by color.
+
+**Modals and file inputs**
+- Build modals on the shared [Dialog](src/components/ui/Dialog.jsx).
+  - It keeps a stack, so only the top dialog answers Escape and traps Tab.
+  - `onClose` is read through a ref, so a new function on every render doesn't re-run the focus logic.
+  - The backdrop closes only when the press started on the backdrop.
+  - `subtitle` (or `ariaDescribedby`) is read as the description; confirm messages are linked the same way.
+- A file input inside a label is `sr-only`, never `hidden`, so Tab reaches it ([FileDropzone](src/components/ui/FileDropzone.jsx)).
+
+**Rows and toggles**
+- Rows that open or expand use a real link or a `<button>` in a cell. Never put `role="button"` or `aria-expanded` on a `<tr>`.
+- Collapsed panels get `inert`.
+- Toggles carry `aria-pressed` or `aria-expanded`.
+- [FilterDropdown](src/features/products/components/FilterDropdown.jsx) moves focus into its portaled menu.
+
+**Names and announcements**
+- Icon-only buttons need `aria-label`; lucide icons are `aria-hidden`.
+- Results and errors take `role="status"` / `role="alert"` on the element that is conditionally rendered.
+- Two Pagination bars on one page need distinct `label`s.
+
+**Shell and verification**
+- AppShell has a "Skip to main content" link to `main#main-content`.
+- `document.title` follows the route via `PAGE_TITLES` in [App.jsx](src/App.jsx); add new routes there.
+- Verify with axe (`axe.min.js` injected through Playwright) and a pixel diff against HEAD.
 
 ### Auth & roles
 

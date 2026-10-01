@@ -85,7 +85,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
               disabled={!!busy}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
             >
-              {busy === 'validate' ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+              {busy === 'validate' ? <ThinkingOrb state="solving" size={20} className="w-4 h-4" aria-hidden="true" /> : <ShieldCheck className="w-4 h-4" />}
               Validate
             </button>
             <button
@@ -123,7 +123,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
         )}
 
         {result?.error && (
-          <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
+          <div role="alert" className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <span className="break-words">{result.error}</span>
           </div>
@@ -141,6 +141,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
             <div className="flex items-start gap-2 px-3 py-2">
               {clean ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />}
               <span className="min-w-0 break-words">
+                <span className="sr-only">{clean ? 'Ready. ' : 'Not ready. '}</span>
                 <span className="text-on-surface-variant">{result.env} · </span>
                 {row.className} (class {row.classId}) · {row.attributes} attributes · {row.images} images · {row.documents} documents
                 {row.listed ? ' · already on Wayfair' : ''}
@@ -159,7 +160,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
         )}
 
         {status && (
-          <div className="rounded-lg border border-outline-variant text-body-sm px-3 py-2">
+          <div role="status" className="rounded-lg border border-outline-variant text-body-sm px-3 py-2">
             {status.error ? (
               <span className="text-error">{status.error}</span>
             ) : (
@@ -229,7 +230,10 @@ function IssueList({ label, items, tone, titles }) {
       <div className="text-label-sm text-on-surface-variant">{label}</div>
       <ul className={`mt-0.5 space-y-0.5 ${cls}`}>
         {items.map((it, i) => (
-          <li key={i} className="break-words" title={titles?.[i] || undefined}>{it}</li>
+          <li key={i} className="break-words" title={titles?.[i] || undefined}>
+            {it}
+            {titles?.[i] && <span className="sr-only"> ({titles[i]})</span>}
+          </li>
         ))}
       </ul>
     </div>

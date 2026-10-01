@@ -165,9 +165,11 @@ export default function PromoTaskNudge() {
   const overdue = tasks.filter((t) => t.overdue).length;
 
   return (
+    // A named region, not a live one: as a live region every spinner and
+    // recheck re-read the whole panel. Only the count below is announced.
     <div
-      role="status"
-      aria-live="polite"
+      role="region"
+      aria-labelledby="promo-task-nudge-title"
       className="fixed right-4 bottom-4 z-40 w-[24rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-outline-variant/70 bg-surface shadow-xl overflow-hidden animate-menu-in-up"
     >
       {/* Header: what this is and how much is waiting */}
@@ -176,8 +178,8 @@ export default function PromoTaskNudge() {
           <CalendarClock className="w-5 h-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-title-md text-on-surface font-semibold leading-tight">Promotion files</p>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">
+          <p id="promo-task-nudge-title" className="text-title-md text-on-surface font-semibold leading-tight">Promotion files</p>
+          <p role="status" className="text-body-sm text-on-surface-variant mt-0.5">
             {tasks.length === 1 ? '1 file due' : `${tasks.length} files due`}
             {overdue ? <span className="text-error font-medium"> · {overdue} overdue</span> : null}
           </p>
@@ -221,6 +223,7 @@ export default function PromoTaskNudge() {
                     <button
                       type="button"
                       onClick={() => upload(t)}
+                      aria-label={`${fromSaved ? 'Generate file' : 'Upload file'}: ${t.channel.label}, ${TASK_LABEL[t.task]}`}
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
                     >
                       <Upload className="w-3.5 h-3.5" />
@@ -230,6 +233,8 @@ export default function PromoTaskNudge() {
                       type="button"
                       onClick={() => markDone(t)}
                       disabled={busyId === t.id}
+                      aria-busy={busyId === t.id}
+                      aria-label={`Already done: ${t.channel.label}, ${TASK_LABEL[t.task]}`}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-label-md text-on-surface-variant hover:bg-on-surface/8 transition-colors disabled:opacity-50"
                     >
                       {busyId === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}

@@ -26,6 +26,8 @@ import {
  *   disabled    — disables editing AND the toolbar
  *   placeholder — shown when empty
  *   minRows     — minimum visible rows (controls min-height)
+ *   ariaLabel   — the field's name for screen readers (the visible label sits
+ *                 outside the editor)
  */
 export default function RichTextEditor({
   value,
@@ -33,6 +35,7 @@ export default function RichTextEditor({
   disabled = false,
   placeholder = '',
   minRows = 4,
+  ariaLabel,
 }) {
   const editor = useEditor({
     extensions: [
@@ -70,6 +73,9 @@ export default function RichTextEditor({
       attributes: {
         class: 'prose-content focus:outline-none px-3 py-2 text-body-md text-on-surface',
         style: `min-height: ${minRows * 1.5}rem;`,
+        role: 'textbox',
+        'aria-multiline': 'true',
+        ...(ariaLabel ? { 'aria-label': ariaLabel } : {}),
       },
     },
   });
@@ -205,6 +211,8 @@ export default function RichTextEditor({
   );
 }
 
+// Toggles (bold, lists, link…) say whether they are on; one-shot actions
+// (undo, redo) pass no `active` and get no aria-pressed.
 function ToolbarBtn({ active, onClick, disabled, title, children }) {
   return (
     <button
@@ -212,6 +220,8 @@ function ToolbarBtn({ active, onClick, disabled, title, children }) {
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={title}
+      aria-pressed={active === undefined ? undefined : Boolean(active)}
       className={`p-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
         active
           ? 'bg-primary text-on-primary'

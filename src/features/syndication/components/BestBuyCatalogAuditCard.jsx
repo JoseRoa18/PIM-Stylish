@@ -116,11 +116,11 @@ export default function BestBuyCatalogAuditCard() {
 
       <div className="px-6 py-5 space-y-4">
         {error && (
-          <p className="px-3 py-2 rounded-lg bg-error-container text-on-error-container text-body-sm">{error}</p>
+          <p role="alert" className="px-3 py-2 rounded-lg bg-error-container text-on-error-container text-body-sm">{error}</p>
         )}
 
         {snap === undefined || (!audit && !error) ? (
-          <p className="text-body-sm text-on-surface-variant">Loading audit…</p>
+          <p role="status" className="text-body-sm text-on-surface-variant">Loading audit…</p>
         ) : snap === null ? (
           <p className="text-body-sm text-on-surface-variant">
             No offers snapshot yet — run "Refresh now" above first.
@@ -200,7 +200,7 @@ export default function BestBuyCatalogAuditCard() {
                 ) : (
                   <div className="grid grid-cols-[8rem_1fr_1fr] items-baseline gap-3 text-body-sm py-1.5">
                     <span className="font-mono text-on-surface truncate">{item.o.sku}</span>
-                    <span className="text-on-surface-variant truncate col-span-2">{item.o.product_title ?? 'offer without PIM product'}</span>
+                    <span className="text-on-surface-variant truncate col-span-2" title={item.o.product_title ?? undefined}>{item.o.product_title ?? 'offer without PIM product'}</span>
                   </div>
                 )
               }
@@ -217,9 +217,9 @@ export default function BestBuyCatalogAuditCard() {
                 <table className="w-full text-body-sm">
                   <thead className="bg-surface-container-low text-left text-label-md text-on-surface-variant">
                     <tr>
-                      <th className="px-3 py-2">PIM category</th>
-                      <th className="px-3 py-2">Best Buy category</th>
-                      <th className="px-3 py-2 text-right">SKUs</th>
+                      <th scope="col" className="px-3 py-2">PIM category</th>
+                      <th scope="col" className="px-3 py-2">Best Buy category</th>
+                      <th scope="col" className="px-3 py-2 text-right">SKUs</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-outline-variant">
@@ -260,6 +260,7 @@ function AuditSection({ id, open, toggle, icon: Icon, title, intro, empty, items
       <button
         type="button"
         onClick={() => toggle(id)}
+        aria-expanded={expanded}
         className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-surface-container-low/40 transition-colors"
       >
         <Icon className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
@@ -295,15 +296,15 @@ function Row({ sku, left, right, stacked = false }) {
       </Link>
       {stacked ? (
         <>
-          <p className="text-on-surface-variant truncate">{left}</p>
-          <p className="text-on-surface truncate">{right}</p>
+          <p className="text-on-surface-variant truncate" title={left}>{left}</p>
+          <p className="text-on-surface truncate" title={right}>{right}</p>
         </>
       ) : (
         // Fixed columns + tabular digits so BB and PIM values line up for
         // digit-by-digit comparison instead of zig-zagging row to row.
         <>
-          <span className="text-on-surface-variant truncate tabular-nums">{left}</span>
-          <span className="text-on-surface truncate tabular-nums">{right}</span>
+          <span className="text-on-surface-variant truncate tabular-nums" title={left}>{left}</span>
+          <span className="text-on-surface truncate tabular-nums" title={right}>{right}</span>
         </>
       )}
     </div>

@@ -23,10 +23,10 @@ export default function ContentGapsCard({ gaps, hasSummaries }) {
         to="/listing-health"
         className="px-6 py-4 border-b border-outline-variant flex items-center justify-between gap-2 hover:bg-surface-container-low/40 transition-colors group"
       >
-        <span className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <ListChecks className="w-4 h-4 text-on-surface-variant" />
-          <span className="text-title-md text-on-surface">Content Gaps</span>
-        </span>
+          <h2 className="text-title-md text-on-surface">Content Gaps</h2>
+        </div>
         <span className="inline-flex items-center gap-1 text-label-md text-primary">
           Listing Health
           <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />

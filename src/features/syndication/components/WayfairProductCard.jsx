@@ -80,7 +80,7 @@ export default function WayfairProductCard({ product, onUpdate, supplier = 'CAN'
               </button>
             )}
           </div>
-          {saveError && <span className="text-body-sm text-error">{saveError}</span>}
+          {saveError && <span role="alert" className="text-body-sm text-error">{saveError}</span>}
         </label>
 
         <p className="text-body-sm text-on-surface-variant">

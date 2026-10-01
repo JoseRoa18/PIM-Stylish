@@ -54,7 +54,7 @@ export default function DetailDialog({ title, subtitle, activity, scores, onClos
       <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
-          <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by SKU or name…" className="pl-9 pr-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary w-64" />
+          <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by SKU or name…" aria-label="Search by SKU or name" className="pl-9 pr-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary w-64" />
         </div>
         <button type="button" onClick={exportCsv} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
           <Download className="w-4 h-4" />
@@ -89,10 +89,14 @@ export default function DetailDialog({ title, subtitle, activity, scores, onClos
                   const isOpen = open === p.sku;
                   return (
                     <Fragment key={p.sku}>
-                      <tr onClick={() => setOpen(isOpen ? null : p.sku)} aria-expanded={isOpen} className={`cursor-pointer transition-colors ${isOpen ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}>
+                      <tr onClick={() => setOpen(isOpen ? null : p.sku)} className={`cursor-pointer transition-colors ${isOpen ? 'bg-surface-container-low/60' : 'hover:bg-surface-container-low/40'}`}>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2">
-                            <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                            {/* The row opens on click; this button lets the keyboard do it too
+                                (its click reaches the row's onClick). Plain look, no press sink. */}
+                            <button type="button" aria-expanded={isOpen} aria-label={`Events of ${p.sku}`} className="flex-shrink-0 cursor-pointer active:scale-none!">
+                              <ChevronDown className={`w-4 h-4 text-on-surface-variant flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                            </button>
                             <div>
                               <Link to={`/catalog/${p.sku}`} onClick={(e) => e.stopPropagation()} className="text-body-md text-on-surface font-mono hover:text-primary">{p.sku}</Link>
                               {p.name && <div className="text-body-sm text-on-surface-variant truncate max-w-xs">{p.name}</div>}

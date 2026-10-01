@@ -84,7 +84,7 @@ export default function ProductHistoryDialog({ sku, onClose, onReverted }) {
       subtitle="Every field change since Aug 2026, newest first. Wix/Wayfair sync timestamps are not tracked."
       maxWidth="max-w-2xl"
     >
-      {error && <p className="mb-3 text-body-sm text-error">{error}</p>}
+      {error && <p role="alert" className="mb-3 text-body-sm text-error">{error}</p>}
 
       {rows === null ? (
         <div className="flex items-center justify-center py-10 text-on-surface-variant">

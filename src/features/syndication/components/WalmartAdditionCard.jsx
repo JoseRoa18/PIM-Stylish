@@ -168,7 +168,7 @@ export default function WalmartAdditionCard({ product }) {
         )}
 
         {result?.error && (
-          <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
+          <div role="alert" className="flex items-start gap-2 rounded-lg px-3 py-2 text-body-sm bg-error-container text-on-error-container animate-banner-in">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <span className="break-words">{result.error}</span>
           </div>
@@ -186,6 +186,7 @@ export default function WalmartAdditionCard({ product }) {
             <div className="flex items-start gap-2 px-3 py-2">
               {row.ready ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />}
               <span className="min-w-0 break-words">
+                <span className="sr-only">{row.ready ? 'Ready. ' : 'Not ready. '}</span>
                 <span className="text-on-surface-variant">{result.preview ? 'preview' : result.env} · </span>
                 {row.productType} · {result.trimmed ? `required fields only (${row.rows.filter((r) => r.required).length + 1} of ${row.fields})` : `${row.fields} fields`}
                 {result.validation ? (result.validation.valid ? ' · spec OK' : ' · spec errors') : ''}
@@ -204,7 +205,7 @@ export default function WalmartAdditionCard({ product }) {
         )}
 
         {status && (
-          <div className="rounded-lg border border-outline-variant text-body-sm px-3 py-2 space-y-1">
+          <div role="status" className="rounded-lg border border-outline-variant text-body-sm px-3 py-2 space-y-1">
             {status.error ? <span className="text-error">{status.error}</span> : (
               <>
                 <div>Feed {status.feedStatus ?? '—'} · received {status.itemsReceived ?? 0} · succeeded {status.itemsSucceeded ?? 0} · failed {status.itemsFailed ?? 0} · processing {status.itemsProcessing ?? 0}</div>

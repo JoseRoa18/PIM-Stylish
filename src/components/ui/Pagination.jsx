@@ -15,8 +15,10 @@ const PAGE_SIZES = [10, 25, 50, 100];
  *   compact    — full-width row with the range pinned LEFT (never moves) and
  *                the page buttons pinned right; `children` render between
  *                them (e.g. the active-filter pills). No size selector.
+ *   label      — the navigation's accessible name; give each bar its own when
+ *                a page has two (above and below a table).
  */
-export default function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange, compact = false, children }) {
+export default function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange, compact = false, label = 'Pagination', children }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(page, totalPages);
   const from = total === 0 ? 0 : (current - 1) * pageSize + 1;
@@ -25,14 +27,14 @@ export default function Pagination({ page, pageSize, total, onPageChange, onPage
   if (total === 0) return null;
 
   const rangeLabel = (
-    <span className="text-body-sm text-on-surface-variant">
+    <span className="text-body-sm text-on-surface-variant" aria-live="polite">
       Showing <span className="text-on-surface font-medium">{from}–{to}</span> of{' '}
       <span className="text-on-surface font-medium">{total}</span>
     </span>
   );
 
   const nav = totalPages > 1 && (
-    <nav className="flex items-center gap-1" aria-label="Pagination">
+    <nav className="flex items-center gap-1" aria-label={label}>
       <PageButton
         disabled={current === 1}
         onClick={() => onPageChange(current - 1)}
@@ -103,10 +105,12 @@ export default function Pagination({ page, pageSize, total, onPageChange, onPage
 
 function PageButton({ children, onClick, disabled = false, active = false, ariaLabel }) {
   return (
+    // The current page stays enabled (a no-op): disabling the button just
+    // pressed dropped keyboard focus to the top of the page.
     <button
       type="button"
-      onClick={onClick}
-      disabled={disabled || active}
+      onClick={active ? undefined : onClick}
+      disabled={disabled}
       aria-label={ariaLabel}
       aria-current={active ? 'page' : undefined}
       className={`min-w-8 h-8 px-2 inline-flex items-center justify-center rounded-lg text-body-sm transition-colors ${

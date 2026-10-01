@@ -176,6 +176,8 @@ export default function Activity() {
         <button
           onClick={reload}
           title="Refresh"
+          aria-label="Refresh"
+          aria-busy={loading}
           className="p-2.5 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors flex-shrink-0"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -190,10 +192,11 @@ export default function Activity() {
             value={search}
             onChange={(e) => resetTo(setSearch)(e.target.value)}
             placeholder="Search SKU or description…"
+            aria-label="Search activity by SKU or description"
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
-        <FilterSelect value={actorId} onChange={resetTo(setActorId)}>
+        <FilterSelect label="User" value={actorId} onChange={resetTo(setActorId)}>
           <option value="">All users</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
@@ -201,19 +204,19 @@ export default function Activity() {
             </option>
           ))}
         </FilterSelect>
-        <FilterSelect value={action} onChange={resetTo(setAction)} options={ACTION_OPTIONS} />
-        <FilterSelect value={target} onChange={resetTo(setTarget)} options={TARGET_OPTIONS} />
-        <FilterSelect value={rangeDays} onChange={resetTo(setRangeDays)} options={RANGE_OPTIONS} />
+        <FilterSelect label="Action" value={action} onChange={resetTo(setAction)} options={ACTION_OPTIONS} />
+        <FilterSelect label="Location" value={target} onChange={resetTo(setTarget)} options={TARGET_OPTIONS} />
+        <FilterSelect label="Date range" value={rangeDays} onChange={resetTo(setRangeDays)} options={RANGE_OPTIONS} />
       </div>
 
       {/* Timeline */}
       <div className="bg-surface border border-outline-variant rounded-2xl overflow-hidden">
         {loading ? (
-          <div className="py-16 flex items-center justify-center text-on-surface-variant text-body-sm">
+          <div role="status" className="py-16 flex items-center justify-center text-on-surface-variant text-body-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading activity…
           </div>
         ) : error ? (
-          <div className="py-16 text-center">
+          <div role="alert" className="py-16 text-center">
             <p className="text-body-md text-error font-semibold">Couldn’t load activity</p>
             <p className="text-body-sm text-on-surface-variant mt-1">{error.message}</p>
             <button
@@ -253,6 +256,7 @@ export default function Activity() {
                 disabled={page <= 1 || loading}
                 className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
                 title="Previous page"
+                aria-label="Previous page"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -264,6 +268,7 @@ export default function Activity() {
                 disabled={page >= totalPages || loading}
                 className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
                 title="Next page"
+                aria-label="Next page"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -275,9 +280,10 @@ export default function Activity() {
   );
 }
 
-function FilterSelect({ value, onChange, options, children }) {
+function FilterSelect({ label, value, onChange, options, children }) {
   return (
     <select
+      aria-label={label}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm focus:outline-none focus:ring-2 focus:ring-primary/30"

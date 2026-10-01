@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Outlet, Navigate, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import ProtectedRoute from './features/auth/components/ProtectedRoute';
@@ -29,11 +29,33 @@ const Analytics = lazy(ROUTE_IMPORTS.analytics);
 
 function PageFallback() {
   return (
-    <div className="flex items-center justify-center py-24 text-on-surface-variant">
+    <div role="status" className="flex items-center justify-center py-24 text-on-surface-variant">
       <Loader2 className="w-5 h-5 animate-spin mr-2" />
       Loading…
     </div>
   );
+}
+
+// The browser tab names the page (screen readers announce it on navigation,
+// and several open tabs stay tellable apart).
+const PAGE_TITLES = [
+  ['/catalog/', (path) => `${decodeURIComponent(path.split('/')[2] ?? '')} · Catalog`],
+  ['/catalog', 'Catalog'],
+  ['/syndication', 'Syndication'],
+  ['/templates', 'Templates'],
+  ['/pricing', 'Pricing'],
+  ['/listing-health', 'Listing Health'],
+  ['/analytics', 'Analytics'],
+  ['/import', 'Import'],
+  ['/users', 'Users'],
+  ['/activity', 'Activity Log'],
+  ['/settings', 'Settings'],
+  ['/assets', 'Assets'],
+];
+function pageTitle(pathname) {
+  const hit = PAGE_TITLES.find(([prefix]) => pathname.startsWith(prefix));
+  const label = !hit ? 'Dashboard' : typeof hit[1] === 'function' ? hit[1](pathname) : hit[1];
+  return `${label} · Stylish PIM`;
 }
 
 function ProtectedLayout() {
@@ -41,6 +63,7 @@ function ProtectedLayout() {
   // fallback right away instead of keeping the previous page on screen
   // (React would otherwise hold the old content during the lazy transition).
   const { pathname } = useLocation();
+  useEffect(() => { document.title = pageTitle(pathname); }, [pathname]);
   return (
     <ProtectedRoute>
       <AppShell>

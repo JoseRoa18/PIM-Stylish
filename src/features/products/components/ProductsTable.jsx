@@ -85,7 +85,7 @@ export default function ProductsTable({
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+      <div role="status" aria-label="Loading products" className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
         <div className="p-4 space-y-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex gap-4 items-center">
@@ -139,7 +139,7 @@ export default function ProductsTable({
                   />
                 </th>
               )}
-              <th className={`${TH_STICKY} z-10 py-3 px-4 w-20`}></th>
+              <th className={`${TH_STICKY} z-10 py-3 px-4 w-20`}><span className="sr-only">Image</span></th>
               {columns.map((col) => (
                 <SortableHeader
                   key={col.key}
@@ -159,9 +159,10 @@ export default function ProductsTable({
               return (
                 <tr
                   key={product.sku}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Open ${product.sku}`}
+                  // Keyboard and screen readers open the product through the
+                  // SKU link (a real link); the row's click is the mouse
+                  // shortcut. A row with role="button" wrapping the checkbox
+                  // and the link nested interactive controls (axe, 2026-10-01).
                   // Hovering a row warms everything the product page needs:
                   // the route chunk (heaviest in the app), the media list,
                   // and the primary image at the gallery's exact size. All
@@ -174,9 +175,9 @@ export default function ProductsTable({
                     scheduleRowPrefetch(product);
                   }}
                   onPointerLeave={cancelRowPrefetch}
-                  // The row is a button, not an anchor — recreate the two
-                  // browser gestures for "open in a new tab" (the SKU cell
-                  // is a real link for the right-click menu).
+                  // The row itself is no anchor — recreate the two browser
+                  // gestures for "open in a new tab" (the SKU cell is a real
+                  // link for the right-click menu).
                   onClick={(e) => {
                     if (e.target.tagName === 'INPUT' || e.target.closest('a')) return;
                     if (e.ctrlKey || e.metaKey) {
@@ -189,14 +190,7 @@ export default function ProductsTable({
                     if (e.button !== 1 || e.target.closest('a')) return;
                     window.open(url, '_blank', 'noopener');
                   }}
-                  onKeyDown={(e) => {
-                    if (e.target.tagName === 'INPUT') return;
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      open();
-                    }
-                  }}
-                  className={`group relative border-b border-outline-variant last:border-0 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+                  className={`group relative border-b border-outline-variant last:border-0 transition-colors cursor-pointer ${
                     isSelected ? 'bg-primary-container/30' : 'hover:bg-surface-container'
                   }`}
                 >

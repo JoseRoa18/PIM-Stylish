@@ -7,7 +7,7 @@ export default function ProtectedRoute({ children }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-on-surface-variant text-body-sm">
+      <div role="status" className="min-h-screen flex items-center justify-center bg-background text-on-surface-variant text-body-sm">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
         Loading…
       </div>

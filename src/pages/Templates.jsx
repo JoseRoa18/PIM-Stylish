@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import {
   Upload,
   Trash2,
@@ -109,14 +109,14 @@ export default function Templates() {
       )}
 
       {loading && (
-        <div className="flex items-center justify-center py-16 text-on-surface-variant">
+        <div role="status" className="flex items-center justify-center py-16 text-on-surface-variant">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
           Loading templates…
         </div>
       )}
 
       {error && (
-        <div className="px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm flex items-center gap-2 animate-banner-in">
+        <div role="alert" className="px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm flex items-center gap-2 animate-banner-in">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error.message}
         </div>
@@ -203,7 +203,7 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-body-md text-on-surface font-medium">{marketplace}</p>
-          <p className="text-body-sm text-on-surface-variant truncate">{summary}</p>
+          <p className="text-body-sm text-on-surface-variant truncate" title={summary}>{summary}</p>
         </div>
       </button>
       {/* Smooth expand/collapse without measuring: transition the grid track
@@ -217,7 +217,8 @@ function MarketplaceGroup({ marketplace, templates, reload }) {
             : 'grid-rows-[0fr] duration-200 ease-in'
         }`}
       >
-        <div className="overflow-hidden min-h-0">
+        {/* inert keeps the collapsed cards out of the tab order. */}
+        <div className="overflow-hidden min-h-0" inert={!open}>
           <div
             className={`px-5 pb-5 pt-4 border-t border-outline-variant space-y-5 transition-opacity ${
               open ? 'opacity-100 duration-300 delay-75' : 'opacity-0 duration-150'
@@ -275,6 +276,9 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
   const [purposeDraft, setPurposeDraft] = useState(templatePurpose(template));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  // Several cards can be in edit mode at once — ids must be per card.
+  const purposeLabelId = useId();
+  const catsLabelId = useId();
 
   const baseName = sharedPrefix && template.file_name.startsWith(sharedPrefix)
     ? template.file_name.slice(sharedPrefix.length)
@@ -366,6 +370,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
               onClick={startEdit}
               className="p-2 rounded-full text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
               title="Edit purpose and categories"
+              aria-label={`Edit ${template.file_name}`}
             >
               <Pencil className="w-4 h-4" />
             </button>
@@ -376,6 +381,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
               disabled={deleting}
               className="p-2 rounded-full text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors disabled:opacity-50"
               title="Delete template"
+              aria-label={`Delete ${template.file_name}`}
             >
               {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             </button>
@@ -385,14 +391,15 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
 
       {editing ? (
         <div className="flex flex-col gap-2">
-          <p className="text-label-md text-on-surface-variant">This file is for:</p>
-          <div className="flex flex-wrap gap-2">
+          <p id={purposeLabelId} className="text-label-md text-on-surface-variant">This file is for:</p>
+          <div className="flex flex-wrap gap-2" role="group" aria-labelledby={purposeLabelId}>
             {TEMPLATE_PURPOSES.map((p) => (
               <button
                 key={p.value}
                 type="button"
                 onClick={() => setPurposeDraft(p.value)}
                 title={p.hint}
+                aria-pressed={purposeDraft === p.value}
                 className={`px-3 py-1 rounded-full border text-label-md transition-colors ${
                   purposeDraft === p.value
                     ? 'bg-tertiary-container text-on-tertiary-container border-tertiary-container'
@@ -403,8 +410,8 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
               </button>
             ))}
           </div>
-          <p className="text-label-md text-on-surface-variant">Available for categories (none = general):</p>
-          <div className="flex flex-wrap gap-2">
+          <p id={catsLabelId} className="text-label-md text-on-surface-variant">Available for categories (none = general):</p>
+          <div className="flex flex-wrap gap-2" role="group" aria-labelledby={catsLabelId}>
             {TEMPLATE_CATEGORIES.map((c) => {
               const active = draft.includes(c.value);
               return (
@@ -412,6 +419,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
                   key={c.value}
                   type="button"
                   onClick={() => toggle(c.value)}
+                  aria-pressed={active}
                   className={`px-3 py-1 rounded-full border text-label-md transition-colors ${
                     active
                       ? 'bg-primary text-on-primary border-primary'
@@ -447,7 +455,7 @@ function TemplateCard({ template, sharedPrefix = '', reload }) {
       {/* Category chips only show while editing — in view mode the card sits
           inside a section that already names its category. */}
 
-      {error && <p className="text-body-sm text-error">{error}</p>}
+      {error && <p role="alert" className="text-body-sm text-error">{error}</p>}
     </div>
   );
 }
@@ -497,15 +505,16 @@ function UploadCard({ onDone, onCancel }) {
     >
       <div className="flex items-center justify-between">
         <h2 className="text-title-lg text-on-surface">Upload Template</h2>
-        <button type="button" onClick={onCancel} className="p-1 rounded-full hover:bg-surface-container-high transition-colors">
+        <button type="button" onClick={onCancel} aria-label="Close upload form" className="p-1 rounded-full hover:bg-surface-container-high transition-colors">
           <X className="w-5 h-5 text-on-surface-variant" />
         </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
-          <label className="text-label-md text-on-surface-variant">Marketplace</label>
+          <label htmlFor="tpl-marketplace" className="text-label-md text-on-surface-variant">Marketplace</label>
           <select
+            id="tpl-marketplace"
             value={marketplace}
             onChange={(e) => setMarketplace(e.target.value)}
             className="px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
@@ -522,6 +531,7 @@ function UploadCard({ onDone, onCancel }) {
               value={customMarketplace}
               onChange={(e) => setCustomMarketplace(e.target.value)}
               placeholder="Marketplace name"
+              aria-label="Marketplace name"
               className="mt-1 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
             />
           )}
@@ -547,17 +557,18 @@ function UploadCard({ onDone, onCancel }) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-label-md text-on-surface-variant">This file is for</label>
+        <label id="tpl-purpose-lbl" className="text-label-md text-on-surface-variant">This file is for</label>
         <p className="text-body-sm text-on-surface-variant -mt-0.5 mb-1">
           The export asks which one to download when a marketplace has more than one.
         </p>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="group" aria-labelledby="tpl-purpose-lbl">
           {TEMPLATE_PURPOSES.map((p) => (
             <button
               key={p.value}
               type="button"
               onClick={() => setPurpose(p.value)}
               title={p.hint}
+              aria-pressed={purpose === p.value}
               className={`px-3 py-1.5 rounded-full border text-label-md transition-colors ${
                 purpose === p.value
                   ? 'bg-tertiary-container text-on-tertiary-container border-tertiary-container'
@@ -571,7 +582,7 @@ function UploadCard({ onDone, onCancel }) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-label-md text-on-surface-variant">
+        <label id="tpl-cats-lbl" className="text-label-md text-on-surface-variant">
           Available for categories
         </label>
         {/* The general-template rule lives in the dynamic line under the
@@ -579,7 +590,7 @@ function UploadCard({ onDone, onCancel }) {
         <p className="text-body-sm text-on-surface-variant -mt-0.5 mb-1">
           The template only shows on products of the selected categories.
         </p>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="group" aria-labelledby="tpl-cats-lbl">
           {TEMPLATE_CATEGORIES.map((c) => {
             const active = categories.includes(c.value);
             return (
@@ -587,6 +598,7 @@ function UploadCard({ onDone, onCancel }) {
                 key={c.value}
                 type="button"
                 onClick={() => toggleCategory(c.value)}
+                aria-pressed={active}
                 className={`px-3 py-1.5 rounded-full border text-label-md transition-colors ${
                   active
                     ? 'bg-primary text-on-primary border-primary'
@@ -604,7 +616,7 @@ function UploadCard({ onDone, onCancel }) {
       </div>
 
       {error && (
-        <p className="text-body-sm text-error">{error}</p>
+        <p role="alert" className="text-body-sm text-error">{error}</p>
       )}
 
       <div className="flex justify-end gap-2">

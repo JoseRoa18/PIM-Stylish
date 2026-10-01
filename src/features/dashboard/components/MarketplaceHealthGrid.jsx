@@ -84,7 +84,11 @@ function HealthCard({ mkt, summary, refreshing }) {
       </div>
 
       {scored > 0 && (
-        <div className="flex gap-px h-1.5 rounded-full overflow-hidden bg-surface-container">
+        <div
+          className="flex gap-px h-1.5 rounded-full overflow-hidden bg-surface-container"
+          role="img"
+          aria-label={`${d.excellent ?? 0} excellent, ${d.good ?? 0} good, ${d.needs_work ?? 0} needs work, ${critical} critical`}
+        >
           {DISTRIBUTION_SEGMENTS.filter((s) => (d[s.key] ?? 0) > 0).map((s) => (
             <div key={s.key} className={s.class} style={{ width: `${(d[s.key] / scored) * 100}%` }} />
           ))}

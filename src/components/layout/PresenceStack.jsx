@@ -20,6 +20,7 @@ export default function PresenceStack() {
     // Soft pill so the stack reads as one deliberate element instead of a
     // face floating between the search bar and the controls.
     <div
+      role="group"
       className="hidden sm:flex items-center -space-x-2 p-1 mr-1 rounded-full bg-surface-container-low"
       aria-label={`${others.length} teammate${others.length === 1 ? '' : 's'} working right now`}
     >
@@ -30,6 +31,7 @@ export default function PresenceStack() {
           title={`${u.name || u.email || 'Teammate'} · working right now`}
         >
           <Avatar name={u.name} email={u.email} src={u.avatar_url} size="sm" />
+          <span className="sr-only">{u.name || u.email || 'Teammate'}</span>
           <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-success ring-2 ring-surface-container-low" />
         </span>
       ))}

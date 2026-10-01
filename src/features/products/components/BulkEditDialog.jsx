@@ -153,6 +153,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
               value={row.field}
               onChange={(e) => updateRow(row.id, { field: e.target.value, value: '', clear: false })}
               disabled={busy}
+              aria-label="Field to edit"
               className="w-44 flex-shrink-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               {EDITABLE_FIELDS.map((f) => (
@@ -166,6 +167,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
                 value={row.value}
                 onChange={(e) => updateRow(row.id, { value: e.target.value })}
                 disabled={busy}
+                aria-label={`New ${def?.label}`}
                 className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
                 <option value="">Choose…</option>
@@ -181,6 +183,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
                 disabled={busy || row.clear}
                 list={`bulk-edit-${row.field}`}
                 placeholder={row.clear ? 'Will be cleared' : 'New value…'}
+                aria-label={`New ${def?.label ?? 'value'}`}
                 className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-surface-container-low disabled:text-on-surface-variant"
               />
             )}
@@ -208,7 +211,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
                 type="button"
                 onClick={() => setRows((rs) => rs.filter((r) => r.id !== row.id))}
                 disabled={busy}
-                aria-label="Remove field"
+                aria-label={`Remove ${def?.label ?? 'field'}`}
                 className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error-container/40 transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
@@ -230,7 +233,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
           </button>
         )}
 
-        {error && <p className="text-body-sm text-error">{error}</p>}
+        {error && <p role="alert" className="text-body-sm text-error">{error}</p>}
       </div>
     </Dialog>
   );

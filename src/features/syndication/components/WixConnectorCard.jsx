@@ -56,7 +56,7 @@ export default function WixConnectorCard() {
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
       {/* The page header already carries the Wix identity — no second avatar here. */}
       <header className="mb-4">
-        <h3 className="text-title-lg text-on-surface">Wix Stores</h3>
+        <h2 className="text-title-lg text-on-surface">Wix Stores</h2>
         <p className="text-body-sm text-on-surface-variant">
           Link PIM products to their Wix counterparts by SKU. Required before pushing edits to Wix.
         </p>
@@ -64,13 +64,14 @@ export default function WixConnectorCard() {
 
       {phase === 'idle' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Wix site">
             <span className="text-label-md text-on-surface-variant mr-1.5">Site:</span>
             {WIX_SITE_KEYS.map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setSite(key)}
+                aria-pressed={site === key}
                 className={`px-3 py-1.5 rounded-full text-label-md font-medium transition-colors ${
                   site === key
                     ? 'bg-primary text-on-primary'
@@ -98,7 +99,7 @@ export default function WixConnectorCard() {
       )}
 
       {busy && (
-        <div className="flex items-center gap-3 text-on-surface-variant">
+        <div role="status" className="flex items-center gap-3 text-on-surface-variant">
           <RefreshCw className="w-5 h-5 animate-spin" />
           <span className="text-body-md">
             {phase === 'previewing' ? 'Fetching Wix catalog…' : 'Applying links…'}
@@ -115,7 +116,7 @@ export default function WixConnectorCard() {
       )}
 
       {phase === 'error' && (
-        <div className="rounded-lg border border-error/40 bg-error-container/30 p-4">
+        <div role="alert" className="rounded-lg border border-error/40 bg-error-container/30 p-4">
           <div className="flex items-start gap-2 mb-2">
             <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
             <div className="flex-1">
@@ -176,7 +177,7 @@ function PreviewPanel({ preview, onConfirm, onCancel }) {
           </p>
           <ul className="text-body-sm text-on-surface-variant space-y-0.5">
             {samples.newLinks.map((r) => (
-              <li key={r.sku} className="truncate">
+              <li key={r.sku} className="truncate" title={r.name ? `${r.sku} ${r.name}` : r.sku}>
                 <span className="font-mono text-on-surface">{r.sku}</span>
                 {r.name && <span className="ml-2">{r.name}</span>}
               </li>
@@ -192,7 +193,7 @@ function PreviewPanel({ preview, onConfirm, onCancel }) {
           </p>
           <ul className="text-body-sm text-on-surface-variant space-y-0.5">
             {samples.wixOnly.map((r) => (
-              <li key={r.wix_product_id} className="truncate">
+              <li key={r.wix_product_id} className="truncate" title={r.name ? `${r.sku} ${r.name}` : r.sku}>
                 <span className="font-mono text-on-surface">{r.sku}</span>
                 {r.name && <span className="ml-2">{r.name}</span>}
               </li>
@@ -226,7 +227,7 @@ function PreviewPanel({ preview, onConfirm, onCancel }) {
 function ResultPanel({ result, onReset }) {
   return (
     <div className="space-y-3">
-      <div className="flex items-start gap-2 rounded-lg border border-tertiary/40 bg-tertiary-container/30 p-4">
+      <div role="status" className="flex items-start gap-2 rounded-lg border border-tertiary/40 bg-tertiary-container/30 p-4">
         <CheckCircle2 className="w-5 h-5 text-tertiary flex-shrink-0 mt-0.5" />
         <div>
           <p className="text-label-lg text-on-surface font-semibold">

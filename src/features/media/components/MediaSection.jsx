@@ -483,6 +483,11 @@ export default function MediaSection({ sku, familyNumber = null, category = null
         </div>
       )}
 
+      {/* Upload progress for screen readers — always mounted so updates are announced. */}
+      <span className="sr-only" role="status">
+        {uploadProgress ? `Uploading ${uploadProgress.done} of ${uploadProgress.total}` : ''}
+      </span>
+
       <div className="px-6 py-4 flex items-center justify-between border-b border-outline-variant gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <h2 className="text-title-lg text-on-surface">Media</h2>
@@ -650,7 +655,7 @@ export default function MediaSection({ sku, familyNumber = null, category = null
       )}
 
       {errorMessage && (
-        <div className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant animate-banner-in">
+        <div role="alert" className="px-6 py-3 bg-error-container text-on-error-container text-body-sm border-b border-outline-variant animate-banner-in">
           {errorMessage}
         </div>
       )}
@@ -663,7 +668,7 @@ export default function MediaSection({ sku, familyNumber = null, category = null
             ))}
           </div>
         ) : error ? (
-          <p className="text-body-md text-error">Failed to load media: {error.message}</p>
+          <p role="alert" className="text-body-md text-error">Failed to load media: {error.message}</p>
         ) : visualMedia.length === 0 ? (
           <EmptyState onAddClick={() => fileInputRef.current?.click()} canEdit={canEdit} />
         ) : filteredMedia.length === 0 ? (
@@ -962,6 +967,12 @@ function MediaCard({
             onError={thumbFallback(item.storage_path)}
             alt={item.alt_text || item.file_name}
             onClick={onView}
+            role="button"
+            tabIndex={0}
+            aria-label={`View ${item.alt_text || item.file_name}`}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onView(); }
+            }}
             onLoad={() => setThumbLoaded(true)}
             className={`w-full h-full object-cover block cursor-zoom-in ${thumbLoaded ? '' : 'opacity-0'}`}
             loading="lazy"
@@ -975,7 +986,7 @@ function MediaCard({
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') onView();
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onView(); }
           }}
           className="relative w-full h-full cursor-pointer"
           title={`Play ${item.file_name}`}
@@ -1003,7 +1014,7 @@ function MediaCard({
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') onView();
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onView(); }
           }}
           className="relative w-full h-full cursor-pointer"
           title={`Play ${item.file_name}`}
@@ -1030,7 +1041,7 @@ function MediaCard({
           role={isVideo ? 'button' : 'link'}
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') (isVideo ? onView : openInNewTab)();
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (isVideo ? onView : openInNewTab)(); }
           }}
           className="w-full h-full flex flex-col items-center justify-center p-3 text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
         >
@@ -1095,7 +1106,7 @@ function MediaCard({
           <select
             value={item.language ?? ''}
             onChange={(e) => onSetLanguage(e.target.value || null)}
-            aria-label="Image language"
+            aria-label={`Language of ${item.file_name}`}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           >
             {IMAGE_LANGUAGES.map((l) => (
@@ -1118,8 +1129,13 @@ function MediaCard({
         </div>
       )}
 
-      {/* Hover actions — copy link (everyone), set primary + remove (editors) */}
-      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
+      <span className="sr-only" role="status">{copied ? 'Link copied' : ''}</span>
+
+      {/* Hover actions — copy link (everyone), set primary + remove (editors).
+          Also shown while a control inside the card has KEYBOARD focus
+          (:focus-visible), so tabbing reaches visible buttons; mouse clicks
+          leave the hover-only look unchanged. */}
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
         <div className="flex gap-2 pointer-events-auto">
           <button
             type="button"
@@ -1128,6 +1144,7 @@ function MediaCard({
               copied ? 'bg-primary text-on-primary' : 'bg-surface/90 hover:bg-surface text-on-surface'
             }`}
             title={copied ? 'Link copied!' : 'Copy image link'}
+            aria-label={`Copy link to ${item.file_name}`}
           >
             <MorphIcon icon={copied ? CheckGlyph : Link2Glyph} size={16} reducedMotion="user" />
           </button>
@@ -1137,6 +1154,7 @@ function MediaCard({
               onClick={onEditAlt}
               className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title={item.alt_text ? `Alt text: ${item.alt_text}` : 'Add alt text'}
+              aria-label={`${item.alt_text ? 'Edit' : 'Add'} alt text for ${item.file_name}`}
             >
               <Pencil className="w-4 h-4" />
             </button>
@@ -1147,6 +1165,7 @@ function MediaCard({
               onClick={onSetThumbnail}
               className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title={item.thumbnail_path ? 'Change thumbnail' : 'Set thumbnail (default: 2nd product image)'}
+              aria-label={`${item.thumbnail_path ? 'Change' : 'Set'} thumbnail for ${item.file_name}`}
             >
               <ImageIcon className="w-4 h-4" />
             </button>
@@ -1157,6 +1176,7 @@ function MediaCard({
               onClick={(e) => { e.stopPropagation(); openInNewTab(); }}
               className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title="Open in new tab"
+              aria-label={`Open ${item.file_name} in new tab`}
             >
               <ExternalLink className="w-4 h-4" />
             </button>
@@ -1167,6 +1187,7 @@ function MediaCard({
               onClick={onSetPrimary}
               className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title="Set as primary"
+              aria-label={`Set ${item.file_name} as primary`}
             >
               <Star className="w-4 h-4" />
             </button>
@@ -1177,6 +1198,7 @@ function MediaCard({
               onClick={onSetSdMain}
               className="p-2 rounded-full bg-surface/90 hover:bg-surface text-on-surface transition-colors"
               title={item.image_role === 'sinksdirect_main' ? 'Unset SinksDirect main' : 'Set as SinksDirect main (gray-background hero, website only)'}
+              aria-label={item.image_role === 'sinksdirect_main' ? `Unset ${item.file_name} as SinksDirect main` : `Set ${item.file_name} as SinksDirect main`}
             >
               <Store className="w-4 h-4" />
             </button>
@@ -1187,6 +1209,7 @@ function MediaCard({
               onClick={onRemove}
               className="p-2 rounded-full bg-surface/90 hover:bg-error hover:text-on-error text-on-surface transition-colors"
               title="Remove from product"
+              aria-label={`Remove ${item.file_name} from product`}
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -1243,6 +1266,7 @@ function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close"
             className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
           >
             <X className="w-4 h-4" />
@@ -1260,6 +1284,7 @@ function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://youtube.com/watch?v=…"
+            aria-label="Video URL"
             className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
           />
           <label className="flex items-center gap-2 text-label-md text-on-surface-variant">
@@ -1276,7 +1301,7 @@ function VideoUrlDialog({ defaultLanguage, onClose, onAdd }) {
               ))}
             </select>
           </label>
-          {error && <p className="text-body-sm text-error">{error}</p>}
+          {error && <p role="alert" className="text-body-sm text-error">{error}</p>}
         </div>
 
         <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-outline-variant bg-surface-container-lowest">
@@ -1339,6 +1364,7 @@ function AltTextDialog({ item, onClose, onSave }) {
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close"
             className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
           >
             <X className="w-4 h-4" />
@@ -1370,6 +1396,7 @@ function AltTextDialog({ item, onClose, onSave }) {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             placeholder="e.g. Brushed gold pull-down kitchen faucet, side view"
+            aria-label="Alt text"
             className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
           />
           <p className="text-label-sm text-on-surface-variant mt-1 text-right">{value.length} chars</p>
@@ -1401,6 +1428,14 @@ function AltTextDialog({ item, onClose, onSave }) {
 // iframe for YouTube/Vimeo links — nothing leaves the app.
 function VideoPlayerDialog({ item, onClose }) {
   const embed = getVideoEmbed(getMediaUrl(item.storage_path));
+  const panelRef = useRef(null);
+
+  // Focus moves into the dialog and returns to what opened it on close.
+  useEffect(() => {
+    const prev = document.activeElement;
+    panelRef.current?.focus();
+    return () => prev?.focus?.();
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
@@ -1422,7 +1457,9 @@ function VideoPlayerDialog({ item, onClose }) {
       aria-label={`Playing ${item.file_name}`}
     >
       <div
-        className="w-full max-w-4xl animate-dialog-in"
+        ref={panelRef}
+        tabIndex={-1}
+        className="w-full max-w-4xl animate-dialog-in outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-2 px-1">
@@ -1435,6 +1472,7 @@ function VideoPlayerDialog({ item, onClose }) {
             onClick={onClose}
             className="p-2 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
             title="Close"
+            aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>
@@ -1467,6 +1505,14 @@ function VideoPlayerDialog({ item, onClose }) {
 // = the product's 2nd image, falling back to the video's own frame.
 function ThumbnailPickerDialog({ item, images, defaultPoster, onClose, onSave }) {
   const [busy, setBusy] = useState(false);
+  const panelRef = useRef(null);
+
+  // Focus moves into the dialog and returns to what opened it on close.
+  useEffect(() => {
+    const prev = document.activeElement;
+    panelRef.current?.focus();
+    return () => prev?.focus?.();
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
@@ -1489,8 +1535,10 @@ function ThumbnailPickerDialog({ item, images, defaultPoster, onClose, onSave })
       aria-label="Choose video thumbnail"
     >
       <div
+        ref={panelRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in"
+        className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in outline-none"
       >
         <div className="px-5 py-4 flex items-center justify-between border-b border-outline-variant">
           <div className="min-w-0">
@@ -1503,6 +1551,7 @@ function ThumbnailPickerDialog({ item, images, defaultPoster, onClose, onSave })
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close"
             className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low transition-colors"
           >
             <X className="w-4 h-4" />
@@ -1526,6 +1575,7 @@ function ThumbnailPickerDialog({ item, images, defaultPoster, onClose, onSave })
                     type="button"
                     disabled={busy}
                     onClick={() => pick(path)}
+                    aria-pressed={active}
                     className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-colors ${
                       active ? 'border-primary ring-2 ring-primary/40' : 'border-transparent hover:border-outline-variant'
                     }`}
@@ -1565,6 +1615,14 @@ function ThumbnailPickerDialog({ item, images, defaultPoster, onClose, onSave })
 function LinksDialog({ title, subtitle, items, onClose }) {
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const panelRef = useRef(null);
+
+  // Focus moves into the dialog and returns to what opened it on close.
+  useEffect(() => {
+    const prev = document.activeElement;
+    panelRef.current?.focus();
+    return () => prev?.focus?.();
+  }, []);
 
   // Close on Escape + lock the background page scroll while the modal is open
   // (otherwise the wheel scrolls the page behind instead of the modal list).
@@ -1610,9 +1668,14 @@ function LinksDialog({ title, subtitle, items, onClose }) {
       data-lenis-prevent
     >
       <div
-        className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in"
+        ref={panelRef}
+        tabIndex={-1}
+        className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl bg-surface border border-outline-variant shadow-xl overflow-hidden animate-dialog-in outline-none"
         onClick={(e) => e.stopPropagation()}
       >
+        <span className="sr-only" role="status">
+          {copiedAll ? 'All links copied' : copiedId ? 'Link copied' : ''}
+        </span>
         {/* Header */}
         <div className="px-5 py-4 flex items-center justify-between gap-4 border-b border-outline-variant">
           <div className="min-w-0">
@@ -1627,6 +1690,7 @@ function LinksDialog({ title, subtitle, items, onClose }) {
             onClick={onClose}
             className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors flex-shrink-0"
             title="Close"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
@@ -1658,7 +1722,10 @@ function LinksDialog({ title, subtitle, items, onClose }) {
                           {item.file_name}
                         </span>
                         {item.is_primary && (
-                          <Star className="w-3 h-3 text-primary fill-current flex-shrink-0" />
+                          <>
+                            <Star className="w-3 h-3 text-primary fill-current flex-shrink-0" />
+                            <span className="sr-only">Primary</span>
+                          </>
                         )}
                         {item.language && (
                           <span className="px-1 py-0.5 rounded bg-surface-container-high text-on-surface-variant text-label-sm font-semibold flex-shrink-0">
@@ -1681,6 +1748,7 @@ function LinksDialog({ title, subtitle, items, onClose }) {
                           : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'
                       }`}
                       title={isCopied ? 'Copied!' : 'Copy link'}
+                      aria-label={`Copy link to ${item.file_name}`}
                     >
                       <MorphIcon icon={isCopied ? CheckGlyph : CopyGlyph} size={16} reducedMotion="user" />
                     </button>
