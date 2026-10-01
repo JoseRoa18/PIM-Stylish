@@ -142,7 +142,7 @@ async function syncCollections(
 
 function buildProductPatch(
   pim: PimRow,
-  site: { priceField: keyof PimRow; currency: string; hasSale: boolean },
+  site: { priceField: keyof PimRow; currency: string; hasSale: boolean; promoAware?: boolean },
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
 
@@ -170,6 +170,13 @@ function buildProductPatch(
     } else {
       patch.discount = { type: "AMOUNT", value: 0 };
     }
+  } else if (site.promoAware && patch.priceData) {
+    // Sinks Direct USA and Azuni Canada: the PIM's price IS the selling price
+    // (the promo travels as the price), so no Wix discount may sit on top.
+    // Oct 1 2026: discounts left on the site from September stacked on
+    // October's prices on 61 Sinks Direct USA products. Cleared with every
+    // price push.
+    patch.discount = { type: "AMOUNT", value: 0 };
   }
 
   if (pim.visible_online != null) patch.visible = pim.visible_online;
@@ -290,8 +297,12 @@ Deno.serve(async (req) => {
     // — used by the price-alignment fixes so a correction can never touch
     // visibility, content, or anything else.
     if (Array.isArray(body.only) && body.only.length > 0) {
+      // On a store whose price is final (no PIM sale fields), the discount
+      // reset travels with the price — a price push leaves no stale discount.
+      const keep = new Set<string>(body.only);
+      if (keep.has("priceData") && site.promoAware && !site.hasSale) keep.add("discount");
       for (const key of Object.keys(productPatch)) {
-        if (!body.only.includes(key)) delete productPatch[key];
+        if (!keep.has(key)) delete productPatch[key];
       }
     }
     if (Object.keys(productPatch).length === 0) {
