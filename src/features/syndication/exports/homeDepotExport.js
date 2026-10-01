@@ -56,7 +56,9 @@ const num = (v) => {
   const m = decimalize(v).match(/-?\d+(\.\d+)?/);
   return m ? m[0] : '';
 };
-const isKitchenSink = (p) => /^kitchen/i.test(p.category ?? '');
+// Kitchen and bar/prep sinks — NOT kitchen faucets (a /^kitchen/ test caught
+// them too until 2026-10-01 and blanked every faucet's Finish Family).
+const isKitchenSink = (p) => p.category === 'kitchen_sink' || p.category === 'bar_prep_sink';
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 const stripHtml = (h) =>
   String(h || '')
@@ -216,6 +218,10 @@ const finishFamily = (p) => {
   if (/chrome/i.test(f)) return 'Brushed Chrome';
   if (/brushed nickel/i.test(f)) return 'Brushed Nickel';
   if (/nickel/i.test(f)) return 'Polished Nickel';
+  // Plain colours (K-140: Gold, White, Black, Red) are matte finishes (user,
+  // 2026-10-01); the list has no red, so Red goes as plain "Matte".
+  const plain = { gold: 'Matte Gold', white: 'Matte White', black: 'Matte Black', red: 'Matte' }[f.trim().toLowerCase()];
+  if (plain) return plain;
   return f;
 };
 
@@ -303,6 +309,10 @@ export const HOME_DEPOT_RULES = {
     return c === 'Beverage Faucets' ? 'Beverage Faucet' : c; // list option is singular
   },
   'Commercial / Residential': () => 'Residential',
+  // HD's list only has filter systems; beverage faucets are filtered-water
+  // faucets (user, 2026-10-01).
+  'Water Treatment Type': (p) =>
+    (/faucet/.test(p.category ?? '') && faucetCollection(p) === 'Beverage Faucets' ? 'Faucet Water Filter Systems' : ''),
   'Manufacturer Warranty': (p) => {
     const parts = [attr(p).warranty_length, attr(p).warranty].filter(Boolean);
     return parts.length ? `${parts.join(' ')} warranty`.replace(/\s+/g, ' ') : '';
@@ -311,8 +321,9 @@ export const HOME_DEPOT_RULES = {
   'Flow rate (gallons per minute)': (p) => num(attr(p).max_flow_rate),
   'Color Family': (p) => colorFamily(p.finish),
   'Color/Finish': (p) => p.finish || '',
-  // Kitchen sinks (2026-09-14): Finish Family, the bathroom dimensions,
-  // Cut-Out Depth and Number of Faucet Holes stay EMPTY. The generic rule
+  // Kitchen sinks (2026-09-14): Finish Family, the bathroom dimensions and
+  // Cut-Out Depth stay EMPTY (Number of Faucet Holes too until 2026-10-01,
+  // when the user asked for it — HD marks it required). The generic rule
   // below also skips every cell the "Columns" sheet marks NA (gray) for the
   // product's collection.
   'Finish Family': (p) => (isKitchenSink(p) ? '' : finishFamily(p)),
@@ -375,7 +386,7 @@ export const HOME_DEPOT_RULES = {
 
   // ---- Sinks file (Kitchen / Bathroom / Bar Sinks collections) ----
   // List values verified against ReferenceData ("Kitchen Sink" is singular).
-  'Kitchen Product Type': (p) => (/^kitchen/i.test(p.category ?? '') ? 'Kitchen Sink' : ''),
+  'Kitchen Product Type': (p) => (p.category === 'kitchen_sink' ? 'Kitchen Sink' : p.category === 'bar_prep_sink' ? 'Bar Sink' : ''),
   'Sink Shape': (p) => attr(p).sink_shape || '',
   'Mount Type': (p) => {
     const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')} ${attr(p).mounting_type ?? ''}`;
@@ -389,11 +400,15 @@ export const HOME_DEPOT_RULES = {
   'Faucet Included': () => 'Without Faucet',
   // Undermount/vessel sinks carry no faucet holes unless the PIM says so.
   // One occurrence's list spells zero as "0", the other as "None".
+  // Kitchen sinks included (user rule 2026-10-01: 0 when the PIM shows no
+  // hole; the drop-ins C430L / C432L carry 1 in number_of_installation_holes).
   'Number of Faucet Holes': (p) => {
-    if (isKitchenSink(p)) return '';
-    const n = num(attr(p).number_of_faucet_holes);
-    return n && n !== '0' ? [n] : ['0', 'None'];
+    if (!/sink/.test(p.category ?? '')) return '';
+    const n = [attr(p).number_of_faucet_holes, attr(p).number_of_installation_holes].map(num).find((x) => x && x !== '0');
+    return n ? [n] : ['0', 'None'];
   },
+  // Stylish sinks never ship with a faucet (user, 2026-10-01).
+  'Faucet Finish': (p) => (/sink/.test(p.category ?? '') ? 'No Faucet Included' : ''),
   // HD's list is textual ("50/50 Double Bowl", not "2").
   'Number of Bowls': (p) => {
     const n = Number(num(attr(p).number_of_bowls));
