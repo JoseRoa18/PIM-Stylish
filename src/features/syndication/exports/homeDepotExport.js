@@ -34,6 +34,7 @@ const HD_DOC_TYPES = {
   installation_top_mount: 'installation_manual',
   warranty_file: 'warranty_file',
   owner_manual: 'owner_manual',
+  cut_out_template: 'cut_out_template',
 };
 
 const attr = (p) => p.attributes || {};
@@ -296,12 +297,29 @@ export const HOME_DEPOT_RULES = {
   // This one's list is Y/N, unlike its sibling questions.
   'Does this product contain electronic equipment (does it contain a circuit board, computer chip, copper wiring, or other electrical components)?': () => 'N',
   'Is this item governed by the Textile and Wool Labeling Act as administered by the Federal Trade Commission?': () => 'No',
+  // Answers that are true for every sink and faucet (user, 2026-10-01: fill
+  // what the PIM can state, leave the rest empty). Not a covered electronic
+  // device, no screen; no biodegradable / compostable plastic claim; not a
+  // textile, so no PFAS. Their follow-ups (CED recycling states, the PFAS
+  // certificate) stay blank.
+  'For Covered Electronic Devices (CEDs), select the states where this item is considered a CED.': () => '_Not A CED_',
+  'Select the screen size in inches (measured diagonally) or select "No Screen" if the item does not have a screen': () => '_No Screen_',
+  'Does the item claim on the label, packaging, or related marketing materials that the plastic/resin is “biodegradable,” or “degradable,” or “decomposable” or other wording that implies the plastic/resin will break down in a landfill or other environment?': alwaysNo,
+  'If you claim the plastic/resin in your product is "compostable", does it comply with: (1) ASTM D6400, (2) ASTM D6868, or (3) Vincotte OK Compost HOME Certification standards?': () => 'No, no claim that the plastic/resin is compostable',
+  'Does the textile in your product contain one or more PFAS chemicals in any amount?': alwaysNo,
+  'Is your product considered “outdoor apparel for severe wet weather conditions”, as the California Safer Clothing and Textiles Act defines that term?': alwaysNo,
+  'Does your product include a disclosure, with the statement “Made with PFAS chemicals”, both with the physical product and on the Product Information Page, as required by California’s Safer Clothing and Textiles Act?': alwaysNo,
+  // Eco Actions needs ENERGY STAR, WaterSense or similar: never a sink. The
+  // PIM doesn't know which faucets are WaterSense, so faucets stay blank.
+  'Eco Actions': (p) => (/sink/.test(p.category ?? '') ? 'No' : ''),
 
   // Documents
   'Warranty': (p) => docUrl(p, 'warranty_file'),
   'Installation Guide': installDocUrl,
   'Use and Care Manual': (p) => docUrl(p, 'owner_manual'),
   'Specification': (p) => docUrl(p, 'spec_sheet'),
+  // The countertop cut-out template is what the PIM has for measuring (user, 2026-10-01).
+  'Measurement Guide': (p) => docUrl(p, 'cut_out_template'),
 
   // Faucet attributes
   'Faucet Type': (p) => {
