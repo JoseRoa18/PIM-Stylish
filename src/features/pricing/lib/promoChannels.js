@@ -75,7 +75,11 @@ export const PROMO_CHANNELS = [
     how: 'Automatic: promotional prices sent through the Walmart API the day before the Canada window opens (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the Seller Center price & promotion file instead.' },
   // Home Depot USA runs on Mirakl: its promotions file is the offers import
   // (sku, price, msrp, discount-price + dates). Regular = MAP USD.
-  { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null, fill: 'mirakl', priceField: 'map_usd', costField: 'cost_usd_lowes_sod_bbb', promoCostSlug: 'lowes_sod_bbb_usd', aliasMarketplace: 'Home Depot US' }, // HD USA: base cost and promo cost = the Lowe's / SOD / BB&B group
+  // dateStamps: the time + offset of every date column, as in the filled
+  // example of the new template the user gave on 2026-10-01 (used when the
+  // uploaded template carries no example rows of its own).
+  { key: 'homedepot_us', label: 'Home Depot USA', monogram: 'HD', market: 'us', kind: 'template', marketplace: /home ?depot.*\bus(a)?\b/i, costSlug: null, fill: 'mirakl', priceField: 'map_usd', costField: 'cost_usd_lowes_sod_bbb', promoCostSlug: 'lowes_sod_bbb_usd', aliasMarketplace: 'Home Depot US',
+    dateStamps: { start: 'T00:00:00.000+02:00', end: 'T23:59:00.000+02:00' } }, // HD USA: base cost and promo cost = the Lowe's / SOD / BB&B group
   // Lowe's Vendor Offer workbook: one file per sub-division (kitchen sinks,
   // faucets, bath sinks, drains), item number + name from Aliases.
   { key: 'lowes_us', label: "Lowe's USA", monogram: 'LO', market: 'us', kind: 'template', marketplace: /lowe.*\bus(a)?\b/i, costSlug: 'lowes_sod_bbb_usd', fill: 'lowes', aliasMarketplace: "Lowe's US" },
@@ -113,7 +117,11 @@ export function promoTemplateFor(channel, templates, kind = 'monthly') {
  */
 export function promoTemplatesFor(channel, templates, kind = 'monthly') {
   if (!channel.marketplace) return [];
-  const mine = (templates ?? []).filter((t) => channel.marketplace.test(t.marketplace ?? ''));
+  // Newest upload first: a marketplace that sends a new layout (Home Depot
+  // USA, 2026-10-01) is filled from it even while the old file is still listed.
+  const mine = (templates ?? [])
+    .filter((t) => channel.marketplace.test(t.marketplace ?? ''))
+    .sort((a, b) => String(b.uploaded_at ?? '').localeCompare(String(a.uploaded_at ?? '')));
   if (kind !== 'monthly') {
     const flash = mine.filter((t) => templatePurpose(t) === 'flash_deals');
     if (flash.length) return flash;
