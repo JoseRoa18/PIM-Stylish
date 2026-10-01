@@ -182,7 +182,8 @@ interface WixJob { sku: string; site: string; only: string[]; fields?: Record<st
 const WIX_CONCURRENCY = 2;
 const WIX_GAP_MS = 700; // pause after each change, per worker
 const WIX_MAX_TRIES = 5; // per change and run, rate-limit answers only
-const WIX_BUDGET_MS = 105_000; // from the run's start, cooldown included (the runtime caps a run at ~150 s)
+const WIX_BUDGET_MS = 70_000; // from the run's start, cooldown included — the runtime cuts a run at ~150 s and a change started late may take WIX_CALL_TIMEOUT_MS (the Oct 1 2026 launch died twice at 105 s)
+const WIX_CALL_TIMEOUT_MS = 25_000; // one change to Wix; past this it is left for the next run
 const WIX_COOLDOWN_MS = 20_000; // a continuation run waits this before pushing again
 const WIX_MAX_CHAIN = 20;
 const WIX_PROGRESS_KEY = "promo_apply_wix_progress";
@@ -217,12 +218,19 @@ async function saveWixProgress(p: WixProgress): Promise<void> {
 }
 
 // One change to Wix: ok, a rate-limit answer (with how long to wait), or an error.
-async function pushOneWix(job: WixJob): Promise<{ ok: true } | { ok: false; rateLimited: boolean; waitMs: number; message: string }> {
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/wix-push-product`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify(job),
-  });
+async function pushOneWix(job: WixJob): Promise<{ ok: true } | { ok: false; rateLimited: boolean; timedOut?: boolean; waitMs: number; message: string }> {
+  let resp: Response;
+  try {
+    resp = await fetch(`${SUPABASE_URL}/functions/v1/wix-push-product`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify(job),
+      signal: AbortSignal.timeout(WIX_CALL_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // Too slow (or the network failed): not counted as done, the next run pushes it again.
+    return { ok: false, rateLimited: false, timedOut: true, waitMs: 0, message: (err as Error).message };
+  }
   if (resp.ok) return { ok: true };
   const message = String(((await resp.json().catch(() => ({}))) as { error?: string }).error ?? resp.status);
   const rateLimited = resp.status === 429 || /rate limit|too many requests/i.test(message);
@@ -280,6 +288,12 @@ async function pushWixJobs(allJobs: WixJob[], dryRun: boolean, errors: string[],
         if (r.ok) {
           out[job.site].pushed += 1;
           ctx.progress.done.add(jobKey(job));
+          // Saved after every change: a run the runtime cuts short keeps what it did.
+          await saveWixProgress(ctx.progress).catch((err) => console.error("[promo-apply] progress save failed:", (err as Error).message));
+          break;
+        }
+        if (r.timedOut) {
+          out[job.site].deferred += 1; // owed: the market stays unstamped and the chain retries it
           break;
         }
         if (r.rateLimited) {
@@ -777,10 +791,13 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
       report.wix_owed = wixOwed;
       if (chain < WIX_MAX_CHAIN) {
         try {
-          const resp = await fetch(`${SUPABASE_URL}/functions/v1/promo-apply`, {
+          // Queued through Postgres (promo_apply_continue → pg_net): a direct
+          // call to itself is refused by Supabase within the same trace
+          // ("Rate limit exceeded for trace", Oct 1 2026 — the chain stopped).
+          const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/promo_apply_continue`, {
             method: "POST",
-            headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ chain: chain + 1, reconcile }),
+            headers: { ...restHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({ p_chain: chain + 1, p_reconcile: reconcile }),
           });
           if (!resp.ok) throw new Error(`${resp.status} ${(await resp.text()).slice(0, 200)}`);
           report.wix_continuing = chain + 1;
