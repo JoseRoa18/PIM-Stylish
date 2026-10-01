@@ -116,10 +116,16 @@ const categoryChain = (p) => {
     case 'colander_drying_rack':
       return ['Kitchen_____l1_kitchen', 'Kitchen_and_Sink_Accessories_____l2_kitchen_sinkaccessories', 'Colanders_____l3_cuttingboards_colanders'];
     case 'accessory': {
+      // The template's tree has no drain or deck-plate category (Plumbing's
+      // Sink Drains / Escutcheons & Plates aren't reachable from its Level 1
+      // list): drains go with the drain hardware, deck plates with the
+      // fittings (user, 2026-10-01).
       const byKind = {
         strainer: 'Sink_Strainers_and_Disposal_Flange_____l3_sinkstrainers_disposalflange',
+        drain: 'Sink_Strainers_and_Disposal_Flange_____l3_sinkstrainers_disposalflange',
         grid: 'Sink_Grids_and_Rinse_Baskets_____l3_sinkgrids_rinsebaskets',
         'soap dispenser': 'Soap_Lotion_Dispensers_____l3_soap_lotiondispensers',
+        'faucet plate': 'Kitchen_Fittings_____l3_kitchenfittings',
       };
       const l3 = byKind[accessoryKind(p)] ?? 'Colanders_____l3_cuttingboards_colanders';
       return ['Kitchen_____l1_kitchen', 'Kitchen_and_Sink_Accessories_____l2_kitchen_sinkaccessories', l3];
@@ -196,8 +202,14 @@ const ONLINE_CORE_RULES = {
   AS: () => 'No',
   AT: (p) => num(attr(p).product_weight_lb ?? p.weight_lb),
   // Assembled H = vertical, W = left-to-right (PIM length), D = front-to-back.
-  AU: (p) => num(attr(p).external_dimensions_in?.height ?? attr(p).external_dimensions_in?.depth),
-  AV: (p) => num(attr(p).external_dimensions_in?.length),
+  // Faucets carry no overall dimensions: their height is faucet_height_in
+  // (user, 2026-10-01); width and depth stay empty.
+  AU: (p) => num(attr(p).external_dimensions_in?.height
+    ?? (/faucet|pot_filler/.test(p.category ?? '') ? attr(p).faucet_height_in : null)
+    ?? attr(p).external_dimensions_in?.depth),
+  // Round drains (D-70x) have no length: their diameter (PIM width) is both
+  // width and depth (user, 2026-10-01).
+  AV: (p) => num(attr(p).external_dimensions_in?.length ?? (accessoryKind(p) === 'drain' ? attr(p).external_dimensions_in?.width : null)),
   AW: (p) => num(attr(p).external_dimensions_in?.width),
   // AZ Pick SLA + BA-BC ship-from: fulfillment terms — business fills.
 };
