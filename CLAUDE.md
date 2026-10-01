@@ -50,7 +50,9 @@ React 19 + Vite + Tailwind CSS v4 (via `@tailwindcss/vite`; theme tokens follow 
 
 ### Accessibility conventions (pass of 2026-10-01 — keep them)
 
-An axe-core scan of every route went from 1,107 violations to 10 with no visual change. The 10 left need a look change the user hasn't decided on: the Activity "Wix" chip contrast and an inline Settings link that is distinguished only by color.
+An axe-core scan of every route, in both themes, went from 1,107 violations to 0. Two small look changes were OK'd by the user:
+- Small Wix text on its 15% tint uses `text-brand-wix-ink` (#0a5fd9 in light mode, 4.7:1).
+- Links inside a sentence are underlined (`underline underline-offset-2`).
 
 **Modals and file inputs**
 - Build modals on the shared [Dialog](src/components/ui/Dialog.jsx).
@@ -65,6 +67,13 @@ An axe-core scan of every route went from 1,107 violations to 10 with no visual 
 - Collapsed panels get `inert`.
 - Toggles carry `aria-pressed` or `aria-expanded`.
 - [FilterDropdown](src/features/products/components/FilterDropdown.jsx) moves focus into its portaled menu.
+- Media images reorder with **Shift + ← / →**, the keyboard twin of drag-and-drop ([MediaSection](src/features/media/components/MediaSection.jsx) `moveImage`).
+  - It uses the same reorder math and the same `persistReorder` save as a drop.
+  - It moves one step and never goes in front of the pinned Primary / SinksDirect main.
+  - Alt + ← is avoided because it is the browser's Back shortcut.
+
+**Login**
+- When the Turnstile check can't load, the form stops waiting for its token and says so; the server still enforces the captcha.
 
 **Names and announcements**
 - Icon-only buttons need `aria-label`; lucide icons are `aria-hidden`.

@@ -68,6 +68,9 @@
 
   /* Marketplace brand colors — channel chips, logos, accents */
   --color-brand-wix: #0c6efc;
+  /* Wix blue as small TEXT on its own 15% tint (Activity chips): 3.7:1 there,
+     this 14% darker shade reaches 4.7:1 (WCAG AA, user OK 2026-10-01). */
+  --color-brand-wix-ink: #0a5fd9;
   --color-brand-wayfair: #7b189f;
   --color-brand-bestbuy: #0046be;
   --color-brand-walmart: #0071ce;
@@ -222,6 +225,7 @@
 
   /* Marketplace brand colors lift to lighter tints on dark surfaces */
   --color-brand-wix: #6fa9ff;
+  --color-brand-wix-ink: #6fa9ff; /* already 5.2:1+ on dark surfaces */
   --color-brand-wayfair: #ce93e8;
   --color-brand-bestbuy: #9dc2ff;
   --color-brand-walmart: #7fb6ff;

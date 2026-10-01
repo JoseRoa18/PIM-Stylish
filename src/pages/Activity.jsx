@@ -39,7 +39,7 @@ const WALMART_TARGET = { label: 'Walmart', className: 'bg-brand-walmart/15 text-
 const BESTBUY_TARGET = { label: 'Best Buy', className: 'bg-brand-bestbuy/15 text-brand-bestbuy' };
 const TARGET_META = {
   pim: { label: 'PIM', className: 'bg-surface-container-high text-on-surface-variant' },
-  wix: { label: 'Wix', className: 'bg-brand-wix/15 text-brand-wix' },
+  wix: { label: 'Wix', className: 'bg-brand-wix/15 text-brand-wix-ink' },
   bbb: { label: 'Bed Bath & Beyond', className: 'bg-warning-container/60 text-on-warning-container' },
   wayfair: { label: 'Wayfair', className: 'bg-brand-wayfair/15 text-brand-wayfair' },
   walmart_us: WALMART_TARGET,

@@ -22,16 +22,20 @@ function loadTurnstile() {
  * VITE_TURNSTILE_SITE_KEY is configured (see Login.jsx); calls onToken with
  * each fresh token and with null when the token expires. `resetSignal` forces
  * a re-challenge — bump it after a failed sign-in, tokens are single-use.
+ * `onError` fires when the widget can't load or errors, so the form can stop
+ * waiting for a token that will never come.
  */
-export default function TurnstileWidget({ siteKey, onToken, resetSignal = 0 }) {
+export default function TurnstileWidget({ siteKey, onToken, onError, resetSignal = 0 }) {
   const holderRef = useRef(null);
   const widgetIdRef = useRef(null);
   // Latest-callback ref so the widget (rendered once) never holds a stale
   // onToken; synced in an effect because refs must not be written in render.
   const onTokenRef = useRef(onToken);
+  const onErrorRef = useRef(onError);
   useEffect(() => {
     onTokenRef.current = onToken;
-  }, [onToken]);
+    onErrorRef.current = onError;
+  }, [onToken, onError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,10 +46,12 @@ export default function TurnstileWidget({ siteKey, onToken, resetSignal = 0 }) {
         theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
         callback: (token) => onTokenRef.current?.(token),
         'expired-callback': () => onTokenRef.current?.(null),
+        'error-callback': () => onErrorRef.current?.(),
       });
     }).catch(() => {
       // Widget failed to load (offline/CSP): leave the form usable; the
       // server-side captcha check is what actually enforces it.
+      onErrorRef.current?.();
     });
     return () => {
       cancelled = true;

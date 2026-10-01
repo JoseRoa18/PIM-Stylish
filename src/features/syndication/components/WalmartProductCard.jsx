@@ -63,8 +63,8 @@ export default function WalmartProductCard({ product, row, loading, market = 'ca
         )}
         <p className="text-body-sm text-on-surface-variant">
           {isCa
-            ? <>Regular price and promotions are compared in <Link to="/pricing" className="text-primary hover:underline">Pricing</Link>. Promotions are scheduled there, per promotion.</>
-            : <>Prices are compared in <Link to="/pricing" className="text-primary hover:underline">Pricing</Link>. Promotions go out as the Walmart USA promo file from the Promotions panel.</>}
+            ? <>Regular price and promotions are compared in <Link to="/pricing" className="text-primary underline underline-offset-2">Pricing</Link>. Promotions are scheduled there, per promotion.</>
+            : <>Prices are compared in <Link to="/pricing" className="text-primary underline underline-offset-2">Pricing</Link>. Promotions go out as the Walmart USA promo file from the Promotions panel.</>}
         </p>
       </div>
     </section>

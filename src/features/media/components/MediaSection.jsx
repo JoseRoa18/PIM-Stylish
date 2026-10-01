@@ -166,6 +166,27 @@ export default function MediaSection({ sku, familyNumber = null, category = null
     }
   };
 
+  // Keyboard twin of drag-to-reorder (Shift + ← / →, user OK 2026-10-01; not
+  // Alt + ←, the browser's Back): one step within the visible images, never
+  // in front of the pinned Primary / SinksDirect main — the same reorder math
+  // and the same save as a drop.
+  const [moveNote, setMoveNote] = useState('');
+  const pinnedIds = new Set(pinned.map((m) => m.id));
+  const moveImage = (id, dir) => {
+    if (busy) return;
+    const flist = filteredRef.current;
+    const from = flist.findIndex((m) => m.id === id);
+    const to = from + dir;
+    const firstMovable = flist.findIndex((m) => !pinnedIds.has(m.id));
+    if (from < 0 || firstMovable < 0 || to < firstMovable || to >= flist.length) return;
+    const newFiltered = reorderByEdge(flist, from, to, dir > 0 ? 'right' : 'left');
+    const ids = new Set(newFiltered.map((m) => m.id));
+    let fi = 0;
+    const newFull = mediaRef.current.map((m) => (ids.has(m.id) ? newFiltered[fi++] : m));
+    setMoveNote(`Moved ${flist[from].file_name} to position ${to + 1} of ${flist.length}`);
+    persistReorder(newFull);
+  };
+
   // Global drop monitor — computes the new order from the dragged card and the
   // closest edge of the card it was dropped on.
   useEffect(() => {
@@ -487,6 +508,8 @@ export default function MediaSection({ sku, familyNumber = null, category = null
       <span className="sr-only" role="status">
         {uploadProgress ? `Uploading ${uploadProgress.done} of ${uploadProgress.total}` : ''}
       </span>
+      {/* Keyboard reorder result (Shift + ← / →). */}
+      <span className="sr-only" role="status">{moveNote}</span>
 
       <div className="px-6 py-4 flex items-center justify-between border-b border-outline-variant gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -692,6 +715,7 @@ export default function MediaSection({ sku, familyNumber = null, category = null
                   onRemove={() => handleRemove(item)}
                   onEditAlt={() => setAltEdit(item)}
                   onView={() => setLightboxIndex(imageSlides.findIndex((m) => m.id === item.id))}
+                  onMove={(dir) => moveImage(item.id, dir)}
                 />
               ))}
 
@@ -879,6 +903,7 @@ function MediaCard({
   onEditAlt,
   onSetThumbnail,
   onView,
+  onMove,
 }) {
   const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
@@ -970,8 +995,14 @@ function MediaCard({
             role="button"
             tabIndex={0}
             aria-label={`View ${item.alt_text || item.file_name}`}
+            aria-keyshortcuts={draggableOn && onMove ? 'Shift+ArrowLeft Shift+ArrowRight' : undefined}
+            aria-description={draggableOn && onMove ? 'Shift plus Left or Right arrow moves this image' : undefined}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onView(); }
+              if (draggableOn && onMove && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                e.preventDefault();
+                onMove(e.key === 'ArrowLeft' ? -1 : 1);
+              }
             }}
             onLoad={() => setThumbLoaded(true)}
             className={`w-full h-full object-cover block cursor-zoom-in ${thumbLoaded ? '' : 'opacity-0'}`}

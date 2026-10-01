@@ -23,6 +23,9 @@ export default function Login() {
   const [error, setError] = useState(null);
   const [captchaToken, setCaptchaToken] = useState(null);
   const [captchaReset, setCaptchaReset] = useState(0);
+  // The check couldn't load: don't keep the button disabled forever waiting
+  // for its token — the server still enforces the captcha.
+  const [captchaFailed, setCaptchaFailed] = useState(false);
 
   // If already logged in, redirect away from login
   if (session) {
@@ -140,13 +143,19 @@ export default function Login() {
               <TurnstileWidget
                 siteKey={TURNSTILE_SITE_KEY}
                 onToken={setCaptchaToken}
+                onError={() => setCaptchaFailed(true)}
                 resetSignal={captchaReset}
               />
+            )}
+            {TURNSTILE_SITE_KEY && captchaFailed && !captchaToken && (
+              <p role="status" className="text-center text-label-md text-on-surface-variant">
+                The security check didn't load. You can still sign in — if it's refused, reload the page.
+              </p>
             )}
 
             <button
               type="submit"
-              disabled={submitting || !email || !password || (TURNSTILE_SITE_KEY && !captchaToken)}
+              disabled={submitting || !email || !password || (TURNSTILE_SITE_KEY && !captchaToken && !captchaFailed)}
               className="w-full bg-primary enabled:hover:brightness-110 disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed text-on-primary font-semibold text-body-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2"
             >
               {submitting ? (

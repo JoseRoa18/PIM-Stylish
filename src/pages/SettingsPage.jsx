@@ -480,7 +480,7 @@ export default function SettingsPage() {
               <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
                 USA: the 1st · Canada: first Thursday (00:00 ET), scheduled a day
                 ahead. Channels without a price API keep using the{' '}
-                <Link to="/pricing" className="text-primary hover:underline">promo files</Link>.
+                <Link to="/pricing" className="text-primary underline underline-offset-2">promo files</Link>.
               </p>
             </div>
           </div>
