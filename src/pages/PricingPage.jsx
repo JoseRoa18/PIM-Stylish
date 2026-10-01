@@ -58,6 +58,7 @@ import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } 
 import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promoCalendar';
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
+import DealsOverview from '@/features/pricing/components/DealsOverview';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 // The promotion file tools load the first time a file of their kind is
@@ -162,8 +163,6 @@ export default function PricingPage() {
   // One promotion card open at a time (user request 2026-09-30): opening a
   // card closes the one that was open.
   const [openCardId, setOpenCardId] = useState(null);
-  const [portalFilter, setPortalFilter] = useState('all'); // flash deals / special events history, by marketplace
-  const [creatorFilter, setCreatorFilter] = useState('all'); // …and by who created them
 
   // A file-task reminder (PromoTaskNudge) lands here with the promotion and
   // the file to fill: switch to its tab and open its card on the upload
@@ -178,14 +177,22 @@ export default function PricingPage() {
     setDeepLink({ id: target?.id ?? null, fill: link.fill, nonce: link.nonce });
     if (target) {
       setTab(target.kind ?? 'monthly');
-      setPortalFilter('all');
-      setCreatorFilter('all');
       setOpenCardId(target.id);
     }
   }
   useEffect(() => {
     if (link && deepLink?.nonce === link.nonce) navigate(location.pathname, { replace: true, state: null });
   }, [link, deepLink, navigate, location.pathname]);
+
+  // A deal picked in the overview opens its card in the list below and
+  // scrolls to it.
+  function openDeal(id) {
+    setOpenCardId(id);
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById(`promo-card-${id}`)?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+    }));
+  }
 
   async function reload() {
     try {
@@ -287,20 +294,17 @@ export default function PricingPage() {
       ) : (
         <div className="space-y-3">
           {tab !== 'monthly' && (
-            <PromoHistoryFilters
+            <DealsOverview
               kind={tab}
               promotions={promotions.filter((p) => (p.kind ?? 'monthly') === tab)}
-              portalFilter={portalFilter}
-              onPortal={setPortalFilter}
-              creatorFilter={creatorFilter}
-              onCreator={setCreatorFilter}
+              onOpen={openDeal}
             />
           )}
           {/* Monthly promotions come ordered by month; flash deals and special
               events are listed by when they were created in the PIM, newest
               first — not by their dates on the portal. */}
           {promotions
-            .filter((p) => (p.kind ?? 'monthly') === tab && (tab === 'monthly' || ((portalFilter === 'all' || (p.marketplaces ?? []).includes(portalFilter)) && (creatorFilter === 'all' || (p.created_by ?? 'unknown') === creatorFilter))))
+            .filter((p) => (p.kind ?? 'monthly') === tab)
             .sort((a, b) => (tab === 'monthly' ? 0 : String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))))
             .map((promo) => (
             <PromotionCard
@@ -702,89 +706,6 @@ function PriceAlignmentCard({ canEdit, confirm }) {
         </>
       )}
     </div>
-  );
-}
-
-// ============================== History filters ==============================
-
-// Flash deals / special events: who ran how many, to which portals, and the
-// two filters (by person, by portal) that narrow the list below.
-function PromoHistoryFilters({ kind, promotions, portalFilter, onPortal, creatorFilter, onCreator }) {
-  const label = (key) => PROMO_CHANNELS.find((ch) => ch.key === key)?.label ?? key;
-  const byCreator = useMemo(() => {
-    const m = new Map();
-    for (const p of promotions) {
-      const id = p.created_by ?? 'unknown';
-      const row = m.get(id) ?? { id, name: p.created_by_name ?? 'Unknown', deals: 0, skus: 0, portals: new Map(), last: null };
-      row.deals += 1;
-      row.skus += p.sku_count ?? 0;
-      for (const k of p.marketplaces ?? []) row.portals.set(k, (row.portals.get(k) ?? 0) + 1);
-      if (!row.last || p.created_at > row.last) row.last = p.created_at;
-      m.set(id, row);
-    }
-    return [...m.values()].sort((a, b) => b.deals - a.deals);
-  }, [promotions]);
-  const portals = useMemo(() => {
-    const m = new Map();
-    for (const p of promotions) for (const k of p.marketplaces ?? []) m.set(k, (m.get(k) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [promotions]);
-  if (!promotions.length) return null;
-  const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '');
-  const pill = (on) => `px-3 py-1 rounded-full text-label-md transition-colors ${on ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface hover:bg-surface-container-high'}`;
-  const noun = PROMOTION_KINDS[kind].toLowerCase();
-
-  return (
-    <section className="rounded-2xl bg-surface border border-outline-variant px-5 py-4 space-y-3">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-title-md text-on-surface font-semibold">Who ran what</h2>
-        <span className="text-body-sm text-on-surface-variant">{promotions.length} {noun}{promotions.length === 1 ? '' : 's'} · {portals.length} portal{portals.length === 1 ? '' : 's'}</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px]">
-          <thead>
-            <tr className="text-label-md text-on-surface-variant border-b border-outline-variant">
-              <th className="text-left font-medium py-1.5 pr-4">Person</th>
-              <th className="text-right font-medium py-1.5 pr-4">{PROMOTION_KINDS[kind]}s</th>
-              <th className="text-right font-medium py-1.5 pr-4">SKUs</th>
-              <th className="text-left font-medium py-1.5 pr-4">Portals</th>
-              <th className="text-right font-medium py-1.5">Last</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byCreator.map((r) => (
-              <tr key={r.id} className="border-b border-outline-variant/60 last:border-b-0">
-                <td className="py-1.5 pr-4 text-body-md text-on-surface">
-                  <button type="button" onClick={() => onCreator(creatorFilter === r.id ? 'all' : r.id)} className={`hover:underline ${creatorFilter === r.id ? 'text-primary font-medium' : ''}`}>{r.name}</button>
-                </td>
-                <td className="py-1.5 pr-4 text-right text-body-md text-on-surface tabular-nums">{r.deals}</td>
-                <td className="py-1.5 pr-4 text-right text-body-md text-on-surface-variant tabular-nums">{r.skus}</td>
-                <td className="py-1.5 pr-4">
-                  <span className="flex items-center gap-1 flex-wrap">
-                    {[...r.portals.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => (
-                      <span key={k} className="px-2 py-0.5 rounded-full text-label-sm bg-surface-container text-on-surface">{label(k)}{n > 1 ? ` · ${n}` : ''}</span>
-                    ))}
-                  </span>
-                </td>
-                <td className="py-1.5 text-right text-body-sm text-on-surface-variant whitespace-nowrap">{day(r.last)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-        <span className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-label-md text-on-surface-variant mr-1">Person</span>
-          <button type="button" onClick={() => onCreator('all')} className={pill(creatorFilter === 'all')}>All</button>
-          {byCreator.map((r) => <button key={r.id} type="button" onClick={() => onCreator(r.id)} className={pill(creatorFilter === r.id)}>{r.name}</button>)}
-        </span>
-        <span className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-label-md text-on-surface-variant mr-1">Portal</span>
-          <button type="button" onClick={() => onPortal('all')} className={pill(portalFilter === 'all')}>All</button>
-          {portals.map(([k, n]) => <button key={k} type="button" onClick={() => onPortal(k)} className={pill(portalFilter === k)}>{label(k)} · {n}</button>)}
-        </span>
-      </div>
-    </section>
   );
 }
 
@@ -1314,7 +1235,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   }
 
   return (
-    <div className="rounded-2xl bg-surface overflow-hidden border border-transparent hover:border-outline-variant transition-colors">
+    <div id={`promo-card-${promo.id}`} className="scroll-mt-20 rounded-2xl bg-surface overflow-hidden border border-transparent hover:border-outline-variant transition-colors">
       <button
         ref={headerRef}
         type="button"
