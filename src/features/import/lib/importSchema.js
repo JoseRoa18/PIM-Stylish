@@ -10,6 +10,7 @@
  *   { attr: 'x' }         → products.attributes JSONB key
  *   { dim: [group, axis]} → grouped dimension object in attributes
  */
+import { canonicalCountry } from '@/features/products/lib/countries';
 
 export const normalizeHeader = (h) =>
   String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -149,7 +150,9 @@ export const FIELD_DEFS = [
   { key: 'product_weight_lb', label: 'Product Weight lb', aliases: ['productweightlb', 'overallproductweight'], type: 'number', target: { attr: 'product_weight_lb' } },
 
   // ---------- Trade & compliance ----------
-  { key: 'country_of_origin', label: 'Country of Origen', aliases: ['countryoforigen', 'countryoforigin'], type: 'text', target: { attr: 'country_of_origin' } },
+  // "CN", "Viet Nam", "CHN" → the dropdown's name ("China", "Vietnam"); a value
+  // it doesn't know is kept as written.
+  { key: 'country_of_origin', label: 'Country of Origen', aliases: ['countryoforigen', 'countryoforigin'], type: 'text', target: { attr: 'country_of_origin' }, transform: (v) => canonicalCountry(v) ?? v },
   { key: 'scc_compliant', label: 'SCC Compliant', aliases: ['scccompliant'], type: 'text', target: { attr: 'scc_compliant' } },
   { key: 'safety_listings', label: 'Safety Listing(s)', aliases: ['safetylistings', 'safetylisting'], type: 'text', target: { attr: 'safety_listings' } },
   { key: 'upc_certified', label: 'UPC Certified', aliases: ['upccertified'], type: 'text', target: { attr: 'upc_certified' } },

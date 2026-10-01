@@ -6,10 +6,13 @@ import { bulkUpdateProducts } from '../api/products';
 import { WORKFLOW_STATUS } from '../lib/workflowStatus';
 import { CATEGORY_OPTIONS } from '../lib/categories';
 import { BRAND_OPTIONS } from '../lib/brands';
+import { COUNTRY_OPTIONS } from '../lib/countries';
 
 // Fields safe to mass-edit. Closed-list fields (status, category) render as
 // selects and can't be cleared; the identity fields (sku, model, family)
-// stay out — they drive variant grouping.
+// stay out — they drive variant grouping. `attr` fields live in the
+// attributes JSONB, where the product page and every export read them (the
+// same-named columns are not read by anything).
 const EDITABLE_FIELDS = [
   {
     key: 'workflow_status',
@@ -37,9 +40,9 @@ const EDITABLE_FIELDS = [
   { key: 'finish', label: 'Finish' },
   { key: 'color', label: 'Color' },
   { key: 'product_type', label: 'Product type' },
-  { key: 'manufacturer', label: 'Manufacturer' },
-  { key: 'country_of_origin', label: 'Country of origin' },
-  { key: 'warranty', label: 'Warranty' },
+  { key: 'manufacturer', label: 'Manufacturer', attr: true },
+  { key: 'country_of_origin', label: 'Country of origin', attr: true, options: COUNTRY_OPTIONS },
+  { key: 'warranty', label: 'Warranty', attr: true },
 ];
 
 let rowSeq = 0;
@@ -61,9 +64,9 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
   // Distinct existing values per free-text field → datalist suggestions.
   const suggestions = useMemo(() => {
     const map = {};
-    for (const { key, options } of EDITABLE_FIELDS) {
+    for (const { key, options, attr } of EDITABLE_FIELDS) {
       if (options) continue; // closed lists render their own <select>
-      map[key] = [...new Set(products.map((p) => p[key]).filter(Boolean))].sort();
+      map[key] = [...new Set(products.map((p) => (attr ? p.attributes?.[key] : p[key])).filter(Boolean))].sort();
     }
     return map;
   }, [products]);
@@ -83,7 +86,11 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
 
   async function handleApply() {
     const patch = {};
-    for (const r of patchRows) patch[r.field] = r.clear ? null : r.value.trim();
+    const attrPatch = {};
+    for (const r of patchRows) {
+      const target = EDITABLE_FIELDS.find((f) => f.key === r.field)?.attr ? attrPatch : patch;
+      target[r.field] = r.clear ? null : r.value.trim();
+    }
 
     const lines = patchRows
       .map((r) => {
@@ -107,7 +114,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
     setBusy(true);
     setError(null);
     try {
-      await bulkUpdateProducts([...selectedSkus], patch);
+      await bulkUpdateProducts([...selectedSkus], patch, attrPatch);
       onChanged?.();
       onClose();
     } catch (err) {
@@ -164,9 +171,9 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
             </select>
             {def?.options ? (
               <select
-                value={row.value}
+                value={row.clear ? '' : row.value}
                 onChange={(e) => updateRow(row.id, { value: e.target.value })}
-                disabled={busy}
+                disabled={busy || row.clear}
                 aria-label={`New ${def?.label}`}
                 className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
               >

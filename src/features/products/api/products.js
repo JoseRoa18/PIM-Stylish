@@ -361,17 +361,45 @@ export async function listVariants(familyNumber, excludeSku = null) {
 /**
  * Apply the same patch to many products at once.
  */
-export async function bulkUpdateProducts(skus, patch) {
+export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}) {
   if (!skus?.length) return [];
-  const { data, error } = await supabase
-    .from('products')
-    .update(patch)
-    .in('sku', skus)
-    .select('*');
+  let data = [];
+  if (Object.keys(patch ?? {}).length) {
+    const res = await supabase
+      .from('products')
+      .update(patch)
+      .in('sku', skus)
+      .select('*');
+    if (res.error) throw res.error;
+    data = res.data ?? [];
+  }
 
-  if (error) throw error;
+  // attributes is one JSONB column: merge into each product's own (null
+  // removes the key, as the product page does) so its other attributes stay.
+  if (Object.keys(attrPatch ?? {}).length) {
+    const current = [];
+    for (let i = 0; i < skus.length; i += 200) {
+      const { data: rows, error } = await supabase
+        .from('products')
+        .select('sku, attributes')
+        .in('sku', skus.slice(i, i + 200));
+      if (error) throw error;
+      current.push(...(rows ?? []));
+    }
+    for (let i = 0; i < current.length; i += 8) {
+      await Promise.all(current.slice(i, i + 8).map(async (row) => {
+        const attributes = { ...(row.attributes ?? {}) };
+        for (const [key, value] of Object.entries(attrPatch)) {
+          if (value == null) delete attributes[key];
+          else attributes[key] = value;
+        }
+        const { error } = await supabase.from('products').update({ attributes }).eq('sku', row.sku);
+        if (error) throw error;
+      }));
+    }
+  }
 
-  const changedKeys = Object.keys(patch ?? {});
+  const changedKeys = [...Object.keys(patch ?? {}), ...Object.keys(attrPatch ?? {})];
   logActivity({
     action: 'update',
     entityType: 'product',

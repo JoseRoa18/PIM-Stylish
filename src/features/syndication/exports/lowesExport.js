@@ -11,6 +11,7 @@ import {
   mergeRows,
 } from './templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
+import { findCountry } from '@/features/products/lib/countries';
 import { supabase } from '@/lib/supabase';
 
 // Fills the Lowe's US Item Setup template ("Core" sheet) in place.
@@ -142,7 +143,8 @@ export const LOWES_RULES = {
   subDivision: subdivision,
   productCat: productCategory,
   brand: (p) => brandMap(p.brand),
-  countryofOrig: (p) => (/china|^chn?$/i.test(attr(p).country_of_origin || 'China') ? 'CHN' : ''),
+  // ISO 3-letter code: CHN, VNM… (it was China-only, so Vietnam came out blank).
+  countryofOrig: (p) => findCountry(attr(p).country_of_origin || 'China')?.code3 ?? '',
   // sellingCty / productShipType / lowesImpOfRec ship pre-filled (USA / Domestic / No).
   availSellingChannel: () => 'Online',
   cAResidentsProp65Warnings: () => 'No',

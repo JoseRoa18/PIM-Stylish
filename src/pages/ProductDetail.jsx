@@ -138,6 +138,7 @@ const WORKFLOW_OPTIONS = [
 
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { BRAND_OPTIONS } from '@/features/products/lib/brands';
+import { COUNTRY_NAMES } from '@/features/products/lib/countries';
 
 // Matches Wayfair's "Warranty Length" valid values (used in exports).
 const WARRANTY_LENGTH_OPTIONS = [
@@ -1123,7 +1124,7 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
 
       <Section title="Trade & Compliance">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-          <AttrField label="Country of Origin" attrKey="country_of_origin" product={product} edit={edit} />
+          <AttrField label="Country of Origin" attrKey="country_of_origin" type="select" options={COUNTRY_NAMES} product={product} edit={edit} />
           <AttrField label="HS Code" attrKey="hs_code" product={product} edit={edit} mono />
           <AttrField label="Warranty" attrKey="warranty" product={product} edit={edit} />
           <AttrField label="Warranty Length" attrKey="warranty_length" type="select" options={WARRANTY_LENGTH_OPTIONS} product={product} edit={edit} />

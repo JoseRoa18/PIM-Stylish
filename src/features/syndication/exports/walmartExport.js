@@ -12,6 +12,7 @@ import {
   fetchDocsBySku,
   createFillTracker,
 } from './templateFiller';
+import { findCountry } from '@/features/products/lib/countries';
 
 // Fills a Walmart Canada "multilocale" spec (Version=3.x) in place.
 //
@@ -52,6 +53,22 @@ const stripHtml = (h) =>
     .replace(/\n{2,}/g, '\n')
     .trim();
 const brandMap = (b) => (/azuni/i.test(b || '') ? 'AZUNI' : 'Stylish');
+
+// Walmart's country closed list is "<ISO code> - <name>" (248 values on the
+// Hidden sheet, read 2026-10-01). Where its name differs from the PIM's it is
+// spelled here; it has no Iran, Libya, North Korea, Somalia or Syria (blank).
+const WALMART_COUNTRY_NAME = {
+  BN: 'Brunei Darussalam', CD: 'Republic of Congo', KN: 'Saint Kitts And Nevis', KR: 'Korea, South',
+  LA: "Lao People's Democratic Republic", MD: 'Republic of Moldova', MK: 'Macedonia',
+  MO: "Macao Special Administrative Region of the People's Republic of China", PS: 'State of Palestine',
+  RU: 'Russian Federation', SZ: 'Swaziland', VA: 'Vatican City State', VC: 'Saint Vincent & the Grenadines', VN: 'Viet Nam',
+};
+const WALMART_NO_COUNTRY = new Set(['IR', 'KP', 'LY', 'SO', 'SY']);
+const walmartCountry = (value) => {
+  const c = findCountry(value);
+  if (!c || WALMART_NO_COUNTRY.has(c.code)) return '';
+  return `${c.code} - ${WALMART_COUNTRY_NAME[c.code] ?? c.name}`;
+};
 const docUrl = (p, kind) => (p._docs ?? []).find((d) => d.raw === kind)?.url ?? '';
 
 // Walmart's Color Category closed list (Hidden sheet, 18 fixed values).
@@ -99,8 +116,7 @@ export const WALMART_RULES = {
   msrp: (p) => num(p.msrp_cad),
   MinimumAdvertisedPrice: (p) => num(p.map_cad),
 
-  countryOfOriginAssembly: (p) =>
-    /china|cn/i.test(attr(p).country_of_origin || 'China') ? 'CN - China' : '',
+  countryOfOriginAssembly: (p) => walmartCountry(attr(p).country_of_origin || 'China'),
   countryOfOriginTextiles: () => 'Imported',
   // productTaxCode: Walmart-account-specific — left for the business to fill.
 
