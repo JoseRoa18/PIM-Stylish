@@ -48,6 +48,7 @@ import {
   marketWindow,
   periodOfDay,
   promoWindow,
+  shiftDay,
   windowContains,
 } from "../_shared/promoCalendar.ts";
 import { isServiceRole } from "../_shared/serviceRole.ts";
@@ -474,13 +475,15 @@ async function scheduleWalmart(market: "ca" | "us", promoId: number, dryRun: boo
 
 // ---------- the run ---------------------------------------------------------
 
-async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number } = {}) {
+async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; asOf?: string } = {}) {
   const chain = opts.chain ?? 0;
   const startedAt = Date.now();
   // A continuation run (chained by the previous one) lets Wix breathe first.
   if (chain > 0 && !dryRun) await sleep(WIX_COOLDOWN_MS);
-  const today = etToday();
-  const tomorrow = etToday(1);
+  // A dry run may simulate another day (asOf) to check what a boundary will do.
+  const today = dryRun && opts.asOf ? opts.asOf : etToday();
+  const tomorrow = shiftDay(today, 1);
+  const yesterday = shiftDay(today, -1);
   const nowIso = new Date().toISOString();
   const report: Record<string, unknown> = { today, dryRun, mode: reconcile ? "reconcile" : "cron", ...(chain ? { chain } : {}) };
   const errors: string[] = [];
@@ -534,8 +537,17 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
   const prepTarget = promos.find((p) => win(p, "ca").start === tomorrow) ?? null;
   const prepUsTarget = promos.find((p) => win(p, "us").start === tomorrow) ?? null;
 
-  const doUS = reconcile || (usStartsToday && !usTarget?.us_applied_at);
-  const doCA = reconcile || (caStartsToday && !caTarget?.ca_applied_at);
+  // A market whose window closed YESTERDAY goes back to regular prices today,
+  // also when no calendar boundary falls on that day: custom dates can close
+  // a market early (October 2026: Canada Oct 1–21 while the Canada calendar
+  // turns Nov 5 — without this, Sinks Direct Canada and Azuni kept October's
+  // prices for two more weeks).
+  const usEndsToday = promos.some((p) => p.status === "active" && win(p, "us").end === yesterday);
+  const caEndsToday = promos.some((p) => p.status === "active" && win(p, "ca").end === yesterday);
+  report.closing = { us: usEndsToday, ca: caEndsToday };
+
+  const doUS = reconcile || (usStartsToday && !usTarget?.us_applied_at) || usEndsToday;
+  const doCA = reconcile || (caStartsToday && !caTarget?.ca_applied_at) || caEndsToday;
   // The prep pass always (re)schedules Best Buy — it overwrites idempotently,
   // and an earlier schedule may carry an outdated window (e.g.
   // pre-calendar-change). Walmart is scheduled once (stamped).
@@ -628,13 +640,17 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number }
     const cadRows = targetRows.filter((r) => r.promo_price_cad != null);
     const targetCadSkus = new Set(cadRows.map((r) => r.sku));
 
-    // Previous promos whose Canada window is over: their members leave the
-    // sale (unless carried into the new list), and the promo ends.
-    const toEnd = promos.filter((p) =>
+    // Promotions whose Canada window is over: their members leave the Canada
+    // sale (unless carried into the new list). A promotion ENDS only once
+    // BOTH markets' windows are over — Canada can close first on custom
+    // dates (October 2026) while the USA still runs, and the USA pass of the
+    // next boundary needs it on the board to find the members leaving its sale.
+    const caOver = promos.filter((p) =>
       p.status === "active" && p.id !== caTarget?.id && win(p, "ca").end < today
     );
+    const toEnd = caOver.filter((p) => win(p, "us").end < today);
     const endSkus = new Set<string>();
-    const leaving = [...toEnd, ...recentlyEnded.filter((p) => p.id !== caTarget?.id && win(p, "ca").end < today)];
+    const leaving = [...caOver, ...recentlyEnded.filter((p) => p.id !== caTarget?.id && win(p, "ca").end < today)];
     for (const p of leaving) {
       for (const r of await promoPrices(p.id)) endSkus.add(r.sku);
     }
@@ -876,10 +892,16 @@ Deno.serve(async (req) => {
     let dryRun = false;
     let chain = 0;
     let chainReconcile = false;
+    let asOf: string | undefined;
+    let asCron = false;
     try {
       const body = await req.json();
       sync = body?.sync === true;
       dryRun = body?.dryRun === true;
+      // dry runs only: { asOf: "YYYY-MM-DD", cron: true } shows what the
+      // nightly run would do on that day (boundary decisions, no reconcile)
+      if (dryRun && typeof body?.asOf === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.asOf)) asOf = body.asOf;
+      asCron = dryRun && body?.cron === true;
       chain = Math.max(0, Math.min(WIX_MAX_CHAIN, Math.floor(Number(body?.chain) || 0)));
       chainReconcile = body?.reconcile === true;
     } catch { /* empty body → cron background mode */ }
@@ -894,7 +916,8 @@ Deno.serve(async (req) => {
 
     // Manual runs reconcile (re-apply today's truth); cron runs are
     // boundary-triggered and stamped.
-    if (sync || dryRun) return json(await run(dryRun, true));
+    if (dryRun) return json(await run(true, !asCron, { asOf }));
+    if (sync) return json(await run(false, true));
 
     // @ts-ignore — EdgeRuntime is provided by the Supabase runtime
     EdgeRuntime.waitUntil(run(false, false));
