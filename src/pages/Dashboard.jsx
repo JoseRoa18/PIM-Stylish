@@ -11,7 +11,7 @@ export default function Dashboard() {
   const { data, loading, error } = useDashboardData();
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div>
       <header className="mb-6">
         <h1 className="text-display-lg text-on-surface">Dashboard</h1>
         <p className="text-body-md text-on-surface-variant mt-1">

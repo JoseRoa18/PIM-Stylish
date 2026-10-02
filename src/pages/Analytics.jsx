@@ -140,7 +140,7 @@ export default function Analytics() {
     : null;
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div>
       <header className="mb-4">
         <h1 className="text-display-lg text-on-surface">Analytics</h1>
         <p className="text-body-md text-on-surface-variant mt-1">Weekly progress of the catalog's data, channels, promotions and the team's work.</p>
@@ -148,12 +148,12 @@ export default function Analytics() {
 
       {/* Pinned: week switcher, section index, actions */}
       <div className="sticky top-0 z-20 -mt-1 mb-6 py-3 bg-background/95 backdrop-blur border-b border-outline-variant flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-4 flex-wrap min-w-0 max-w-full">
+          <div className="flex items-center gap-1.5 min-w-0 max-w-full">
             <button type="button" onClick={() => goWeek(1)} disabled={weekIndex >= weeks.length - 1} title="Earlier week" aria-label="Earlier week" className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <select value={week.key} onChange={(e) => setWeekKey(e.target.value)} aria-label="Week" className="px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
+            <select value={week.key} onChange={(e) => setWeekKey(e.target.value)} aria-label="Week" className="min-w-0 px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
               {weeks.map((w) => <option key={w.key} value={w.key}>{w.name}{w.hint ? ` (${w.hint})` : ''} · {w.range}</option>)}
             </select>
             <button type="button" onClick={() => goWeek(-1)} disabled={weekIndex <= 0} title="Later week" aria-label="Later week" className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">

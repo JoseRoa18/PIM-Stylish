@@ -176,13 +176,19 @@ export const LEVEL_FIELDS = {
 // (`levelByKind` in promoChannels — Bed Bath & Beyond and Overstock take
 // flash deals at Purple); promotionLevel resolves both.
 //
-// The products' levels in Pricing are the ONLY source of promotion prices:
-// the database derives every promotion_prices row from them when the row is
-// written and refreshes the rows of draft / active promotions when a level
-// changes (20260928_promotion_prices_from_levels.sql). Pasted lists and
-// price files only contribute SKUs (Wayfair Canada's USD cost too has its own
-// levels since 2026-09-28, 20260928_wayfair_ca_levels.sql). The same rule lives in KIND_LEVEL here and in
-// promotion_level_of() there — keep them in step.
+// Where a promotion's prices come from (the database trigger
+// promotion_prices_from_level() derives promo_price_* / promo_costs):
+//   · Monthly promotions (user rule 2026-10-02,
+//     20261002_promotion_prices_us_monthly_orange.sql): Canada takes what the
+//     FILE says over the Orange price, and a product the file gives no price
+//     takes Orange; the USA takes the ORANGE price over the file (a file
+//     price only fills a product without an Orange price), costs alike.
+//   · Flash deals and special events: the file's prices first, else their
+//     level (rule 2026-09-30, 20260930_promotion_prices_file_first.sql).
+//   · A SKU-only list (pasted, or a file without prices) takes everything
+//     from the level, and a level change in Pricing refreshes those rows.
+// Each market keeps its own list (in_ca / in_us). The same levels live in
+// KIND_LEVEL here and in promotion_level_of() there — keep them in step.
 export const KIND_LEVEL = { monthly: 'orange', flash: 'orange', special: 'purple' };
 export const levelLabel = (tier) => (tier === 'purple' ? 'Purple' : 'Orange');
 export function promotionLevel(promotion, channel = null) {
@@ -389,10 +395,11 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
     .single();
   if (error) throw error;
 
-  // The file's values ARE the promotion (rule 2026-09-30): each market's list
-  // is the SKUs of its own file, at the prices and costs the file gives; the
-  // level only fills what the file leaves blank. `markets` says which file a
-  // row came from (the form merges the Canada and the USA file).
+  // Each market's list is the SKUs of its own file (rule 2026-09-30). The
+  // file's prices and costs are stored as given; the trigger decides what
+  // wins — Canada the file over Orange, the USA Orange over the file (monthly
+  // rule 2026-10-02). `markets` says which file a row came from (the form
+  // merges the Canada and the USA file).
   const priceRows = valid.map((r) => {
     const inCa = r.markets ? r.markets.includes('ca') : (r.promo_price_cad != null || hasMarketCost(r.promo_costs, 'ca'));
     const inUs = r.markets ? r.markets.includes('us') : (r.promo_price_usd != null || hasMarketCost(r.promo_costs, 'us'));
@@ -439,10 +446,12 @@ function withoutMarketCosts(costs, market) {
 /**
  * Import one market's file into an existing promotion: the file IS that
  * market's list (rule 2026-09-30 — the USA and the Canada promotions are
- * independent). Its SKUs go on the market's list at the file's prices and
- * costs (the level only fills what the file leaves blank); SKUs of the
- * promotion that are not in the file leave that market's list, and a row on
- * neither list is removed. The other market is never touched.
+ * independent). Its SKUs go on the market's list with the file's prices and
+ * costs stored as given — for a monthly promotion Canada takes them over
+ * Orange and the USA takes Orange over them (rule 2026-10-02, decided by the
+ * trigger); SKUs of the promotion that are not in the file leave that
+ * market's list, and a row on neither list is removed. The other market is
+ * never touched.
  */
 export async function addFileToPromotion(promotion, rows, market) {
   if (market !== 'ca' && market !== 'us') throw new Error('Pick the market this file is for.');

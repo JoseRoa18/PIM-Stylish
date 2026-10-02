@@ -63,7 +63,12 @@ export default function AppShell({ children }) {
       </Suspense>
       <div className="lg:ml-64 h-screen flex flex-col">
         <Topbar onMenuClick={() => setSidebarOpen(true)} menuOpen={sidebarOpen} />
-        <main ref={mainRef} id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none">
+        {/* relative: <main> contains its absolutely placed children (the sr-only
+            labels and live regions) — without it they escaped the scroll area
+            and made the whole window scroll too (Dashboard, Settings).
+            scrollbar-gutter: the scrollbar's room is always kept, so a page
+            sits at the same place whether it scrolls or not (2026-10-02). */}
+        <main ref={mainRef} id="main-content" tabIndex={-1} className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable] focus:outline-none">
           <div ref={contentRef} className="max-w-[1400px] mx-auto px-4 sm:px-8 py-8">
             {children}
           </div>

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  Users as UsersIcon,
   UserPlus,
   Loader2,
   KeyRound,
@@ -110,19 +109,14 @@ export default function Users() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
-      {/* Header — same icon-tile pattern as the Activity Log page. */}
-      <div className="flex items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-container/50 flex items-center justify-center flex-shrink-0">
-            <UsersIcon className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-headline-sm text-on-surface">Users</h1>
-            <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Manage who has access to the PIM and what they can do.
-            </p>
-          </div>
+    <div className="max-w-5xl">
+      {/* Header — the page title every page uses. */}
+      <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
+        <div>
+          <h1 className="text-display-lg text-on-surface">Users</h1>
+          <p className="text-body-md text-on-surface-variant mt-1">
+            Manage who has access to the PIM and what they can do.
+          </p>
         </div>
         <button
           onClick={() => setShowAdd(true)}

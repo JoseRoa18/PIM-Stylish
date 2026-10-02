@@ -284,7 +284,7 @@ export default function ListingHealth() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div>
       <header className="mb-4">
         <h1 className="text-display-lg text-on-surface">Listing Health</h1>
         <p className="text-body-md text-on-surface-variant mt-1">

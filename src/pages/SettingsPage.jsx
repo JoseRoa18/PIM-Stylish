@@ -455,9 +455,9 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-headline-md text-on-surface font-semibold">Settings</h1>
+        <h1 className="text-display-lg text-on-surface">Settings</h1>
         <p className="text-body-md text-on-surface-variant mt-1">
           Rules for what the PIM does on its own.
         </p>

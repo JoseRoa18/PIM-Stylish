@@ -582,7 +582,7 @@ export default function ProductDetail() {
   const editCtx = { isEditing, form, setField, suggestions };
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="relative max-w-6xl mx-auto">
       {/* Restore the catalog view the user left (filters/sort/page) — a
           bare /catalog would wipe it. Falls back to bare in a fresh tab. */}
       <Link
@@ -637,7 +637,7 @@ export default function ProductDetail() {
             <p className="text-body-lg text-on-surface-variant">{subtitleParts.join(' · ')}</p>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap flex-shrink-0">
           {!isEditing && (
             <button type="button" onClick={() => setShowHistory(true)}
               title="Field change history"
@@ -943,10 +943,10 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
           rail-wide screens it scrolls away naturally (the rail takes over).
           The scroll container is <main>, which already starts below the
           topbar — so the pin offset is 0, not the topbar height. */}
-      <div className={`sticky top-0 z-20 bg-surface min-[1820px]:static min-[1820px]:bg-transparent -mx-6 border-b border-outline-variant relative ${
-        scrolledPast ? 'shadow-md shadow-black/5 min-[1820px]:shadow-none' : ''
+      <div className={`sticky top-0 z-20 bg-surface min-[1880px]:static min-[1880px]:bg-transparent -mx-4 sm:-mx-6 border-b border-outline-variant relative ${
+        scrolledPast ? 'shadow-md shadow-black/5 min-[1880px]:shadow-none' : ''
       }`}>
-        <div ref={stripRef} onScroll={updateEdges} className="overflow-x-auto scrollbar-hide px-6">
+        <div ref={stripRef} onScroll={updateEdges} className="overflow-x-auto scrollbar-hide px-4 sm:px-6">
         <nav className="flex min-w-max gap-1 items-center" aria-label="Product sections">
           {/* display: contents — the tablist groups only the tabs (the
               variant links below are not tabs) without touching the layout. */}
@@ -972,7 +972,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
           {/* On screens without room for the side rail, family variants live
               at the end of the strip as compact pills. */}
           {sortedVariants.length > 0 && (
-            <div className="ml-auto flex items-center gap-1.5 pl-4 min-[1820px]:hidden">
+            <div className="ml-auto flex items-center gap-1.5 pl-4 min-[1880px]:hidden">
               <span className="h-5 w-px bg-outline-variant" aria-hidden />
               {sortedVariants.map((v) => (
                 <Link
@@ -1006,12 +1006,12 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
             the only affordance that more tabs/variants hide beyond the fold. */}
         {!edges.atStart && (
           <>
-            <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-surface to-transparent min-[1820px]:hidden" />
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-surface to-transparent min-[1880px]:hidden" />
             <button
               type="button"
               aria-label="Scroll tabs left"
               onClick={() => stripRef.current?.scrollBy({ left: -240, behavior: 'smooth' })}
-              className="absolute left-1 top-1/2 -translate-y-1/2 p-1 rounded-full border border-outline-variant bg-surface shadow-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors min-[1820px]:hidden"
+              className="absolute left-1 top-1/2 -translate-y-1/2 p-1 rounded-full border border-outline-variant bg-surface shadow-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors min-[1880px]:hidden"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -1019,12 +1019,12 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
         )}
         {!edges.atEnd && (
           <>
-            <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-surface to-transparent min-[1820px]:hidden" />
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-surface to-transparent min-[1880px]:hidden" />
             <button
               type="button"
               aria-label="Scroll tabs right"
               onClick={() => stripRef.current?.scrollBy({ left: 240, behavior: 'smooth' })}
-              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full border border-outline-variant bg-surface shadow-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors min-[1820px]:hidden"
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full border border-outline-variant bg-surface shadow-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors min-[1880px]:hidden"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -1034,9 +1034,15 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
 
       {/* Vertical rail — docks in the left gutter once the strip is out of view. */}
       {scrolledPast && (
+        // Anchored to the page column, not the window: it sits 24 px left of
+        // the cards (their own spacing) on every tab, scrollbar or not — it
+        // used to be placed from the window width, so the gap changed from
+        // tab to tab (2026-10-02). 1880 px is the narrowest window where the
+        // rail and its gap still clear the sidebar.
+        <div className="hidden min-[1880px]:block absolute right-full inset-y-0 mr-6">
         <nav
           aria-label="Product sections"
-          className="hidden min-[1820px]:flex fixed left-[calc(50vw-640px)] top-24 z-20 w-44 flex-col gap-0.5 rounded-2xl border border-outline-variant bg-surface/90 backdrop-blur-md shadow-lg p-1.5 animate-fade-in"
+          className="sticky top-8 z-20 w-44 flex flex-col gap-0.5 rounded-2xl border border-outline-variant bg-surface/90 backdrop-blur-md shadow-lg p-1.5 animate-fade-in"
         >
           <div role="tablist" aria-label="Product sections" aria-orientation="vertical" className="contents">
           {tabs.map((tab) => {
@@ -1097,6 +1103,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
             </>
           )}
         </nav>
+        </div>
       )}
     </>
   );

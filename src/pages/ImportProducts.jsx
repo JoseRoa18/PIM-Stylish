@@ -200,7 +200,7 @@ export default function ImportProducts() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-6xl">
       <Link
         to="/catalog"
         className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"

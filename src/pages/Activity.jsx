@@ -159,19 +159,14 @@ export default function Activity() {
   const rangeEnd = Math.min(page * PAGE_SIZE, count);
 
   return (
-    <div className="max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-container/50 flex items-center justify-center flex-shrink-0">
-            <History className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-headline-sm text-on-surface">Activity Log</h1>
-            <p className="text-body-sm text-on-surface-variant mt-0.5">
-              Who did what, when and where — product edits and pushes to your sites.
-            </p>
-          </div>
+    <div className="max-w-5xl">
+      {/* Header — the page title every page uses. */}
+      <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
+        <div>
+          <h1 className="text-display-lg text-on-surface">Activity Log</h1>
+          <p className="text-body-md text-on-surface-variant mt-1">
+            Who did what, when and where — product edits and pushes to your sites.
+          </p>
         </div>
         <button
           onClick={reload}

@@ -211,9 +211,9 @@ export default function PricingPage() {
   useEffect(() => { reload(); }, []);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl space-y-6">
       <div>
-        <h1 className="text-headline-md text-on-surface font-semibold">Pricing</h1>
+        <h1 className="text-display-lg text-on-surface">Pricing</h1>
         <p className="text-body-md text-on-surface-variant mt-1">
           {tab === 'monthly' && 'Monthly promotions for all marketplaces: the market calendar drives them and the boundaries run on their own.'}
           {tab === 'flash' && 'Flash deals: short promotions on their own dates, pushed and exported by hand from here.'}
@@ -222,7 +222,7 @@ export default function PricingPage() {
         </p>
       </div>
 
-      <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label="Pricing sections">
+      <div className="inline-flex max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container p-1" role="tablist" aria-label="Pricing sections">
         {[['monthly', 'Monthly Promotions'], ['flash', 'Flash Deals'], ['special', 'Special Events'], ['alignment', 'Price Alignment']].map(([key, label]) => (
           <button
             key={key}
@@ -230,7 +230,7 @@ export default function PricingPage() {
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`px-5 py-2 rounded-full text-label-lg font-medium transition-colors ${
+            className={`px-4 sm:px-5 py-2 rounded-full text-label-lg font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
               tab === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
@@ -861,9 +861,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         starts_on: customDates ? startsOn : null,
         ends_on: customDates ? endsOn : null,
       };
-      // A price file's values ARE the promotion — each market's list at the
-      // file's prices, the level only where the file leaves a price blank
-      // (rule 2026-09-30); a pasted SKU list takes everything from the level.
+      // A price file gives each market its list (rule 2026-09-30); Canada
+      // takes the file's prices over Orange, the USA Orange over the file
+      // (monthly rule 2026-10-02, applied by the database). A pasted SKU list
+      // takes everything from the level.
       const res = monthly && mode === 'file'
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
         : await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: monthly ? [] : portals });
@@ -2647,8 +2648,9 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
         const other = market === 'us' ? 'Canada' : 'USA';
         throw new Error(`This file has no ${marketLabel} price columns — it looks like a ${other} file. Download the ${marketLabel} template from this dialog.`);
       }
-      // The file IS this market's list: its SKUs at its prices; the SKUs not
-      // in it leave the list. The other market is not touched.
+      // The file IS this market's list (Canada at the file's prices over
+      // Orange, the USA at Orange — monthly rule 2026-10-02); the SKUs not in
+      // it leave the list. The other market is not touched.
       const r = await addFileToPromotion(promo, parsed.rows, market);
       onImported(
         `${marketLabel}: ${r.added} SKUs on the list from ${file.name}` +
@@ -2699,7 +2701,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
             {loaded ? (
               <p className="text-body-sm text-on-surface-variant">
                 <span className="font-semibold text-on-surface">{marketLabel} is already loaded</span> ({counts[market]} SKUs).
-                A new file replaces the {marketLabel} list: its SKUs at its prices, and the SKUs not in it leave the list.
+                A new file replaces the {marketLabel} list: its SKUs at {market === 'us' && (promo.kind ?? 'monthly') === 'monthly' ? 'their Orange prices (the USA takes Orange over the file)' : 'its prices'}, and the SKUs not in it leave the list.
               </p>
             ) : (
               <p className="text-body-sm text-on-surface-variant">
