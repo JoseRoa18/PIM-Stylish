@@ -16,6 +16,8 @@
 // Required secrets: WALMART_US_PROD_CLIENT_ID, WALMART_US_PROD_CLIENT_SECRET
 // (the credential pair is multi-market; CA is selected via WM_MARKET).
 
+import { etToday, periodOfDay, promoWindow, windowContains, PROMO_DATE_COLUMNS, type PromoLike } from "../_shared/promoCalendar.ts";
+
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -137,12 +139,52 @@ Deno.serve(async (req) => {
       const prevBySku = new Map<string, Record<string, unknown>>(
         ((prevSnap?.[0]?.results ?? []) as Record<string, unknown>[]).map((r) => [String(r.sku), r]),
       );
-      const monthStart = new Date().toISOString().slice(0, 7) + "-01";
-      const promos = await restGet(`promotions?select=promotion_prices(sku,promo_price_cad)&status=in.(draft,active)&period=gte.${monthStart}`);
+      // What the PIM expects on Walmart Canada TODAY — a running flash deal /
+      // special event on walmart_ca, else the active monthly promo whose
+      // Canada window is open, else no promo — so the promo reads go first
+      // where the carried reading would be reported as a problem. Found
+      // 2026-10-02: 19 SKUs were flagged for two days on reads taken before
+      // the Sept 30 re-push / removal, while Walmart was right.
+      const today = etToday();
+      const monthStart = periodOfDay(today);
+      type PromoRow = PromoLike & {
+        kind: string | null; status: string; marketplaces: string[] | null; wm_ca_scheduled_at: string | null;
+        promotion_prices: { sku: string; promo_price_cad: number | null }[];
+      };
+      const promos = await restGet(
+        `promotions?select=kind,status,period,marketplaces,wm_ca_scheduled_at,${PROMO_DATE_COLUMNS},promotion_prices(sku,promo_price_cad)&status=in.(draft,active)`,
+      ) as PromoRow[];
       const members = new Set<string>();
-      for (const pr of promos as { promotion_prices: { sku: string; promo_price_cad: number | null }[] }[]) {
-        for (const row of pr.promotion_prices ?? []) if (row.promo_price_cad != null) members.add(row.sku);
+      const pushedAt = new Map<string, string>(); // last whole-promotion send to Walmart CA
+      const monthlyToday = new Map<string, number>();
+      const dealToday = new Map<string, number>();
+      for (const pr of promos) {
+        const w = promoWindow(pr, "ca");
+        const monthly = (pr.kind ?? "monthly") === "monthly";
+        // Flash deals stay "draft" while the portal runs them: they run by their dates.
+        const live = windowContains(w, today) && (monthly ? pr.status === "active" : (pr.marketplaces ?? []).includes("walmart_ca"));
+        const current = live || (monthly ? pr.period >= monthStart : w.end >= today && (pr.marketplaces ?? []).includes("walmart_ca"));
+        for (const row of pr.promotion_prices ?? []) {
+          if (row.promo_price_cad == null) continue;
+          if (current) members.add(row.sku);
+          if (pr.wm_ca_scheduled_at && (pushedAt.get(row.sku) ?? "") < pr.wm_ca_scheduled_at) pushedAt.set(row.sku, pr.wm_ca_scheduled_at);
+          if (live) (monthly ? monthlyToday : dealToday).set(row.sku, Number(row.promo_price_cad));
+        }
       }
+      const near = (a: unknown, b: unknown) => a != null && b != null && Math.abs(Number(a) - Number(b)) < 0.01;
+      const liveOf = (r: Record<string, unknown>) => {
+        if (r.discount_price == null) return r.price ?? null;
+        const s = r.discount_start as string | null;
+        const e = r.discount_end as string | null;
+        return (!s || s <= today) && (!e || e >= today) ? r.discount_price : (r.price ?? null);
+      };
+      // The carried reading disagrees with the PIM: a promo SKU not at its
+      // price (or never read), or a promo on Walmart the PIM doesn't expect today.
+      const suspect = (r: Record<string, unknown>) => {
+        const expected = dealToday.get(String(r.sku)) ?? monthlyToday.get(String(r.sku)) ?? null;
+        if (expected != null) return !(near(liveOf(r), expected) || near(r.discount_price, expected));
+        return r.discount_price != null && liveOf(r) === r.discount_price;
+      };
 
       const etDay = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : null);
       const enriched: Array<Record<string, unknown>> = items.map((it) => {
@@ -156,13 +198,22 @@ Deno.serve(async (req) => {
       });
       const promoLimit = Number.isFinite(bodyLimit) ? Math.max(0, bodyLimit) : 40;
       const twelveHoursAgo = new Date(Date.now() - 12 * 3600_000).toISOString();
-      const order = [...enriched].sort((a, b) => {
-        const am = members.has(String(a.sku)) ? 0 : 1;
-        const bm = members.has(String(b.sku)) ? 0 : 1;
-        if (am !== bm) return am - bm;
-        return String(a.promo_checked_at ?? "").localeCompare(String(b.promo_checked_at ?? ""));
-      }).filter((r) => !(members.has(String(r.sku)) && String(r.promo_checked_at ?? "") > twelveHoursAgo) || !members.has(String(r.sku)));
-      const queue = order.slice(0, promoLimit);
+      const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+      // Read order: 0 = would be reported as a problem (unless confirmed in
+      // the last hour), 1 = sent to Walmart after its last read, 2 = promo
+      // SKUs not read in 12 h, 3 = everything else; oldest read first.
+      const tier = (r: Record<string, unknown>) => {
+        const sku = String(r.sku);
+        const checked = String(r.promo_checked_at ?? "");
+        if (checked < hourAgo && suspect(r)) return 0;
+        if (members.has(sku) && checked < (pushedAt.get(sku) ?? "")) return 1;
+        if (members.has(sku)) return checked > twelveHoursAgo ? -1 : 2;
+        return 3;
+      };
+      const ranked = enriched.map((r) => ({ r, t: tier(r) })).filter((x) => x.t >= 0)
+        .sort((a, b) => a.t - b.t || String(a.r.promo_checked_at ?? "").localeCompare(String(b.r.promo_checked_at ?? "")));
+      const suspects = ranked.filter((x) => x.t === 0).length;
+      const queue = ranked.slice(0, promoLimit).map((x) => x.r);
 
       const startedAt = Date.now();
       const failures: Record<string, number> = {};
@@ -198,7 +249,7 @@ Deno.serve(async (req) => {
       }
       const checked = enriched.filter((r) => r.promo_checked_at).length;
       const promosActive = enriched.filter((r) => r.discount_price != null).length;
-      return json({ ok: true, market: "ca", total: enriched.length, feedDate: feed.feedDate ?? null, items: enriched, promos_checked: checked, promos_checked_now: checkedNow, promo_members: members.size, promos_active: promosActive, partial: checked < enriched.length, failures, ms: Date.now() - startedAt });
+      return json({ ok: true, market: "ca", total: enriched.length, feedDate: feed.feedDate ?? null, items: enriched, promos_checked: checked, promos_checked_now: checkedNow, promo_members: members.size, promos_active: promosActive, suspects, partial: checked < enriched.length, failures, ms: Date.now() - startedAt });
     }
 
     const items: Array<{

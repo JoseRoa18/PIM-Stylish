@@ -78,7 +78,7 @@ function latestChannelSnapshot(channel) {
 // with one click) plus Best Buy (analysis only until its push is built).
 export const ALIGN_TARGETS = {
   ...Object.fromEntries(
-    Object.entries(WIX_SITES).map(([key, cfg]) => [key, { ...cfg, kind: 'wix', canFix: true }]),
+    Object.entries(WIX_SITES).map(([key, cfg]) => [key, { ...cfg, kind: 'wix', canFix: true, promoChannel: `wix_${key}` }]),
   ),
   bestbuy: {
     key: 'bestbuy',
@@ -92,6 +92,7 @@ export const ALIGN_TARGETS = {
     priceShort: 'MAP (CAD)',
     promoAware: true,
     market: 'ca',
+    promoChannel: 'bestbuy',
   },
   walmart_us: {
     key: 'walmart_us',
@@ -105,6 +106,7 @@ export const ALIGN_TARGETS = {
     priceShort: 'MAP (USD)',
     promoAware: true,
     market: 'us',
+    promoChannel: 'walmart_us',
   },
   // Walmart Canada exposes prices only while a promotion exists on the SKU
   // (the promo read carries the regular price next to it), so the analysis
@@ -121,6 +123,7 @@ export const ALIGN_TARGETS = {
     priceShort: 'MAP (CAD)',
     promoAware: true,
     market: 'ca',
+    promoChannel: 'walmart_ca',
   },
 };
 export const ALIGN_TARGET_KEYS = Object.keys(ALIGN_TARGETS);
@@ -149,12 +152,12 @@ function classifySnapshot(snapshot, outOfScope = null) {
       problems.push({ sku: r.sku, status: 'no_map', live: r.price ?? null, expected: null, source: null });
     } else if (!r.price_diff) {
       counts[r.expected_source === 'promo' ? 'promo_ok' : 'map_ok'] += 1;
-    } else if (r.expected_source === 'promo' && eq(r.price, r.map)) {
+    } else if (r.expected_source === 'promo' && (r.no_promo || eq(r.price, r.map))) {
       counts.promo_missing += 1;
-      problems.push({ sku: r.sku, status: 'promo_missing', live: r.price, expected: r.expected, source: 'promo', map: r.map ?? null, promo_period: r.promo_period ?? null });
+      problems.push({ sku: r.sku, status: 'promo_missing', live: r.price ?? null, expected: r.expected, source: 'promo', map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null });
     } else {
       counts.misaligned += 1;
-      problems.push({ sku: r.sku, status: 'misaligned', live: r.price, expected: r.expected, source: r.expected_source, map: r.map ?? null, promo_period: r.promo_period ?? null });
+      problems.push({ sku: r.sku, status: 'misaligned', live: r.price, expected: r.expected, source: r.expected_source, map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null });
     }
   }
 
@@ -210,7 +213,33 @@ async function loadExpectedPrices(cfg) {
     for (const row of promo.promotion_prices ?? []) {
       // The period + window ride along so a promo fix can be pushed as a
       // SCHEDULED discount covering exactly the market window (Best Buy).
-      if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period, windowStart: w.start, windowEnd: w.end });
+      if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: promo.period, windowStart: w.start, windowEnd: w.end, kind: 'monthly' });
+    }
+  }
+  // A flash deal or special event running on THIS marketplace (user rule
+  // 2026-10-02) is the expected price of its SKUs for as long as it runs,
+  // over the monthly promo. Like the Deals overview, a deal runs by its
+  // dates (flash deals stay "draft" while the portal runs them); only an
+  // ended one is over early.
+  if (cfg.promoChannel) {
+    const deals = await sharedLoad(`deals:${cfg.promoChannel}:${promoField}`, async () => {
+      const { data, error } = await supabase
+        .from('promotions')
+        .select(`name, kind, period, status, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku, ${promoField})`)
+        .in('kind', ['flash', 'special'])
+        .neq('status', 'ended')
+        .contains('marketplaces', [cfg.promoChannel]);
+      if (error) throw error;
+      return data ?? [];
+    });
+    const running = (deals ?? [])
+      .map((deal) => ({ deal, w: promoWindow(deal, cfg.market) }))
+      .filter(({ w }) => windowContains(w, todayET))
+      .sort((a, b) => a.w.start.localeCompare(b.w.start)); // overlapping deals: the later start wins
+    for (const { deal, w } of running) {
+      for (const row of deal.promotion_prices ?? []) {
+        if (row[promoField] != null) promoBySku.set(row.sku, { price: row[promoField], period: deal.period, windowStart: w.start, windowEnd: w.end, kind: deal.kind, name: deal.name });
+      }
     }
   }
   return { baseBySku, promoBySku };
@@ -241,11 +270,15 @@ async function loadOfferAlignment(cfg) {
   const results = [];
   for (const o of snapshot.results ?? []) {
     if (!baseBySku.has(o.sku)) continue; // channel SKU not in the PIM
-    if (o.price == null && o.discount_price == null) continue; // no price on file (Walmart CA without a promo)
     const base = baseBySku.get(o.sku) ?? null;
     const promo = promoBySku.get(o.sku);
+    // No price on file: Walmart CA shows prices only through a promo. A SKU
+    // that should be on promo and was read with none is a missing promo;
+    // any other has no price to compare and stays out.
+    const noPromo = o.price == null && o.discount_price == null;
+    if (noPromo && !(promo && o.promo_checked_at)) continue;
     const expected = promo?.price ?? base;
-    const price = livePrice(o, promo);
+    const price = noPromo ? null : livePrice(o, promo);
     results.push({
       sku: o.sku,
       state: 'live',
@@ -254,8 +287,10 @@ async function loadOfferAlignment(cfg) {
       expected_source: promo != null ? 'promo' : 'map',
       map: base,
       promo_period: promo?.period ?? null,
+      promo_kind: promo?.kind ?? null,
       promo_window: promo ? { start: promo.windowStart, end: promo.windowEnd } : null,
-      price_diff: expected != null && price != null && Math.abs(price - expected) > 0.01,
+      no_promo: noPromo,
+      price_diff: noPromo || (expected != null && price != null && Math.abs(price - expected) > 0.01),
     });
   }
   return classifySnapshot({ run_at: snapshot.run_at, results });
@@ -293,6 +328,7 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
       expected_source: promo != null ? 'promo' : 'map',
       map: base,
       promo_period: promo?.period ?? null,
+      promo_kind: promo?.kind ?? null,
       price_diff: expected != null && r.price != null && Math.abs(r.price - expected) > 0.01,
     };
   });

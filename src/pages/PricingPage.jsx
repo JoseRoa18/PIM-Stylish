@@ -544,18 +544,21 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
           <h2 className="text-title-md text-on-surface font-semibold">Price Alignment — {cfg.label}</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5">
             {cfg.kind === 'bestbuy'
-              ? `Compares every Best Buy offer against its expected price — the active promo price
-                 for promo members, the regular ${cfg.priceShort} for everyone else. Fixes update ONLY
+              ? `Compares every Best Buy offer against its expected price — a flash deal or special
+                 event running on Best Buy, else the active promo price for promo members, the regular
+                 ${cfg.priceShort} for everyone else. Fixes update ONLY
                  prices: stale MAPs correct the offer price, missing promos become a scheduled
-                 discount for the promo month.`
+                 discount for the promo's dates.`
               : cfg.kind === 'walmart'
-                ? `Compares every Walmart item with a price on file against its expected price — the
-                   active promo price for promo members, the regular ${cfg.priceShort} for everyone else.
+                ? `Compares every Walmart item with a price on file against its expected price — a
+                   flash deal or special event running on this Walmart, else the active promo price for
+                   promo members, the regular ${cfg.priceShort} for everyone else.
                    Analysis only: regular prices are corrected in Seller Center; promotions are
                    scheduled from the Promotions tab.`
                 : cfg.promoAware
                 ? `Compares every linked product's live store price against its expected price —
-                   the active promo price for promo members, the regular ${cfg.priceShort} for everyone else.`
+                   a flash deal or special event running on this store, else the active promo price for
+                   promo members, the regular ${cfg.priceShort} for everyone else.`
                 : `Compares every linked product's base price against its ${cfg.priceShort} — this store
                    runs its own storefront sales, so percent-off discounts are not counted as drift.`}
             {' '}Reports save automatically twice a day; run a fresh one anytime.
@@ -659,12 +662,14 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                         <td className="px-4 py-2">
                           <Link to={`/catalog/${p.sku}`} className="font-mono text-on-surface hover:text-primary hover:underline">{p.sku}</Link>
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-on-surface">{p.live != null ? money(p.live) : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-on-surface">{p.live != null ? money(p.live) : (p.status === 'promo_missing' ? 'No promo' : '—')}</td>
                         <td className="px-4 py-2 text-right tabular-nums font-semibold text-on-surface">{p.expected != null ? money(p.expected) : '—'}</td>
                         <td className="px-4 py-2">
                           {p.expected != null ? (
                             <span className={`px-2 py-0.5 rounded-full text-label-md font-medium ${p.source === 'promo' ? 'bg-tertiary-container/60 text-on-tertiary-container' : 'bg-surface-container text-on-surface-variant'}`}>
-                              {p.source === 'promo' ? 'Promo' : (cfg.priceField.startsWith('map') ? 'MAP' : 'MSRP')}
+                              {p.source === 'promo'
+                                ? (p.promo_kind === 'flash' ? 'Flash deal' : p.promo_kind === 'special' ? 'Special event' : 'Promo')
+                                : (cfg.priceField.startsWith('map') ? 'MAP' : 'MSRP')}
                             </span>
                           ) : (
                             <span className="text-on-surface-variant">{STATUS_TEXT[p.status]}</span>
