@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { scoreCompleteness, snapshotMetrics } from '@/features/products/lib/completeness';
+import { completenessContext, scoreCompleteness, snapshotMetrics } from '@/features/products/lib/completeness';
 import { computeListingHealth } from '@/features/dashboard/api/listingHealthData';
 import { loadLatestAlignment } from '@/features/pricing/api/priceAlignment';
 import { WIX_SITES } from '@/features/syndication/lib/wixSites';
@@ -29,9 +29,10 @@ export async function takeSnapshot() {
     .select('sku, category, workflow_status, *, product_media (id, media_type, is_primary, image_role, language, document_type)')
     .neq('workflow_status', 'archived');
   if (error) throw error;
+  const ctx = completenessContext(products);
   const scored = (products ?? []).map((p) => {
     const { product_media: media, ...product } = p;
-    return { sku: p.sku, category: p.category, workflow_status: p.workflow_status, result: scoreCompleteness(product, media ?? []) };
+    return { sku: p.sku, category: p.category, workflow_status: p.workflow_status, result: scoreCompleteness(product, media ?? [], ctx) };
   });
   const rows = snapshotMetrics(scored, today);
 

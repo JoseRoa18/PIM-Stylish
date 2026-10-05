@@ -22,7 +22,7 @@
 // @ts-ignore — plain JS module shared with the browser app
 import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHealth.js";
 // @ts-ignore — plain JS module shared with the browser app
-import { scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
+import { completenessContext, scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
 import { etToday, promoWindow, windowContains } from "../_shared/promoCalendar.ts";
 import { WIX_SITES, siteSells, type WixSite } from "../_shared/wixSites.ts";
 
@@ -297,14 +297,14 @@ async function runRefresh() {
     // refreshes the row. History = weekly progress.
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const scored = (list as Record<string, unknown>[])
-        .filter((p) => p.workflow_status !== "archived")
-        .map((p) => ({
-          sku: p.sku,
-          category: p.category,
-          workflow_status: p.workflow_status,
-          result: scoreCompleteness(p, (p.product_media as unknown[]) ?? []),
-        }));
+      const active = (list as Record<string, unknown>[]).filter((p) => p.workflow_status !== "archived");
+      const ctx = completenessContext(active);
+      const scored = active.map((p) => ({
+        sku: p.sku,
+        category: p.category,
+        workflow_status: p.workflow_status,
+        result: scoreCompleteness(p, (p.product_media as unknown[]) ?? [], ctx),
+      }));
       const rows = snapshotMetrics(scored, today) as Record<string, unknown>[];
       type MktData = { stats: { avgScore: number; distribution: Record<string, number> }; linkedCount: number; products: unknown[] };
       for (const [mkt, data] of Object.entries(perMarketplaceData as Record<string, MktData>)) {

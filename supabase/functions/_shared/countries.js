@@ -3,6 +3,8 @@
 // stores the English name (attributes.country_of_origin — "China",
 // "Vietnam"); marketplaces that want a code get it from here: ISO 3166-1
 // alpha-2 (Walmart's "CN - China") and alpha-3 (Lowe's "CHN").
+// (CANONICAL copy: src/features/products/lib/countries.js re-exports this
+// file; pure JS with no imports, shared with the edge functions.)
 // [alpha-2, alpha-3, name] — UN members plus Hong Kong, Macau, Taiwan,
 // Kosovo, Palestine, Puerto Rico and Vatican City.
 const TABLE = [
