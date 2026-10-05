@@ -247,9 +247,9 @@ function buildEditForm(product) {
     cost_usd_menards: product.cost_usd_menards ?? '',
     shipping_weight_lb: product.shipping_weight_lb ?? '',
     description: product.description ?? '',
-    quickbooks_description: product.quickbooks_description ?? '',
+    // QuickBooks description and Ribbon are no longer edited here (user,
+    // 2026-10-05); their stored values stay (import name fallback, Wix ribbon).
     notes: product.notes ?? '',
-    ribbon: product.ribbon ?? '',
     standards_compliance: product.standards_compliance ?? '',
 
     // From attributes JSONB
@@ -1549,8 +1549,6 @@ function ContentTab({ product, edit, onGenerated }) {
           <EditableField label="Product Description" fieldKey="description" type="richtext" product={product} edit={edit} />
           <AttrField label="Short Description / Marketing Copy" attrKey="marketing_copy" type="textarea" product={product} edit={edit} />
           <AttrField label="Product URL" attrKey="product_url" product={product} edit={edit} mono />
-          <EditableField label="QuickBooks Description" fieldKey="quickbooks_description" product={product} edit={edit} />
-          <EditableField label="Ribbon" fieldKey="ribbon" product={product} edit={edit} />
         </div>
       </Section>
 

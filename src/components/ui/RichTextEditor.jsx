@@ -80,11 +80,18 @@ export default function RichTextEditor({
     },
   });
 
+  // A destroyed editor is never touched. useEditor destroys its instance when
+  // the component's effects are torn down (React hides and re-shows a subtree
+  // that way) and builds a new one on the next pass; calling getHTML() on the
+  // old one in between threw ("reading 'cached'" of a null schema) and took
+  // the whole page down when Edit was pressed on Content (found 2026-10-05).
+  const live = (ed) => ed && !ed.isDestroyed;
+
   // Reseed the editor when the value changes externally (e.g. Pull from Wix
   // overwrites the form). Skip if the editor already has this HTML, otherwise
   // every keystroke would re-set the content and reset the cursor.
   useEffect(() => {
-    if (!editor) return;
+    if (!live(editor)) return;
     const current = editor.getHTML();
     const incoming = value || '';
     if (current === incoming || (current === '<p></p>' && incoming === '')) return;
@@ -93,10 +100,10 @@ export default function RichTextEditor({
 
   // Keep editable state in sync when `disabled` flips at runtime.
   useEffect(() => {
-    if (editor) editor.setEditable(!disabled);
+    if (live(editor)) editor.setEditable(!disabled);
   }, [disabled, editor]);
 
-  if (!editor) {
+  if (!live(editor)) {
     // Render a placeholder during the initial mount so the layout is stable.
     return (
       <div
