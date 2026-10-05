@@ -6,8 +6,8 @@
 // and the Wix sites (wixSites.js, prefixed wix_).
 
 export const MARKETPLACES = [
-  { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', wixSite: 'sinksdirect_ca' },
-  { key: 'wix_stylish_ca', label: 'Stylish Canada', monogram: 'ST', market: 'ca', wixSite: 'stylish_ca' },
+  { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', wixSite: 'sinksdirect_ca', alwaysOn: true },
+  { key: 'wix_stylish_ca', label: 'Stylish Canada', monogram: 'ST', market: 'ca', wixSite: 'stylish_ca', alwaysOn: true },
   { key: 'wix_azuni_ca', label: 'Azuni Canada', monogram: 'AZ', market: 'ca', wixSite: 'azuni_ca' },
   { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca' },
   { key: 'bestbuy', label: 'Best Buy Canada', monogram: 'BB', market: 'ca' },
@@ -15,8 +15,8 @@ export const MARKETPLACES = [
   { key: 'amazon_ca', label: 'Amazon Canada', monogram: 'AM', market: 'ca' },
   { key: 'homedepot_ca', label: 'Home Depot Canada', monogram: 'HD', market: 'ca' },
   { key: 'rona', label: 'Rona', monogram: 'RO', market: 'ca' },
-  { key: 'wix_sinksdirect_us', label: 'Sinks Direct USA', monogram: 'SD', market: 'us', wixSite: 'sinksdirect_us' },
-  { key: 'wix_stylish_us', label: 'Stylish USA', monogram: 'ST', market: 'us', wixSite: 'stylish_us' },
+  { key: 'wix_sinksdirect_us', label: 'Sinks Direct USA', monogram: 'SD', market: 'us', wixSite: 'sinksdirect_us', alwaysOn: true },
+  { key: 'wix_stylish_us', label: 'Stylish USA', monogram: 'ST', market: 'us', wixSite: 'stylish_us', alwaysOn: true },
   { key: 'wayfair_us', label: 'Wayfair USA', monogram: 'WF', market: 'us' },
   { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us' },
   { key: 'amazon_us', label: 'Amazon USA', monogram: 'AM', market: 'us' },
@@ -32,7 +32,12 @@ export const marketplaceLabel = (key) => MARKETPLACES.find((m) => m.key === key)
 export const wixExclusionKey = (site) => `wix_${site}`;
 
 /** Is the product switched off for this marketplace key? */
-export const isExcluded = (product, key) => Array.isArray(product?.channel_exclusions) && product.channel_exclusions.includes(key);
+// The Sinks Direct and Stylish websites carry EVERY product (user rule
+// 2026-10-05): they can't be switched off, and the database drops them from
+// channel_exclusions (20261005_websites_always_on.sql).
+export const ALWAYS_ON_KEYS = new Set(MARKETPLACES.filter((m) => m.alwaysOn).map((m) => m.key));
+
+export const isExcluded = (product, key) => !ALWAYS_ON_KEYS.has(key) && Array.isArray(product?.channel_exclusions) && product.channel_exclusions.includes(key);
 
 /** Keys the product is excluded from, in MARKETPLACES order. */
 export const excludedKeys = (product) => MARKETPLACES.filter((m) => isExcluded(product, m.key)).map((m) => m.key);

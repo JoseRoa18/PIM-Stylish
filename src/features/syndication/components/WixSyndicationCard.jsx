@@ -209,8 +209,9 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
         product,
         media,
         (wixBaseline ?? buildForm(product, fieldGroups)).additional_info_sections,
+        site,
       ),
-    [product, media, wixBaseline, fieldGroups],
+    [product, media, wixBaseline, fieldGroups, site],
   );
   // The sections field's "differs from PIM" comparison runs against the
   // derived value — the raw PIM column just mirrors the last push.

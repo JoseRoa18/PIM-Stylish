@@ -166,7 +166,7 @@ export async function pushProductToAllWixSites(sku, brand = null) {
     let fields;
     try {
       const { snapshot } = await readWixProduct(sku, site);
-      const derived = deriveWixSectionsFromPim(p ?? {}, mediaRows ?? [], snapshot?.additional_info_sections ?? []);
+      const derived = deriveWixSectionsFromPim(p ?? {}, mediaRows ?? [], snapshot?.additional_info_sections ?? [], site);
       if (derived.sections?.length) fields = { additional_info_sections: derived.sections };
     } catch {
       // store unreadable — push content without touching its sections

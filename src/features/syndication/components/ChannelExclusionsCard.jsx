@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Ban } from 'lucide-react';
-import { MARKETPLACES } from '../lib/marketplaces';
+import { MARKETPLACES, ALWAYS_ON_KEYS } from '../lib/marketplaces';
 import { updateProduct } from '@/features/products/api/products';
 import { useAuth } from '@/features/auth/AuthContext';
 
@@ -11,7 +11,7 @@ export default function ChannelExclusionsCard({ product, onUpdate }) {
   const { canEdit } = useAuth();
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
-  const excluded = new Set(product.channel_exclusions ?? []);
+  const excluded = new Set((product.channel_exclusions ?? []).filter((k) => !ALWAYS_ON_KEYS.has(k)));
 
   async function toggle(key) {
     const next = new Set(excluded);
@@ -59,6 +59,12 @@ export default function ChannelExclusionsCard({ product, onUpdate }) {
                       <span className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-sm font-bold flex-shrink-0">{c.monogram}</span>
                       <span className={`text-body-md truncate ${on ? 'text-on-surface' : 'text-on-surface-variant'}`}>{c.label}</span>
                     </span>
+                    {c.alwaysOn ? (
+                      // The Sinks Direct and Stylish websites carry every product (rule 2026-10-05).
+                      <span title={`Every product is on ${c.label}`} className="px-2.5 py-0.5 rounded-full bg-success-container text-on-success-container text-label-sm font-medium whitespace-nowrap flex-shrink-0">
+                        Always on
+                      </span>
+                    ) : (
                     <button
                       type="button"
                       role="switch"
@@ -71,6 +77,7 @@ export default function ChannelExclusionsCard({ product, onUpdate }) {
                     >
                       <span className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-surface shadow transition-transform" style={{ transform: on ? 'translateX(16px)' : 'translateX(0)' }} />
                     </button>
+                    )}
                   </li>
                 );
               })}

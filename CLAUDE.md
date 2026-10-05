@@ -116,7 +116,12 @@ Supabase Auth + a `profiles` table with roles `admin | editor | viewer`. `Protec
   - CSV quotes and surrounding spaces are removed; nothing else changes.
   - The existing 632 bullets on 86 products were cleaned that day.
   - Change the rule there, never in the browser.
-- Faucets have a **Spare Parts Diagram** document (`spare_parts_diagram`, PDF, user 2026-10-05, [20261005_spare_parts_diagram.sql](supabase/migrations/20261005_spare_parts_diagram.sql)). Like every faucet document it is family-shared; other categories only show it while one is stored. No channel export maps it yet.
+- Faucets have a **Spare Parts Diagram** document (`spare_parts_diagram`, PDF, user 2026-10-05, [20261005_spare_parts_diagram.sql](supabase/migrations/20261005_spare_parts_diagram.sql)). Like every faucet document it is family-shared; other categories only show it while one is stored.
+  - It goes ONLY to the Sinks Direct and Stylish websites: a Wix push adds a "SPARE PARTS DIAGRAM" link to DOCUMENTS TO DOWNLOAD (`deriveWixSectionsFromPim(…, site)`). It is the one document the PIM adds there; the others are only repointed.
+  - No other marketplace gets it.
+- **The Sinks Direct and Stylish websites carry EVERY product** (user rule 2026-10-05). Their four exclusion keys (`wix_sinksdirect_ca/_us`, `wix_stylish_ca/_us`) are `alwaysOn` in [marketplaces.js](src/features/syndication/lib/marketplaces.js): `isExcluded` ignores them and the card shows "Always on".
+  - The `products_websites_always_on` trigger drops them from `channel_exclusions` on any write ([20261005_websites_always_on.sql](supabase/migrations/20261005_websites_always_on.sql)). The 344 products that had them were cleaned that day.
+  - The brand scope still applies: Azuni products stay off the Stylish sites (`excludedBrands`). The other marketplaces' exclusions are unchanged.
 - The product page's Content tab no longer edits QuickBooks description or Ribbon (user, 2026-10-05). Their columns and values stay: QuickBooks is an import name fallback, and the ribbon of 4 products still goes to Wix.
 - `workflow_status` values are centralized in [src/features/products/lib/workflowStatus.js](src/features/products/lib/workflowStatus.js) — add new statuses there only.
 - SKUs with and without dashes are DIFFERENT brands (e.g. `A-906` vs `A906`), not duplicates. Never merge/delete on that assumption without asking.

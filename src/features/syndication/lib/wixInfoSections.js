@@ -93,6 +93,7 @@ export function buildFeaturesHtml(product) {
 // "DXF CUT-OUT TEMPLATE" is the DXF file, not the PDF template.
 export function docTypeForLabel(label) {
   const t = String(label ?? '').toUpperCase();
+  if (/SPARE|PARTS? DIAGRAM|EXPLODED/.test(t)) return 'spare_parts_diagram';
   if (/DXF/.test(t)) {
     if (/UNDERMOUNT/.test(t)) return 'dxf_undermount';
     if (/DROP.?IN/.test(t)) return 'dxf_drop_in';
@@ -184,24 +185,57 @@ const isDimensions = (t) => /DIMENSION/i.test(t);
 const isFeatures = (t) => /FEATURE/i.test(t);
 const isDocuments = (t) => /DOCUMENT|DOWNLOAD/i.test(t);
 
+// The faucets' Spare Parts Diagram goes to the Sinks Direct and Stylish
+// websites only (user, 2026-10-05) — the one document the PIM ADDS to a
+// listing's DOCUMENTS TO DOWNLOAD (the others are only repointed).
+const SPARE_PARTS_SITES = new Set(['sinksdirect_ca', 'sinksdirect_us', 'stylish_ca', 'stylish_us']);
+const SPARE_PARTS_LABEL = 'SPARE PARTS DIAGRAM';
+
+// Add one <li><a> to the section's list when no link of that type is there
+// yet; it copies the attributes the existing links carry (target, rel).
+function addDocumentLink(html, type, label, url) {
+  const doc = new DOMParser().parseFromString(typeof html === 'string' ? html : '', 'text/html');
+  const anchors = [...doc.body.querySelectorAll('a[href]')];
+  if (anchors.some((a) => docTypeForLabel(a.textContent) === type)) return { html, added: false };
+  const a = doc.createElement('a');
+  for (const name of ['target', 'rel']) {
+    const v = anchors[0]?.getAttribute(name);
+    if (v) a.setAttribute(name, v);
+  }
+  a.setAttribute('href', url);
+  a.textContent = label;
+  const li = doc.createElement('li');
+  li.appendChild(a);
+  let ul = doc.body.querySelector('ul');
+  if (!ul) { ul = doc.createElement('ul'); doc.body.appendChild(ul); }
+  ul.appendChild(li);
+  return { html: doc.body.innerHTML, added: true };
+}
+
 /**
  * Transform a Wix product's current sections into what the PIM says they
  * should be. `sections` is the listing's current array (may be empty);
  * `media` is the product's product_media rows (documents are read from it).
  *
+ * `site` is the Wix site the sections are for.
+ *
  * Returns { sections, changes } where changes summarizes what happened:
- *   { dimensions: bool, features: bool, docsReplaced: n, docsKept: n }
+ *   { dimensions: bool, features: bool, docsReplaced: n, docsKept: n, docsAdded: n }
  */
-export function deriveWixSectionsFromPim(product, media, sections) {
+export function deriveWixSectionsFromPim(product, media, sections, site = null) {
   const docs = (media ?? []).filter(
     (m) => m.media_type === 'document' && m.storage_path,
   );
   const dimensionsHtml = buildDimensionsHtml(product);
   const featuresHtml = buildFeaturesHtml(product);
+  const spareParts = SPARE_PARTS_SITES.has(site)
+    ? docs.find((d) => d.document_type === 'spare_parts_diagram' && /^https?:\/\//i.test(d.storage_path))
+    : null;
 
-  const changes = { dimensions: false, features: false, docsReplaced: 0, docsKept: 0 };
+  const changes = { dimensions: false, features: false, docsReplaced: 0, docsKept: 0, docsAdded: 0 };
   let sawDimensions = false;
   let sawFeatures = false;
+  let sawDocuments = false;
 
   const out = (Array.isArray(sections) ? sections : []).map((section) => {
     const title = String(section?.title ?? '');
@@ -216,13 +250,22 @@ export function deriveWixSectionsFromPim(product, media, sections) {
       return { ...section, description: featuresHtml };
     }
     if (isDocuments(title)) {
+      sawDocuments = true;
       const { html, replaced, kept } = rewriteDocumentLinks(section?.description, docs);
       changes.docsReplaced += replaced;
       changes.docsKept += kept;
-      return { ...section, description: html };
+      if (!spareParts) return { ...section, description: html };
+      const withDiagram = addDocumentLink(html, 'spare_parts_diagram', SPARE_PARTS_LABEL, spareParts.storage_path);
+      if (withDiagram.added) changes.docsAdded += 1;
+      return { ...section, description: withDiagram.html };
     }
     return section;
   });
+
+  if (!sawDocuments && spareParts) {
+    out.push({ title: 'DOCUMENTS TO DOWNLOAD', description: `<ul><li><a href="${esc(spareParts.storage_path)}">${SPARE_PARTS_LABEL}</a></li></ul>` });
+    changes.docsAdded += 1;
+  }
 
   // Listings that never had these sections get them appended.
   if (!sawDimensions && dimensionsHtml) {
