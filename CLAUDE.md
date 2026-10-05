@@ -120,6 +120,26 @@ Supabase Auth + a `profiles` table with roles `admin | editor | viewer`. `Protec
 
 `src/features/syndication/exports/` fills marketplace XLSX templates **without altering them**: [templateFiller.js](src/features/syndication/exports/templateFiller.js) edits the worksheet XML in place via JSZip so dropdowns/valid-values/formatting survive (SheetJS would destroy them). Each marketplace exporter (`wayfairExport`, `amazonExport`, `bbbExport`, `menardsExport`) layers its own header detection and row-building rules on top. Wayfair variant grouping: group by `model_name` + dashed SKU root, Finish is the primary axis. Marketplace template files themselves are managed in the Templates page (`marketplace_templates` table + Storage).
 
+A template's formula cells ship with an empty cached value, and Excel shows them blank until it recalculates — and a vendor portal never does. An exporter that fills rows next to formulas writes their RESULT as the cached value (`setFormulaResults`, the `<f>` kept) and calls `recalcOnOpen`.
+
+Home Depot Canada listing ([homeDepotCaExport.js](src/features/syndication/exports/homeDepotCaExport.js), user review 2026-10-05):
+- **Basic Data.**
+  - **Identity:** B `Stock_Articles`; M vendor `70007082` (VendorData → CAD, so N / BS / BV = CAD; BT / BW = `EA_each`).
+  - **Department:** E/F — kitchen sinks + kitchen faucets `29 Kitchen` / `In-Stock Countertops/Kitchen Sinks`; accessories, colanders, racks `26 Plumbing` / `Plumbing Repair`; bath stays `29 Bath` (Faucets / Bath Fixtures).
+  - **Descriptions:** G/H ≤ 35 = model + short type + SKU (EN/FR; the SKU keeps the variants apart).
+  - **Till receipt:** I/J ≤ 12 = the size `36x18x10in` / `po` (L×W×D; unit dropped, then 1 decimal, if it doesn't fit; faucets `H16in`).
+  - **Weights:** Z gross = package; AA net = product, else package − 2 lb unless that is ≤ 1 (then the package's).
+  - **Packaging and money:** only L1 is filled; BR = WC Blue (`cost_cad_rona_hd`), BU = MAP Blue (`map_cad`).
+  - **Country:** CG = the template's own country list ("VN - Viet Nam", `countryFromList`).
+- **Online Core.** AP = French warranty; AT = the AA rule; BA / BB / BC = `CA__` / `Ontario__` / `GreaterTorontoArea__Less_than_truckload`; row 3's example category is cleared.
+- **Digital Assets.**
+  - Images `SKU.jpg`, `SKU_2.jpg`…
+  - PDF #1 spec sheet, #2 installation manual, #3 the brand's warranty (`Stylish_warranty.pdf`). Each PDF is ONE file: the `en_fr` one, else English.
+- **ECO and HAZMAT.** ECO questions all "No"; HAZMAT C–L "No", O `0`, Q `SOLID`.
+- **Untouched.** "Consolidated Data (DO NOT EDIT)".
+
+Home Depot Canada and Home Depot USA also download a `<file>_media.zip` (`downloadMediaZip`, parts past 600 MB) with exactly the files the sheet names (USA: its image columns, still as URLs in the sheet).
+
 ### Edge functions (supabase/functions/)
 
 - `admin-users` — user CRUD with service_role (caller must be an authenticated admin).

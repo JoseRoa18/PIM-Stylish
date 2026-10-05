@@ -353,14 +353,102 @@ export async function downloadZip(zip, fileName, ext = 'xlsx') {
     mimeType: MIME_BY_EXT[ext] ?? MIME_BY_EXT.xlsx,
     compression: 'DEFLATE',
   });
-  const url = URL.createObjectURL(out);
+  saveBlob(out, `${fileName}_${new Date().toISOString().slice(0, 10)}.${ext}`);
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${fileName}_${new Date().toISOString().slice(0, 10)}.${ext}`;
+  link.download = name;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+// Give the formula cells of the rows we fill their RESULT as the cached
+// value. Templates ship them with an empty <v/>, and Excel shows that until
+// something makes it recalculate (Home Depot Canada's "Do not edit" columns
+// came out blank, user 2026-10-05) — a vendor portal reading the file never
+// recalculates at all. The formula itself is kept, untouched (shared
+// formulas included). resultsByRow: Map<row number, Map<column letter, value>>.
+export function setFormulaResults(sheetXml, resultsByRow) {
+  if (!resultsByRow.size) return sheetXml;
+  return sheetXml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (row, n) => {
+    const results = resultsByRow.get(Number(n));
+    if (!results) return row;
+    return row.replace(/<c r="([A-Z]+)(\d+)"([^>]*?)>(<f\b[^>]*?(?:\/>|>[\s\S]*?<\/f>))[\s\S]*?<\/c>/g, (cell, col, rn, attrs, formula) => {
+      if (!results.has(col)) return cell;
+      const value = results.get(col);
+      const a = attrs.replace(/\s+t="[^"]*"/, '');
+      if (typeof value === 'number') return `<c r="${col}${rn}"${a}>${formula}<v>${value}</v></c>`;
+      return `<c r="${col}${rn}"${a} t="str">${formula}<v>${escapeXml(value ?? '')}</v></c>`;
+    });
+  });
+}
+
+// A product's media file name in the bundles we hand to a marketplace:
+// SKU.jpg for the first image, SKU_2.jpg, SKU_3.jpg… after it (user,
+// 2026-10-05); the extension is the stored file's.
+export function mediaFileName(sku, index, url, suffix = '') {
+  const safe = String(sku).replace(/[\\/:*?"<>|\s]+/g, '-');
+  const ext = (String(url ?? '').match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1] ?? 'jpg').toLowerCase().replace(/^jpeg$/, 'jpg');
+  return `${safe}${suffix}${index > 0 ? `_${index + 1}` : ''}.${ext}`;
+}
+
+// Download media files (public Storage URLs) into a .zip next to the
+// export: entries [{ name, url }], names unique (a repeated name is fetched
+// once — e.g. the brand's one warranty PDF). A bundle past ~600 MB is
+// closed and a new part started, so the browser never holds more than that;
+// files that could not be fetched are listed in _could_not_download.txt.
+export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 1024 * 1024 } = {}) {
+  const byName = new Map();
+  for (const e of entries) if (e?.name && e?.url && !byName.has(e.name)) byName.set(e.name, e.url);
+  if (!byName.size) return { files: 0, parts: 0, failed: [] };
+  const JSZip = await loadJSZip();
+  const day = new Date().toISOString().slice(0, 10);
+  const failed = [];
+  let zip = new JSZip();
+  let bytes = 0;
+  let inZip = 0;
+  let part = 0;
+  let files = 0;
+  const flush = async (last) => {
+    if (!inZip && !(last && failed.length)) return;
+    if (last && failed.length) zip.file('_could_not_download.txt', failed.map((f) => `${f.name}\t${f.url}`).join('\n'));
+    part += 1;
+    // JPEG/PNG/PDF are already compressed: STORE keeps the bundle fast.
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    saveBlob(blob, `${fileName}_media${last && part === 1 ? '' : `_part${part}`}_${day}.zip`);
+    zip = new JSZip();
+    bytes = 0;
+    inZip = 0;
+  };
+  const queue = [...byName.entries()];
+  const fetchOne = async ([name, url]) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { name, url, blob: await res.blob() };
+    } catch {
+      return { name, url, blob: null };
+    }
+  };
+  // Four downloads at a time, added in order.
+  for (let i = 0; i < queue.length; i += 4) {
+    const got = await Promise.all(queue.slice(i, i + 4).map(fetchOne));
+    for (const g of got) {
+      if (!g.blob) { failed.push(g); continue; }
+      if (inZip && bytes + g.blob.size > partBytes) await flush(false);
+      zip.file(g.name, g.blob);
+      bytes += g.blob.size;
+      inZip += 1;
+      files += 1;
+    }
+  }
+  await flush(true);
+  return { files, parts: part, failed: failed.map((f) => f.name) };
 }
 
 // ---- PIM media lookups shared by all exporters -------------------------------
@@ -411,12 +499,12 @@ export async function fetchDocsBySku(skus, typeMap, priority = []) {
   for (let i = 0; i < skus.length; i += 40) {
     const { data } = await supabase
       .from('product_media')
-      .select('sku, storage_path, document_type')
+      .select('sku, storage_path, document_type, language')
       .in('sku', skus.slice(i, i + 40))
       .eq('media_type', 'document');
     for (const m of data ?? []) {
       const mapped = typeMap[m.document_type];
-      if (mapped) (bySku[m.sku] = bySku[m.sku] || []).push({ url: m.storage_path, type: mapped, raw: m.document_type });
+      if (mapped) (bySku[m.sku] = bySku[m.sku] || []).push({ url: m.storage_path, type: mapped, raw: m.document_type, lang: m.language ?? null });
     }
   }
   const rank = (t) => { const i = priority.indexOf(t); return i === -1 ? 99 : i; };

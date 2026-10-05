@@ -11,6 +11,8 @@ import {
   fetchImagesBySku,
   fetchDocsBySku,
   createFillTracker,
+  mediaFileName,
+  downloadMediaZip,
 } from './templateFiller';
 
 // Fills a Home Depot USA (Mirakl) template in place.
@@ -675,6 +677,12 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
 
   zip.file(tplPath, injectRows(sheetXml, rowsXml, DATA_ROW - 1 + products.length));
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  // Home Depot USA takes the images as a .zip too (user, 2026-10-05): the
+  // ones in the image columns, in their order — SKU.jpg, SKU_2.jpg…
+  const media = await downloadMediaZip(
+    products.flatMap((p) => (p._images ?? []).slice(0, imgSlots).map((url, i) => ({ url, name: mediaFileName(p.sku, i, url) }))),
+    fileName,
+  );
 
-  return { count: products.length, fillReport: fill.report(labels, products.length) };
+  return { count: products.length, fillReport: fill.report(labels, products.length), media };
 }

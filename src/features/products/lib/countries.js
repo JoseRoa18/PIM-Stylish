@@ -99,3 +99,13 @@ export function findCountry(value) {
 
 /** 'CN' → 'China', 'Viet Nam' → 'Vietnam'; unknown → null. */
 export const canonicalCountry = (value) => findCountry(value)?.name ?? null;
+
+/**
+ * The entry of a marketplace's own country list ("VN - Viet Nam", "CN - China")
+ * for a PIM country, matched by its ISO alpha-2 code; '' when the list has none.
+ */
+export function countryFromList(value, labels) {
+  const c = findCountry(value);
+  if (!c) return '';
+  return (labels ?? []).find((l) => String(l).startsWith(`${c.code} - `)) ?? '';
+}
