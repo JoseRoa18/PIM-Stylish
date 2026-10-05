@@ -22,8 +22,10 @@ import { countryFromList } from '@/features/products/lib/countries';
 //
 //   Basic Data (87 cols)   — identity, department, packaging L1, cost, MSRP
 //   Online Core Attributes — category tree, EN/FR names, marketing & bullets
-//   Add EAN UPC            — additional barcodes only (nothing for us)
-//   Digital Assets         — image / PDF file NAMES (the files go in a .zip)
+//   Add EAN UPC            — D L1-Primary UPC = the product's UPC (user,
+//                            2026-10-05); the additional barcodes stay empty
+//   Digital Assets         — image / PDF file NAMES (the files go in a .zip,
+//                            one folder per part number)
 //   ECO Options, HAZMAT    — questionnaires (all "No" for our catalog)
 //   Consolidated Data      — "DO NOT EDIT": never touched
 //
@@ -65,6 +67,8 @@ const num = (v) => {
   return m ? Number(m[0]) : '';
 };
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+// Digits only, kept as text (Basic Data W and Add EAN UPC D).
+const upcOf = (p) => String(attr(p).upc ?? p.upc ?? '').replace(/\D/g, '');
 const stripHtml = (h) =>
   String(h || '')
     .replace(/<br\s*\/?>/gi, '\n')
@@ -393,7 +397,7 @@ const BASIC_DATA_RULES = {
   S: () => 'Yes',
   T: () => 'Yes',
   U: () => 'Yes',
-  W: (p) => String(attr(p).upc ?? p.upc ?? '').replace(/\D/g, ''),
+  W: (p) => upcOf(p),
   X: isFragile,
   Y: () => 'Box',
   Z: grossLb,
@@ -470,6 +474,12 @@ const ONLINE_CORE_RESULTS = (p) => ({
 });
 const MIRROR_RESULTS = (p) => ({ A: p.sku, B: p._desc.en });
 
+// Add EAN UPC: the template leaves D (L1-Primary UPC) empty; it gets the
+// same UPC as Basic Data W, as text so Excel keeps all 12 digits. A, B and
+// C mirror Basic Data by formula.
+const EAN_UPC_RULES = { D: (p) => upcOf(p) };
+const EAN_UPC_RESULTS = (p) => ({ ...MIRROR_RESULTS(p), C: L1_UOM });
+
 // ECO Options: every question "No" (user, 2026-10-05).
 const ECO_RULES = Object.fromEntries(['C', 'D', 'E', 'H', 'I', 'L', 'M', 'P', 'Q', 'S', 'T', 'V'].map((c) => [c, () => 'No']));
 
@@ -532,7 +542,8 @@ async function templateCountries(zip, shared) {
 
 /**
  * Fill The Home Depot Canada workbook (in place) and download it, with a
- * .zip of the images and PDFs its Digital Assets sheet names.
+ * .zip of the images and PDFs its Digital Assets sheet names, one folder
+ * per part number.
  *
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
@@ -586,6 +597,7 @@ export async function generateHomeDepotCaFromTemplate(templateStoragePath, produ
 
   await fillSheet('Basic Data', BASIC_DATA_RULES, { results: BASIC_DATA_RESULTS });
   await fillSheet('Online Core Attributes', ONLINE_CORE_RULES, { results: ONLINE_CORE_RESULTS, clear: ONLINE_CORE_CLEAR });
+  await fillSheet('Add EAN UPC', EAN_UPC_RULES, { results: EAN_UPC_RESULTS });
   await fillSheet('Digital Assets', digitalRules(), { results: MIRROR_RESULTS });
   await fillSheet('ECO Options', ECO_RULES, { results: MIRROR_RESULTS });
   await fillSheet('HAZMAT', HAZMAT_RULES, { results: MIRROR_RESULTS });
@@ -593,7 +605,11 @@ export async function generateHomeDepotCaFromTemplate(templateStoragePath, produ
   await recalcOnOpen(zip);
 
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
-  const media = await downloadMediaZip(products.flatMap((p) => [...p._media.images, ...p._media.pdfs.filter(Boolean)]), fileName);
+  // One folder per part number with its images and PDFs (user, 2026-10-05).
+  const media = await downloadMediaZip(
+    products.flatMap((p) => [...p._media.images, ...p._media.pdfs.filter(Boolean)].map((e) => ({ ...e, folder: p.sku }))),
+    fileName,
+  );
   return { count: products.length, media };
 }
 

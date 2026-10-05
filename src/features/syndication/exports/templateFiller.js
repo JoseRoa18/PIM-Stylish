@@ -398,14 +398,30 @@ export function mediaFileName(sku, index, url, suffix = '') {
 }
 
 // Download media files (public Storage URLs) into a .zip next to the
-// export: entries [{ name, url }], names unique (a repeated name is fetched
-// once — e.g. the brand's one warranty PDF). A bundle past ~600 MB is
-// closed and a new part started, so the browser never holds more than that;
-// files that could not be fetched are listed in _could_not_download.txt.
+// export: entries [{ name, url, folder? }]. `folder` puts the file in a
+// sub-folder of the bundle — one per part number (Home Depot Canada, user
+// 2026-10-05) — and a folder is never split between two parts. Paths are
+// unique (a repeated one is dropped) and a URL used several times (the
+// brand's one warranty PDF in every folder) is fetched once. A bundle past
+// ~600 MB is closed and a new part started, so the browser never holds more
+// than that; files that could not be fetched are listed in
+// _could_not_download.txt.
 export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 1024 * 1024 } = {}) {
-  const byName = new Map();
-  for (const e of entries) if (e?.name && e?.url && !byName.has(e.name)) byName.set(e.name, e.url);
-  if (!byName.size) return { files: 0, parts: 0, failed: [] };
+  const safeFolder = (f) => String(f).replace(/[\\/:*?"<>|\s]+/g, '-');
+  const groups = new Map(); // folder ('' = top level) → [{ path, url }]
+  const seen = new Set();
+  const uses = new Map();
+  for (const e of entries) {
+    if (!e?.name || !e?.url) continue;
+    const folder = e.folder ? safeFolder(e.folder) : '';
+    const path = folder ? `${folder}/${e.name}` : e.name;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    uses.set(e.url, (uses.get(e.url) ?? 0) + 1);
+    if (!groups.has(folder)) groups.set(folder, []);
+    groups.get(folder).push({ path, url: e.url });
+  }
+  if (!seen.size) return { files: 0, parts: 0, failed: [] };
   const JSZip = await loadJSZip();
   const day = new Date().toISOString().slice(0, 10);
   const failed = [];
@@ -416,7 +432,7 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
   let files = 0;
   const flush = async (last) => {
     if (!inZip && !(last && failed.length)) return;
-    if (last && failed.length) zip.file('_could_not_download.txt', failed.map((f) => `${f.name}\t${f.url}`).join('\n'));
+    if (last && failed.length) zip.file('_could_not_download.txt', failed.map((f) => `${f.path}\t${f.url}`).join('\n'));
     part += 1;
     // JPEG/PNG/PDF are already compressed: STORE keeps the bundle fast.
     const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
@@ -425,30 +441,47 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
     bytes = 0;
     inZip = 0;
   };
-  const queue = [...byName.entries()];
-  const fetchOne = async ([name, url]) => {
+  const fetchBlob = async (url) => {
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return { name, url, blob: await res.blob() };
+      return await res.blob();
     } catch {
-      return { name, url, blob: null };
+      return null;
     }
   };
-  // Four downloads at a time, added in order.
-  for (let i = 0; i < queue.length; i += 4) {
-    const got = await Promise.all(queue.slice(i, i + 4).map(fetchOne));
-    for (const g of got) {
-      if (!g.blob) { failed.push(g); continue; }
-      if (inZip && bytes + g.blob.size > partBytes) await flush(false);
-      zip.file(g.name, g.blob);
-      bytes += g.blob.size;
-      inZip += 1;
-      files += 1;
+  const sharedBlobs = new Map(); // url → Promise<Blob|null>, only for URLs used more than once
+  const fetchOne = async ({ path, url }) => {
+    if ((uses.get(url) ?? 0) < 2) return { path, url, blob: await fetchBlob(url) };
+    if (!sharedBlobs.has(url)) sharedBlobs.set(url, fetchBlob(url));
+    return { path, url, blob: await sharedBlobs.get(url) };
+  };
+  const add = (g) => {
+    zip.file(g.path, g.blob);
+    bytes += g.blob.size;
+    inZip += 1;
+    files += 1;
+  };
+  for (const [folder, list] of groups) {
+    // Four downloads at a time, added in order.
+    const got = [];
+    for (let i = 0; i < list.length; i += 4) got.push(...await Promise.all(list.slice(i, i + 4).map(fetchOne)));
+    const ok = got.filter((g) => g.blob);
+    failed.push(...got.filter((g) => !g.blob));
+    if (folder) {
+      // The whole folder goes in one part.
+      const size = ok.reduce((s, g) => s + g.blob.size, 0);
+      if (inZip && bytes + size > partBytes) await flush(false);
+      ok.forEach(add);
+    } else {
+      for (const g of ok) {
+        if (inZip && bytes + g.blob.size > partBytes) await flush(false);
+        add(g);
+      }
     }
   }
   await flush(true);
-  return { files, parts: part, failed: failed.map((f) => f.name) };
+  return { files, parts: part, failed: failed.map((f) => f.path) };
 }
 
 // ---- PIM media lookups shared by all exporters -------------------------------
