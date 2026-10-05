@@ -79,6 +79,9 @@ An axe-core scan of every route, in both themes, went from 1,107 violations to 0
 - Icon-only buttons need `aria-label`; lucide icons are `aria-hidden`.
 - Results and errors take `role="status"` / `role="alert"` on the element that is conditionally rendered.
 - Two Pagination bars on one page need distinct `label`s.
+- The top search remembers the products opened from it (user idea 2026-10-05, [recentSearches.js](src/features/search/lib/recentSearches.js)). It keeps the last 4 per user in localStorage and shows them as "Recent" when the empty bar is clicked.
+  - The panel is the same combobox / listbox as the results; Clear empties the list.
+  - The Delete key removes the highlighted product. The × on each row is its mouse twin and is `aria-hidden`, because a listbox holds only options.
 
 **Shell and verification**
 - AppShell has a "Skip to main content" link to `main#main-content`.
