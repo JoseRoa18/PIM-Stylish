@@ -94,6 +94,9 @@ User decision: every page sits at the same place, so nothing jumps when moving b
 - **Product section rail.** It docks 24 px left of the cards on every tab: an `absolute right-full` box on the page column with a `sticky` nav, never placed from the window width (it was `50vw − 640px`, and the scrollbar moved the cards but not the rail). It shows from 1880 px, where the rail and its gap clear the sidebar; below that the tab strip stays pinned.
 - **Phones (390 px).** No sideways scroll: tab groups scroll inside themselves (`max-w-full overflow-x-auto scrollbar-hide`), button rows wrap, and a full-bleed strip uses the page's own padding (`-mx-4 sm:-mx-6`).
 - Verify with real scrollbars (Playwright `ignore_default_args=['--hide-scrollbars']`) at 1920, 1440 and 390: the same title x on every page, and the document never scrolls (`documentElement.scrollHeight === clientHeight`).
+- **A crash never blanks the window** (2026-10-05). [ErrorBoundary](src/components/ui/ErrorBoundary.jsx) wraps every page (ProtectedLayout, `resetKey` = the route, so it clears on navigation) and the whole app (main.jsx, `fullScreen`).
+  - The fallback: "Something went wrong on this page", Reload page / Go to Dashboard and the technical details. A failed chunk of an old deploy reads "A new version of the PIM is available".
+  - Never call a TipTap editor without checking `!editor.isDestroyed`: `useEditor` destroys and rebuilds its instance when effects are torn down, and `getHTML()` on the old one blanked the page on Edit.
 
 ### Auth & roles
 
@@ -113,6 +116,7 @@ Supabase Auth + a `profiles` table with roles `admin | editor | viewer`. `Protec
   - CSV quotes and surrounding spaces are removed; nothing else changes.
   - The existing 632 bullets on 86 products were cleaned that day.
   - Change the rule there, never in the browser.
+- Faucets have a **Spare Parts Diagram** document (`spare_parts_diagram`, PDF, user 2026-10-05, [20261005_spare_parts_diagram.sql](supabase/migrations/20261005_spare_parts_diagram.sql)). Like every faucet document it is family-shared; other categories only show it while one is stored. No channel export maps it yet.
 - The product page's Content tab no longer edits QuickBooks description or Ribbon (user, 2026-10-05). Their columns and values stay: QuickBooks is an import name fallback, and the ribbon of 4 products still goes to Wix.
 - `workflow_status` values are centralized in [src/features/products/lib/workflowStatus.js](src/features/products/lib/workflowStatus.js) — add new statuses there only.
 - SKUs with and without dashes are DIFFERENT brands (e.g. `A-906` vs `A906`), not duplicates. Never merge/delete on that assumption without asking.

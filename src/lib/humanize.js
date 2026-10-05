@@ -26,6 +26,7 @@ const FIELD_LABELS = {
   dxf_dual_mount: 'DXF file (dual mount)',
   dxf_top_mount: 'DXF file (top mount)',
   cut_out_template: 'cut-out template',
+  spare_parts_diagram: 'spare parts diagram',
   wix_product_id: 'Wix product ID',
   wayfair_item_group_id: 'Wayfair item group ID',
   en_fr: 'English-French',

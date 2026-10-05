@@ -88,6 +88,12 @@ const DOCUMENT_TYPES = [
     extensions: ['.pdf', '.dxf'],
     description: 'Countertop cutout template',
   },
+  {
+    id: 'spare_parts_diagram',
+    label: 'Spare Parts Diagram',
+    extensions: ['.pdf'],
+    description: 'Exploded view with the part numbers (PDF)',
+  },
 ];
 
 // A "slot" is a (type, language) pair the UI can hold one document in.
@@ -105,6 +111,9 @@ const LANG_AWARE = new Set([
 // Faucets don't have CAD fabrication docs (DXF / cut-out template) — those are
 // for stone fabricators cutting countertops for sinks.
 const FAUCET_HIDDEN_TYPES = new Set(['dxf_file', 'cut_out_template']);
+// The Spare Parts Diagram is a faucet document (user, 2026-10-05); other
+// products only show it while one is already stored.
+const FAUCET_ONLY_TYPES = new Set(['spare_parts_diagram']);
 
 export default function DocumentsSection({ sku, category, familyNumber = null, installationType = null, brand = null }) {
   const confirm = useConfirm();
@@ -133,7 +142,8 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
   const manualKinds = isSink ? manualKindsFor(installationType) : [];
   const hasLegacy = (typeId) => documents.some((d) => d.document_type === typeId);
   const visibleTypes = DOCUMENT_TYPES.filter(
-    (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id)),
+    (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id))
+      && (isFaucet || !FAUCET_ONLY_TYPES.has(t.id) || hasLegacy(t.id)),
   ).flatMap((t) => {
     if (manualKinds.length === 0) return [t];
     if (t.id === 'installation_manual') {

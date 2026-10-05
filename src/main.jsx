@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '@/features/auth/AuthContext';
 import App from './App.jsx';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 import './index.css';
 
 // A tab opened before a deploy still points at chunk files the new build no
@@ -22,10 +23,14 @@ window.addEventListener('vite:preloadError', (event) => {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </BrowserRouter>
+    {/* Last line of defense: a crash outside a page (shell, login, auth)
+        shows a message with Reload instead of a blank window. */}
+    <ErrorBoundary fullScreen>
+      <BrowserRouter>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>
 );

@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import ProtectedRoute from './features/auth/components/ProtectedRoute';
 import RequireRole from './features/auth/components/RequireRole';
 import { ConfirmProvider } from './components/ui/ConfirmProvider';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 import AppShell from './components/layout/AppShell';
 import Login from './features/auth/pages/Login';
 
@@ -67,9 +68,13 @@ function ProtectedLayout() {
   return (
     <ProtectedRoute>
       <AppShell>
-        <Suspense key={pathname} fallback={<PageFallback />}>
-          <Outlet />
-        </Suspense>
+        {/* A crash in a page shows a message here instead of a blank window;
+            the shell keeps working and the next route starts clean. */}
+        <ErrorBoundary resetKey={pathname}>
+          <Suspense key={pathname} fallback={<PageFallback />}>
+            <Outlet />
+          </Suspense>
+        </ErrorBoundary>
       </AppShell>
     </ProtectedRoute>
   );
