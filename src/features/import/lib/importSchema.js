@@ -394,6 +394,10 @@ export const VALUE_CANONICALS = {
     'center drain/ reversible': 'Center Drain / Reversible',
     'center drain/reversible': 'Center Drain / Reversible',
   },
+  // The product page's dropdown has "Lifetime"; "Limited" lives in Warranty.
+  warranty_length: {
+    'limited lifetime': 'Lifetime',
+  },
   mounting_type: {
     'undermount sinks': 'Undermount',
     'undermount': 'Undermount',

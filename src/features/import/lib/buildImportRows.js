@@ -8,7 +8,9 @@ import {
 } from './importSchema';
 import { BRANDS, canonicalBrand } from '@/features/products/lib/brands';
 
-const EMPTY_VALUES = new Set(['', 'n/a', 'na', '#n/a', '#n/d', '-', '—', 'null', 'none']);
+// "Ask Technical Team" is the PTD's placeholder for an unknown answer, not a
+// value: it lands as empty (user, 2026-10-06 — 253 of them were cleared).
+const EMPTY_VALUES = new Set(['', 'n/a', 'na', '#n/a', '#n/d', '-', '—', 'null', 'none', 'ask technical team', 'ask the technical team']);
 
 function cleanText(raw) {
   const s = String(raw ?? '').trim();
