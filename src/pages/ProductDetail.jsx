@@ -80,23 +80,44 @@ const CreateProductDialog = lazy(() => import('@/features/products/components/Cr
 // uses), shared across product visits for a few minutes — the page used to
 // scan the whole catalog on every visit for dropdowns only Edit mode shows.
 const SUGGESTIONS_TTL_MS = 5 * 60 * 1000;
+// Open-vocabulary fields: their dropdown lists what the catalog already uses
+// (the fixed lists live in fieldOptions.js).
+const SUGGEST_COLUMNS = ['material', 'finish', 'series', 'product_type', 'standards_compliance'];
+const SUGGEST_ATTRS = [
+  'mounting_type', 'lock_type', 'application', 'safety_listings',
+  'compatible_faucet_type', 'faucet_hole_center_spacing', 'compatible_pedestal',
+  'wood_species', 'pattern', 'handle_material', 'faucet_centers', 'spray_head_functions',
+  'pull_down_hose_model', 'cartridge_type', 'cartridge_size', 'grids_model_code',
+  'warranty_url_us', 'warranty_url_ca', 'reason_for_restriction', 'commercial_warranty',
+  'greenguard_certifications', 'cradle_to_cradle_certifications', 'sfi_certifications', 'fsc_certifications',
+];
+// Fields whose suggestions come from some categories only.
+const SUGGEST_FROM = {
+  installation_type: (r) => !String(r.category ?? '').includes('sink'), // accessories (sinks have a fixed list)
+  overall_shape: (r) => r.category === 'accessory', // faucets use Wayfair's fixed list
+};
+const SKU_TYPES = [STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE];
 let suggestionsCache = null; // { at, promise }
 function loadSuggestions() {
   if (!suggestionsCache || Date.now() - suggestionsCache.at > SUGGESTIONS_TTL_MS) {
+    const attrs = [...SUGGEST_ATTRS, ...Object.keys(SUGGEST_FROM)];
     const promise = supabase
       .from('products')
-      .select('material, finish, spout_type:attributes->>spout_type, mounting_type:attributes->>mounting_type, lock_type:attributes->>lock_type')
+      .select(['sku', 'brand', 'category', 'workflow_status', ...SUGGEST_COLUMNS,
+        ...attrs.map((k) => `${k}:attributes->>${k}`)].join(', '))
       .then(({ data, error }) => {
         if (error || !data) throw error ?? new Error('no data');
-        const collect = (key) =>
-          [...new Set(data.map((r) => r[key]).filter((v) => v && String(v).trim()))].sort();
-        return {
-          material: collect('material'),
-          finish: collect('finish'),
-          spout_type: collect('spout_type'),
-          mounting_type: collect('mounting_type'),
-          lock_type: collect('lock_type'),
-        };
+        const collect = (key, keep = () => true) =>
+          [...new Set(data.filter(keep).map((r) => r[key]).filter((v) => v && String(v).trim()))].sort();
+        const out = {};
+        for (const k of [...SUGGEST_COLUMNS, ...SUGGEST_ATTRS]) out[k] = collect(k);
+        for (const [k, keep] of Object.entries(SUGGEST_FROM)) out[k] = collect(k, keep);
+        // The SKUs other products point at (strainers, deck plates, drains).
+        out.skusByType = Object.fromEntries(SKU_TYPES.map((t) => [t,
+          data.filter((r) => r.product_type === t && r.workflow_status !== 'archived')
+            .map((r) => ({ sku: r.sku, brand: r.brand }))
+            .sort((a, b) => a.sku.localeCompare(b.sku))]));
+        return out;
       });
     suggestionsCache = { at: Date.now(), promise };
     promise.catch(() => { suggestionsCache = null; });
@@ -139,14 +160,14 @@ const WORKFLOW_OPTIONS = [
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { BRAND_OPTIONS } from '@/features/products/lib/brands';
 import { COUNTRY_NAMES } from '@/features/products/lib/countries';
-
-// Matches Wayfair's "Warranty Length" valid values (used in exports).
-const WARRANTY_LENGTH_OPTIONS = [
-  '30 Days', '60 Days', '90 Days', '6 Months', '18 Months',
-  '1 Year', '2 Years', '3 Years', '4 Years', '5 Years', '6 Years', '7 Years',
-  '8 Years', '10 Years', '12 Years', '15 Years', '20 Years', '25 Years',
-  'Lifetime', 'Warranty length varies by part',
-];
+import {
+  YES_NO_OPTIONS, YES_NO_DNA_OPTIONS, COMPLIANCE_OPTIONS, MANUFACTURER_OPTIONS,
+  WARRANTY_OPTIONS, WARRANTY_LENGTH_OPTIONS, CRAFTSMANSHIP_OPTIONS, SINK_SHAPE_OPTIONS,
+  INSTALLATION_TYPE_OPTIONS, GAUGE_OPTIONS, BOWL_CONFIGURATION_OPTIONS, BASIN_SPLIT_OPTIONS,
+  DRAIN_LOCATION_OPTIONS, FAUCET_SHAPE_OPTIONS, SPOUT_TYPE_OPTIONS, SPRAY_TYPE_OPTIONS,
+  SPRAY_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS,
+  STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE, skusOfType,
+} from '@/features/products/lib/fieldOptions';
 
 const MAX_BULLETS = 12;
 
@@ -159,22 +180,6 @@ function attr(product, key) {
 const LIST_ATTRS = new Set([
   'accessories_included', 'durability_tags', 'keywords_en', 'keywords_fr',
 ]);
-
-// Sink installation is a single choice — dual mount is its own option, not
-// a pair of values (drives the per-type installation manual slots).
-const INSTALLATION_TYPE_OPTIONS = ['Undermount', 'Drop-In', 'Dual Mount', 'Top Mount'];
-// Wayfair's "Overall Shape" vocabulary for faucet classes (Product Addition
-// questions, read 2026-09-15). The faucet-relevant ones lead the list.
-const FAUCET_SHAPE_OPTIONS = [
-  'Gooseneck / High Arc', 'Straight', 'Curved', 'Arch',
-  'Rectangle', 'Square', 'Triangle', 'Cylinder', 'Wedge', 'Oval', 'Round', 'Hexagon', 'T-Shaped',
-  'Free Form', 'Novelty', 'L-Shaped', 'Diamond', 'Circle', 'U-Shaped', 'Abstract', 'Cube', 'Concave',
-  'Flat', 'Elongated', 'Random', 'Crescent', 'Unique', 'Rounded Back', 'Can', 'P-Shaped', 'Unavailable',
-];
-
-// Wayfair's "Spout Type" vocabulary (Kitchen Faucets 653 requires it, Bathroom
-// Sink Faucets 655 recommends it; read 2026-09-21). Same six values in both.
-const SPOUT_TYPE_OPTIONS = ['Gooseneck / High Arc', 'Low Arc', 'Rigid / Fixed', 'Swivel', 'Swing', 'Spring Neck'];
 
 // Attribute keys that must be coerced to numbers on save.
 const NUMBER_ATTRS = new Set([
@@ -1119,11 +1124,11 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
           <Field label="SKU" value={product.sku} mono />
           <AttrField label="UPC" attrKey="upc" product={product} edit={edit} mono />
           <EditableField label="Brand" fieldKey="brand" type="select" options={BRAND_OPTIONS} product={product} edit={edit} />
-          <AttrField label="Manufacturer" attrKey="manufacturer" product={product} edit={edit} />
+          <AttrField label="Manufacturer" attrKey="manufacturer" type="select" options={MANUFACTURER_OPTIONS} product={product} edit={edit} />
           <EditableField label="Category" fieldKey="category" type="select" options={CATEGORY_OPTIONS} product={product} edit={edit} />
-          <EditableField label="Series" fieldKey="series" product={product} edit={edit} />
+          <EditableField label="Series" fieldKey="series" suggest product={product} edit={edit} />
           <EditableField label="Family Number" fieldKey="family_number" type="number" product={product} edit={edit} />
-          <EditableField label="Product Type" fieldKey="product_type" product={product} edit={edit} />
+          <EditableField label="Product Type" fieldKey="product_type" suggest product={product} edit={edit} />
         </div>
       </Section>
 
@@ -1133,21 +1138,21 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <AttrField label="Country of Origin" attrKey="country_of_origin" type="select" options={COUNTRY_NAMES} product={product} edit={edit} />
           <AttrField label="HS Code" attrKey="hs_code" product={product} edit={edit} mono />
-          <AttrField label="Warranty" attrKey="warranty" product={product} edit={edit} />
+          <AttrField label="Warranty" attrKey="warranty" type="select" options={WARRANTY_OPTIONS} product={product} edit={edit} />
           <AttrField label="Warranty Length" attrKey="warranty_length" type="select" options={WARRANTY_LENGTH_OPTIONS} product={product} edit={edit} />
-          <AttrField label="Warranty URL (USA)" attrKey="warranty_url_us" type="url" help="Warranty page sent to US marketplaces (Walmart warrantyURL). Same address for every product." product={product} edit={edit} />
-          <AttrField label="Warranty URL (Canada)" attrKey="warranty_url_ca" type="url" help="Warranty page sent to Canadian marketplaces. Same address for every product." product={product} edit={edit} />
+          <AttrField label="Warranty URL (USA)" attrKey="warranty_url_us" type="url" suggest help="Warranty page sent to US marketplaces (Walmart warrantyURL). Same address for every product." product={product} edit={edit} />
+          <AttrField label="Warranty URL (Canada)" attrKey="warranty_url_ca" type="url" suggest help="Warranty page sent to Canadian marketplaces. Same address for every product." product={product} edit={edit} />
           <div className="col-span-2 sm:col-span-3">
             <AttrField label="Warranty Text (USA)" attrKey="warranty_text_us" type="textarea" help="Full warranty terms sent to US marketplaces that ask for written warranty text (Walmart has_written_warranty = Yes - Warranty Text)." product={product} edit={edit} />
           </div>
           <div className="col-span-2 sm:col-span-3">
             <AttrField label="Warranty Text (Canada)" attrKey="warranty_text_ca" type="textarea" help="Same terms for Canadian marketplaces, pointing at the Canadian warranty page." product={product} edit={edit} />
           </div>
-          <EditableField label="Standards" fieldKey="standards_compliance" product={product} edit={edit} />
-          <AttrField label="Safety Listing(s)" attrKey="safety_listings" product={product} edit={edit} />
-          <AttrField label="SCC Compliant" attrKey="scc_compliant" product={product} edit={edit} />
-          <AttrField label="UPC Certified" attrKey="upc_certified" product={product} edit={edit} />
-          <AttrField label="Vermont Act 193 Compliant" attrKey="vermont_act_193_compliant" product={product} edit={edit} />
+          <EditableField label="Standards" fieldKey="standards_compliance" suggest product={product} edit={edit} />
+          <AttrField label="Safety Listing(s)" attrKey="safety_listings" suggest product={product} edit={edit} />
+          <AttrField label="SCC Compliant" attrKey="scc_compliant" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
+          <AttrField label="UPC Certified" attrKey="upc_certified" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
+          <AttrField label="Vermont Act 193 Compliant" attrKey="vermont_act_193_compliant" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
         </div>
       </Section>
 
@@ -1176,6 +1181,7 @@ function SpecsTab({ product, edit }) {
     || attr(product, 'compatible_drain_assembly') != null;
   const isKitchenFaucet = isFaucet && !isBathFaucet;
   const isAccessory = cat === 'accessory';
+  const brand = edit.isEditing ? edit.form.brand : product.brand;
   const [unit, setUnit] = useLengthUnit();
   // Lives in the header of every section that holds lengths — one shared
   // choice, but always on screen next to the numbers it rewrites.
@@ -1187,12 +1193,12 @@ function SpecsTab({ product, edit }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField label="Material" fieldKey="material" suggest product={product} edit={edit} />
           <EditableField label="Finish" fieldKey="finish" suggest product={product} edit={edit} />
-          <AttrField label="Craftsmanship" attrKey="craftsmanship" product={product} edit={edit} />
-          {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" product={product} edit={edit} />}
+          <AttrField label="Craftsmanship" attrKey="craftsmanship" type="select" options={CRAFTSMANSHIP_OPTIONS} product={product} edit={edit} />
+          {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" type="select" options={SINK_SHAPE_OPTIONS} product={product} edit={edit} />}
           {isSink && <AttrField label="Installation Type" attrKey="installation_type" type="select" options={INSTALLATION_TYPE_OPTIONS} product={product} edit={edit} />}
-          {!isFaucet && !isSink && <AttrField label="Installation Type" attrKey="installation_type" product={product} edit={edit} />}
-          {isKitchenSink && <AttrField label="Gauge" attrKey="gauge" product={product} edit={edit} />}
-          {isFaucet && <AttrField label="Application" attrKey="application" product={product} edit={edit} />}
+          {!isFaucet && !isSink && <AttrField label="Installation Type" attrKey="installation_type" suggest product={product} edit={edit} />}
+          {isKitchenSink && <AttrField label="Gauge" attrKey="gauge" type="select" options={GAUGE_OPTIONS} product={product} edit={edit} />}
+          {isFaucet && <AttrField label="Application" attrKey="application" suggest product={product} edit={edit} />}
           {isFaucet && <AttrField label="Lead Free" attrKey="lead_free" type="boolean" product={product} edit={edit} />}
           {/* Same field the accessory sheets call "Product Care" — the sink
               template just names it differently. */}
@@ -1209,13 +1215,13 @@ function SpecsTab({ product, edit }) {
         <Section title="Bowl Configuration" action={unitToggle}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
             <AttrField label="Number of Bowls" attrKey="number_of_bowls" type="number" product={product} edit={edit} />
-            <AttrField label="Bowl Configuration" attrKey="bowl_configuration" product={product} edit={edit} />
-            <AttrField label="Basin Split" attrKey="basin_split" product={product} edit={edit} />
+            <AttrField label="Bowl Configuration" attrKey="bowl_configuration" type="select" options={BOWL_CONFIGURATION_OPTIONS} product={product} edit={edit} />
+            <AttrField label="Basin Split" attrKey="basin_split" type="select" options={BASIN_SPLIT_OPTIONS} product={product} edit={edit} />
             <AttrField label="Low Divider" attrKey="low_divider" type="boolean" product={product} edit={edit} />
-            <AttrField label="Strainer Model" attrKey="strainer_model" product={product} edit={edit} />
+            <AttrField label="Strainer Model" attrKey="strainer_model" type="select" options={skusOfType(edit.suggestions, STRAINER_TYPE, brand)} product={product} edit={edit} />
             <AttrField label="Sink Radius (mm)" attrKey="sink_radius_mm" type="number" product={product} edit={edit} />
             <AttrField label="Drain Diameter" attrKey="drain_diameter_in" type="number" unit={unit} product={product} edit={edit} />
-            <AttrField label="Drain Location" attrKey="drain_hole_location" product={product} edit={edit} />
+            <AttrField label="Drain Location" attrKey="drain_hole_location" type="select" options={DRAIN_LOCATION_OPTIONS} product={product} edit={edit} />
             <AttrField label="Has Grooves" attrKey="has_grooves" type="boolean" product={product} edit={edit} />
             <AttrField label="Includes Grids" attrKey="includes_grids" type="boolean" product={product} edit={edit} />
           </div>
@@ -1225,34 +1231,34 @@ function SpecsTab({ product, edit }) {
       {isKitchenSink && (
         <Section title="Certifications & Compliance" defaultOpen={false}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-            <AttrField label="cUPC Certified" attrKey="cupc_certified" product={product} edit={edit} />
-            <AttrField label="ADA Compliant" attrKey="ada_compliant" product={product} edit={edit} />
-            <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" product={product} edit={edit} />
-            <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" product={product} edit={edit} />
-            <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" product={product} edit={edit} />
-            <AttrField label="ASME A112.19.4" attrKey="asme_a112_19_4_compliant" product={product} edit={edit} />
-            <AttrField label="ANSI Z124.6-97" attrKey="ansi_z124_6_97_compliant" product={product} edit={edit} />
-            <AttrField label="WW-P-541 Certified" attrKey="ww_p_541_certified" product={product} edit={edit} />
-            <AttrField label="CSA B45.5/IAPMO Z124" attrKey="csa_b45_5_iapmo_z124_compliant" product={product} edit={edit} />
-            <AttrField label="NSF Certified" attrKey="nsf_certified" product={product} edit={edit} />
-            <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" product={product} edit={edit} />
-            <AttrField label="ISTA 1A" attrKey="ista_1a_certified" product={product} edit={edit} />
-            <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" product={product} edit={edit} />
-            <AttrField label="GREENGUARD Certifications" attrKey="greenguard_certifications" product={product} edit={edit} />
-            <AttrField label="GREENGUARD Certified" attrKey="greenguard_certified" product={product} edit={edit} />
-            <AttrField label="GREENGUARD Gold" attrKey="greenguard_gold_certified" product={product} edit={edit} />
-            <AttrField label="Cradle to Cradle Certifications" attrKey="cradle_to_cradle_certifications" product={product} edit={edit} />
-            <AttrField label="Cradle to Cradle Certified" attrKey="cradle_to_cradle_certified" product={product} edit={edit} />
-            <AttrField label="C2C Material Health" attrKey="cradle_to_cradle_material_health" product={product} edit={edit} />
-            <AttrField label="ISO 14021 Recycled" attrKey="iso_14021_certified" product={product} edit={edit} />
-            <AttrField label="EPA WaterSense" attrKey="epa_watersense_certified" product={product} edit={edit} />
-            <AttrField label="Type III EPD" attrKey="epd_type_iii" product={product} edit={edit} />
-            <AttrField label="UPLR Compliant" attrKey="uplr_compliant" help="Uniform Packaging and Labeling Regulation." product={product} edit={edit} />
-            <AttrField label="DOE Compliant" attrKey="doe_compliant" help="Meets the U.S. Department of Energy water-conservation standards." product={product} edit={edit} />
-            <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" product={product} edit={edit} />
-            <AttrField label="California AB-100" attrKey="ab_100_compliant" help="California low-lead law for plumbing fixtures." product={product} edit={edit} />
-            <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
-            <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
+            <AttrField label="cUPC Certified" attrKey="cupc_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ADA Compliant" attrKey="ada_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ASME A112.19.4" attrKey="asme_a112_19_4_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ANSI Z124.6-97" attrKey="ansi_z124_6_97_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="WW-P-541 Certified" attrKey="ww_p_541_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="CSA B45.5/IAPMO Z124" attrKey="csa_b45_5_iapmo_z124_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="NSF Certified" attrKey="nsf_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ISTA 1A" attrKey="ista_1a_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="GREENGUARD Certifications" attrKey="greenguard_certifications" suggest={['Not Certified']} product={product} edit={edit} />
+            <AttrField label="GREENGUARD Certified" attrKey="greenguard_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="GREENGUARD Gold" attrKey="greenguard_gold_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="Cradle to Cradle Certifications" attrKey="cradle_to_cradle_certifications" suggest={['Not Certified']} product={product} edit={edit} />
+            <AttrField label="Cradle to Cradle Certified" attrKey="cradle_to_cradle_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="C2C Material Health" attrKey="cradle_to_cradle_material_health" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="ISO 14021 Recycled" attrKey="iso_14021_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="EPA WaterSense" attrKey="epa_watersense_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="Type III EPD" attrKey="epd_type_iii" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="UPLR Compliant" attrKey="uplr_compliant" type="select" options={COMPLIANCE_OPTIONS} help="Uniform Packaging and Labeling Regulation." product={product} edit={edit} />
+            <AttrField label="DOE Compliant" attrKey="doe_compliant" type="select" options={COMPLIANCE_OPTIONS} help="Meets the U.S. Department of Energy water-conservation standards." product={product} edit={edit} />
+            <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+            <AttrField label="California AB-100" attrKey="ab_100_compliant" type="select" options={COMPLIANCE_OPTIONS} help="California low-lead law for plumbing fixtures." product={product} edit={edit} />
+            <AttrField label="Canada Restriction" attrKey="canada_product_restriction" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
+            <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" suggest={['Does Not Apply']} product={product} edit={edit} />
           </div>
         </Section>
       )}
@@ -1261,33 +1267,33 @@ function SpecsTab({ product, edit }) {
         <>
           <Section title="Bathroom Sink">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="Compatible Faucet Type" attrKey="compatible_faucet_type" product={product} edit={edit} />
+              <AttrField label="Compatible Faucet Type" attrKey="compatible_faucet_type" suggest product={product} edit={edit} />
               <AttrField label="Number of Faucet Holes" attrKey="number_of_faucet_holes" type="number" product={product} edit={edit} />
-              <AttrField label="Faucet Hole Center Spacing" attrKey="faucet_hole_center_spacing" product={product} edit={edit} />
-              <AttrField label="Overflow" attrKey="overflow" product={product} edit={edit} />
+              <AttrField label="Faucet Hole Center Spacing" attrKey="faucet_hole_center_spacing" suggest product={product} edit={edit} />
+              <AttrField label="Overflow" attrKey="overflow" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
               <AttrField label="Drain Location" attrKey="drain_hole_location" product={product} edit={edit} />
               <AttrField label="Drain Diameter" attrKey="drain_diameter_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Pedestal Included" attrKey="pedestal_included" type="boolean" product={product} edit={edit} />
-              <AttrField label="Compatible Pedestal #" attrKey="compatible_pedestal" product={product} edit={edit} />
+              <AttrField label="Compatible Pedestal #" attrKey="compatible_pedestal" suggest product={product} edit={edit} />
               <AttrField label="Console Included" attrKey="console_included" type="boolean" product={product} edit={edit} />
             </div>
           </Section>
 
           <Section title="Certifications & Compliance" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" product={product} edit={edit} />
-              <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" product={product} edit={edit} />
-              <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" product={product} edit={edit} />
-              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" product={product} edit={edit} />
-              <AttrField label="NSF/ANSI 61" attrKey="nsf_ansi_61_certified" product={product} edit={edit} />
-              <AttrField label="NSF Certified" attrKey="nsf_certified" product={product} edit={edit} />
-              <AttrField label="CSA B45.5/IAPMO Z124" attrKey="csa_b45_5_iapmo_z124_compliant" product={product} edit={edit} />
-              <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" product={product} edit={edit} />
-              <AttrField label="cUPC Certified" attrKey="cupc_certified" product={product} edit={edit} />
-              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" product={product} edit={edit} />
-              <AttrField label="California AB-100" attrKey="ab_100_compliant" product={product} edit={edit} />
-              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
-              <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
+              <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="NSF/ANSI 61" attrKey="nsf_ansi_61_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="NSF Certified" attrKey="nsf_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="CSA B45.5/IAPMO Z124" attrKey="csa_b45_5_iapmo_z124_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="cUPC Certified" attrKey="cupc_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="California AB-100" attrKey="ab_100_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
+              <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" suggest={['Does Not Apply']} product={product} edit={edit} />
             </div>
           </Section>
         </>
@@ -1297,11 +1303,11 @@ function SpecsTab({ product, edit }) {
         <>
           <Section title="Accessory Details">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="Wood Species" attrKey="wood_species" product={product} edit={edit} />
-              <AttrField label="Pattern" attrKey="pattern" product={product} edit={edit} />
-              <AttrField label="Overall Shape" attrKey="overall_shape" product={product} edit={edit} />
+              <AttrField label="Wood Species" attrKey="wood_species" suggest product={product} edit={edit} />
+              <AttrField label="Pattern" attrKey="pattern" suggest product={product} edit={edit} />
+              <AttrField label="Overall Shape" attrKey="overall_shape" suggest product={product} edit={edit} />
               <AttrField label="Product Care" attrKey="product_care" product={product} edit={edit} />
-              <AttrField label="Antimicrobial" attrKey="antimicrobial" product={product} edit={edit} />
+              <AttrField label="Antimicrobial" attrKey="antimicrobial" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
               <AttrField label="Juice Grooves" attrKey="juice_grooves" type="boolean" product={product} edit={edit} />
               <AttrField label="BPA Free" attrKey="bpa_free" type="boolean" product={product} edit={edit} />
               <AttrField label="Flexible" attrKey="flexible_cutting_board" type="boolean" product={product} edit={edit} />
@@ -1314,18 +1320,18 @@ function SpecsTab({ product, edit }) {
 
           <Section title="Certifications & Compliance" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="USDA Compliant" attrKey="usda_compliant" product={product} edit={edit} />
-              <AttrField label="TAA Compliant" attrKey="taa_compliant" product={product} edit={edit} />
-              <AttrField label="NSF Certified" attrKey="nsf_certified" product={product} edit={edit} />
-              <AttrField label="ISO 14021 Recycled" attrKey="iso_14021_certified" product={product} edit={edit} />
-              <AttrField label="PEFC Certified" attrKey="pefc_certified" product={product} edit={edit} />
-              <AttrField label="ISTA Certified" attrKey="ista_certified" product={product} edit={edit} />
-              <AttrField label="SFI Certifications" attrKey="sfi_certifications" product={product} edit={edit} />
-              <AttrField label="FSC Certifications" attrKey="fsc_certifications" product={product} edit={edit} />
+              <AttrField label="USDA Compliant" attrKey="usda_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="TAA Compliant" attrKey="taa_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="NSF Certified" attrKey="nsf_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="ISO 14021 Recycled" attrKey="iso_14021_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="PEFC Certified" attrKey="pefc_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="ISTA Certified" attrKey="ista_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="SFI Certifications" attrKey="sfi_certifications" suggest={['Not Certified']} product={product} edit={edit} />
+              <AttrField label="FSC Certifications" attrKey="fsc_certifications" suggest={['Not Certified']} product={product} edit={edit} />
               <AttrField label="Safety Reg. #" attrKey="safety_listing_registration_number" product={product} edit={edit} mono />
-              <AttrField label="Commercial Warranty" attrKey="commercial_warranty" product={product} edit={edit} />
-              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
-              <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />
+              <AttrField label="Commercial Warranty" attrKey="commercial_warranty" suggest={YES_NO_OPTIONS} product={product} edit={edit} />
+              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
+              <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" suggest={['Does Not Apply']} product={product} edit={edit} />
             </div>
           </Section>
         </>
@@ -1337,7 +1343,7 @@ function SpecsTab({ product, edit }) {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Spout Type" attrKey="spout_type" type="select" options={SPOUT_TYPE_OPTIONS} help="Wayfair's Spout Type list. Required for kitchen faucets, recommended for bathroom faucets." product={product} edit={edit} />
               <AttrField label="Overall Shape" attrKey="overall_shape" type="select" options={FAUCET_SHAPE_OPTIONS} help="Wayfair's Overall Shape list for faucets. Falls back to Spout Type when empty." product={product} edit={edit} />
-              <AttrField label="Swivel Spout" attrKey="swivel_spout" product={product} edit={edit} />
+              <AttrField label="Swivel Spout" attrKey="swivel_spout" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
               <AttrField label="Spout Rotation (Degrees)" attrKey="spout_rotation_degrees" type="number" help="How far the spout swivels, in degrees (e.g. 360)." product={product} edit={edit} />
               <AttrField label="Max Flow Rate (GPM)" attrKey="max_flow_rate" help="Maximum water flow in gallons per minute, typically measured at 60 psi." product={product} edit={edit} />
               <AttrField label="Installation Holes" attrKey="number_of_installation_holes" type="number" product={product} edit={edit} />
@@ -1352,12 +1358,12 @@ function SpecsTab({ product, edit }) {
           {isBathFaucet && (
             <Section title="Bathroom Faucet">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-                <AttrField label="Laminar Flow" attrKey="laminar_flow" product={product} edit={edit} />
+                <AttrField label="Laminar Flow" attrKey="laminar_flow" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
                 <AttrField label="Valve Included" attrKey="valve_included" type="boolean" product={product} edit={edit} />
-                <AttrField label="Drain Overflow" attrKey="drain_overflow" product={product} edit={edit} />
-                <AttrField label="Compatible Drain Assembly #" attrKey="compatible_drain_assembly" product={product} edit={edit} />
-                <AttrField label="Handle Material" attrKey="handle_material" product={product} edit={edit} />
-                <AttrField label="Faucet Centers" attrKey="faucet_centers" product={product} edit={edit} />
+                <AttrField label="Drain Overflow" attrKey="drain_overflow" type="select" options={YES_NO_DNA_OPTIONS} product={product} edit={edit} />
+                <AttrField label="Compatible Drain Assembly #" attrKey="compatible_drain_assembly" skuList={skusOfType(edit.suggestions, DRAIN_TYPE, brand)} product={product} edit={edit} />
+                <AttrField label="Handle Material" attrKey="handle_material" suggest product={product} edit={edit} />
+                <AttrField label="Faucet Centers" attrKey="faucet_centers" suggest product={product} edit={edit} />
               </div>
             </Section>
           )}
@@ -1366,22 +1372,22 @@ function SpecsTab({ product, edit }) {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Number of Handles" attrKey="number_of_handles" type="number" product={product} edit={edit} />
               <AttrField label="Handle(s) Included" attrKey="handles_included" type="boolean" product={product} edit={edit} />
-              <AttrField label="Handle Style" attrKey="handle_style" product={product} edit={edit} />
+              <AttrField label="Handle Style" attrKey="handle_style" type="select" options={HANDLE_STYLE_OPTIONS} product={product} edit={edit} />
               <AttrField label="Cold Start Handle" attrKey="cold_start_handle" type="boolean" product={product} edit={edit} />
               <AttrField label="Spray Included" attrKey="spray_included" type="boolean" product={product} edit={edit} />
-              <AttrField label="Spray Type" attrKey="spray_type" product={product} edit={edit} />
-              <AttrField label="Spray Activation" attrKey="spray_function_activation" product={product} edit={edit} />
-              <AttrField label="Spray Head Functions" attrKey="spray_head_functions" product={product} edit={edit} />
-              <AttrField label="Pull-Down Hose Model" attrKey="pull_down_hose_model" product={product} edit={edit} />
-              <AttrField label="Cartridge Type" attrKey="cartridge_type" product={product} edit={edit} />
-              <AttrField label="Cartridge Size" attrKey="cartridge_size" product={product} edit={edit} />
+              <AttrField label="Spray Type" attrKey="spray_type" type="select" options={SPRAY_TYPE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="Spray Activation" attrKey="spray_function_activation" type="select" options={SPRAY_ACTIVATION_OPTIONS} product={product} edit={edit} />
+              <AttrField label="Spray Head Functions" attrKey="spray_head_functions" suggest product={product} edit={edit} />
+              <AttrField label="Pull-Down Hose Model" attrKey="pull_down_hose_model" suggest product={product} edit={edit} />
+              <AttrField label="Cartridge Type" attrKey="cartridge_type" suggest product={product} edit={edit} />
+              <AttrField label="Cartridge Size" attrKey="cartridge_size" suggest product={product} edit={edit} />
             </div>
           </Section>
 
           <Section title="Included Components" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Deck Plate Included" attrKey="deck_plate_included" type="boolean" product={product} edit={edit} />
-              <AttrField label="Compatible Deck Plate #" attrKey="compatible_deck_plate" product={product} edit={edit} />
+              <AttrField label="Compatible Deck Plate #" attrKey="compatible_deck_plate" skuList={skusOfType(edit.suggestions, DECK_PLATE_TYPE, brand)} product={product} edit={edit} />
               <AttrField label="Supply Line Included" attrKey="supply_line_included" type="boolean" product={product} edit={edit} />
               <AttrField label="Aerator Included" attrKey="aerator_included" type="boolean" product={product} edit={edit} />
               <AttrField label="Hose Included" attrKey="hose_included" type="boolean" product={product} edit={edit} />
@@ -1405,26 +1411,26 @@ function SpecsTab({ product, edit }) {
 
           <Section title="Certifications & Compliance" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="ADA Compliant" attrKey="ada_compliant" help="Meets Americans with Disabilities Act accessibility requirements (one-hand operation, limited force)." product={product} edit={edit} />
-              <AttrField label="cUPC Certified" attrKey="cupc_certified" help="Certified by IAPMO to the Uniform Plumbing Code for the US and Canada." product={product} edit={edit} />
-              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" help="Backflow-prevention (anti-siphon) performance standard." product={product} edit={edit} />
-              <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" product={product} edit={edit} />
-              <AttrField label="ASME/CSA B125.1" attrKey="asme_csa_certified" help="North American standard for plumbing supply fittings." product={product} edit={edit} />
-              <AttrField label="ISTA 1A" attrKey="ista_1a_certified" help="Packaging transit-test certification (non-simulation)." product={product} edit={edit} />
-              <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" help="Packaging transit-test certification for parcel delivery." product={product} edit={edit} />
-              <AttrField label="CALGreen" attrKey="calgreen_compliant" help="California Green Building Standards Code (water-efficient fixtures)." product={product} edit={edit} />
-              <AttrField label="Title 20" attrKey="title_20_compliant" help="California appliance efficiency regulation — maximum flow limits." product={product} edit={edit} />
-              <AttrField label="Title 24" attrKey="title_24_compliant" help="California building energy/water efficiency standard." product={product} edit={edit} />
-              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" help="Uniform Packaging and Labeling Regulation." product={product} edit={edit} />
-              <AttrField label="DOE Compliant" attrKey="doe_compliant" help="Meets the U.S. Department of Energy water-conservation standards for faucets." product={product} edit={edit} />
-              <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" product={product} edit={edit} />
-              <AttrField label="California AB-100" attrKey="ab_100_compliant" help="California low-lead law for plumbing fixtures." product={product} edit={edit} />
-              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" product={product} edit={edit} />
-              {isBathFaucet && <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" product={product} edit={edit} />}
-              {isBathFaucet && <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" product={product} edit={edit} />}
-              {isBathFaucet && <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" product={product} edit={edit} />}
-              {isBathFaucet && <AttrField label="SDWA Compliant" attrKey="sdwa_compliant" product={product} edit={edit} />}
-              {isBathFaucet && <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" product={product} edit={edit} />}
+              <AttrField label="ADA Compliant" attrKey="ada_compliant" type="select" options={COMPLIANCE_OPTIONS} help="Meets Americans with Disabilities Act accessibility requirements (one-hand operation, limited force)." product={product} edit={edit} />
+              <AttrField label="cUPC Certified" attrKey="cupc_certified" type="select" options={COMPLIANCE_OPTIONS} help="Certified by IAPMO to the Uniform Plumbing Code for the US and Canada." product={product} edit={edit} />
+              <AttrField label="ASSE 1001" attrKey="asse_1001_certified" type="select" options={COMPLIANCE_OPTIONS} help="Backflow-prevention (anti-siphon) performance standard." product={product} edit={edit} />
+              <AttrField label="UL 1951 Listed" attrKey="ul_1951_listed" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="ASME/CSA B125.1" attrKey="asme_csa_certified" type="select" options={COMPLIANCE_OPTIONS} help="North American standard for plumbing supply fittings." product={product} edit={edit} />
+              <AttrField label="ISTA 1A" attrKey="ista_1a_certified" type="select" options={COMPLIANCE_OPTIONS} help="Packaging transit-test certification (non-simulation)." product={product} edit={edit} />
+              <AttrField label="ISTA 3A/6A" attrKey="ista_3a_6a_certified" type="select" options={COMPLIANCE_OPTIONS} help="Packaging transit-test certification for parcel delivery." product={product} edit={edit} />
+              <AttrField label="CALGreen" attrKey="calgreen_compliant" type="select" options={COMPLIANCE_OPTIONS} help="California Green Building Standards Code (water-efficient fixtures)." product={product} edit={edit} />
+              <AttrField label="Title 20" attrKey="title_20_compliant" type="select" options={COMPLIANCE_OPTIONS} help="California appliance efficiency regulation — maximum flow limits." product={product} edit={edit} />
+              <AttrField label="Title 24" attrKey="title_24_compliant" type="select" options={COMPLIANCE_OPTIONS} help="California building energy/water efficiency standard." product={product} edit={edit} />
+              <AttrField label="UPLR Compliant" attrKey="uplr_compliant" type="select" options={COMPLIANCE_OPTIONS} help="Uniform Packaging and Labeling Regulation." product={product} edit={edit} />
+              <AttrField label="DOE Compliant" attrKey="doe_compliant" type="select" options={COMPLIANCE_OPTIONS} help="Meets the U.S. Department of Energy water-conservation standards for faucets." product={product} edit={edit} />
+              <AttrField label="Energy Efficiency" attrKey="energy_efficiency_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
+              <AttrField label="California AB-100" attrKey="ab_100_compliant" type="select" options={COMPLIANCE_OPTIONS} help="California low-lead law for plumbing fixtures." product={product} edit={edit} />
+              <AttrField label="Canada Restriction" attrKey="canada_product_restriction" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
+              {isBathFaucet && <AttrField label="ASME A112.19.1/CSA B45.2" attrKey="asme_a112_19_1_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="ASME A112.19.2/CSA B45.1" attrKey="asme_a112_19_2_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="ASME A112.19.3" attrKey="asme_a112_19_3_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="SDWA Compliant" attrKey="sdwa_compliant" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />}
+              {isBathFaucet && <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" suggest={['Does Not Apply']} product={product} edit={edit} />}
             </div>
           </Section>
         </>
@@ -1475,7 +1481,7 @@ function SpecsTab({ product, edit }) {
           <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} hint="Separate items with ;" linkSkus />
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
             <AttrField label="Number of Pieces Included" attrKey="number_of_pieces" type="number" product={product} edit={edit} />
-            <AttrField label="Grids Model Code" attrKey="grids_model_code" product={product} edit={edit} />
+            <AttrField label="Grids Model Code" attrKey="grids_model_code" suggest product={product} edit={edit} />
           </div>
         </Section>
       )}
@@ -2168,7 +2174,10 @@ function FractionField({ label, attrKey, product, edit }) {
   return <Field label={`${label} (Fractions)`} value={fraction ? `${fraction}"` : null} />;
 }
 
-function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit, suggest, help }) {
+// `options` = a fixed list (a <select>); `suggest` = true for the catalog's own
+// values plus "Other…", or a list that leads them; `skuList` = the SKUs that
+// can be picked, several at once ("A-802B; A-803B").
+function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit, suggest, skuList, help }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;
   const shownUnit = unit ? (isEditing ? 'in' : unit) : null;
@@ -2221,16 +2230,26 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
   const inputBase = 'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
   if (suggest) {
+    const lead = Array.isArray(suggest) ? suggest : [];
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
         <SuggestInput
           value={value ?? ''}
           onChange={(v) => setField(formKey, v)}
-          suggestions={edit.suggestions?.[attrKey] ?? []}
+          suggestions={[...new Set([...lead, ...(edit.suggestions?.[attrKey] ?? [])])]}
           inputBase={inputBase}
           ariaLabel={name}
         />
+      </div>
+    );
+  }
+
+  if (skuList) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-label-md text-on-surface-variant">{label}</span>
+        <SkuListInput value={value ?? ''} onChange={(v) => setField(formKey, v)} options={skuList} inputBase={inputBase} ariaLabel={name} />
       </div>
     );
   }
@@ -2423,7 +2442,7 @@ function AttrListField({ label, attrKey, product, edit, hint, linkSkus = false }
         placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`}
         className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
       />
-      {hint && <span className="text-label-md text-on-surface-variant/70 mt-0.5">{hint}</span>}
+      {hint && <span className="text-label-md text-on-surface-variant mt-0.5">{hint}</span>}
     </div>
   );
 }
@@ -2752,6 +2771,52 @@ function SuggestInput({ value, onChange, suggestions, inputBase, ariaLabel }) {
       {!isKnown && <option value={value}>{value}</option>}
       <option value="__other__">Other…</option>
     </select>
+  );
+}
+
+// Several SKUs of one product type as chips plus a dropdown of the catalog's
+// SKUs, so a part number is picked, never typed. Saved as "A; B" text (the
+// exporters split on any separator); a value nobody edits is left as it is.
+const DOES_NOT_APPLY = 'Does Not Apply';
+function SkuListInput({ value, onChange, options, inputBase, ariaLabel }) {
+  const selectRef = useRef(null);
+  const items = String(value ?? '').split(/[;,:]/).map((s) => s.trim()).filter(Boolean);
+  const save = (next) => onChange([...new Set(next)].join('; '));
+  const remove = (item) => {
+    save(items.filter((i) => i !== item));
+    selectRef.current?.focus(); // the chip's button is gone
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {items.map((item, i) => (
+            <span key={`${item}-${i}`} className="inline-flex items-center gap-1 pl-3 pr-1 py-1 rounded-full bg-surface-container text-body-sm text-on-surface">
+              {item}
+              <button type="button" onClick={() => remove(item)} aria-label={`Remove ${item}`}
+                className="p-0.5 rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface">
+                <X className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <select
+        ref={selectRef}
+        value=""
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) return;
+          save(v === DOES_NOT_APPLY ? [v] : [...items.filter((i) => i !== DOES_NOT_APPLY), v]);
+        }}
+        aria-label={ariaLabel ? `Add to ${ariaLabel}` : undefined}
+        className={inputBase}
+      >
+        <option value="">Add…</option>
+        {options.filter((o) => !items.includes(o)).map((o) => (<option key={o} value={o}>{o}</option>))}
+        {!items.includes(DOES_NOT_APPLY) && <option value={DOES_NOT_APPLY}>{DOES_NOT_APPLY}</option>}
+      </select>
+    </div>
   );
 }
 

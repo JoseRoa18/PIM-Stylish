@@ -144,6 +144,12 @@ Supabase Auth + a `profiles` table with roles `admin | editor | viewer`. `Protec
 - Exporters read yes/no certifications with `isYes` ([templateFiller.js](src/features/syndication/exports/templateFiller.js)): true, "Yes" or the mark's own name ("ADA Compliant", "cUPC Certified"); a stored "No" / "Not Certified" / "Does Not Apply" is a no. BB&B (features) and Home Depot USA (Certifications and Listings) counted ANY filled value as yes until 2026-10-06.
 - The spreadsheet import ([buildImportRows.js](src/features/import/lib/buildImportRows.js)) treats the PTD's "Ask Technical Team" placeholder as empty (`EMPTY_VALUES`; the 253 already stored were cleared 2026-10-06) and maps Warranty Length "Limited Lifetime" to the dropdown's "Lifetime" (`VALUE_CANONICALS`). Its parser reads only a file's first sheet with headers in row 1 — the PTD workbook's sheets carry rows above the "Model Number" header.
 - `workflow_status` values are centralized in [src/features/products/lib/workflowStatus.js](src/features/products/lib/workflowStatus.js) — add new statuses there only.
+- The product page edits with dropdowns wherever the value comes from a list (user request 2026-10-06, against typos):
+  - Fixed lists live in [fieldOptions.js](src/features/products/lib/fieldOptions.js) (`type="select" options`): Manufacturer, Warranty, Craftsmanship, Sink Shape, Gauge, Bowl Configuration, Basin Split, Drain Location, Handle Style, Spray Type / Activation, every Yes/No and certification field.
+  - Open fields (Series, Product Type, Finish, Mounting, Cartridge…) offer the catalog's own values plus "Other…" (`suggest`; the keys are `SUGGEST_COLUMNS` / `SUGGEST_ATTRS` in ProductDetail's `loadSuggestions`).
+  - Strainer Model and the Compatible Deck Plate # / Drain Assembly # pickers offer the catalog's SKUs of that product type, of the product's own brand (`skusOfType`; ST-03 Stylish, ST03 Azuni).
+  - A stored value that is off its list shows as the first option and is kept. A new value goes on the list, not typed into one product.
+  - UPC, HS Code, numbers, titles and long texts (care instructions) stay free text.
 - SKUs with and without dashes are DIFFERENT brands (e.g. `A-906` vs `A906`), not duplicates. Never merge/delete on that assumption without asking.
 - Mutations log to the audit trail via `logActivity` ([src/features/activity/api/activityLog.js](src/features/activity/api/activityLog.js)).
 - In PIM ↔ marketplace discrepancies, the PIM is the source of truth: fix diffs by pushing from the PIM, not by copying channel data in.
