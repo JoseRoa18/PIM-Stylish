@@ -55,10 +55,13 @@ const SUPPLIERS: Record<string, { market: Market; prefix: string; costKey: strin
     costKey: "cost_usd_wayfair",
     region: "US",
   },
+  // Wayfair Canada bills its base cost in USD from its OWN levels
+  // (cost_usd_wayfair_ca); the CAD "Small Online Dealers" cost is not Wayfair's
+  // (user, 2026-10-06 — this used to send that CAD cost). Its MAP stays in CAD.
   CAN: {
     market: { locale: "en-CA", country: "CANADA", brand: "WAYFAIR" },
     prefix: "WAYFAIR",
-    costKey: "cost_cad_wayfair_sod",
+    costKey: "cost_usd_wayfair_ca",
     region: "CA",
   },
 };
@@ -640,7 +643,7 @@ Deno.serve(async (req) => {
     // the UNITED_STATES market context (CANADA returns no brands and
     // "problems with our internal systems", seen 2026-09-15) — so CAN
     // defaults to the US context while keeping its own credentials, supplier
-    // id and CAD cost.
+    // id and cost (Wayfair Canada's USD cost).
     const marketOverride = String(body.market ?? (supplier === "CAN" ? "US" : "")).toUpperCase();
     const cfg = marketOverride === "US" ? { ...base, market: SUPPLIERS.USA.market } : marketOverride === "CA" ? { ...base, market: SUPPLIERS.CAN.market } : base;
     const sandbox = body.sandbox === true || (Deno.env.get("WAYFAIR_ENV") ?? "sandbox") !== "production";

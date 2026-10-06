@@ -242,7 +242,7 @@ export const CHECKS = [
   // ---- Pricing (both markets) ----
   { key: 'msrp_cad', label: 'MSRP CAD', group: 'Pricing', section: 'Canada Pricing (CAD)', cats: ALL, check: (p) => num(p.msrp_cad) },
   { key: 'map_cad', label: 'MAP CAD', group: 'Pricing', section: 'Canada Pricing (CAD)', cats: ALL, check: (p) => num(p.map_cad) },
-  { key: 'cost_cad', label: 'Costs CAD (Rona/HD + Wayfair/SOD)', group: 'Pricing', section: 'Canada Pricing (CAD)', cats: ALL, check: (p) => num(p.cost_cad_rona_hd) && num(p.cost_cad_wayfair_sod) },
+  { key: 'cost_cad', label: 'Costs CAD (Rona/HD + Small Online Dealers)', group: 'Pricing', section: 'Canada Pricing (CAD)', cats: ALL, check: (p) => num(p.cost_cad_rona_hd) && num(p.cost_cad_wayfair_sod) },
   { key: 'msrp_usd', label: 'MSRP USD', group: 'Pricing', section: 'USA Pricing (USD)', cats: ALL, check: (p) => num(p.msrp_usd) },
   { key: 'map_usd', label: 'MAP USD', group: 'Pricing', section: 'USA Pricing (USD)', cats: ALL, check: (p) => num(p.map_usd) },
   { key: 'cost_usd', label: 'Costs USD (Wayfair + Lowe\'s/SOD/BB&B)', group: 'Pricing', section: 'USA Pricing (USD)', cats: ALL, check: (p) => num(p.cost_usd_wayfair) && num(p.cost_usd_lowes_sod_bbb) },

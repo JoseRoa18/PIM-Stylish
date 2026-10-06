@@ -1622,7 +1622,9 @@ function PricingTab({ product, edit, onAddPricing }) {
               columns={[
                 { label: 'MAP', help: 'All marketplaces. Blue is the base MAP; Orange the monthly-promotion level; Purple the flash deal / special event level.', keys: ['map_cad', 'map_orange_cad', 'map_purple_cad'] },
                 { label: 'WC · Rona / Home Depot', keys: ['cost_cad_rona_hd', 'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple'] },
-                { label: 'WC · Wayfair / Small Online', keys: ['cost_cad_wayfair_sod', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple'] },
+                // Small Online Dealers only (user, 2026-10-06): Wayfair Canada is billed
+                // in USD from its own levels (the Wayfair Canada section below).
+                { label: 'WC · Small Online Dealers', keys: ['cost_cad_wayfair_sod', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple'] },
               ]}
             />
           </Section>

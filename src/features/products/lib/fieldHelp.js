@@ -182,7 +182,8 @@ export const FIELD_HELP = {
   msrp_cad: 'Canadian list price. NOT the SinksDirect selling price — the store sells at MAP.',
   map_cad: 'Canadian Minimum Advertised Price — the floor for ads AND the SinksDirect selling price.',
   cost_cad_rona_hd: 'Canadian dealer cost for Rona and Home Depot.',
-  cost_cad_wayfair_sod: 'Canadian dealer cost for Wayfair and Small Online Dealers.',
+  // The column keeps its old name; it is the Small Online Dealers cost only (2026-10-06).
+  cost_cad_wayfair_sod: 'Canadian dealer cost (CAD) for Small Online Dealers. Wayfair Canada has its own cost in USD.',
   msrp_usd: 'US list price from the official price list.',
   map_usd: 'US Minimum Advertised Price — no channel may advertise below it.',
   cost_usd_lowes_sod_bbb: 'US dealer cost for Lowes, Home Depot USA, Small Online Dealers and BB&B.',
