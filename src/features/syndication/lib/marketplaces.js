@@ -32,9 +32,11 @@ export const marketplaceLabel = (key) => MARKETPLACES.find((m) => m.key === key)
 export const wixExclusionKey = (site) => `wix_${site}`;
 
 /** Is the product switched off for this marketplace key? */
-// The Sinks Direct and Stylish websites carry EVERY product (user rule
-// 2026-10-05): they can't be switched off, and the database drops them from
-// channel_exclusions (20261005_websites_always_on.sql).
+// The Sinks Direct and Stylish websites carry EVERY product of the brands
+// they sell (user rule 2026-10-05): they can't be switched off, and the
+// database drops them from channel_exclusions (20261005_websites_always_on.sql).
+// The brand rule stays on top (wixSiteSells): Azuni is never on the Stylish
+// websites, Stylish never on the Azuni one (user, 2026-10-06).
 export const ALWAYS_ON_KEYS = new Set(MARKETPLACES.filter((m) => m.alwaysOn).map((m) => m.key));
 
 export const isExcluded = (product, key) => !ALWAYS_ON_KEYS.has(key) && Array.isArray(product?.channel_exclusions) && product.channel_exclusions.includes(key);

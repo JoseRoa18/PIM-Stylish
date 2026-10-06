@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Ban } from 'lucide-react';
 import { MARKETPLACES, ALWAYS_ON_KEYS } from '../lib/marketplaces';
+import { wixSiteSells } from '../lib/wixSites';
 import { updateProduct } from '@/features/products/api/products';
 import { useAuth } from '@/features/auth/AuthContext';
 
@@ -53,15 +54,23 @@ export default function ChannelExclusionsCard({ product, onUpdate }) {
             <ul className="divide-y divide-outline-variant/60">
               {byMarket(m).map((c) => {
                 const on = excluded.has(c.key);
+                // Brand rule (2026-09-09, user 2026-10-06): Azuni is never on the
+                // Stylish websites and Stylish never on the Azuni one — no switch.
+                const notSold = c.wixSite && !wixSiteSells(c.wixSite, product);
                 return (
                   <li key={c.key} className="flex items-center justify-between gap-3 py-2">
                     <span className="flex items-center gap-2.5 min-w-0">
                       <span className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center text-label-sm font-bold flex-shrink-0">{c.monogram}</span>
                       <span className={`text-body-md truncate ${on ? 'text-on-surface' : 'text-on-surface-variant'}`}>{c.label}</span>
                     </span>
-                    {c.alwaysOn ? (
-                      // The Sinks Direct and Stylish websites carry every product (rule 2026-10-05).
-                      <span title={`Every product is on ${c.label}`} className="px-2.5 py-0.5 rounded-full bg-success-container text-on-success-container text-label-sm font-medium whitespace-nowrap flex-shrink-0">
+                    {notSold ? (
+                      <span title={`${product.brand} products are never sold on ${c.label}`} className="px-2.5 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-label-sm font-medium whitespace-nowrap flex-shrink-0">
+                        Not sold ({product.brand})
+                      </span>
+                    ) : c.alwaysOn ? (
+                      // The Sinks Direct and Stylish websites carry every product of
+                      // their brands (rule 2026-10-05).
+                      <span title={`Every ${product.brand ?? ''} product is on ${c.label}`} className="px-2.5 py-0.5 rounded-full bg-success-container text-on-success-container text-label-sm font-medium whitespace-nowrap flex-shrink-0">
                         Always on
                       </span>
                     ) : (
