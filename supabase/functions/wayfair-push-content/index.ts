@@ -6,8 +6,8 @@
 //     Wayfair already carries the copy; prices have no API at all.
 //   - Everything that travels is media, by public URL, in this order:
 //       images  → white main leads, gray SinksDirect hero stays out,
-//                 the market's language set (CA: EN-FR, else EN, else all;
-//                 US: EN, else EN-ES, else EN-FR, else all but French)
+//                 ONE language set (EN-FR, else EN + FR, else EN-ES — the
+//                 listing is shared by both markets) + the Universal photos
 //       videos  → the product family's .mp4 files
 //       documents → PDFs: spec sheet, installation, cut-out template, warranty
 //     Spec attributes are pushed by wayfair-push-attributes (separate call).
@@ -78,19 +78,21 @@ const isHttp = (u: string | null) => /^https?:\/\//i.test(u ?? "");
 const fileName = (u: string) => decodeURIComponent(u.split("?")[0].split("/").pop() ?? "");
 
 // Same language rule as the Wix Canada push, so the two channels show the
-// same artwork: EN-FR set when it exists, else EN, else everything (US: EN,
-// else everything that is not French).
-// ONE listing serves both suppliers (verified 2026-09-10: the 12 images
-// pushed through Canada show under the USA supplier, spec diffs are
-// identical SKU by SKU, same listingId), so both markets get the SAME
-// set: the bilingual EN-FR set, else EN, else everything. A market-specific
-// set would pile a second gallery onto the shared listing.
+// same artwork. ONE listing serves both suppliers (verified 2026-09-10: the
+// 12 images pushed through Canada show under the USA supplier, spec diffs
+// are identical SKU by SKU, same listingId), so both markets get the SAME
+// set; a market-specific set would pile a second gallery onto the shared
+// listing. The order (2026-10-05): EN-FR, else EN + FR, else EN-ES — ONE
+// text set plus every Universal (untagged) photo, which is language-neutral
+// and goes with whichever set is sent. PIM order is kept.
+const SET_ORDER = [["en_fr"], ["en", "fr"], ["en_es"]];
 function pickImages(all: MediaRow[], _lang: "ca" | "us") {
-  const enFr = all.filter((m) => m.language === "en_fr" || m.language === "fr");
-  const en = all.filter((m) => m.language === "en");
-  if (enFr.length) return { chosen: enFr, set: "en_fr" };
-  if (en.length) return { chosen: en, set: "en" };
-  return { chosen: all, set: "all" };
+  for (const langs of SET_ORDER) {
+    if (all.some((m) => m.language != null && langs.includes(m.language))) {
+      return { chosen: all.filter((m) => m.language == null || langs.includes(m.language)), set: langs.join("+") };
+    }
+  }
+  return { chosen: all.filter((m) => m.language == null), set: "universal" };
 }
 
 function buildPlan(media: MediaRow[], lang: "ca" | "us") {
@@ -120,7 +122,7 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
   const skippedDocs = media.filter((m) => m.media_type === "document").length - docItems.length;
   return {
     steps: [
-      { key: "images", label: "Images", items: imageItems, note: `${set === "en_fr" ? "EN-FR set" : set === "en_es" ? "EN-ES set" : set === "en" ? "EN set" : "all images"} · white main first · gray hero not sent${orderedImages.length > IMAGE_CAP ? ` · ${orderedImages.length - IMAGE_CAP} beyond the cap not sent` : ""}` },
+      { key: "images", label: "Images", items: imageItems, note: `${set === "en_fr" ? "EN-FR set" : set === "en+fr" ? "EN + FR sets" : set === "en_es" ? "EN-ES set" : set === "en" ? "EN set" : "Universal photos only"}${set !== "universal" ? " + Universal photos" : ""} · white main first · gray hero not sent${orderedImages.length > IMAGE_CAP ? ` · ${orderedImages.length - IMAGE_CAP} beyond the cap not sent` : ""}` },
       { key: "videos", label: "Videos", items: videoItems, note: videoItems.length ? "MP4 files of the product family" : "no video file in the PIM" },
       { key: "documents", label: "Documents", items: docItems.slice(0, DOC_CAP), note: `PDF only · type and language are set in Partner Home after the upload${skippedDocs > 0 ? ` · ${skippedDocs} not sent (DXF, EN-ES or beyond the cap)` : ""}` },
     ],

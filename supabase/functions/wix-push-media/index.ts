@@ -38,12 +38,15 @@ const UPLOAD_PARALLELISM = 3;
 const SETTLE_TRIES = 12;
 const SETTLE_MS = 2000;
 
-// Language rule by market. Canadian sites are bilingual: push the EN/FR set
-// when the product has one; otherwise the EN set; otherwise everything left
-// (EN/ES artwork and universal/untagged shots). US sites skip the French
-// tier: EN set first, else the non-French remainder. Sets never mix — a
-// product with 15 EN/FR + 15 EN/ES duplicates must not burn Wix's media cap
-// on the duplicate copies.
+// Language rule by market (2026-10-05): ONE text set, plus every Universal
+// (untagged) photo — Universal means language-neutral, so it goes with
+// whichever set is sent instead of counting as a set of its own (that made
+// untagged EN-FR sets ride along with the EN-ES copies, and pushed French
+// slides to US sites). Canadian sites are bilingual: EN-FR, else EN + FR,
+// else EN-ES. US sites: EN, else EN-ES, else EN-FR (bilingual beats blank).
+// Sets never mix — a product with 15 EN/FR + 15 EN/ES copies of the same
+// slides must not burn Wix's media cap on duplicates. PIM order is kept.
+// The same rule runs in wayfair-push-content and walmart-add-items.
 interface PimImage {
   storage_path: string;
   language: string | null;
@@ -51,21 +54,18 @@ interface PimImage {
   is_primary: boolean | null;
 }
 
+const SET_ORDER: Record<"ca" | "us", string[][]> = {
+  ca: [["en_fr"], ["en", "fr"], ["en_es"]],
+  us: [["en"], ["en_es"], ["en_fr"]],
+};
+
 function pickLanguageSet(all: PimImage[], market: "ca" | "us"): { chosen: PimImage[]; set: string } {
-  if (market === "ca") {
-    const enFr = all.filter((m) => m.language === "en_fr" || m.language === "fr");
-    if (enFr.length) return { chosen: enFr, set: "en_fr" };
+  for (const langs of SET_ORDER[market]) {
+    if (all.some((m) => m.language != null && langs.includes(m.language))) {
+      return { chosen: all.filter((m) => m.language == null || langs.includes(m.language)), set: langs.join("+") };
+    }
   }
-  const en = all.filter((m) => m.language === "en");
-  if (en.length) return { chosen: en, set: "en" };
-  const rest = market === "us"
-    ? all.filter((m) => m.language !== "en_fr" && m.language !== "fr")
-    : all;
-  if (rest.length) return { chosen: rest, set: "en_es_universal" };
-  // A product whose entire artwork is bilingual EN/FR (common) must not end
-  // up photo-less on the US sites — bilingual beats blank.
-  const enFr = all.filter((m) => m.language === "en_fr");
-  return enFr.length ? { chosen: enFr, set: "en_fr_fallback" } : { chosen: all, set: "all_fallback" };
+  return { chosen: all.filter((m) => m.language == null), set: "universal" };
 }
 
 function json(body: unknown, status = 200) {

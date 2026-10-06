@@ -473,7 +473,8 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
                     setMediaMsg(null);
                     try {
                       const res = await pushMediaToWix(product.sku, cfg.key);
-                      const setLabel = { en_fr: 'EN/FR', en: 'EN', en_es_universal: 'EN/ES + universal' }[res.language_set] ?? '';
+                      // The text set the site got (+ the Universal photos, which go with every set).
+                      const setLabel = { en_fr: 'EN/FR', 'en+fr': 'EN + FR', en: 'EN', en_es: 'EN/ES', universal: 'Universal' }[res.language_set] ?? '';
                       const live = res.wix_media_now ?? res.added ?? 0;
                       const parts = [`${live} ${setLabel} image${live === 1 ? '' : 's'} live on Wix`];
                       if (res.uploaded) parts.push(`${res.uploaded} uploaded`);

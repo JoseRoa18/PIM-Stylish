@@ -271,9 +271,10 @@ function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: 
 
   // ---- Visible: media. White images only (the gray SinksDirect hero stays
   // off). Main = the language-neutral primary. Secondary = ONE language set,
-  // the same rule the Wix US pushes use: the EN set when the product has one,
-  // else the non-French artwork (EN/ES + untagged), else the EN/FR set rather
-  // than no photos. Sets never mix — the EN/FR and EN/ES copies are duplicates.
+  // the same rule the Wix US pushes use (2026-10-05): the EN set, else EN/ES,
+  // else EN/FR rather than no photos — plus every Universal (untagged) photo,
+  // which is language-neutral and goes with whichever set is sent. Sets never
+  // mix — the EN/FR and EN/ES copies are duplicates.
   const images = media
     .filter((m) => m.media_type === "image" && /^https?:\/\//i.test(m.storage_path ?? "") && m.image_role !== "sinksdirect_main")
     .sort((x, y) => Number(y.is_primary) - Number(x.is_primary) || (x.display_order ?? 0) - (y.display_order ?? 0));
@@ -281,10 +282,10 @@ function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: 
   set(vis, "mainImageUrl", main?.storage_path ?? "", "Media", main ? main.storage_path.split("/").pop() : undefined, true);
   const others = images.filter((m) => m !== main);
   const lang = (m: MediaRow) => (m as MediaRow & { language?: string | null }).language ?? null;
-  let chosen = others.filter((m) => lang(m) === "en");
-  let setName = "EN set";
-  if (!chosen.length) { chosen = others.filter((m) => lang(m) !== "en_fr" && lang(m) !== "fr"); setName = "EN/ES + untagged set"; }
-  if (!chosen.length) { chosen = others.filter((m) => lang(m) === "en_fr"); setName = "EN/FR set (no US artwork)"; }
+  const US_SETS: [string, string][] = [["en", "EN set"], ["en_es", "EN/ES set"], ["en_fr", "EN/FR set (no US artwork)"]];
+  const pickSet = US_SETS.find(([l]) => others.some((m) => lang(m) === l));
+  const chosen = others.filter((m) => lang(m) == null || (pickSet != null && lang(m) === pickSet[0]));
+  const setName = pickSet ? `${pickSet[1]} + Universal photos` : "Universal photos";
   const secondary = chosen.map((m) => m.storage_path);
   if (secondary.length >= 3) set(vis, "productSecondaryImageURL", secondary, "Media", `${setName} · ${secondary.map((u) => u.split("/").pop()).join(" | ")}`);
   else if (secondary.length) warnings.push(`${secondary.length} secondary image(s) in the ${setName} — Walmart wants at least 3, none sent`);
