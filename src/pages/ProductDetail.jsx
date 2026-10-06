@@ -1117,6 +1117,10 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
 // ===================== Overview Tab =====================
 
 function OverviewTab({ product, edit, onProductChanged, onUnify }) {
+  // An Azuni product is made by Azuni (the products_azuni_manufacturer trigger
+  // writes it whatever is sent).
+  const brand = edit.isEditing ? edit.form.brand : product.brand;
+  const manufacturers = brand === 'Azuni' ? ['Azuni'] : MANUFACTURER_OPTIONS;
   return (
     <div className="space-y-6">
       <Section title="Identification">
@@ -1124,7 +1128,7 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
           <Field label="SKU" value={product.sku} mono />
           <AttrField label="UPC" attrKey="upc" product={product} edit={edit} mono />
           <EditableField label="Brand" fieldKey="brand" type="select" options={BRAND_OPTIONS} product={product} edit={edit} />
-          <AttrField label="Manufacturer" attrKey="manufacturer" type="select" options={MANUFACTURER_OPTIONS} product={product} edit={edit} />
+          <AttrField label="Manufacturer" attrKey="manufacturer" type="select" options={manufacturers} product={product} edit={edit} />
           <EditableField label="Category" fieldKey="category" type="select" options={CATEGORY_OPTIONS} product={product} edit={edit} />
           <EditableField label="Series" fieldKey="series" suggest product={product} edit={edit} />
           <EditableField label="Family Number" fieldKey="family_number" type="number" product={product} edit={edit} />
