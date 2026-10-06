@@ -16,6 +16,16 @@ export async function loadJSZip() {
 
 export const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 export const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// A yes/no certification answer from the PIM: true, "Yes", or the mark's own
+// name ("ADA Compliant", "cUPC Certified"). "No", "Not Certified", "No
+// Compliant", "N Certified", "Does Not Apply", "Not Applicable"… are not.
+export function isYes(v) {
+  if (v === true) return true;
+  const s = String(v ?? '').trim();
+  if (!s || /^(n|no|not|na|n\/a|none|false|does not|doesn't|non)\b/i.test(s)) return false;
+  return /^(yes|y|true)$/i.test(s) || /(compliant|certified|listed)$/i.test(s);
+}
 export const escapeXml = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 export const colToIndex = (col) => { let n = 0; for (const ch of col) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };

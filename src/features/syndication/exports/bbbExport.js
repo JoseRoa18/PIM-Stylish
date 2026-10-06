@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { mergeRows } from './templateFiller';
+import { mergeRows, isYes } from './templateFiller';
 
 // JSZip loads on demand — it's only needed when the user actually exports,
 // so it stays out of the page bundles.
@@ -314,9 +314,12 @@ function buildRowData(product, media) {
     r['Attribute: Style Value 1'] = 'Modern & Contemporary';
 
     const feats = [];
-    if (a.ada_compliant) feats.push('ADA Compliant');
-    if (a.cupc_certified) feats.push('IAPMO Certified'); // cUPC is IAPMO's
-    if (a.asse_1001_certified) feats.push('ASSE Certified');
+    // A stored "No" / "Not Certified" / "Does Not Apply" is not a yes (until
+    // 2026-10-06 any filled value counted: 70 "No" ADA sinks were sent as
+    // ADA Compliant).
+    if (isYes(a.ada_compliant)) feats.push('ADA Compliant');
+    if (isYes(a.cupc_certified)) feats.push('IAPMO Certified'); // cUPC is IAPMO's
+    if (isYes(a.asse_1001_certified)) feats.push('ASSE Certified');
     if (a.handles_included) feats.push('Handles Included');
     if (feats[0]) r['Attribute: Product Features Value 1'] = feats[0];
     if (feats[1]) r['Attribute: Product Features Value 2'] = feats[1];

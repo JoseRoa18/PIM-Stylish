@@ -13,6 +13,7 @@ import {
   createFillTracker,
   mediaFileName,
   downloadMediaZip,
+  isYes,
 } from './templateFiller';
 
 // Fills a Home Depot USA (Mirakl) template in place.
@@ -348,8 +349,9 @@ export const HOME_DEPOT_RULES = {
   // product's collection.
   'Finish Family': (p) => (isKitchenSink(p) ? '' : finishFamily(p)),
   // Never blank on a list column — "No Certifications or Listings" is an option.
+  // A filled "No" / "Not certified (will be cUPC…)" is not certified (fixed 2026-10-06).
   'Certifications and Listings': (p) =>
-    attr(p).cupc_certified || attr(p).upc_certified
+    isYes(attr(p).cupc_certified) || isYes(attr(p).upc_certified)
       ? 'UPC Certified (Uniform Plumbing Code)'
       : 'No Certifications or Listings',
   // Faucets ship with their mounting kit (hoses/supply lines confirm it).
