@@ -14,7 +14,7 @@ import {
   downloadMediaZip,
 } from './templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
-import { baseCategory, isFaucetCategory } from '@/features/products/lib/categories';
+import { channelCategory, isFaucetCategory } from '@/features/products/lib/categories';
 import { countryFromList } from '@/features/products/lib/countries';
 
 // Fills "The Home Depot Canada.xlsm" — HD Canada's own multi-sheet vendor
@@ -92,7 +92,7 @@ const installText = (p) =>
 const KITCHEN = { dept: '29 Kitchen', breakdown: 'In-Stock Countertops/Kitchen Sinks_____29_Kitchen_l2_1' };
 const PLUMBING = { dept: '26 Plumbing', breakdown: 'Plumbing Repair_____26_Plumbing_l2_6' };
 const department = (p) => {
-  switch (baseCategory(p.category)) {
+  switch (channelCategory(p)) {
     case 'kitchen_sink':
     case 'bar_prep_sink':
     case 'outdoor_sink':
@@ -115,7 +115,7 @@ const department = (p) => {
 // Online category chain (Categories sheet named ranges, verbatim).
 const categoryChain = (p) => {
   const t = installText(p);
-  switch (baseCategory(p.category)) {
+  switch (channelCategory(p)) {
     case 'kitchen_sink':
     case 'bar_prep_sink':
     case 'outdoor_sink': {
@@ -227,7 +227,7 @@ const ACCESSORY_EN = { strainer: 'Strainer', drain: 'Drain', grid: 'Sink Grid', 
 // [long, short, shortest] product-type words for EN and FR.
 const typeWords = (p) => {
   const spray = `${attr(p).spray_type ?? ''} ${attr(p).spout_type ?? ''}`;
-  switch (baseCategory(p.category)) {
+  switch (channelCategory(p)) {
     case 'kitchen_sink': return { en: ['Kitchen Sink', 'Sink'], fr: ['Évier de cuisine', 'Évier'] };
     case 'bar_prep_sink': return { en: ['Bar Sink', 'Sink'], fr: ['Évier de bar', 'Évier'] };
     case 'outdoor_sink': return { en: ['Outdoor Sink', 'Sink'], fr: ['Évier extérieur', 'Évier'] };

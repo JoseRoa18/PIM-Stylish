@@ -37,7 +37,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 import { attr, FINISH_ALIAS, num, type Product, ruleContext, ruleForTitle } from "../_shared/wayfairAttributes.ts";
-import { baseCategory, isFaucetCategory } from "../_shared/categories.js";
+import { channelCategory, isFaucetCategory } from "../_shared/categories.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -86,14 +86,14 @@ const ACCESSORY_CLASSES: Array<{ re: RegExp; classId: string; className: string 
   { re: /cartridge|aerator|hose|spray|part/i, classId: "613", className: "Fixture Parts" },
 ];
 function classFor(p: Product): { classId: string; className: string } | null {
-  const cat = String(p.category ?? "");
+  const cat = String(channelCategory(p) ?? "");
   if (cat === "accessory") {
     // Stylish D-/ST- part numbers are drains and basket strainers.
     if (/^(D|ST)-/i.test(String(p.sku ?? ""))) return { classId: "626", className: "Drains" };
     const text = `${p.product_type ?? ""} ${p.model_name ?? ""} ${attr(p).general_title_en ?? ""}`;
     return ACCESSORY_CLASSES.find((c) => c.re.test(text)) ?? { classId: "633", className: "Kitchen Sink Accessories" };
   }
-  return CLASS_BY_CATEGORY[baseCategory(cat)] ?? null;
+  return CLASS_BY_CATEGORY[cat] ?? null;
 }
 
 const DOC_TYPES: Record<string, string> = {

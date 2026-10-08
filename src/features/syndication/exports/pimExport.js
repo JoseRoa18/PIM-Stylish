@@ -16,6 +16,7 @@ import {
   COLANDER_TEMPLATE_HEADERS,
 } from '@/features/import/lib/importSchema';
 import { accessoryKind } from '@/features/templates/api/templates';
+import { channelCategory } from '@/features/products/lib/categories';
 
 // Exports products back into the PIM's OWN category templates (the same
 // header sets the importer accepts), filled from the database — the exact
@@ -132,14 +133,15 @@ function toCsv(headers, products) {
   return '﻿' + lines.join('\r\n') + '\r\n';
 }
 
+// Colanders and racks filed as Accessories keep the colander sheet (channelCategory).
 const groupKeyOf = (p) =>
-  p.category === 'accessory' ? `accessory ${accessoryKind(p) ?? 'other'}` : (p.category ?? 'uncategorized');
+  channelCategory(p) === 'accessory' ? `accessory ${accessoryKind(p) ?? 'other'}` : (channelCategory(p) ?? 'uncategorized');
 
 const headersFor = (p) => {
-  if (p.category === 'accessory') {
+  if (channelCategory(p) === 'accessory') {
     return ACCESSORY_KIND_HEADERS[accessoryKind(p)] ?? ACCESSORY_TEMPLATE_HEADERS;
   }
-  return CATEGORY_HEADERS[p.category] ?? TEMPLATE_HEADERS;
+  return CATEGORY_HEADERS[channelCategory(p)] ?? TEMPLATE_HEADERS;
 };
 
 function downloadBlob(blob, fileName) {

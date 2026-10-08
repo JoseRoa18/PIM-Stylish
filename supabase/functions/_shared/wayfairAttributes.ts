@@ -7,7 +7,7 @@
 // exact titles first, then axis patterns. A rule returning "" means "no PIM
 // value; skip".
 
-import { isFaucetCategory, isKitchenFaucetCategory } from "./categories.js";
+import { channelCategory, isFaucetCategory, isKitchenFaucetCategory } from "./categories.js";
 
 export type Product = Record<string, unknown> & { attributes?: Record<string, unknown> };
 export const attr = (p: Product) => (p.attributes ?? {}) as Record<string, unknown>;
@@ -56,7 +56,10 @@ export const finish = (v: unknown): string => (v ? String(v) : "");
 
 // ---- Category / accessory helpers (rules below) ----
 export type RuleValue = string | string[];
-const cat = (p: Product) => String(p.category ?? "");
+// The category the channels know the product by: a Kitchen Faucet Combo /
+// Cold Water Tap reads kitchen_faucet, a colander or rack filed as an
+// Accessory reads colander_drying_rack (categories.js).
+const cat = (p: Product) => String(channelCategory(p) ?? "");
 export const isSinkCat = (p: Product) => /sink/.test(cat(p));
 export const isFaucetCat = (p: Product) => isFaucetCategory(cat(p));
 const isKitchenLike = (p: Product) => /kitchen_sink|bar_prep_sink/.test(cat(p));

@@ -11,7 +11,7 @@ import {
   mergeRows,
 } from './templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
-import { baseCategory, isFaucetCategory } from '@/features/products/lib/categories';
+import { channelCategory, isFaucetCategory } from '@/features/products/lib/categories';
 import { findCountry } from '@/features/products/lib/countries';
 import { supabase } from '@/lib/supabase';
 
@@ -69,7 +69,7 @@ const subdivision = (p) => {
 
 // Lowe's Product Category — exact strings from the Reference Data closed list.
 const productCategory = (p) => {
-  switch (baseCategory(p.category)) {
+  switch (channelCategory(p)) {
     case 'kitchen_sink': return 'Kitchen Sinks';
     case 'bathroom_sink': return 'Bathroom Sinks';
     case 'laundry_sink': return 'Utility Sinks';
@@ -321,7 +321,7 @@ const gtin14 = (p) => {
 // Assortment per product — SOS (special order / drop-ship) assortments only.
 const freightAssortment = (p) => {
   const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')}`;
-  switch (baseCategory(p.category)) {
+  switch (channelCategory(p)) {
     case 'kitchen_sink':
     case 'bar_prep_sink':
     case 'outdoor_sink':

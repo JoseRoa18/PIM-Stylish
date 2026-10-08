@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { baseCategory } from '@/features/products/lib/categories';
+import { baseCategory, channelCategory } from '@/features/products/lib/categories';
 
 // Categories a template can be scoped to. An empty scope = general (all products).
 export const TEMPLATE_CATEGORIES = [
@@ -41,10 +41,13 @@ export const templateCategoryLabel = (value) => CATEGORY_LABEL[value] ?? value;
 // A template is available for a product when it's general (no categories) or
 // explicitly lists that product's category.
 // A Kitchen Faucet Combo / Cold Water Tap fits a template scoped to kitchen
-// faucets (they are kinds of kitchen faucet).
+// faucets (they are kinds of kitchen faucet), and a laundry sink one scoped to
+// kitchen sinks (user, 2026-10-08: no marketplace template lists laundry sinks).
+const TEMPLATE_FALLBACK = { laundry_sink: 'kitchen_sink' };
 export function templateAppliesTo(template, category) {
   const cats = template?.categories;
-  return !cats || cats.length === 0 || cats.includes(category) || cats.includes(baseCategory(category));
+  return !cats || cats.length === 0 || cats.includes(category) || cats.includes(baseCategory(category))
+    || (TEMPLATE_FALLBACK[category] != null && cats.includes(TEMPLATE_FALLBACK[category]));
 }
 
 // Accessories span several marketplace classes (cutting boards, strainers,
@@ -77,9 +80,12 @@ const KIND_FILE_RE = {
 // product's kind (a cutting board never lands in the strainers template).
 // Templates whose file name mentions NO kind are spec-wide (e.g. Walmart's
 // "Home Decor, Kitchen & Other" file) and accept every accessory.
+// Colanders and racks filed as Accessories match as Colanders & Drying Racks
+// (channelCategory), exactly as before they moved.
 export function templateMatchesProduct(template, product) {
-  if (!templateAppliesTo(template, product.category)) return false;
-  if (product.category !== 'accessory') return true;
+  const category = channelCategory(product);
+  if (!templateAppliesTo(template, category)) return false;
+  if (category !== 'accessory') return true;
   const name = template.file_name ?? '';
   const isKindSpecific = Object.values(KIND_FILE_RE).some((re) => re.test(name));
   if (!isKindSpecific) return true;
