@@ -260,3 +260,175 @@ export const AMAZON_RULES = {
   'Compliance Media Source Location (en_CA, Warranty)': (p) => docUrl(p, 'warranty_file'),
   'Compliance Media Source Location (en_CA, User Manual)': (p) => docUrl(p, 'owner_manual'),
 };
+
+// ===================== Amazon kitchen sink listing (Canada + USA) =====================
+// The user's review of the Canada template (2026-10-06), column by column,
+// applied to the USA one too the same day. These rules sit on top of
+// AMAZON_RULES only for the two kitchen sink templates (the generator sets
+// ctx.kitchenSink and ctx.market 'ca' | 'us'); every other Amazon template
+// keeps the rules above. Where the two templates differ, the rule reads the
+// template's own list (fulfilment wording) or the market (prices, stock).
+
+const isCompositeGranite = (p) => /composite\s*granite|granite\s*composite/i.test(String(p.material ?? attr(p).material ?? ''));
+const installText = (p) => [attr(p).installation_type ?? []].flat().join(' ');
+const bowlKind = (p) => {
+  const n = Number(attr(p).number_of_bowls);
+  const c = String(attr(p).bowl_configuration ?? '');
+  if (n >= 2 || /double/i.test(c)) return 'Double Bowl';
+  if (n === 1 || /single/i.test(c)) return 'Single Bowl';
+  return '';
+};
+const installLabel = (p) => {
+  const t = installText(p);
+  if (/dual/i.test(t)) return 'Dual Mount';
+  if (/under/i.test(t)) return 'Undermount';
+  if (/top/i.test(t)) return 'Top Mount';
+  if (/drop/i.test(t)) return 'Drop-In';
+  return '';
+};
+
+// One installation manual per sink, the one of its own mounting, in English
+// or English + French (never the French-only or the Spanish one): Canada
+// takes the bilingual one first, the USA the English one.
+const INSTALL_SLOTS = {
+  'Dual Mount': ['installation_dual_mount', 'installation_undermount', 'installation_drop_in', 'installation_top_mount'],
+  Undermount: ['installation_undermount'],
+  'Top Mount': ['installation_top_mount', 'installation_drop_in'],
+  'Drop-In': ['installation_drop_in', 'installation_top_mount'],
+};
+const DOC_LANGS = { ca: ['en_fr', 'en', null], us: ['en', 'en_fr', null] };
+const englishDoc = (p, kinds, ctx) => {
+  for (const kind of kinds) {
+    for (const lang of DOC_LANGS[ctx?.market] ?? DOC_LANGS.ca) {
+      const d = (p._docs ?? []).find((x) => x.raw === kind && (x.lang ?? null) === lang);
+      if (d) return d.url;
+    }
+  }
+  return '';
+};
+const installManual = (p, ctx) => englishDoc(p, [
+  ...(INSTALL_SLOTS[installLabel(p)] ?? []),
+  'installation_manual',
+  'installation_undermount', 'installation_dual_mount', 'installation_drop_in', 'installation_top_mount',
+], ctx);
+// Single Bowl / Double Bowl node: Canada's "Recommended Browse Nodes", the
+// USA's "Item Type Keyword" — each template lists exactly those two.
+const bowlNode = (label) => (p, ctx) => {
+  const b = bowlKind(p);
+  return b ? (ctx?.validValues?.[label] ?? []).find((o) => o.includes(`> ${b} (`)) ?? '' : '';
+};
+// Each template's own wording ("Fulfilment" in Canada, "Fulfillment" in the
+// USA; their Valid Values rows carry no "- [ … ]" tag, so the generator can't
+// snap them). An FBA Seller SKU stays with Amazon.
+const isFba = (p) => /fba/i.test(p._amazon?.fulfillment ?? '');
+const FULFILMENT = {
+  ca: { merchant: 'Fulfilment by Merchant (Default)', amazon: 'Fulfilment by Amazon (NA)' },
+  us: { merchant: 'Fulfillment by Merchant (Default)', amazon: 'Fulfillment by Amazon (NA)' },
+};
+const fulfilment = (market) => (p) => FULFILMENT[market][isFba(p) ? 'amazon' : 'merchant'];
+// Our stock in that market; not tracked = 0, as in Rona's stock column.
+const quantity = (p) => (isFba(p) ? '' : String(Math.max(0, Math.floor(Number(p._stock?.available) || 0))));
+
+// Search terms: ONE cell, single words, English + French + Spanish, at most
+// 250 bytes (a French accent counts twice, so the 250-character limit always
+// holds). Composite granite sinks always carry "composite" and "granite".
+const KEYWORD_STOP = new Set([
+  'a', 'an', 'and', 'the', 'with', 'for', 'of', 'in', 'on', 'to', 'by', 'or', 'x',
+  'de', 'du', 'des', 'la', 'le', 'les', 'et', 'pour', 'avec', 'en', 'à', 'au', 'aux', 'un', 'une', 'sur', 'po',
+  'stylish', 'azuni',
+]);
+const words = (phrases) => list(phrases)
+  .flatMap((s) => String(s).toLowerCase().split(/[\s,;/()"“”]+/))
+  .map((w) => w.replace(/^[-'.]+|[-'.]+$/g, ''))
+  .filter((w) => w && !KEYWORD_STOP.has(w) && !/^[\d.]+(in|po|mm|cm)?$/.test(w));
+// The PIM has no Spanish keywords: these words describe the sink itself.
+const spanishWords = (p) => {
+  const out = ['fregadero', 'cocina', 'lavaplatos', 'tarja'];
+  const m = String(p.material ?? '');
+  if (/stainless/i.test(m)) out.push('acero', 'inoxidable');
+  if (isCompositeGranite(p)) out.push('granito', 'compuesto', 'cuarzo');
+  const inst = installLabel(p);
+  if (inst === 'Undermount' || inst === 'Dual Mount') out.push('submontaje');
+  if (inst === 'Drop-In' || inst === 'Top Mount' || inst === 'Dual Mount') out.push('sobreponer');
+  const b = bowlKind(p);
+  if (b === 'Double Bowl') out.push('doble');
+  if (b === 'Single Bowl') out.push('sencillo');
+  if (/workstation/i.test(`${p.product_type ?? ''} ${attr(p).general_title_en ?? ''}`)) out.push('estación', 'trabajo');
+  if (/farmhouse|apron/i.test(`${p.product_type ?? ''} ${attr(p).general_title_en ?? ''}`)) out.push('granja');
+  const f = String(p.finish ?? '').toLowerCase();
+  if (/black/.test(f)) out.push('negro');
+  if (/white/.test(f)) out.push('blanco');
+  if (/gr[ae]y/.test(f)) out.push('gris');
+  return out;
+};
+const MAX_KEYWORD_BYTES = 250;
+const genericKeywords = (p) => {
+  const bytes = (s) => new TextEncoder().encode(s).length;
+  const lists = [words(attr(p).keywords_en), words(attr(p).keywords_fr), spanishWords(p)];
+  const seen = new Set();
+  let out = '';
+  const add = (w) => {
+    if (seen.has(w)) return;
+    const next = out ? `${out} ${w}` : w;
+    if (bytes(next) > MAX_KEYWORD_BYTES) return;
+    seen.add(w);
+    out = next;
+  };
+  if (isCompositeGranite(p)) { add('composite'); add('granite'); }
+  // Round robin, so the three languages all make it before the limit.
+  for (let i = 0; lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length) add(l[i]);
+  return out;
+};
+
+// Column letters in the comments are the Canada template's.
+export const AMAZON_KITCHEN_SINK_RULES = {
+  // A: the listing's Amazon Seller SKU (Aliases tab → Amazon Canada / USA), never ours.
+  'SKU': (p) => p._amazon?.sellerSku || p.sku,
+  // L (USA: L Item Type Keyword).
+  'Recommended Browse Nodes': bowlNode('Recommended Browse Nodes'),
+  'Item Type Keyword': bowlNode('Item Type Keyword'),
+  // AH: the swatch is the main picture.
+  'Swatch Image URL': (p) => (p._images ?? [])[0] ?? '',
+  'Generic Keyword': genericKeywords,
+  // AU: composite granite is listed as Quartz.
+  'Material': (p) => (isCompositeGranite(p) ? ['Quartz'] : list(attr(p).material ?? p.material).slice(0, 5)),
+  // BQ: every component in one cell, one per line.
+  'Included Components': (p) => list(attr(p).accessories_included).join('\n'),
+  // CF: every sink drains through a grid strainer.
+  'Drain Type': () => 'Grid',
+  // CG / CH: only top-mount sinks, and always one hole.
+  'Hole Count': (p) => (installLabel(p) === 'Top Mount' ? '1' : ''),
+  'Hole Count Unit': (p) => (installLabel(p) === 'Top Mount' ? 'Holes' : ''),
+  // CY: the first two measures + a short description.
+  'Set Name': (p) => {
+    const d = attr(p).external_dimensions_in ?? {};
+    const size = num(d.length) && num(d.width) ? `${num(d.length)}" x ${num(d.width)}"` : '';
+    return [size, bowlKind(p), installLabel(p), 'Kitchen Sink'].filter(Boolean).join(' ');
+  },
+  // CZ: only composite granite sinks.
+  'Rock Material Type': (p) => (isCompositeGranite(p) ? 'Granite' : ''),
+  'Skip Offer': () => 'No',
+  // DG / DH: the list price is MAP Blue of the market (the USA file has no
+  // currency column).
+  'List Price Currency': (p, ctx) => (ctx?.market === 'us' ? (num(p.map_usd) ? 'USD' : '') : (num(p.map_cad) ? 'CAD' : '')),
+  'List Price': (p, ctx) => (ctx?.market === 'us' ? num(p.map_usd) : num(p.map_cad)),
+  // EE / EF / FI: shipped by us from that market's stock.
+  'Fulfillment Channel Code (CA)': fulfilment('ca'),
+  'Fulfillment Channel Code (US)': fulfilment('us'),
+  'Quantity (CA)': quantity,
+  'Quantity (US)': quantity,
+  'Shipping Template (CA)': () => 'ALL CANADA SHIPPING CHARGES',
+  // The USA template's one shipping template.
+  'Shipping Template (US)': () => 'FBM USA',
+  // FR: a "-2" SKU ships in two boxes.
+  'Number of Boxes': (p) => (/-2$/.test(p.sku) ? '2' : '1'),
+  // FS (the USA template has no Safety Warning column).
+  'Safety Warning': () => 'No',
+  // GE / HK: left empty (the USA template has no HK).
+  'Are batteries included?': () => '',
+  'Contains Liquid Contents?': () => '',
+  // IN: the installation manual of the sink's own mounting, English or EN-FR
+  // (the en_US labels read these en_CA rules).
+  'Compliance Media Source Location (en_CA, Installation Manual)': installManual,
+  'Compliance Media Source Location (en_CA, Specification Sheet)': (p, ctx) => englishDoc(p, ['spec_sheet'], ctx),
+};

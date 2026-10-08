@@ -1,4 +1,6 @@
-import { AMAZON_RULES } from './amazonMapping';
+import { AMAZON_RULES, AMAZON_KITCHEN_SINK_RULES } from './amazonMapping';
+import { supabase } from '@/lib/supabase';
+import { getStockFor } from '@/features/pricing/api/inventory';
 import {
   openTemplate,
   sheetPathByName,
@@ -23,12 +25,44 @@ import {
 // snapped against it, and single-option fields (Product Type) auto-fill.
 
 // Amazon docs keep their PIM type in `raw`; the mapping rules match on it.
+// Kitchen sinks keep their installation manual per mounting (the
+// installation_* slots), not in installation_manual.
 const AMAZON_DOC_TYPES = {
   spec_sheet: 'spec_sheet',
   installation_manual: 'installation_manual',
+  installation_undermount: 'installation_undermount',
+  installation_dual_mount: 'installation_dual_mount',
+  installation_drop_in: 'installation_drop_in',
+  installation_top_mount: 'installation_top_mount',
   warranty_file: 'warranty_file',
   owner_manual: 'owner_manual',
 };
+
+// The Amazon kitchen sink templates (Canada and USA): SINK, and EVERY node it
+// offers is a kitchen sink one — Canada's "Recommended Browse Nodes", the
+// USA's "Item Type Keyword". The bathroom sink templates are SINKs too and
+// list one kitchen node among their bathroom ones.
+const isKitchenSinkTemplate = (ctx, validValues) => {
+  const nodes = validValues['Recommended Browse Nodes'] ?? validValues['Item Type Keyword'] ?? [];
+  return ['en_CA', 'en_US'].includes(ctx.lang) && ctx.productType === 'SINK'
+    && nodes.length > 0 && nodes.every((o) => /kitchen sinks/i.test(o));
+};
+
+// Seller SKU (and fulfilment) of each product on Amazon Canada or USA — the
+// alias the Aliases tab shows, stored in amazon_links per marketplace.
+async function amazonLinks(skus, market) {
+  const out = {};
+  for (let i = 0; i < skus.length; i += 200) {
+    const { data, error } = await supabase
+      .from('amazon_links')
+      .select('sku, seller_sku, fulfillment')
+      .eq('marketplace', market)
+      .in('sku', skus.slice(i, i + 200));
+    if (error) throw error;
+    for (const r of data ?? []) out[r.sku] ??= { sellerSku: r.seller_sku, fulfillment: r.fulfillment };
+  }
+  return out;
+}
 
 function parseSettings(a1) {
   const out = {};
@@ -169,11 +203,18 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
     : {};
   const productType = resolveProductType(validValues, settings);
   ctx.productType = productType;
+  ctx.validValues = validValues;
+  ctx.market = ctx.lang === 'en_US' ? 'us' : 'ca';
+  ctx.kitchenSink = isKitchenSinkTemplate(ctx, validValues);
+  const rules = ctx.kitchenSink ? { ...AMAZON_RULES, ...AMAZON_KITCHEN_SINK_RULES } : AMAZON_RULES;
   const unitPairs = buildUnitPairs(grid[attributeRow - 1] || []);
 
   const skus = products.map((p) => p.sku);
   const imgBySku = await fetchImagesBySku(skus);
   const docBySku = await fetchDocsBySku(skus, AMAZON_DOC_TYPES, Object.keys(AMAZON_DOC_TYPES));
+  const [linkBySku, stock] = ctx.kitchenSink
+    ? await Promise.all([amazonLinks(skus, ctx.market), getStockFor(skus)])
+    : [{}, {}];
 
   const fill = createFillTracker();
   let rowsXml = '';
@@ -181,6 +222,8 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
     const rowNum = dataRow + pi;
     p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
     p._docs = docBySku[p.sku] || [];
+    p._amazon = linkBySku[p.sku] ?? null;
+    p._stock = stock[ctx.market]?.[p.sku] ?? null;
     const cache = {}; // label → computed value (arrays reused across occurrences)
     // Values are collected first so units can be reconciled against their
     // paired value before anything is written out.
@@ -193,7 +236,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
       else {
         // Rules are keyed with the en_CA compliance-media labels; other
         // locales (en_US…) share the same columns, so normalize the lookup.
-        const rule = AMAZON_RULES[label] ?? AMAZON_RULES[label.replace(/\(en_[A-Z]{2}, /, '(en_CA, ')];
+        const rule = rules[label] ?? rules[label.replace(/\(en_[A-Z]{2}, /, '(en_CA, ')];
         if (!rule) continue;
         if (!(label in cache)) {
           try { cache[label] = rule(p, ctx); } catch { cache[label] = ''; }
