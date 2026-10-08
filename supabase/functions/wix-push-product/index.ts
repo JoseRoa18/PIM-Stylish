@@ -384,7 +384,11 @@ Deno.serve(async (req) => {
     // Failures here are surfaced but the product PATCH already succeeded.
     let collectionsResult: { added: string[]; removed: string[] } | null = null;
     let collectionsError: string | null = null;
-    if (site.hasCollections) {
+    // An `only` push touches only the keys it names: collections follow only
+    // when it names "collectionIds" (a documents-only or price-only push used
+    // to re-sync Sinks Direct Canada's collections from the PIM as well).
+    const onlyKeys = Array.isArray(body.only) && body.only.length > 0 ? new Set<string>(body.only) : null;
+    if (site.hasCollections && (!onlyKeys || onlyKeys.has("collectionIds"))) {
       try {
         collectionsResult = await syncCollections(
           WIX_API_KEY,
