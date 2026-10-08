@@ -7,6 +7,8 @@
 // exact titles first, then axis patterns. A rule returning "" means "no PIM
 // value; skip".
 
+import { isFaucetCategory, isKitchenFaucetCategory } from "./categories.js";
+
 export type Product = Record<string, unknown> & { attributes?: Record<string, unknown> };
 export const attr = (p: Product) => (p.attributes ?? {}) as Record<string, unknown>;
 
@@ -56,12 +58,13 @@ export const finish = (v: unknown): string => (v ? String(v) : "");
 export type RuleValue = string | string[];
 const cat = (p: Product) => String(p.category ?? "");
 export const isSinkCat = (p: Product) => /sink/.test(cat(p));
-export const isFaucetCat = (p: Product) => /faucet/.test(cat(p));
+export const isFaucetCat = (p: Product) => isFaucetCategory(cat(p));
 const isKitchenLike = (p: Product) => /kitchen_sink|bar_prep_sink/.test(cat(p));
 const isBathSink = (p: Product) => cat(p) === "bathroom_sink";
 const isUtilitySink = (p: Product) => /laundry_sink|outdoor_sink/.test(cat(p));
 const isAccessory = (p: Product) => cat(p) === "accessory";
-const isKitchenFaucet = (p: Product) => cat(p) === "kitchen_faucet";
+// Kitchen Faucet Combo and Cold Water Tap are kitchen faucets too.
+const isKitchenFaucet = (p: Product) => isKitchenFaucetCategory(cat(p));
 const dna = (v: unknown) => /does\s*no/i.test(String(v ?? "")); // "Does Not Apply" / "Does not Appy" / "Does No Apply"
 const yesNoOrDna = (v: unknown): string => (dna(v) ? "Does Not Apply" : yesNo(v));
 const oneOf = (v: unknown, options: string[]): string => {
@@ -190,7 +193,7 @@ export const productType = (p: Product): string => {
     return "Standard Kitchen Sink";
   }
   if (cat(p) === "bathroom_faucet") return handleCount(p) <= 1 ? "Mono Basin Mixer" : "";
-  if (cat(p) === "kitchen_faucet") {
+  if (isKitchenFaucetCategory(cat(p))) {
     const t = `${p.product_type ?? ""} ${attr(p).spout_type ?? ""} ${attr(p).spray_type ?? ""} ${attr(p).general_title_en ?? ""}`;
     if (/pot ?filler/i.test(t)) return "Pot Filler";
     if (/\bbar\b|beverage|prep/i.test(t)) return "Bar Faucet";

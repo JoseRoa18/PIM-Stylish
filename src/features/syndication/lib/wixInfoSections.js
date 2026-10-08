@@ -17,6 +17,7 @@
 //     passes through untouched.
 
 import { toFractionLength } from '@/features/products/lib/units';
+import { isFaucetCategory } from '@/features/products/lib/categories';
 
 function esc(text) {
   return String(text)
@@ -50,7 +51,7 @@ export function buildDimensionsHtml(product) {
   const category = String(product?.category ?? '');
   const rows = [];
 
-  if (/faucet/i.test(category)) {
+  if (isFaucetCategory(category)) {
     const push = (label, key) => {
       const v = inches(attrs[key]);
       if (v) rows.push([label, v]);

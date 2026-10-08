@@ -15,6 +15,15 @@ export const YES_NO_DNA_OPTIONS = ['Yes', 'No', 'Does Not Apply'];
 export const COMPLIANCE_OPTIONS = ['Yes', 'No', 'Not Certified', 'Does Not Apply', 'Not Applicable'];
 
 export const MANUFACTURER_OPTIONS = ['Stylish International Inc.', 'Azuni'];
+
+// Color and Finish Type split the PIM's Finish ("Matte Black") into the plain
+// color and the kind of surface (user's product data file, 2026-10-08). The
+// Finish itself stays as it is.
+export const COLOR_OPTIONS = [
+  'Black', 'White', 'Gray', 'Dark Gray', 'Silver', 'Stainless Steel', 'Chrome', 'Gold',
+  'Graphite Black', 'Gunmetal', 'Brown', 'Red', 'Black and Gold', 'Black and Silver', 'Mixed',
+];
+export const FINISH_TYPE_OPTIONS = ['Brushed', 'Matte', 'Glossy', 'Polished', 'Honey-toned', 'Dura-Tek'];
 // Wayfair always gets "Limited"; Amazon's Warranty Type reads this field.
 export const WARRANTY_OPTIONS = ['Limited', 'Full Warranty'];
 // Matches Wayfair's "Warranty Length" valid values (used in exports).

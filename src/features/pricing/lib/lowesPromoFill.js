@@ -52,6 +52,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
+import { baseCategory } from '@/features/products/lib/categories';
 import { promotionMembersFor, PROMOTION_KINDS, promotionLevel } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
@@ -84,7 +85,7 @@ const GROUPS = {
   drains: { division: 'ROUGH.PLUMBING.22', subdivision: 'PLUMBING.REPAIR.208', label: 'Drains', file: 'Drains_208' },
 };
 export function lowesGroupFor(product) {
-  switch (product.category) {
+  switch (baseCategory(product.category)) {
     case 'kitchen_sink': case 'bar_prep_sink': case 'laundry_sink': case 'outdoor_sink': return GROUPS.kitchen_sinks;
     case 'kitchen_faucet': case 'bathroom_faucet': return GROUPS.faucets;
     case 'bathroom_sink': return GROUPS.bath_sinks;

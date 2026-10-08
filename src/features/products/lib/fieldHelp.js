@@ -52,6 +52,8 @@ export const FIELD_HELP = {
   // ---------- Material / construction ----------
   material: 'Primary material — dropdown lists the values already used in the catalog.',
   finish: 'Surface finish/color as marketed (e.g. Brushed Stainless Steel).',
+  color: 'The plain color (e.g. Silver, Black). The Finish keeps the full marketed name.',
+  finish_type: 'The kind of surface: Brushed, Matte, Glossy, Polished, Honey-toned or Dura-Tek.',
   craftsmanship: 'Construction technique highlight (e.g. handmade, precision-formed).',
   wood_species: 'Wood type for bamboo/wood accessories.',
   antimicrobial: 'Whether the surface has an antimicrobial treatment.',

@@ -71,6 +71,7 @@ import {
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel, levelLabel, PROMOTION_KINDS } from '@/features/pricing/api/promotions';
 import { getStockFor } from '@/features/pricing/api/inventory';
+import { baseCategory } from '@/features/products/lib/categories';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
@@ -209,7 +210,7 @@ async function buildWorkbook(template, promotion, channel) {
   let fromList = 0;
   for (const m of members) {
     const p = pim.get(m.sku) ?? {};
-    if (categories.size && !categories.has(p.category)) { otherCategory.push(m.sku); continue; }
+    if (categories.size && !categories.has(p.category) && !categories.has(baseCategory(p.category))) { otherCategory.push(m.sku); continue; }
     const a = alias.get(m.sku);
     if (!a) { noAlias.push(m.sku); continue; }
     // The promotion's row is the truth — the file's price, or the level where

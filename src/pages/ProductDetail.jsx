@@ -157,11 +157,11 @@ const WORKFLOW_OPTIONS = [
   { value: 'archived', label: 'Archived' },
 ];
 
-import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
+import { CATEGORY_OPTIONS, isFaucetCategory } from '@/features/products/lib/categories';
 import { BRAND_OPTIONS } from '@/features/products/lib/brands';
 import { COUNTRY_NAMES } from '@/features/products/lib/countries';
 import {
-  YES_NO_OPTIONS, YES_NO_DNA_OPTIONS, COMPLIANCE_OPTIONS, MANUFACTURER_OPTIONS,
+  YES_NO_OPTIONS, YES_NO_DNA_OPTIONS, COMPLIANCE_OPTIONS, MANUFACTURER_OPTIONS, COLOR_OPTIONS, FINISH_TYPE_OPTIONS,
   WARRANTY_OPTIONS, WARRANTY_LENGTH_OPTIONS, CRAFTSMANSHIP_OPTIONS, SINK_SHAPE_OPTIONS,
   INSTALLATION_TYPE_OPTIONS, GAUGE_OPTIONS, BOWL_CONFIGURATION_OPTIONS, BASIN_SPLIT_OPTIONS,
   DRAIN_LOCATION_OPTIONS, FAUCET_SHAPE_OPTIONS, SPOUT_TYPE_OPTIONS, SPRAY_TYPE_OPTIONS,
@@ -170,6 +170,9 @@ import {
 } from '@/features/products/lib/fieldOptions';
 
 const MAX_BULLETS = 12;
+
+// Color is a column (EditableField takes { value, label } options).
+const COLOR_SELECT = COLOR_OPTIONS.map((c) => ({ value: c, label: c }));
 
 // Helper to read a value from product.attributes JSONB
 function attr(product, key) {
@@ -1171,7 +1174,7 @@ function SpecsTab({ product, edit }) {
   const isSink = cat?.includes('sink');
   // Category-aware: faucet products show faucet sections, sinks show sink ones.
   // Falls back to a data signal (spout_type) so mis-categorized faucets still work.
-  const isFaucet = Boolean(cat?.includes('faucet')) || attr(product, 'spout_type') != null;
+  const isFaucet = isFaucetCategory(cat) || attr(product, 'spout_type') != null;
   // Bathroom sinks show pedestal / faucet-hole / overflow fields instead of the
   // kitchen bowl configuration. Fall back to data signals for mis-categorized rows.
   const isBathSink = cat === 'bathroom_sink'
@@ -1197,6 +1200,8 @@ function SpecsTab({ product, edit }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField label="Material" fieldKey="material" suggest product={product} edit={edit} />
           <EditableField label="Finish" fieldKey="finish" suggest product={product} edit={edit} />
+          <EditableField label="Color" fieldKey="color" type="select" options={COLOR_SELECT} product={product} edit={edit} />
+          <AttrField label="Finish Type" attrKey="finish_type" type="select" options={FINISH_TYPE_OPTIONS} product={product} edit={edit} />
           <AttrField label="Craftsmanship" attrKey="craftsmanship" type="select" options={CRAFTSMANSHIP_OPTIONS} product={product} edit={edit} />
           {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" type="select" options={SINK_SHAPE_OPTIONS} product={product} edit={edit} />}
           {isSink && <AttrField label="Installation Type" attrKey="installation_type" type="select" options={INSTALLATION_TYPE_OPTIONS} product={product} edit={edit} />}
@@ -2686,6 +2691,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
         <span className="text-label-md text-on-surface-variant">{label}</span>
         <select value={value} onChange={(e) => setField(fieldKey, e.target.value)} aria-label={name} className={inputBase}>
           <option value="">—</option>
+          {value && !options.some((o) => o.value === value) && <option value={value}>{value}</option>}
           {options.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
         </select>
       </div>

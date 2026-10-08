@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { baseCategory } from '@/features/products/lib/categories';
 
 // Categories a template can be scoped to. An empty scope = general (all products).
 export const TEMPLATE_CATEGORIES = [
@@ -39,9 +40,11 @@ export const templateCategoryLabel = (value) => CATEGORY_LABEL[value] ?? value;
 
 // A template is available for a product when it's general (no categories) or
 // explicitly lists that product's category.
+// A Kitchen Faucet Combo / Cold Water Tap fits a template scoped to kitchen
+// faucets (they are kinds of kitchen faucet).
 export function templateAppliesTo(template, category) {
   const cats = template?.categories;
-  return !cats || cats.length === 0 || cats.includes(category);
+  return !cats || cats.length === 0 || cats.includes(category) || cats.includes(baseCategory(category));
 }
 
 // Accessories span several marketplace classes (cutting boards, strainers,

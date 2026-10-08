@@ -15,6 +15,7 @@ import {
   downloadMediaZip,
   isYes,
 } from './templateFiller';
+import { isFaucetCategory } from '@/features/products/lib/categories';
 
 // Fills a Home Depot USA (Mirakl) template in place.
 //
@@ -333,7 +334,7 @@ export const HOME_DEPOT_RULES = {
   // HD's list only has filter systems; beverage faucets are filtered-water
   // faucets (user, 2026-10-01).
   'Water Treatment Type': (p) =>
-    (/faucet/.test(p.category ?? '') && faucetCollection(p) === 'Beverage Faucets' ? 'Faucet Water Filter Systems' : ''),
+    (isFaucetCategory(p.category) && faucetCollection(p) === 'Beverage Faucets' ? 'Faucet Water Filter Systems' : ''),
   'Manufacturer Warranty': (p) => {
     const parts = [attr(p).warranty_length, attr(p).warranty].filter(Boolean);
     return parts.length ? `${parts.join(' ')} warranty`.replace(/\s+/g, ' ') : '';

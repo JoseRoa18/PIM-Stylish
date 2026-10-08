@@ -37,6 +37,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 import { attr, FINISH_ALIAS, num, type Product, ruleContext, ruleForTitle } from "../_shared/wayfairAttributes.ts";
+import { baseCategory, isFaucetCategory } from "../_shared/categories.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -92,7 +93,7 @@ function classFor(p: Product): { classId: string; className: string } | null {
     const text = `${p.product_type ?? ""} ${p.model_name ?? ""} ${attr(p).general_title_en ?? ""}`;
     return ACCESSORY_CLASSES.find((c) => c.re.test(text)) ?? { classId: "633", className: "Kitchen Sink Accessories" };
   }
-  return CLASS_BY_CATEGORY[cat] ?? null;
+  return CLASS_BY_CATEGORY[baseCategory(cat)] ?? null;
 }
 
 const DOC_TYPES: Record<string, string> = {
@@ -199,7 +200,7 @@ function productType(p: Product): string {
 
 // ---- Faucet answers (Bathroom Sink Faucets 655 / Kitchen Faucets 653;
 // vocabularies read from the class questions 2026-09-15) ----
-const isFaucet = (p: Product) => /faucet/.test(String(p.category ?? ""));
+const isFaucet = (p: Product) => isFaucetCategory(p.category);
 const isBathFaucet = (p: Product) => String(p.category ?? "") === "bathroom_faucet";
 const handles = (p: Product) => parseInt(num(attr(p).number_of_handles), 10) || 0;
 const holes = (p: Product) => parseInt(num(attr(p).number_of_installation_holes), 10) || 0;

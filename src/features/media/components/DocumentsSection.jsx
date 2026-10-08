@@ -9,6 +9,7 @@ import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
 import { getBrandWarranties, brandWarrantyFor } from '@/features/settings/api/brandWarranty';
+import { isFaucetCategory } from '@/features/products/lib/categories';
 
 // Heavy (bundles PDF.js) — loaded only when a user previews a PDF.
 const PdfPreviewModal = lazy(() => import('./PdfPreviewModal'));
@@ -131,7 +132,7 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
   // EXCEPT sinks — their variants differ in gauge/mount, so documents stay
   // per-product. Only used for messaging — the API resolves this itself.
   const inFamily = familyNumber != null && !category?.includes('sink');
-  const isFaucet = category?.includes('faucet');
+  const isFaucet = isFaucetCategory(category);
   const isSink = category?.includes('sink');
   const { documents, loading, error, reload } = useProductMedia(sku);
 

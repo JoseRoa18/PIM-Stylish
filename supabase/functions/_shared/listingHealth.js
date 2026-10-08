@@ -104,7 +104,8 @@ const FIELDS = {
   external_dimensions: {
     label: 'External Dimensions',
     check: (p) =>
-      /faucet|pot_filler/.test(p.category ?? '')
+      // every faucet category (categories.js; this file stays import-free)
+      /faucet|pot_filler|cold_water_tap/.test(p.category ?? '')
         ? hasNumber(attr(p, 'faucet_height_in')) || hasNumber(attr(p, 'spout_height_in')) || hasDims(attr(p, 'external_dimensions_in'))
         : hasDims(attr(p, 'external_dimensions_in')),
   },

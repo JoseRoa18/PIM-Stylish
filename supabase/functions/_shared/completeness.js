@@ -12,11 +12,14 @@
 // stays pure JS importing only from _shared. Category labels mirror
 // src/features/products/lib/categories.js; keep both in step.
 import { COUNTRY_NAMES } from './countries.js';
+import { FAUCET_CATEGORIES, KITCHEN_FAUCET_CATEGORIES } from './categories.js';
 
 export const CATEGORY_LABEL = {
   kitchen_sink: 'Kitchen Sink',
   bathroom_sink: 'Bathroom Sink',
   kitchen_faucet: 'Kitchen Faucet',
+  kitchen_faucet_combo: 'Kitchen Faucet Combo',
+  cold_water_tap: 'Cold Water Tap',
   bathroom_faucet: 'Bathroom Faucet',
   pot_filler: 'Pot Filler',
   bar_prep_sink: 'Bar/Prep Sink',
@@ -28,7 +31,8 @@ export const CATEGORY_LABEL = {
 
 const SINKS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink', 'bathroom_sink'];
 const KITCHEN_SINKS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink'];
-const FAUCETS = ['kitchen_faucet', 'bathroom_faucet', 'pot_filler'];
+// Kitchen Faucet Combo and Cold Water Tap are kitchen faucets (categories.js).
+const FAUCETS = FAUCET_CATEGORIES;
 const ALL = null; // applies to every category
 // Faucets describe size by spout height/reach, not by an overall L×W×H.
 const NOT_FAUCETS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink', 'bathroom_sink', 'colander_drying_rack', 'accessory'];
@@ -76,7 +80,7 @@ const hasNum = (k) => (p) => num(Number(attr(p, k)));
 const yes = (v) => v === true || /^(yes|true)$/i.test(String(v ?? '').trim());
 const doubleBowl = (p) => Number(field(p, 'number_of_bowls')) >= 2;
 const pullDown = (p) => /pull/i.test(String(attr(p, 'spray_type') ?? '')) || /pull/i.test(String(p.product_type ?? ''));
-const KITCHEN_FAUCETS = ['kitchen_faucet', 'pot_filler'];
+const KITCHEN_FAUCETS = [...KITCHEN_FAUCET_CATEGORIES, 'pot_filler'];
 
 // group = the product page tab where the field is filled in (deep link),
 // in the tab order of the product page.

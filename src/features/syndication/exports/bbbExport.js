@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { mergeRows, isYes } from './templateFiller';
+import { isFaucetCategory } from '@/features/products/lib/categories';
 
 // JSZip loads on demand — it's only needed when the user actually exports,
 // so it stays out of the page bundles.
@@ -230,7 +231,7 @@ function buildRowData(product, media) {
   // (Product Features, Height…), where a wrong-category value would be invalid.
   const cat = product.category ?? '';
   const isSink = /sink/.test(cat);
-  const isFaucet = /faucet|pot_filler/.test(cat);
+  const isFaucet = isFaucetCategory(cat);
 
   if (isSink) {
     const dur = a.durability_tags ?? [];
