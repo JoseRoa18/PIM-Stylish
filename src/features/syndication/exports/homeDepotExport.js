@@ -11,8 +11,6 @@ import {
   fetchImagesBySku,
   fetchDocsBySku,
   createFillTracker,
-  mediaFileName,
-  downloadMediaZip,
   isYes,
 } from './templateFiller';
 import { isFaucetCategory } from '@/features/products/lib/categories';
@@ -64,6 +62,17 @@ const num = (v) => {
 // Kitchen and bar/prep sinks — NOT kitchen faucets (a /^kitchen/ test caught
 // them too until 2026-10-01 and blanked every faucet's Finish Family).
 const isKitchenSink = (p) => p.category === 'kitchen_sink' || p.category === 'bar_prep_sink';
+const isSink = (p) => /sink/.test(p.category ?? '');
+// Every sink but a bathroom one (kitchen, bar / prep, laundry) — the Kitchen
+// Sinks collections of the Sinks file.
+const isKitchenTypeSink = (p) => isSink(p) && p.category !== 'bathroom_sink';
+const isGranite = (p) => /granite|composite|quartz/i.test(String(attr(p).material ?? p.material ?? ''));
+// Boxes shipped: a set of N ("-2" SKU, "Set of 2" in the title) ships in N
+// boxes (user, 2026-10-09: P-201-2 is two sinks, two boxes).
+const boxesShipped = (p) => {
+  const set = String(attr(p).general_title_en ?? '').match(/\bset of (\d+)\b/i)?.[1] ?? String(p.sku ?? '').match(/-(\d)$/)?.[1];
+  return set && Number(set) > 1 ? set : '1';
+};
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 const stripHtml = (h) =>
   String(h || '')
@@ -144,13 +153,14 @@ const hdTitle = (p) => {
 
 // Country of origin, HD spelling (2026-09-14): the code column takes "CH"
 // for China, the name column the capitalized name ("China", not "CHINA") —
-// written as is, never snapped to the list's uppercase entry.
+// written as is, never snapped to the list's uppercase entry. Vietnam takes
+// the ReferenceData's wording, "Viet Nam" (user, 2026-10-09).
 const COUNTRY = {
   china: ['CH', 'China'],
   cn: ['CH', 'China'],
-  vietnam: ['VN', 'Vietnam'],
-  'viet nam': ['VN', 'Vietnam'],
-  vn: ['VN', 'Vietnam'],
+  vietnam: ['VN', 'Viet Nam'],
+  'viet nam': ['VN', 'Viet Nam'],
+  vn: ['VN', 'Viet Nam'],
 };
 const country = (p) => COUNTRY[String(attr(p).country_of_origin || 'China').trim().toLowerCase()] ?? null;
 
@@ -259,10 +269,14 @@ export const HOME_DEPOT_RULES = {
   'Sell Pkg Qty (as sold to consumer)': () => '1',
   'Sell UOM (as sold to consumer)': () => 'EA-Each',
   'Made-To-Order': () => 'No',
-  'Number of Boxes Shipped to Consumer': () => '1',
+  'Number of Boxes Shipped to Consumer': boxesShipped,
   'Vendor Processing Days': () => '1',
   'Material Breakdown': materialBreakdown,
-  'Material Breakdown Percentage': (p) => (materialBreakdown(p) ? '100' : ''),
+  // A granite composite sink is not 100% granite: its percentage stays empty
+  // (user, 2026-10-09).
+  'Material Breakdown Percentage': (p) => (materialBreakdown(p) && !(isSink(p) && isGranite(p)) ? '100' : ''),
+  // The swatch is the main picture (user, 2026-10-09).
+  'Color Swatch': (p) => (p._images ?? [])[0] ?? '',
 
   // Highlights cap at 65 chars, marketing copy at 1000 (HD content review;
   // the header still says 1500 but HD trims at 1000).
@@ -305,11 +319,13 @@ export const HOME_DEPOT_RULES = {
   // what the PIM can state, leave the rest empty). Not a covered electronic
   // device, no screen; no biodegradable / compostable plastic claim; not a
   // textile, so no PFAS. Their follow-ups (CED recycling states, the PFAS
-  // certificate) stay blank.
-  'For Covered Electronic Devices (CEDs), select the states where this item is considered a CED.': () => '_Not A CED_',
-  'Select the screen size in inches (measured diagonally) or select "No Screen" if the item does not have a screen': () => '_No Screen_',
+  // certificate) stay blank. The Sinks file leaves the CED, screen and
+  // compostable questions empty (user review of the kitchen sinks file,
+  // 2026-10-09: EB, EC, EG); the faucets file keeps them.
+  'For Covered Electronic Devices (CEDs), select the states where this item is considered a CED.': (p) => (isSink(p) ? '' : '_Not A CED_'),
+  'Select the screen size in inches (measured diagonally) or select "No Screen" if the item does not have a screen': (p) => (isSink(p) ? '' : '_No Screen_'),
   'Does the item claim on the label, packaging, or related marketing materials that the plastic/resin is “biodegradable,” or “degradable,” or “decomposable” or other wording that implies the plastic/resin will break down in a landfill or other environment?': alwaysNo,
-  'If you claim the plastic/resin in your product is "compostable", does it comply with: (1) ASTM D6400, (2) ASTM D6868, or (3) Vincotte OK Compost HOME Certification standards?': () => 'No, no claim that the plastic/resin is compostable',
+  'If you claim the plastic/resin in your product is "compostable", does it comply with: (1) ASTM D6400, (2) ASTM D6868, or (3) Vincotte OK Compost HOME Certification standards?': (p) => (isSink(p) ? '' : 'No, no claim that the plastic/resin is compostable'),
   'Does the textile in your product contain one or more PFAS chemicals in any amount?': alwaysNo,
   'Is your product considered “outdoor apparel for severe wet weather conditions”, as the California Safer Clothing and Textiles Act defines that term?': alwaysNo,
   'Does your product include a disclosure, with the statement “Made with PFAS chemicals”, both with the physical product and on the Product Information Page, as required by California’s Safer Clothing and Textiles Act?': alwaysNo,
@@ -322,8 +338,8 @@ export const HOME_DEPOT_RULES = {
   'Installation Guide': installDocUrl,
   'Use and Care Manual': (p) => docUrl(p, 'owner_manual'),
   'Specification': (p) => docUrl(p, 'spec_sheet'),
-  // The countertop cut-out template is what the PIM has for measuring (user, 2026-10-01).
-  'Measurement Guide': (p) => docUrl(p, 'cut_out_template'),
+  // Measurement Guide stays empty: the cut-out template does not go (user,
+  // 2026-10-09; it went from 2026-10-01).
 
   // Faucet attributes
   'Faucet Type': (p) => {
@@ -341,7 +357,13 @@ export const HOME_DEPOT_RULES = {
   },
   'Faucet Height (in.) (in)': (p) => num(attr(p).faucet_height_in ?? attr(p).external_dimensions_in?.height),
   'Flow rate (gallons per minute)': (p) => num(attr(p).max_flow_rate),
-  'Color Family': (p) => colorFamily(p.finish),
+  // Sinks (user, 2026-10-09): stainless steel is "Silver", graphite black
+  // "Black"; granite and porcelain keep their own color.
+  'Color Family': (p) => {
+    if (isSink(p) && /graphite/i.test(p.finish ?? '')) return 'Black';
+    if (isSink(p) && /stainless/i.test(String(attr(p).material ?? p.material ?? ''))) return 'Silver';
+    return colorFamily(p.finish);
+  },
   'Color/Finish': (p) => p.finish || '',
   // Kitchen sinks (2026-09-14): Finish Family, the bathroom dimensions and
   // Cut-Out Depth stay EMPTY (Number of Faucet Holes too until 2026-10-01,
@@ -372,6 +394,8 @@ export const HOME_DEPOT_RULES = {
   // bathroom one has Rust/Scratch Resistant…). The rule returns ordered
   // CANDIDATES; each column takes the first one its own list accepts.
   'Features': (p) => {
+    // Kitchen sinks: always "Rust Resistant", nothing else (user, 2026-10-09).
+    if (isKitchenTypeSink(p)) return 'Rust Resistant';
     if (/sink/i.test(p.category ?? '')) {
       // "Select all applicable values": several, joined with "|".
       const acc = list(attr(p).accessories_included).join(' ');
@@ -476,9 +500,11 @@ export const HOME_DEPOT_RULES = {
     (isKitchenSink(p) ? '' : num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height)),
   'Cut-Out Width (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.length),
   'Cut-Out Depth (in.) (in)': (p) => (isKitchenSink(p) ? '' : num(attr(p).cut_out_dimensions_in?.width)),
-  // The list only has whole inches — a 29.25" minimum means the next size up.
+  // The PIM's Min Internal Cabinet (user, 2026-10-09; it read the external
+  // one). The list only has whole inches — a 29.25" minimum means the next
+  // size up.
   'Minimum Cabinet Size (in.)': (p, ctx, options) => {
-    const v = Number(num(attr(p).min_external_cabinet_size_in));
+    const v = Number(num(attr(p).min_internal_cabinet_size_in));
     if (!v) return '';
     const need = Math.ceil(v);
     const ladder = (options ?? []).map(Number).filter((x) => !Number.isNaN(x)).sort((a, b) => a - b);
@@ -505,6 +531,8 @@ export const HOME_DEPOT_RULES = {
   // accessory in the box, in HD's own wording, joined with "|" (Mirakl's
   // separator); each occurrence keeps only the values its list accepts.
   'Included': (p) => {
+    // Kitchen sinks: "Strainer" for every one (user, 2026-10-09).
+    if (isKitchenTypeSink(p)) return 'Strainer';
     const acc = list(attr(p).accessories_included).map(String);
     const has = (re) => acc.some((a) => re.test(a));
     const items = [];
@@ -680,12 +708,8 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
 
   zip.file(tplPath, injectRows(sheetXml, rowsXml, DATA_ROW - 1 + products.length));
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
-  // Home Depot USA takes the images as a .zip too (user, 2026-10-05): the
-  // ones in the image columns, in their order — SKU.jpg, SKU_2.jpg…
-  const media = await downloadMediaZip(
-    products.flatMap((p) => (p._images ?? []).slice(0, imgSlots).map((url, i) => ({ url, name: mediaFileName(p.sku, i, url) }))),
-    fileName,
-  );
+  // No images .zip: Home Depot USA takes its images as the links in the sheet
+  // (user, 2026-10-09 — the zip is Home Depot Canada's only).
 
-  return { count: products.length, fillReport: fill.report(labels, products.length), media };
+  return { count: products.length, fillReport: fill.report(labels, products.length) };
 }

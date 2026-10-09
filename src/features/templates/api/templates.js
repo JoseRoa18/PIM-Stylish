@@ -80,10 +80,15 @@ const KIND_FILE_RE = {
 // product's kind (a cutting board never lands in the strainers template).
 // Templates whose file name mentions NO kind are spec-wide (e.g. Walmart's
 // "Home Decor, Kitchen & Other" file) and accept every accessory.
+// Amazon lists every sink but a bathroom one on its kitchen sink template
+// (user, 2026-10-09: "para Amazon todos los sinks son kitchen sinks").
+const AMAZON_KITCHEN_SINKS = new Set(['bar_prep_sink', 'laundry_sink', 'outdoor_sink']);
+
 // Colanders and racks filed as Accessories match as Colanders & Drying Racks
 // (channelCategory), exactly as before they moved.
 export function templateMatchesProduct(template, product) {
-  const category = channelCategory(product);
+  let category = channelCategory(product);
+  if (/^amazon/i.test(template?.marketplace ?? '') && AMAZON_KITCHEN_SINKS.has(category)) category = 'kitchen_sink';
   if (!templateAppliesTo(template, category)) return false;
   if (category !== 'accessory') return true;
   const name = template.file_name ?? '';

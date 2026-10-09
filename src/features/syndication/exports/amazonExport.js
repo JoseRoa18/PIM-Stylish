@@ -1,6 +1,7 @@
-import { AMAZON_RULES, AMAZON_KITCHEN_SINK_RULES } from './amazonMapping';
+import { AMAZON_RULES, AMAZON_LISTING_RULES, AMAZON_KITCHEN_SINK_RULES } from './amazonMapping';
 import { supabase } from '@/lib/supabase';
 import { getStockFor } from '@/features/pricing/api/inventory';
+import { amazonTitle } from '@/features/syndication/lib/amazonTitles';
 import {
   openTemplate,
   sheetPathByName,
@@ -62,6 +63,25 @@ async function amazonLinks(skus, market) {
     for (const r of data ?? []) out[r.sku] ??= { sellerSku: r.seller_sku, fulfillment: r.fulfillment };
   }
   return out;
+}
+
+// SKUs that are color variants: another product of their family (archived
+// ones aside) has a different finish. Their Item Name always keeps the color.
+async function colorVariantSkus(products) {
+  const families = [...new Set(products.map((p) => p.family_number).filter(Boolean))];
+  const finishes = {};
+  for (let i = 0; i < families.length; i += 200) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('sku, family_number, finish, workflow_status')
+      .in('family_number', families.slice(i, i + 200));
+    if (error) throw error;
+    for (const r of data ?? []) {
+      if (r.workflow_status === 'archived') continue;
+      (finishes[r.family_number] ??= new Set()).add(String(r.finish ?? '').trim().toLowerCase());
+    }
+  }
+  return new Set(products.filter((p) => (finishes[p.family_number]?.size ?? 0) > 1).map((p) => p.sku));
 }
 
 function parseSettings(a1) {
@@ -206,15 +226,15 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   ctx.validValues = validValues;
   ctx.market = ctx.lang === 'en_US' ? 'us' : 'ca';
   ctx.kitchenSink = isKitchenSinkTemplate(ctx, validValues);
-  const rules = ctx.kitchenSink ? { ...AMAZON_RULES, ...AMAZON_KITCHEN_SINK_RULES } : AMAZON_RULES;
+  // The user's review applies to every Amazon listing; the kitchen sink
+  // template adds its sink-only columns.
+  const rules = { ...AMAZON_RULES, ...AMAZON_LISTING_RULES, ...(ctx.kitchenSink ? AMAZON_KITCHEN_SINK_RULES : {}) };
   const unitPairs = buildUnitPairs(grid[attributeRow - 1] || []);
 
   const skus = products.map((p) => p.sku);
   const imgBySku = await fetchImagesBySku(skus);
   const docBySku = await fetchDocsBySku(skus, AMAZON_DOC_TYPES, Object.keys(AMAZON_DOC_TYPES));
-  const [linkBySku, stock] = ctx.kitchenSink
-    ? await Promise.all([amazonLinks(skus, ctx.market), getStockFor(skus)])
-    : [{}, {}];
+  const [linkBySku, stock, variants] = await Promise.all([amazonLinks(skus, ctx.market), getStockFor(skus), colorVariantSkus(products)]);
 
   const fill = createFillTracker();
   let rowsXml = '';
@@ -224,6 +244,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
     p._docs = docBySku[p.sku] || [];
     p._amazon = linkBySku[p.sku] ?? null;
     p._stock = stock[ctx.market]?.[p.sku] ?? null;
+    p._title = amazonTitle(p, { colorVariant: variants.has(p.sku) });
     const cache = {}; // label → computed value (arrays reused across occurrences)
     // Values are collected first so units can be reconciled against their
     // paired value before anything is written out.
