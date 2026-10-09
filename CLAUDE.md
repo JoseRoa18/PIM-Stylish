@@ -199,7 +199,7 @@ Amazon listings, Canada and USA (user review of the Canada kitchen sink template
 Home Depot Canada also downloads a `<file>_media.zip` (`downloadMediaZip`, parts past 600 MB) with exactly the files the sheet names: ONE FOLDER PER PART NUMBER with its images and PDFs (user, 2026-10-05: entries carry `folder`; a folder is never split between parts, and the brand's warranty is fetched once and copied into every folder). **Home Depot USA has no zip** (user, 2026-10-09): its images go only as the links in the sheet.
 
 Home Depot USA listing ([homeDepotExport.js](src/features/syndication/exports/homeDepotExport.js), user review of the Sinks file's kitchen sinks, 2026-10-09; letters are the Sinks file's):
-- **S** Country of Origin Name "Viet Nam" (the ReferenceData's wording; China stays "China").
+- **S** Country of Origin Name exactly as the ReferenceData writes it, in capitals: "CHINA", "VIET NAM" (both files; it was "China" / "Vietnam").
 - **Y** boxes = N for a set of N (a "-2" SKU or "Set of N" in the title — P-201-2 ships in 2), else 1. **BO** Color Swatch = the main image (faucets file too).
 - **Sinks file only:** **BQ** Material Breakdown Percentage empty on granite composite; **CG** Measurement Guide empty (the cut-out template does not go); **EB / EC / EG** (CED states, screen size, compostable) empty — the faucets file keeps `_Not A CED_` / `_No Screen_` / "No, no claim…"; **FF** Minimum Cabinet Size from `min_internal_cabinet_size_in`, rounded up to the list; **FO** Color Family "Silver" for stainless steel, "Black" for graphite black, granite and porcelain their own color.
 - **Kitchen-type sinks** (every sink but a bathroom one): **FK** Included = "Strainer" and **FX** Features = "Rust Resistant", one value each.

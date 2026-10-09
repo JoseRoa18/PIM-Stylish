@@ -152,9 +152,9 @@ const hdTitle = (p) => {
 };
 
 // Country of origin, HD spelling (2026-09-14): the code column takes "CH"
-// for China, the name column the capitalized name ("China", not "CHINA") —
-// written as is, never snapped to the list's uppercase entry. Vietnam takes
-// the ReferenceData's wording, "Viet Nam" (user, 2026-10-09).
+// for China. The name column is written exactly as the ReferenceData spells
+// it — "CHINA", "VIET NAM", in capitals (user, 2026-10-09; it was "China" /
+// "Vietnam").
 const COUNTRY = {
   china: ['CH', 'China'],
   cn: ['CH', 'China'],
@@ -264,7 +264,8 @@ export const HOME_DEPOT_RULES = {
   'Is this product sold exclusively to and by The Home Depot?': () => 'No',
   'Is this a new version of an existing item?': () => 'No',
   'COUNTRY OF ORIGIN': (p) => country(p)?.[0] ?? '',
-  'Country of Origin Name': (p) => ({ raw: country(p)?.[1] ?? '' }),
+  // Snapped to the column's list, so it takes the list's own capitals.
+  'Country of Origin Name': (p) => country(p)?.[1] ?? '',
   'Sellable Unit?': () => 'Y',
   'Sell Pkg Qty (as sold to consumer)': () => '1',
   'Sell UOM (as sold to consumer)': () => 'EA-Each',
