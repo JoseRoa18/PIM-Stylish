@@ -32,11 +32,13 @@
 //   AO Cost                         WC Lowe's Blue (cost_usd_lowes_sod_bbb)
 //
 // Lowe's creates one Offer ID per Offer # in a file, and the offer name
-// carries the category, so the promotion is split into ONE FILE PER
-// SUB-DIVISION (kitchen sinks, faucets, bath sinks, drains…); several files
-// download together as a ZIP. Products without a Lowe's item number are
-// left out and reported. Cells take the column's own format (dates,
-// prices) so the sheet's dropdowns and macros keep working.
+// carries the category. Files (user rule 2026-10-09, every promotion kind):
+// Kitchen Sinks and Kitchen Faucets share ONE file — Offer # 1 the sinks,
+// Offer # 2 the faucets, each with its own name and sub-division — and every
+// other group has a file of its own (bath faucets, bath sinks, drains,
+// accessories). Several files download together as a ZIP. Products without a
+// Lowe's item number are left out and reported. Cells take the column's own
+// format (dates, prices) so the sheet's dropdowns and macros keep working.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -75,25 +77,41 @@ export const LOWES_CONSTANTS = {
 
 // Lowe's merchandising division / sub-division per PIM category (the
 // dropdown values of the workbook's hidden MDV MSD sheet). Strainers and
-// drains sit under Rough Plumbing; every other accessory goes with sinks.
+// drains sit under Rough Plumbing; every other accessory keeps the kitchen
+// sinks sub-division. `file` is the file the group goes in (FILES).
 const KB = 'KITCHENS.AND.BATH.35';
+const SINKS_188 = 'KITCHEN.SINKS.AND.DISPOSERS.188';
+const FAUCETS_225 = 'FAUCETS.SHOWERHEADS.AND.BATH.DECOR.225';
 const GROUPS = {
-  kitchen_sinks: { division: KB, subdivision: 'KITCHEN.SINKS.AND.DISPOSERS.188', label: 'Kitchen Sinks', file: 'Kitchen_Sinks_188' },
-  faucets: { division: KB, subdivision: 'FAUCETS.SHOWERHEADS.AND.BATH.DECOR.225', label: 'Faucets', file: 'Faucets_225' },
+  kitchen_sinks: { division: KB, subdivision: SINKS_188, label: 'Kitchen Sinks', file: 'kitchen' },
+  kitchen_faucets: { division: KB, subdivision: FAUCETS_225, label: 'Kitchen Faucets', file: 'kitchen' },
+  bath_faucets: { division: KB, subdivision: FAUCETS_225, label: 'Bath Faucets', file: 'bath_faucets' },
   // Bath sinks have their own Lowe's merchant (user 2026-09-24).
-  bath_sinks: { division: KB, subdivision: 'TOILETS.AND.BATHING.130', label: 'Bath Sinks', file: 'Bath_Sinks_130', merchantSignerEmail: 'mike.norris@lowes.com' },
-  drains: { division: 'ROUGH.PLUMBING.22', subdivision: 'PLUMBING.REPAIR.208', label: 'Drains', file: 'Drains_208' },
+  bath_sinks: { division: KB, subdivision: 'TOILETS.AND.BATHING.130', label: 'Bath Sinks', file: 'bath_sinks', merchantSignerEmail: 'mike.norris@lowes.com' },
+  drains: { division: 'ROUGH.PLUMBING.22', subdivision: 'PLUMBING.REPAIR.208', label: 'Drains', file: 'drains' },
+  accessories: { division: KB, subdivision: SINKS_188, label: 'Accessories', file: 'accessories' },
+};
+// The order of the groups is the order of their Offer # inside a file.
+const GROUP_ORDER = Object.keys(GROUPS);
+const groupKey = (group) => GROUP_ORDER.find((k) => GROUPS[k] === group);
+const FILES = {
+  kitchen: { label: 'Kitchen Sinks & Faucets', name: 'Kitchen_Sinks_188_Faucets_225' },
+  bath_faucets: { label: 'Bath Faucets', name: 'Bath_Faucets_225' },
+  bath_sinks: { label: 'Bath Sinks', name: 'Bath_Sinks_130' },
+  drains: { label: 'Drains', name: 'Drains_208' },
+  accessories: { label: 'Accessories', name: 'Accessories_188' },
 };
 export function lowesGroupFor(product) {
   switch (channelCategory(product)) {
     case 'kitchen_sink': case 'bar_prep_sink': case 'laundry_sink': case 'outdoor_sink': return GROUPS.kitchen_sinks;
-    case 'kitchen_faucet': case 'bathroom_faucet': return GROUPS.faucets;
+    case 'kitchen_faucet': case 'pot_filler': return GROUPS.kitchen_faucets;
+    case 'bathroom_faucet': return GROUPS.bath_faucets;
     case 'bathroom_sink': return GROUPS.bath_sinks;
     case 'accessory': {
       const kind = accessoryKind(product);
-      return kind === 'strainer' || kind === 'drain' ? GROUPS.drains : GROUPS.kitchen_sinks;
+      return kind === 'strainer' || kind === 'drain' ? GROUPS.drains : GROUPS.accessories;
     }
-    default: return GROUPS.kitchen_sinks;
+    default: return GROUPS.accessories; // colanders and racks
   }
 }
 
@@ -191,7 +209,7 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
   const atOrAbove = [];
   const noCost = [];
   let fromList = 0;
-  const byGroup = new Map(); // group.file → { group, lines }
+  const byFile = new Map(); // FILES key → { file, lines }
   for (const m of members) {
     const a = alias.get(m.sku);
     if (!a) { noAlias.push(m.sku); continue; }
@@ -206,15 +224,31 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
     const cost = p.cost_usd_lowes_sod_bbb != null ? Number(p.cost_usd_lowes_sod_bbb) : null;
     if (cost == null) noCost.push(m.sku);
     const group = lowesGroupFor(p);
-    if (!byGroup.has(group.file)) byGroup.set(group.file, { group, lines: [] });
-    byGroup.get(group.file).lines.push({ sku: m.sku, itemNumber: a.alias, name: a.listing_title ?? null, map, promo, amount: Math.round((map - promo) * 100) / 100, cost });
+    if (!byFile.has(group.file)) byFile.set(group.file, { file: FILES[group.file], lines: [] });
+    byFile.get(group.file).lines.push({ group, sku: m.sku, itemNumber: a.alias, name: a.listing_title ?? null, map, promo, amount: Math.round((map - promo) * 100) / 100, cost });
   }
-  if (!byGroup.size) throw new Error("Nothing to write: no product has a Lowe's item number with a promo price below its MAP.");
+  if (!byFile.size) throw new Error("Nothing to write: no product has a Lowe's item number with a promo price below its MAP.");
 
-  const offerName = (group) => `${shortDate(window.start)}-${shortDate(window.end)} ${monthName(window.start)} ${kindLabel} ${group.label}`.slice(0, 50);
+  // "10.1-10.31 October Monthly Promotion Kitchen Sinks" — 50 characters at
+  // most: the month goes first when it does not fit (the dates say it), then
+  // the end is cut at a word.
+  const offerName = (group) => {
+    const dates = `${shortDate(window.start)}-${shortDate(window.end)}`;
+    const full = `${dates} ${monthName(window.start)} ${kindLabel} ${group.label}`;
+    if (full.length <= 50) return full;
+    const short = `${dates} ${kindLabel} ${group.label}`;
+    if (short.length <= 50) return short;
+    return short.slice(0, 51).replace(/\s+\S*$/, '').slice(0, 50);
+  };
   const period = String(promotion.period).slice(0, 7);
   const files = [];
-  for (const { group, lines } of byGroup.values()) {
+  const fileOrder = Object.keys(FILES);
+  for (const { file, lines: unsorted } of [...byFile.entries()].sort((x, y) => fileOrder.indexOf(x[0]) - fileOrder.indexOf(y[0])).map(([, v]) => v)) {
+    // One Offer # per group of the file, in GROUP_ORDER: the kitchen file is
+    // Offer # 1 Kitchen Sinks, Offer # 2 Kitchen Faucets.
+    const lines = [...unsorted].sort((x, y) => GROUP_ORDER.indexOf(groupKey(x.group)) - GROUP_ORDER.indexOf(groupKey(y.group)));
+    const offerOf = new Map();
+    for (const l of lines) if (!offerOf.has(l.group)) offerOf.set(l.group, offerOf.size + 1);
     const { zip, shared } = await openTemplate(template.storage_path);
     const workbookXml = await zip.file('xl/workbook.xml').async('string');
     const name = listSheetNames(workbookXml).find((n) => /^discounted pricing$/i.test(n));
@@ -239,7 +273,8 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
         if (c == null || v == null || v === '') return;
         cells.set(c + 1, buildCell(`${indexToCol(c + 1)}${rn}`, v, style ?? styles.get(c + 1) ?? null));
       };
-      put('offerNumber', LOWES_CONSTANTS.offerNumber);
+      const { group } = l;
+      put('offerNumber', LOWES_CONSTANTS.offerNumber - 1 + offerOf.get(group));
       put('stockOrSos', LOWES_CONSTANTS.stockOrSos);
       put('start', excelSerial(window.start));
       put('end', excelSerial(window.end));
@@ -267,7 +302,8 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
       rowsXml += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
     }
     zip.file(path, injectRows(xml, rowsXml, lastUsed + 1 + lines.length));
-    files.push({ name: `Lowes_Promo_${period}_${group.file}.xlsm`, zip, group, rows: lines.length });
+    const offers = [...offerOf.keys()].map((g) => ({ label: g.label, subdivision: g.subdivision, rows: lines.filter((l) => l.group === g).length }));
+    files.push({ name: `Lowes_Promo_${period}_${file.name}.xlsm`, zip, label: file.label, offers, rows: lines.length });
   }
 
   if (files.length === 1) {
@@ -288,7 +324,7 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
   }
 
   const rows = files.reduce((n, f) => n + f.rows, 0);
-  const report = { rows, tier, tierLabel, fromList, files: files.map((f) => ({ name: f.name, label: f.group.label, subdivision: f.group.subdivision, rows: f.rows })), noAlias, noName, noMap, noPromo, atOrAbove, noCost, excluded, window };
+  const report = { rows, tier, tierLabel, fromList, files: files.map((f) => ({ name: f.name, label: f.label, offers: f.offers, rows: f.rows })), noAlias, noName, noMap, noPromo, atOrAbove, noCost, excluded, window };
   logActivity({
     action: 'export',
     entityType: 'promotion',
@@ -303,7 +339,8 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
 const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? ` and ${list.length - n} more` : ''}`;
 
 export function summarizeLowesFill(channel, r) {
-  const parts = [`${channel.label} ${r.files.length > 1 ? `${r.files.length} files (ZIP)` : 'file'} ready. ${r.rows} products, ${r.window.start} to ${r.window.end}, value = MAP ${r.tierLabel}${r.fromList ? ` (${r.fromList} from the promotion's own list)` : ''}: ${r.files.map((f) => `${f.label} ${f.rows}`).join(', ')}`];
+  const fileText = (f) => (f.offers.length > 1 ? `${f.label} (${f.offers.map((o, i) => `offer ${i + 1} ${o.label} ${o.rows}`).join(', ')})` : `${f.label} ${f.rows}`);
+  const parts = [`${channel.label} ${r.files.length > 1 ? `${r.files.length} files (ZIP)` : 'file'} ready. ${r.rows} products, ${r.window.start} to ${r.window.end}, value = MAP ${r.tierLabel}${r.fromList ? ` (${r.fromList} from the promotion's own list)` : ''}: ${r.files.map(fileText).join(', ')}`];
   if (r.noAlias.length) parts.push(`no Lowe's item number in Aliases, left out: ${few(r.noAlias)}`);
   if (r.noMap.length) parts.push(`no MAP USD in the PIM, left out: ${few(r.noMap)}`);
   if (r.noPromo.length) parts.push(`no MAP ${r.tierLabel} in the PIM, left out: ${few(r.noPromo)}`);
