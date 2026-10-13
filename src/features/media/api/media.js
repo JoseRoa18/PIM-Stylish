@@ -29,6 +29,19 @@ export function getMediaUrl(storagePath) {
   return storagePath || null;
 }
 
+/**
+ * The same file as a download (user, 2026-10-13: "bajar directamente el
+ * archivo"): Supabase Storage answers `?download=<name>` with
+ * Content-Disposition: attachment, so the browser saves it under its original
+ * name instead of opening it. Other links are returned as they are.
+ */
+export function getDownloadUrl(storagePath, fileName) {
+  const url = getMediaUrl(storagePath);
+  if (!url || !/\/storage\/v1\/object\/public\//.test(url)) return url;
+  const name = fileName || decodeURIComponent(url.split('?')[0].split('/').pop() ?? '');
+  return `${url}${url.includes('?') ? '&' : '?'}download=${encodeURIComponent(name)}`;
+}
+
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
 
 /**

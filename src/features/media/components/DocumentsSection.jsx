@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { FileText, ExternalLink, Eye, Trash2, Loader2, Upload, ChevronDown } from 'lucide-react';
+import { FileText, ExternalLink, Eye, Trash2, Loader2, Upload, ChevronDown, Download } from 'lucide-react';
 import { MorphIcon } from 'morphicons/react';
 import { Link as LinkGlyph, Check as CheckGlyph } from 'lucide';
 import { useProductMedia } from '../hooks/useProductMedia';
-import { uploadDocumentFile, removeMedia, getMediaUrl, isSupabaseStored } from '../api/media';
+import { uploadDocumentFile, removeMedia, getMediaUrl, getDownloadUrl, isSupabaseStored } from '../api/media';
 import { formatFileSize } from '@/lib/format';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -568,6 +568,16 @@ export function DocumentRow({ label, name = label, description, doc, canEdit, ca
           <button type="button" onClick={openInNewTab} className={iconBtn} title="Open in new tab" aria-label={`Open ${name} in new tab`}>
             <ExternalLink className="w-4 h-4" />
           </button>
+          {/* Saves the file straight away, under its own name (no opening first). */}
+          <a
+            href={getDownloadUrl(doc.storage_path, doc.file_name)}
+            download={doc.file_name || true}
+            className={iconBtn}
+            title="Download"
+            aria-label={`Download ${name}`}
+          >
+            <Download className="w-4 h-4" />
+          </a>
           <button
             type="button"
             onClick={copyLink}
