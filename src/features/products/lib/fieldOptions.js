@@ -60,6 +60,9 @@ export const SPOUT_TYPE_OPTIONS = ['Gooseneck / High Arc', 'Low Arc', 'Rigid / F
 // pull out), Best Buy / BB&B handle styles (lever / knob / cross).
 export const SPRAY_TYPE_OPTIONS = ['Pull Down', 'Pull Out', 'Standard Faucet', 'Pot Filler', 'Does Not Apply'];
 export const SPRAY_ACTIVATION_OPTIONS = ['Spray Head Button', 'Lever', 'Does Not Apply'];
+// How the water turns on without the handle (user, 2026-10-13: K-150 is
+// touchless) — Home Depot USA's Sensor Activation list.
+export const SENSOR_ACTIVATION_OPTIONS = ['No Sensor', 'Touch', 'Touchless', 'Touchless with Voice', 'Voice Control'];
 export const HANDLE_STYLE_OPTIONS = ['Lever', 'Knob', 'Cross'];
 
 // Product types whose SKUs other products point at (Strainer Model,

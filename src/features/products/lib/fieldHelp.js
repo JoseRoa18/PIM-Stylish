@@ -94,6 +94,7 @@ export const FIELD_HELP = {
   connection_size: 'Water supply connection diameter in inches — enter the decimal (0.375 = 3/8").',
   lock_type: 'How the spray head docks back (magnetic, click-lock…).',
   hot_cold_dispenser: 'Whether it dispenses both hot and cold water.',
+  sensor_activation: 'Turns the water on without the handle: Touchless (motion sensor), Touch, voice — or No Sensor. Home Depot USA reads it.',
   faucet_height_in: 'Total faucet height from the deck, in inches.',
   spout_height_in: 'Height from the deck to the spout outlet, in inches.',
   spout_reach_in: 'Horizontal distance from the mounting hole to the water stream, in inches.',

@@ -165,7 +165,7 @@ import {
   WARRANTY_OPTIONS, WARRANTY_LENGTH_OPTIONS, CRAFTSMANSHIP_OPTIONS, SINK_SHAPE_OPTIONS,
   INSTALLATION_TYPE_OPTIONS, GAUGE_OPTIONS, BOWL_CONFIGURATION_OPTIONS, BASIN_SPLIT_OPTIONS,
   DRAIN_LOCATION_OPTIONS, FAUCET_SHAPE_OPTIONS, SPOUT_TYPE_OPTIONS, SPRAY_TYPE_OPTIONS,
-  SPRAY_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS,
+  SPRAY_ACTIVATION_OPTIONS, SENSOR_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS,
   STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE, skusOfType,
 } from '@/features/products/lib/fieldOptions';
 
@@ -1361,6 +1361,7 @@ function SpecsTab({ product, edit }) {
               <FractionField label="Connection Size" attrKey="connection_size" product={product} edit={edit} />
               <AttrField label="Lock Type" attrKey="lock_type" suggest product={product} edit={edit} />
               <AttrField label="Hot & Cold Dispenser" attrKey="hot_cold_dispenser" type="boolean" product={product} edit={edit} />
+              <AttrField label="Sensor Activation" attrKey="sensor_activation" type="select" options={SENSOR_ACTIVATION_OPTIONS} product={product} edit={edit} />
             </div>
           </Section>
 

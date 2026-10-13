@@ -97,11 +97,18 @@ const installDocUrl = (p) => {
 };
 
 // HD faucet collection from the PIM's product_type/spray wording.
+// The cold water / drinking taps (K-142, K-147: category Cold Water Tap or a
+// "Cold Water" title) are Beverage Faucets (user, 2026-10-13); a pot filler
+// filed as a cold water tap (K-145) stays a Pot Filler.
+// A combo naming its cold water tap (K133NK142NA802N) is still a pull-down.
+const isColdWaterTap = (p) => p.category !== 'kitchen_faucet_combo'
+  && !/pot ?filler/i.test(p.product_type ?? '')
+  && (p.category === 'cold_water_tap' || /cold water|drinking water/i.test(`${p.product_type ?? ''} ${attr(p).general_title_en ?? ''}`));
 const faucetCollection = (p) => {
   const t = `${p.product_type ?? ''} ${attr(p).spout_type ?? ''} ${attr(p).spray_type ?? ''}`;
   if (/pot ?filler/i.test(t)) return 'Pot Filler';
   if (/pull.?out/i.test(t)) return 'Pull Out';
-  if (/beverage|bar |drinking|filtration|water filter/i.test(t)) return 'Beverage Faucets';
+  if (/beverage|bar |drinking|filtration|water filter/i.test(t) || isColdWaterTap(p)) return 'Beverage Faucets';
   return 'Pull Down';
 };
 
@@ -167,10 +174,15 @@ const country = (p) => COUNTRY[String(attr(p).country_of_origin || 'China').trim
 // Material Breakdown takes the ReferenceData wording closest to the PIM
 // material; the percentage column then says 100 (the legend wants the
 // breakdown to total 100%).
+// Granite composite is 80% quartz and 20% acrylic resin (user, 2026-10-13):
+// two materials, in ReferenceData's own words ("Engineered Quartz" and
+// "Acrylic" — the list has no plain "Quartz" nor "Acrylic Resin"), and the
+// percentages in the same order.
+const GRANITE_BREAKDOWN = { materials: ['Engineered Quartz', 'Acrylic'], percentages: '80|20' };
 const materialBreakdown = (p) => {
   const m = String(attr(p).material ?? p.material ?? '');
   if (/stainless/i.test(m) || (!m && num(attr(p).gauge))) return ['Stainless Steel'];
-  if (/granite|composite|quartz/i.test(m)) return ['Granite Composite', 'Composite Granite', 'Granite', 'Engineered Quartz'];
+  if (/granite|composite|quartz/i.test(m)) return { multi: GRANITE_BREAKDOWN.materials };
   if (/fire ?clay/i.test(m)) return ['Fire Clay', 'Fireclay'];
   if (/porcelain/i.test(m)) return ['Porcelain'];
   if (/ceramic|vitreous/i.test(m)) return ['Ceramic'];
@@ -254,7 +266,14 @@ export const HOME_DEPOT_RULES = {
   'MFG Model #': (p) => p.sku,
   'MFG Part #': (p) => p.sku,
   'MFG Brand Name': (p) => brandMap(p.brand),
-  'Item Weight (lb)': (p) => num(attr(p).product_weight_lb),
+  // A faucet without its own weight takes the package's minus 1 lb (user,
+  // 2026-10-13).
+  'Item Weight (lb)': (p) => {
+    const own = num(attr(p).product_weight_lb);
+    if (own || !isFaucetCategory(p.category)) return own;
+    const pkg = Number(num(p.shipping_weight_lb));
+    return pkg > 1 ? String(Math.round((pkg - 1) * 100) / 100) : '';
+  },
   // Packaged axes (2026-09-14): Height = the box LENGTH, Width = width,
   // Depth = the remaining axis (the PIM's box height).
   'Packaged Height (in) (in)': (p) => num(attr(p).shipping_dimensions_in?.length),
@@ -267,15 +286,15 @@ export const HOME_DEPOT_RULES = {
   // Snapped to the column's list, so it takes the list's own capitals.
   'Country of Origin Name': (p) => country(p)?.[1] ?? '',
   'Sellable Unit?': () => 'Y',
-  'Sell Pkg Qty (as sold to consumer)': () => '1',
+  // A combo (faucet + tap / soap dispenser) sells as 2 (user, 2026-10-13).
+  'Sell Pkg Qty (as sold to consumer)': (p) => (p.category === 'kitchen_faucet_combo' ? '2' : '1'),
   'Sell UOM (as sold to consumer)': () => 'EA-Each',
   'Made-To-Order': () => 'No',
   'Number of Boxes Shipped to Consumer': boxesShipped,
   'Vendor Processing Days': () => '1',
   'Material Breakdown': materialBreakdown,
-  // A granite composite sink is not 100% granite: its percentage stays empty
-  // (user, 2026-10-09).
-  'Material Breakdown Percentage': (p) => (materialBreakdown(p) && !(isSink(p) && isGranite(p)) ? '100' : ''),
+  // Granite composite: 80|20 (quartz, acrylic); one material: 100.
+  'Material Breakdown Percentage': (p) => (isGranite(p) ? GRANITE_BREAKDOWN.percentages : materialBreakdown(p) ? '100' : ''),
   // The swatch is the main picture (user, 2026-10-09).
   'Color Swatch': (p) => (p._images ?? [])[0] ?? '',
 
@@ -317,16 +336,12 @@ export const HOME_DEPOT_RULES = {
   'Does this product contain electronic equipment (does it contain a circuit board, computer chip, copper wiring, or other electrical components)?': () => 'N',
   'Is this item governed by the Textile and Wool Labeling Act as administered by the Federal Trade Commission?': () => 'No',
   // Answers that are true for every sink and faucet (user, 2026-10-01: fill
-  // what the PIM can state, leave the rest empty). Not a covered electronic
-  // device, no screen; no biodegradable / compostable plastic claim; not a
-  // textile, so no PFAS. Their follow-ups (CED recycling states, the PFAS
-  // certificate) stay blank. The Sinks file leaves the CED, screen and
-  // compostable questions empty (user review of the kitchen sinks file,
-  // 2026-10-09: EB, EC, EG); the faucets file keeps them.
-  'For Covered Electronic Devices (CEDs), select the states where this item is considered a CED.': (p) => (isSink(p) ? '' : '_Not A CED_'),
-  'Select the screen size in inches (measured diagonally) or select "No Screen" if the item does not have a screen': (p) => (isSink(p) ? '' : '_No Screen_'),
+  // what the PIM can state, leave the rest empty): no biodegradable plastic
+  // claim; not a textile, so no PFAS. Their follow-ups (the PFAS certificate)
+  // stay blank. The CED states, screen size and compostable questions (EB,
+  // EC, EG) are left EMPTY in both files (user reviews of 2026-10-09 sinks and
+  // 2026-10-13 faucets).
   'Does the item claim on the label, packaging, or related marketing materials that the plastic/resin is “biodegradable,” or “degradable,” or “decomposable” or other wording that implies the plastic/resin will break down in a landfill or other environment?': alwaysNo,
-  'If you claim the plastic/resin in your product is "compostable", does it comply with: (1) ASTM D6400, (2) ASTM D6868, or (3) Vincotte OK Compost HOME Certification standards?': (p) => (isSink(p) ? '' : 'No, no claim that the plastic/resin is compostable'),
   'Does the textile in your product contain one or more PFAS chemicals in any amount?': alwaysNo,
   'Is your product considered “outdoor apparel for severe wet weather conditions”, as the California Safer Clothing and Textiles Act defines that term?': alwaysNo,
   'Does your product include a disclosure, with the statement “Made with PFAS chemicals”, both with the physical product and on the Product Information Page, as required by California’s Safer Clothing and Textiles Act?': alwaysNo,
@@ -335,7 +350,9 @@ export const HOME_DEPOT_RULES = {
   'Eco Actions': (p) => (/sink/.test(p.category ?? '') ? 'No' : ''),
 
   // Documents
-  'Warranty': (p) => docUrl(p, 'warranty_file'),
+  // The faucets file leaves Warranty (BZ) empty — not the PDF's link (user,
+  // 2026-10-13); the sinks file keeps the link.
+  'Warranty': (p) => (isFaucetCategory(p.category) ? '' : docUrl(p, 'warranty_file')),
   'Installation Guide': installDocUrl,
   'Use and Care Manual': (p) => docUrl(p, 'owner_manual'),
   'Specification': (p) => docUrl(p, 'spec_sheet'),
@@ -347,7 +364,8 @@ export const HOME_DEPOT_RULES = {
     const c = faucetCollection(p);
     return c === 'Beverage Faucets' ? 'Beverage Faucet' : c; // list option is singular
   },
-  'Commercial / Residential': () => 'Residential',
+  // Faucets are for both (user, 2026-10-13: ES "Commercial / Residential").
+  'Commercial / Residential': (p) => (isFaucetCategory(p.category) ? 'Commercial / Residential' : 'Residential'),
   // HD's list only has filter systems; beverage faucets are filtered-water
   // faucets (user, 2026-10-01).
   'Water Treatment Type': (p) =>
@@ -378,14 +396,18 @@ export const HOME_DEPOT_RULES = {
     isYes(attr(p).cupc_certified) || isYes(attr(p).upc_certified)
       ? 'UPC Certified (Uniform Plumbing Code)'
       : 'No Certifications or Listings',
-  // Faucets ship with their mounting kit (hoses/supply lines confirm it).
+  // Every faucet ships with its mounting kit (user, 2026-10-13: FH "All
+  // Mounting Hardware" for all; it went only where hoses/supply lines said so).
   'Included Components': (p) =>
-    attr(p).supply_line_included || attr(p).hose_included ? 'All Mounting Hardware' : '',
+    isFaucetCategory(p.category) || attr(p).supply_line_included || attr(p).hose_included ? 'All Mounting Hardware' : '',
   // The list is textual ("1 Handle"), not numeric.
   'Number of Faucet Handles': (p) => `${num(attr(p).number_of_handles) || '1'} Handle`,
   'Mount Location': (p) => (/wall/i.test(attr(p).mounting_type || '') ? 'Wall Mount' : 'Deck Mount'),
+  // The PIM's Sensor Activation field (user, 2026-10-13 — K-150 is
+  // touchless); without one, the spray wording and the product type.
   'Sensor Activation': (p) => {
-    const t = `${attr(p).spray_function_activation ?? ''} ${attr(p).spray_type ?? ''}`;
+    if (attr(p).sensor_activation) return attr(p).sensor_activation;
+    const t = `${attr(p).spray_function_activation ?? ''} ${attr(p).spray_type ?? ''} ${p.product_type ?? ''}`;
     if (/touchless|sensor|motion/i.test(t)) return 'Touchless';
     if (/touch/i.test(t)) return 'Touch';
     return 'No Sensor';
@@ -413,6 +435,8 @@ export const HOME_DEPOT_RULES = {
       if (/granite|composite|quartz|porcelain|fireclay/i.test(m)) items.push('Scratch Resistant', 'Heat Resistant');
       return { multi: items, fallback: 'No Additional Features' };
     }
+    // Cold water taps: "Cold Water Only" (user, 2026-10-13).
+    if (isFaucetCategory(p.category) && isColdWaterTap(p)) return ['Cold Water Only', 'No Additional Features'];
     const c = faucetCollection(p);
     if (c === 'Pull Down') return ['Pull Down Spray Wand', 'Gooseneck', 'No Additional Features'];
     if (c === 'Pull Out') return ['Pull Out Spray Wand', 'Pull out sprayer', 'No Additional Features'];
@@ -425,8 +449,9 @@ export const HOME_DEPOT_RULES = {
     const deg = String(list(attr(p).bullet_points).join(' ')).match(/(\d{2,3})\s*(?:°|degree)/i);
     return deg ? `${deg[1]} Degree Spout Swivel` : '';
   },
+  // Every faucet (user, 2026-10-13; it went only with 1 installation hole).
   'Faucet Hole Spacing': (p) =>
-    num(attr(p).number_of_installation_holes) === '1' ? 'No Spacing - Single Hole' : '',
+    isFaucetCategory(p.category) || num(attr(p).number_of_installation_holes) === '1' ? 'No Spacing - Single Hole' : '',
   'Faucet Hole Fit': (p) => {
     const n = num(attr(p).number_of_installation_holes);
     return n === '1' ? 'Single Hole' : n ? `${n} Hole` : '';
