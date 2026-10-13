@@ -455,9 +455,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const parts = [];
       const reports = [];
       let warnings = 0;
+      const leftOut = []; // products an exporter could not write (e.g. no Home Depot Canada item number)
       for (const { tmpl, label, products: productList } of byTemplate.values()) {
         const res = await generate(tmpl.storage_path, productList, `${prefix}_${label.replace(/[^a-z0-9_]+/gi, '_')}`);
         warnings += res.warnings?.length ?? 0;
+        if (res.skipped?.length) leftOut.push(`${res.skipped.join(', ')} (${res.skippedReason ?? 'not written'})`);
         if (res.fillReport) reports.push({ file: `${marketplace} — ${label}`, ...res.fillReport });
         parts.push(`${label}: ${res.count} product(s)${res.families != null ? ` / ${res.families} group(s)` : ''}`);
       }
@@ -470,7 +472,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       if (noTemplate.length) message += ` ⚠ Skipped (no template): ${noTemplate.join(', ')}.`;
       if (excludedSkus.length) message += ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.`;
       if (warnings) message += ` ⚠ ${warnings} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`;
-      setResult({ type: noTemplate.length || warnings ? 'error' : 'success', message });
+      if (leftOut.length) message += ` ⚠ Left out: ${leftOut.join('; ')}.`;
+      setResult({ type: noTemplate.length || warnings || leftOut.length ? 'error' : 'success', message });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? `${marketplace} export failed` });
     } finally {

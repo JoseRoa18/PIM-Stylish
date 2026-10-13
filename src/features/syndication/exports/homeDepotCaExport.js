@@ -1,6 +1,10 @@
+import { supabase } from '@/lib/supabase';
 import {
   openTemplate,
   sheetPathByName,
+  sheetToGrid,
+  listSheetNames,
+  injectRows,
   buildCell,
   colToIndex,
   downloadZip,
@@ -541,10 +545,118 @@ async function templateCountries(zip, shared) {
   return out;
 }
 
+// ---- Update listing: HD Canada's "Item Maintenance Export" (Vladimir, 2026-10-13)
+// One sheet ("Online Core Data_Digital Asset"): headers row 1, hints row 2,
+// one item per row from row 3 — row 3 ships with Home Depot's example item,
+// which our rows replace. The key is Home Depot's Item Number (the Home
+// Depot CA alias, Aliases tab); a product without one is left out and
+// reported. Every column takes the SAME rule as the new-listing workbook
+// (names, marketing, bullets, warranty, image and PDF file names), so an
+// update says exactly what a listing would; the files go in the same .zip.
+// Columns are found by their header, not by letter.
+const UPDATE_RULES = [
+  [/^item number$/i, (p) => p._itemNumber],
+  [/^online product name\s*\(en\)$/i, titleEn],
+  [/^marketing info\s*\(en\)$/i, (p) => stripHtml(p.description)],
+  [/^bullet\s*(\d+)\s*\(en\)$/i, (p, n) => list(attr(p).bullet_points)[n - 1] ?? ''],
+  [/^warranty\s*\(en\)$/i, warrantyText],
+  [/^online product name\s*\(fr\)$/i, titleFr],
+  [/^marketing info\s*\(fr\)$/i, (p) => stripHtml(attr(p).description_fr)],
+  [/^bullet\s*(\d+)\s*\(fr\)$/i, (p, n) => list(attr(p).bullet_points_fr)[n - 1] ?? ''],
+  [/^warranty\s*\(fr\)$/i, warrantyTextFr],
+  [/^primary image\b/i, (p) => p._media.images[0]?.name ?? ''],
+  [/^alternate image\s*(\d+)$/i, (p, n) => p._media.images[n]?.name ?? ''],
+  [/^additional pdf\s*(\d+)$/i, (p, n) => p._media.pdfs[n - 1]?.name ?? ''],
+];
+const UPDATE_DATA_ROW = 3;
+
+// The update sheet: the one whose first row holds Item Number and the
+// English product name.
+async function findUpdateSheet(zip, shared) {
+  const names = listSheetNames(await zip.file('xl/workbook.xml').async('string'));
+  if (names.includes('Basic Data')) return null; // the new-listing workbook
+  for (const name of names) {
+    const path = await sheetPathByName(zip, name);
+    if (!path) continue;
+    const xml = await zip.file(path).async('string');
+    const heads = (sheetToGrid(xml, shared)[0] ?? []).map((h) => String(h ?? '').trim());
+    if (heads.some((h) => /^item number$/i.test(h)) && heads.some((h) => /^online product name\s*\(en\)$/i.test(h))) {
+      return { path, xml, heads };
+    }
+  }
+  return null;
+}
+
+// Home Depot Canada item numbers by SKU (Aliases tab).
+async function homeDepotCaItemNumbers(skus) {
+  const out = {};
+  for (let i = 0; i < skus.length; i += 200) {
+    const { data, error } = await supabase
+      .from('product_aliases')
+      .select('sku, alias')
+      .eq('marketplace', 'Home Depot CA')
+      .in('sku', skus.slice(i, i + 200));
+    if (error) throw error;
+    for (const r of data ?? []) out[r.sku] ??= String(r.alias).trim();
+  }
+  return out;
+}
+
+async function fillHomeDepotCaUpdate(zip, sheet, products, fileName, templateStoragePath) {
+  const skus = products.map((p) => p.sku);
+  const [imgBySku, docBySku, itemBySku] = await Promise.all([
+    fetchImagesBySku(skus),
+    fetchDocsBySku(skus, HDCA_DOC_TYPES, Object.keys(HDCA_DOC_TYPES)),
+    homeDepotCaItemNumbers(skus),
+  ]);
+  const noItem = products.filter((p) => !itemBySku[p.sku]).map((p) => p.sku);
+  const rows = products.filter((p) => itemBySku[p.sku]);
+  if (!rows.length) throw new Error(`None of these products has a Home Depot Canada item number (Aliases tab): ${noItem.join(', ')}.`);
+
+  const cols = sheet.heads
+    .map((h, ci) => {
+      for (const [re, rule] of UPDATE_RULES) {
+        const m = h.match(re);
+        if (m) return { ci, rule, n: m[1] != null ? Number(m[1]) : null };
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  let rowsXml = '';
+  rows.forEach((p, pi) => {
+    p._itemNumber = itemBySku[p.sku];
+    p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
+    p._docs = docBySku[p.sku] || [];
+    p._media = mediaPlan(p);
+    const rowNum = UPDATE_DATA_ROW + pi;
+    let cells = '';
+    for (const { ci, rule, n } of cols) {
+      let v;
+      try { v = rule(p, n); } catch { v = ''; }
+      cells += buildCell(`${colLetter(ci + 1)}${rowNum}`, v);
+    }
+    rowsXml += `<row r="${rowNum}">${cells}</row>`;
+  });
+  // Home Depot's example row (and anything below the hints) goes; ours follow.
+  const cleared = sheet.xml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (m, r) => (Number(r) >= UPDATE_DATA_ROW ? '' : m));
+  zip.file(sheet.path, injectRows(cleared, rowsXml, UPDATE_DATA_ROW - 1 + rows.length));
+
+  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  // The images and PDFs the sheet names, one folder per part number — the
+  // same .zip as a new listing.
+  const media = await downloadMediaZip(
+    rows.flatMap((p) => [...p._media.images, ...p._media.pdfs.filter(Boolean)].map((e) => ({ ...e, folder: p.sku }))),
+    fileName,
+  );
+  return { count: rows.length, skipped: noItem, skippedReason: 'no Home Depot Canada item number in Aliases', media };
+}
+
 /**
  * Fill The Home Depot Canada workbook (in place) and download it, with a
  * .zip of the images and PDFs its Digital Assets sheet names, one folder
- * per part number.
+ * per part number. An "Item Maintenance Export" (update listing) template
+ * is filled by fillHomeDepotCaUpdate instead.
  *
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
@@ -554,6 +666,8 @@ export async function generateHomeDepotCaFromTemplate(templateStoragePath, produ
   if (!products?.length) throw new Error('No products to export.');
 
   const { zip, shared } = await openTemplate(templateStoragePath);
+  const updateSheet = await findUpdateSheet(zip, shared);
+  if (updateSheet) return fillHomeDepotCaUpdate(zip, updateSheet, products, fileName, templateStoragePath);
   const countries = await templateCountries(zip, shared);
 
   const skus = products.map((p) => p.sku);
