@@ -85,6 +85,8 @@ const stripHtml = (h) =>
     .trim();
 const brandMap = (b) => (/azuni/i.test(b || '') ? 'AZUNI' : 'Stylish');
 const isFaucet = (p) => isFaucetCategory(p.category);
+// A round drain (D-70x) has a diameter and a body length, no PIM length.
+const isRoundDrain = (p) => accessoryKind(p) === 'drain' && !num(attr(p).external_dimensions_in?.length);
 
 const installText = (p) =>
   `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')} ${attr(p).mounting_type ?? ''}`;
@@ -447,21 +449,34 @@ const ONLINE_CORE_RULES = {
   AR: () => 'No',
   AS: () => 'No',
   AT: netLb,
-  // Assembled H = vertical, W = left-to-right (PIM length), D = front-to-back.
-  // Faucets carry no overall dimensions: their height is faucet_height_in
-  // (user, 2026-10-01); width and depth stay empty.
-  AU: (p) => num(attr(p).external_dimensions_in?.height
-    ?? (isFaucet(p) ? attr(p).faucet_height_in : null)
-    ?? attr(p).external_dimensions_in?.depth),
-  // Round drains (D-70x) have no length: their diameter (PIM width) is both
-  // width and depth (user, 2026-10-01).
-  AV: (p) => num(attr(p).external_dimensions_in?.length ?? (accessoryKind(p) === 'drain' ? attr(p).external_dimensions_in?.width : null)),
-  AW: (p) => num(attr(p).external_dimensions_in?.width),
-  // AZ Pick SLA — business fills. Ship from: Canada / Ontario / Greater
-  // Toronto Area, less than truckload (user, 2026-10-05).
-  BA: () => 'CA__Less_than_truckload',
-  BB: () => 'Ontario__Less_than_truckload',
-  BC: () => 'GreaterTorontoArea__Less_than_truckload',
+  // Assembled Height = the PIM length, Width = the PIM width, Depth = the PIM
+  // height (user, 2026-10-14). Faucets carry no overall dimensions: their
+  // height is faucet_height_in (user, 2026-10-01). Round drains (D-70x) have
+  // no length: their body (PIM depth) is the height and their diameter (PIM
+  // width) both width and depth (user, 2026-10-01).
+  AU: (p) => {
+    const d = attr(p).external_dimensions_in ?? {};
+    if (isFaucet(p)) return num(d.height ?? attr(p).faucet_height_in ?? d.depth);
+    if (isRoundDrain(p)) return num(d.depth ?? d.height);
+    return num(d.length);
+  },
+  AV: (p) => {
+    const d = attr(p).external_dimensions_in ?? {};
+    return num(isFaucet(p) ? d.length : d.width);
+  },
+  AW: (p) => {
+    const d = attr(p).external_dimensions_in ?? {};
+    if (isFaucet(p)) return num(d.width);
+    if (isRoundDrain(p)) return num(d.width);
+    return num(d.height ?? d.depth);
+  },
+  // Pick SLA 1 and ship from Canada / Ontario / Other, by parcel, for every
+  // product (user, 2026-10-14; the lists hang on the Shipping Method formula,
+  // which reads Parcel for every product with its sizes in the PIM).
+  AZ: () => 1,
+  BA: () => 'CA__Parcel',
+  BB: () => 'Ontario__Parcel',
+  BC: () => 'Other__Parcel',
 };
 // Row 3 carries the template's example category (Appliances…): the category
 // columns are always written, an empty value clearing the example.
@@ -527,6 +542,26 @@ const digitalRules = () => {
   ['X', 'Y', 'Z'].forEach((col, i) => { rules[col] = (p) => p._media.pdfs[i]?.name ?? ''; });
   return rules;
 };
+
+// The same cell format with the General number format (numFmtId 0), added to
+// the workbook's cellXfs once per source format. Returns its index.
+async function generalStyle(zip, styleId, cache) {
+  if (cache.has(styleId)) return cache.get(styleId);
+  let xml = await zip.file('xl/styles.xml').async('string');
+  const block = xml.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/);
+  const xfs = block ? [...block[1].matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map((m) => m[0]) : [];
+  const base = xfs[Number(styleId)];
+  if (!base || !/numFmtId="(?!0")\d+"/.test(base)) {
+    cache.set(styleId, styleId); // already General (or unknown): keep it
+    return styleId;
+  }
+  const id = String(xfs.length);
+  const clone = base.replace(/numFmtId="\d+"/, 'numFmtId="0"');
+  xml = xml.replace(block[0], `<cellXfs count="${xfs.length + 1}">${block[1]}${clone}</cellXfs>`);
+  zip.file('xl/styles.xml', xml);
+  cache.set(styleId, id);
+  return id;
+}
 
 // The template's country list (Validations!T, named range "Countries").
 async function templateCountries(zip, shared) {
@@ -683,12 +718,24 @@ export async function generateHomeDepotCaFromTemplate(templateStoragePath, produ
   }
 
   const DATA_ROW = 3;
-  const fillSheet = async (sheetName, rules, { results = null, clear = null } = {}) => {
+  const generalStyles = new Map();
+  const fillSheet = async (sheetName, rules, { results = null, clear = null, general = null } = {}) => {
     const path = await sheetPathByName(zip, sheetName);
     if (!path) throw new Error(`The file has no "${sheetName}" sheet — is this the Home Depot Canada template?`);
     let xml = await zip.file(path).async('string');
     const cellsByRow = new Map();
     const resultsByRow = new Map();
+    // `general` columns keep each row's own cell format with the General
+    // number format (see generalStyle).
+    const styleFor = {}; // col → Map(row → style index)
+    for (const col of general ?? []) {
+      const byRow = new Map();
+      for (const m of xml.matchAll(new RegExp(`<c r="${col}(\\d+)"[^>]*?\\ss="(\\d+)"`, 'g'))) {
+        const r = Number(m[1]);
+        if (r >= DATA_ROW && r < DATA_ROW + products.length) byRow.set(r, await generalStyle(zip, m[2], generalStyles));
+      }
+      styleFor[col] = byRow;
+    }
     products.forEach((p, pi) => {
       const rowNum = DATA_ROW + pi;
       const cells = new Map();
@@ -699,7 +746,7 @@ export async function generateHomeDepotCaFromTemplate(templateStoragePath, produ
           if (clear?.has(col)) cells.set(colToIndex(col), '');
           continue;
         }
-        cells.set(colToIndex(col), buildCell(`${col}${rowNum}`, v));
+        cells.set(colToIndex(col), buildCell(`${col}${rowNum}`, v, styleFor[col]?.get(rowNum) ?? null));
       }
       if (cells.size) cellsByRow.set(rowNum, cells);
       if (results) resultsByRow.set(rowNum, new Map(Object.entries(results(p))));
@@ -710,7 +757,10 @@ export async function generateHomeDepotCaFromTemplate(templateStoragePath, produ
     zip.file(path, xml);
   };
 
-  await fillSheet('Basic Data', BASIC_DATA_RULES, { results: BASIC_DATA_RESULTS });
+  // Net Weight (AA), and Gross Weight (Z) alike: a whole number reads whole,
+  // decimals as they are (user, 2026-10-14) — the template's first rows are
+  // formatted 0.000 ("34.000").
+  await fillSheet('Basic Data', BASIC_DATA_RULES, { results: BASIC_DATA_RESULTS, general: ['Z', 'AA'] });
   await fillSheet('Online Core Attributes', ONLINE_CORE_RULES, { results: ONLINE_CORE_RESULTS, clear: ONLINE_CORE_CLEAR });
   await fillSheet('Add EAN UPC', EAN_UPC_RULES, { results: EAN_UPC_RESULTS });
   await fillSheet('Digital Assets', digitalRules(), { results: MIRROR_RESULTS });
