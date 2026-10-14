@@ -174,15 +174,12 @@ const country = (p) => COUNTRY[String(attr(p).country_of_origin || 'China').trim
 // Material Breakdown takes the ReferenceData wording closest to the PIM
 // material; the percentage column then says 100 (the legend wants the
 // breakdown to total 100%).
-// Granite composite is 80% quartz and 20% acrylic resin (user, 2026-10-13):
-// two materials, in ReferenceData's own words ("Engineered Quartz" and
-// "Acrylic" — the list has no plain "Quartz" nor "Acrylic Resin"), and the
-// percentages in the same order.
-const GRANITE_BREAKDOWN = { materials: ['Engineered Quartz', 'Acrylic'], percentages: '80|20' };
+// Granite composite is just "Granite", with no percentage (user, 2026-10-14;
+// the 80% quartz / 20% acrylic split of 10-13 is not sent).
 const materialBreakdown = (p) => {
   const m = String(attr(p).material ?? p.material ?? '');
   if (/stainless/i.test(m) || (!m && num(attr(p).gauge))) return ['Stainless Steel'];
-  if (/granite|composite|quartz/i.test(m)) return { multi: GRANITE_BREAKDOWN.materials };
+  if (/granite|composite|quartz/i.test(m)) return ['Granite'];
   if (/fire ?clay/i.test(m)) return ['Fire Clay', 'Fireclay'];
   if (/porcelain/i.test(m)) return ['Porcelain'];
   if (/ceramic|vitreous/i.test(m)) return ['Ceramic'];
@@ -293,8 +290,8 @@ export const HOME_DEPOT_RULES = {
   'Number of Boxes Shipped to Consumer': boxesShipped,
   'Vendor Processing Days': () => '1',
   'Material Breakdown': materialBreakdown,
-  // Granite composite: 80|20 (quartz, acrylic); one material: 100.
-  'Material Breakdown Percentage': (p) => (isGranite(p) ? GRANITE_BREAKDOWN.percentages : materialBreakdown(p) ? '100' : ''),
+  // Granite composite: no percentage; any other single material: 100.
+  'Material Breakdown Percentage': (p) => (isGranite(p) ? '' : materialBreakdown(p) ? '100' : ''),
   // The swatch is the main picture (user, 2026-10-09).
   'Color Swatch': (p) => (p._images ?? [])[0] ?? '',
 
