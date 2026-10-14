@@ -7,10 +7,11 @@
 // Amazon does not know our SKUs: column A takes the SELLER SKU of the offer
 // (S-300XG-CAN, 3P-LVMJ-40J0…), stored per marketplace in amazon_links. One
 // product can have several offers (FBA + FBM, legacy codes) — every offer
-// gets the promo. Filled per row: seller SKU, fulfillment channel
-// ("Fulfillment by Merchant (Default)" — user rule 2026-09-22, we ship
-// ourselves), sale price in the market's currency, sale start and sale end
-// = the market's promo window.
+// gets the promo. Filled per row: seller SKU, sale price in the market's
+// currency, sale start and sale end = the market's promo window. Column B,
+// Fulfillment Channel Code, stays EMPTY on every row we write (user,
+// 2026-10-14, monthly promotions and deals alike; it carried "Fulfillment by
+// Merchant (Default)" since 2026-09-22).
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -29,22 +30,6 @@ import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const HEADER_SCAN_ROWS = 12;
-// The merchant-fulfilled option as each template spells it: Amazon.com says
-// "Fulfillment by Merchant (Default)", Amazon.ca "Fulfilment by Merchant
-// (Default)". Read from the file's own Valid Values sheet; the US spelling is
-// the fallback when the sheet is missing.
-const FULFILLMENT_FALLBACK = 'Fulfillment by Merchant (Default)';
-async function merchantFulfillmentValue(zip, shared) {
-  const path = await sheetPathByName(zip, 'Valid Values');
-  if (!path) return FULFILLMENT_FALLBACK;
-  const grid = sheetToGrid(await zip.file(path).async('string'), shared);
-  for (const row of grid) {
-    if (!row.some((c) => /fulfil+ment channel code/i.test(text(c)))) continue;
-    const hit = row.find((c) => /fulfil+ment by merchant/i.test(text(c)));
-    if (hit) return text(hit);
-  }
-  return FULFILLMENT_FALLBACK;
-}
 const text = (v) => String(v ?? '').trim();
 const lower = (v) => text(v).toLowerCase();
 
@@ -88,7 +73,6 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   }
 
   const market = channel.market;
-  const fulfillmentValue = await merchantFulfillmentValue(zip, shared);
   const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const { rows: prices, excluded } = await promotionMembersFor(promotion, channel.key);
   const members = prices.filter((r) => r[priceKey] != null);
@@ -121,9 +105,11 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
 
   const window = promoWindow(promotion, market);
   const { sku: skuCol, price: priceCol, start: startCol, end: endCol, fulfillment: fulfillCol } = loc.cols;
+  // Fulfillment Channel Code is written empty, so a row that came back from
+  // Amazon with one filled is cleared too.
   const cellsFor = (rn, o) => new Map([
     [skuCol + 1, buildCell(`${indexToCol(skuCol + 1)}${rn}`, o.seller)],
-    ...(fulfillCol >= 0 ? [[fulfillCol + 1, buildCell(`${indexToCol(fulfillCol + 1)}${rn}`, fulfillmentValue)]] : []),
+    ...(fulfillCol >= 0 ? [[fulfillCol + 1, '']] : []),
     [priceCol + 1, buildCell(`${indexToCol(priceCol + 1)}${rn}`, Number(o.price))],
     [startCol + 1, buildCell(`${indexToCol(startCol + 1)}${rn}`, window.start)],
     [endCol + 1, buildCell(`${indexToCol(endCol + 1)}${rn}`, window.end)],
@@ -167,8 +153,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
     noOffer,
     excluded,
     window,
-    fulfillmentValue,
-    columns: { sku: indexToCol(skuCol + 1), fulfillment: fulfillCol >= 0 ? indexToCol(fulfillCol + 1) : null, price: indexToCol(priceCol + 1), start: indexToCol(startCol + 1), end: indexToCol(endCol + 1) },
+    columns: { sku: indexToCol(skuCol + 1), price: indexToCol(priceCol + 1), start: indexToCol(startCol + 1), end: indexToCol(endCol + 1) },
   };
   logActivity({
     action: 'export',
@@ -182,7 +167,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
 }
 
 export function summarizeAmazonFill(channel, r) {
-  const parts = [`${channel.label} file ready. ${r.offers} offers for ${r.products} products, ${r.window.start} to ${r.window.end} · columns ${r.columns.sku}${r.columns.fulfillment ? `+${r.columns.fulfillment}` : ''}, ${r.columns.price}, ${r.columns.start}, ${r.columns.end}`];
+  const parts = [`${channel.label} file ready. ${r.offers} offers for ${r.products} products, ${r.window.start} to ${r.window.end} · columns ${r.columns.sku}, ${r.columns.price}, ${r.columns.start}, ${r.columns.end}`];
   if (r.filled) parts.push(`${r.filled} rows filled in place, ${r.appended} added`);
   if (r.noOffer.length) parts.push(`no Amazon seller SKU on file: ${r.noOffer.slice(0, 10).join(', ')}${r.noOffer.length > 10 ? ` and ${r.noOffer.length - 10} more` : ''}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${r.excluded.slice(0, 10).join(', ')}${r.excluded.length > 10 ? ` and ${r.excluded.length - 10} more` : ''}`);
