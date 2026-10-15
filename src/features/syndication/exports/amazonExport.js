@@ -1,13 +1,16 @@
-import { AMAZON_RULES, AMAZON_LISTING_RULES, AMAZON_KITCHEN_SINK_RULES } from './amazonMapping';
+import { AMAZON_RULES, AMAZON_LISTING_RULES, AMAZON_KITCHEN_SINK_RULES, AMAZON_UPDATE_RULES } from './amazonMapping';
 import { supabase } from '@/lib/supabase';
 import { getStockFor } from '@/features/pricing/api/inventory';
+import { expectedPricesFor } from '@/features/pricing/api/expectedPrices';
 import { amazonTitle } from '@/features/syndication/lib/amazonTitles';
+import { channelCategory } from '@/features/products/lib/categories';
 import {
   openTemplate,
   sheetPathByName,
   sheetToGrid,
   buildCell,
   indexToCol,
+  colToIndex,
   injectRows,
   downloadZip,
   templateExt,
@@ -197,6 +200,9 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   const grid = sheetToGrid(sheetXml, shared);
 
   const settings = parseSettings(grid[0]?.[0]);
+  if (isListingsReport(settings)) {
+    return fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings, products, fileName, templateStoragePath });
+  }
   const labelRow = Number(settings.labelRow ?? 4);
   const attributeRow = Number(settings.attributeRow ?? 5);
   const dataRow = Number(settings.dataRow ?? 7);
@@ -245,42 +251,248 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
     p._amazon = linkBySku[p.sku] ?? null;
     p._stock = stock[ctx.market]?.[p.sku] ?? null;
     p._title = amazonTitle(p, { colorVariant: variants.has(p.sku) });
-    const cache = {}; // label → computed value (arrays reused across occurrences)
-    // Values are collected first so units can be reconciled against their
-    // paired value before anything is written out.
-    const values = [];
-    for (let ci = 0; ci < labels.length; ci++) {
-      const label = labels[ci];
-      if (!label) continue;
-      let v;
-      if (label === 'Product Type') v = productType;
-      else {
-        // Rules are keyed with the en_CA compliance-media labels; other
-        // locales (en_US…) share the same columns, so normalize the lookup.
-        const rule = rules[label] ?? rules[label.replace(/\(en_[A-Z]{2}, /, '(en_CA, ')];
-        if (!rule) continue;
-        if (!(label in cache)) {
-          try { cache[label] = rule(p, ctx); } catch { cache[label] = ''; }
-        }
-        const computed = cache[label];
-        v = Array.isArray(computed) ? computed[occurrence[ci] - 1] ?? '' : occurrence[ci] === 1 ? computed : '';
-      }
-      if (v === '' || v == null) continue;
-      values[ci] = snapTo(v, validValues[label]);
-    }
-    reconcileUnits(values, unitPairs, labels, validValues);
-
-    let cells = '';
-    values.forEach((v, ci) => {
-      if (v === '' || v == null) return;
-      fill.hit(ci, v);
-      cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
-    });
-    rowsXml += `<row r="${rowNum}" spans="1:${labels.length}">${cells}</row>`;
+    const values = rowValues({ p, ctx, rules, labels, occurrence, validValues, unitPairs, productType });
+    rowsXml += rowXml(values, rowNum, labels, fill);
   });
 
   zip.file(tplPath, injectRows(sheetXml, rowsXml, dataRow - 1 + products.length));
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
 
   return { count: products.length, fillReport: fill.report(labels, products.length) };
+}
+
+// One row's values by column index. Values are collected first so units can
+// be reconciled against their paired value before anything is written out.
+function rowValues({ p, ctx, rules, labels, occurrence, validValues, unitPairs, productType }) {
+  const cache = {}; // label → computed value (arrays reused across occurrences)
+  const values = [];
+  for (let ci = 0; ci < labels.length; ci++) {
+    const label = labels[ci];
+    if (!label) continue;
+    let v;
+    if (label === 'Product Type') v = productType;
+    else {
+      // Rules are keyed with the en_CA compliance-media labels; other
+      // locales (en_US…) share the same columns, so normalize the lookup.
+      const rule = rules[label] ?? rules[label.replace(/\(en_[A-Z]{2}, /, '(en_CA, ')];
+      if (!rule) continue;
+      if (!(label in cache)) {
+        try { cache[label] = rule(p, ctx); } catch { cache[label] = ''; }
+      }
+      const computed = cache[label];
+      v = Array.isArray(computed) ? computed[occurrence[ci] - 1] ?? '' : occurrence[ci] === 1 ? computed : '';
+    }
+    if (v === '' || v == null) continue;
+    values[ci] = snapTo(v, validValues[label]);
+  }
+  reconcileUnits(values, unitPairs, labels, validValues);
+  return values;
+}
+
+function rowXml(values, rowNum, labels, fill, kept = null) {
+  let cells = '';
+  values.forEach((v, ci) => {
+    if (v === '' || v == null) return;
+    if (!kept?.has(ci)) fill.hit(ci, v);
+    cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
+  });
+  return `<row r="${rowNum}" spans="1:${labels.length}">${cells}</row>`;
+}
+
+// ---- Update listing: Amazon's Category Listings Report (2026-10-14) --------
+// The report Seller Central exports (Inventory Reports → Category Listings
+// Report, settings flavor "inventory-report…") is kept in Templates as the
+// MASTER: every live listing, every product type in one sheet, one row per
+// Seller SKU. An export writes ONLY the selected products' rows — found by
+// their Seller SKU (Aliases) — rebuilt from the PIM with the listing rules plus
+// AMAZON_UPDATE_RULES, each row with its own product type (SINK, FAUCET…), so
+// the report's own 10-06 values never ride along. Parents are not written. A
+// product with no Seller SKU, or whose Seller SKU is not in the report, is
+// left out and reported.
+const isListingsReport = (settings) => /^inventory-report/i.test(settings.flavor ?? '');
+
+// Which product types each column applies to. The template greys a column
+// out with the conditional format "ApplicablePTList<n>", a defined name that
+// lists the types it does NOT grey: NOT(OR(Template!$D1="SINK", …)). A column
+// without one applies to every type.
+async function columnApplicability(zip, sheetXml) {
+  const wb = await zip.file('xl/workbook.xml').async('string');
+  const lists = {};
+  for (const m of wb.matchAll(/<definedName name="(ApplicablePTList\d+)"[^>]*>([\s\S]*?)<\/definedName>/g)) {
+    lists[m[1]] = new Set([...m[2].matchAll(/\$D\d+=(?:"|&quot;)([A-Z_]+)(?:"|&quot;)/g)].map((x) => x[1]));
+  }
+  const byCol = new Map();
+  for (const m of sheetXml.matchAll(/<conditionalFormatting sqref="([A-Z]+)\d+:[A-Z]+\d+">([\s\S]*?)<\/conditionalFormatting>/g)) {
+    const name = m[2].match(/<formula>(ApplicablePTList\d+)<\/formula>/)?.[1];
+    const ci = colToIndex(m[1]) - 1;
+    if (name && lists[name] && !byCol.has(ci)) byCol.set(ci, lists[name]);
+  }
+  return (ci, productType) => !byCol.has(ci) || byCol.get(ci).has(productType);
+}
+
+// One update row's values: only the columns that apply to the row's product
+// type. The report repeats a label for different attributes of different
+// types (Item Width Side to Side = item_width_height and
+// item_depth_width_height): a scalar fills every ATTRIBUTE it applies to, but
+// the numbered slots of one attribute (Generic Keyword #1, #2) only once. A
+// measure without its unit takes inches / pounds (converted where the column
+// wants other units).
+function rowValuesUpdate({ p, ctx, rules, labels, attrs, validValues, unitPairs, productType, applies }) {
+  const cache = {};
+  const values = [];
+  const slot = {};
+  const given = new Set();
+  for (let ci = 0; ci < labels.length; ci++) {
+    const label = labels[ci];
+    if (!label || !applies(ci, productType)) continue;
+    if (label === 'Product Type') { values[ci] = productType; continue; }
+    const rule = rules[label] ?? rules[label.replace(/\(en_[A-Z]{2}, /, '(en_CA, ')];
+    if (!rule) continue;
+    if (!(label in cache)) {
+      try { cache[label] = rule(p, ctx); } catch { cache[label] = ''; }
+    }
+    const computed = cache[label];
+    slot[label] = (slot[label] ?? 0) + 1;
+    let v;
+    if (Array.isArray(computed)) v = computed[slot[label] - 1] ?? '';
+    else {
+      const key = `${label}|${String(attrs[ci] ?? '').replace(/#\d+/g, '#')}`;
+      if (given.has(key)) continue;
+      given.add(key);
+      v = computed;
+    }
+    if (v === '' || v == null) continue;
+    values[ci] = snapTo(v, validValues[label]);
+  }
+  for (const { value: vi, unit: ui } of unitPairs) {
+    if (values[vi] === '' || values[vi] == null || (values[ui] !== '' && values[ui] != null)) continue;
+    if (!applies(ui, productType)) continue;
+    values[ui] = /weight/i.test(String(attrs[vi] ?? '')) ? 'Pounds' : 'Inches';
+  }
+  reconcileUnits(values, unitPairs, labels, validValues);
+  // A unit without the PIM's measure stays out: the report's own measure and
+  // unit are then kept together (6.6 Centimeters never turns 6.6 Inches).
+  for (const { value: vi, unit: ui } of unitPairs) {
+    if ((values[vi] === '' || values[vi] == null) && values[ui] !== '' && values[ui] != null) delete values[ui];
+  }
+  return values;
+}
+
+// A partial update replaces each attribute it names as a whole. Where a row
+// fills one member of an attribute that has several (Your Price inside
+// purchasable_offer, the height inside item_depth_width_height), the other
+// members are copied from the report, so Amazon keeps them: the pricing rule,
+// the minimum price, the B2B price, the other sides. A list (bullets,
+// keywords, materials: the same member numbered #1, #2…) stays the PIM's.
+// Returns the columns it copied.
+const attrName = (a) => String(a ?? '').match(/^([a-z0-9_]+)[[#.]/i)?.[1] ?? '';
+const memberOf = (a) => String(a ?? '').replace(/#\d+/g, '#');
+function keepRestOfAttributes(values, reportCells, attrs) {
+  const touched = new Set();
+  const members = new Set();
+  values.forEach((v, ci) => {
+    if (v === '' || v == null || !attrName(attrs[ci])) return;
+    touched.add(attrName(attrs[ci]));
+    members.add(memberOf(attrs[ci]));
+  });
+  const kept = new Set();
+  attrs.forEach((a, ci) => {
+    const v = reportCells?.[ci];
+    if (v === '' || v == null || (values[ci] !== '' && values[ci] != null)) return;
+    if (!touched.has(attrName(a)) || members.has(memberOf(a))) return;
+    values[ci] = v;
+    kept.add(ci);
+  });
+  return kept;
+}
+
+// Valid Values per product type: "Label - [ SINK ]" rows, "- [ ]" for all.
+function buildAmazonValidValuesByType(grid) {
+  const generic = {};
+  const byType = {};
+  for (const row of grid) {
+    if (!row) continue;
+    const li = row.findIndex((v) => v != null && v !== '');
+    if (li < 0) continue;
+    const m = String(row[li]).match(/^(.*?)\s*-\s*\[\s*([^\]]*?)\s*\]\s*$/);
+    if (!m) continue;
+    const options = row.slice(li + 1).filter((v) => v != null && v !== '');
+    if (!options.length) continue;
+    if (m[2]) (byType[m[2]] ??= {})[m[1].trim()] = options;
+    else generic[m[1].trim()] = options;
+  }
+  return (pt) => ({ ...generic, ...(byType[pt] ?? {}) });
+}
+
+async function fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings, products, fileName, templateStoragePath }) {
+  const labelRow = Number(settings.labelRow ?? 4);
+  const attributeRow = Number(settings.attributeRow ?? 5);
+  const dataRow = Number(settings.dataRow ?? 7);
+  const labels = grid[labelRow - 1] || [];
+  const col = (name) => labels.indexOf(name);
+  const [skuCol, typeCol, statusCol, levelCol, idTypeCol, idCol] = [col('SKU'), col('Product Type'), col('Status'), col('Parentage Level'), col('Product Id Type'), col('Product Id')];
+  if (skuCol < 0 || typeCol < 0) throw new Error('The listings report has no SKU / Product Type columns.');
+  const cell = (i, c) => (c < 0 ? '' : String(grid[i]?.[c] ?? '').trim());
+
+  // The report's rows by Seller SKU (parents left aside), with what the
+  // listing already is on Amazon: its product type, status and product id.
+  const report = new Map();
+  for (let i = dataRow - 1; i < grid.length; i++) {
+    const seller = cell(i, skuCol);
+    if (!seller || /^abc123$/i.test(seller) || cell(i, levelCol) === 'Parent') continue;
+    report.set(seller, { productType: cell(i, typeCol), status: cell(i, statusCol), productIdType: cell(i, idTypeCol), productId: cell(i, idCol), cells: grid[i] });
+  }
+  const applies = await columnApplicability(zip, sheetXml);
+  const attrs = grid[attributeRow - 1] || [];
+
+  const vvPath = await sheetPathByName(zip, 'Valid Values');
+  const validValuesFor = vvPath ? buildAmazonValidValuesByType(sheetToGrid(await zip.file(vvPath).async('string'), shared)) : () => ({});
+  const lang = settings.contentLanguageTag ?? 'en_CA';
+  const market = lang === 'en_US' ? 'us' : 'ca';
+  const unitPairs = buildUnitPairs(grid[attributeRow - 1] || []);
+
+  const skus = products.map((p) => p.sku);
+  const [imgBySku, docBySku, linkBySku, stock, variants, prices] = await Promise.all([
+    fetchImagesBySku(skus),
+    fetchDocsBySku(skus, AMAZON_DOC_TYPES, Object.keys(AMAZON_DOC_TYPES)),
+    amazonLinks(skus, market),
+    getStockFor(skus),
+    colorVariantSkus(products),
+    expectedPricesFor({ priceField: market === 'us' ? 'map_usd' : 'map_cad', market, promoChannel: `amazon_${market}` }),
+  ]);
+
+  const skipped = [];
+  const fill = createFillTracker();
+  let rowsXml = '';
+  let rowNum = dataRow;
+  for (const p of products) {
+    // Amazon USA lists our products under the PIM SKU itself.
+    const seller = linkBySku[p.sku]?.sellerSku || (market === 'us' ? p.sku : null);
+    if (!seller) { skipped.push(`${p.sku} (no Amazon ${market.toUpperCase()} Seller SKU in Aliases)`); continue; }
+    const row = report.get(seller);
+    if (!row) { skipped.push(`${p.sku} (${seller} is not in the listings report — list it with New listing)`); continue; }
+    p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
+    p._docs = docBySku[p.sku] || [];
+    p._amazon = { ...(linkBySku[p.sku] ?? {}), sellerSku: seller };
+    p._stock = stock[market]?.[p.sku] ?? null;
+    p._title = amazonTitle(p, { colorVariant: variants.has(p.sku) });
+    p._report = row;
+    p._sale = prices.promoBySku.get(p.sku) ?? null;
+    const validValues = validValuesFor(row.productType);
+    const kitchenSink = row.productType === 'SINK' && channelCategory(p) !== 'bathroom_sink';
+    const ctx = { lang, market, productType: row.productType, validValues, kitchenSink };
+    const rules = { ...AMAZON_RULES, ...AMAZON_LISTING_RULES, ...(kitchenSink ? AMAZON_KITCHEN_SINK_RULES : {}), ...AMAZON_UPDATE_RULES };
+    const values = rowValuesUpdate({ p, ctx, rules, labels, attrs, validValues, unitPairs, productType: row.productType, applies });
+    const kept = keepRestOfAttributes(values, row.cells, attrs);
+    rowsXml += rowXml(values, rowNum, labels, fill, kept);
+    rowNum += 1;
+  }
+  const count = rowNum - dataRow;
+  if (!count) throw new Error(`None of these products can be updated on Amazon ${market.toUpperCase()}: ${skipped.join('; ')}.`);
+
+  // The report's own rows go; Amazon's example row and the headers stay.
+  const cleared = sheetXml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (m, r) => (Number(r) >= dataRow ? '' : m));
+  zip.file(tplPath, injectRows(cleared, rowsXml, dataRow - 1 + count));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  return { count, skipped, skippedReason: 'left out', fillReport: fill.report(labels, count) };
 }

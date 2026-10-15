@@ -220,10 +220,37 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     const all = (await listTemplates()).filter((t) => t.marketplace === marketplace);
     const purposes = purposesIn(all);
     if (purposes.length > 1) {
-      setAsking({ marketplace, purposes, templates: all });
+      // "N files" is what THIS selection downloads for each purpose, not how
+      // many templates the purpose has (Amazon CA's six listing templates).
+      setBusy('export');
+      try {
+        const loaded = await getProducts([...selectedSkus]);
+        const counted = purposes.map((p) => ({ ...p, count: filesForSelection(marketplace, all.filter((t) => templatePurpose(t) === p.value), loaded) }));
+        setAsking({ marketplace, purposes: counted, templates: all });
+      } catch (err) {
+        setResult({ type: 'error', message: err.message ?? 'Could not load the selected products' });
+      } finally {
+        setBusy(null);
+      }
       return;
     }
     return runMarketplaceExport(marketplace, all);
+  }
+
+  // The files an export of these products will write — the same routing the
+  // exporters below use: Lowe's fills its whole set, Menards each covered
+  // category's set, the others one file per template a product resolves to.
+  function filesForSelection(marketplace, templates, loaded) {
+    const exclusionKey = templateMarketplaceKey(marketplace);
+    const kept = loaded.filter((p) => !(exclusionKey && isExcluded(p, exclusionKey)));
+    if (!kept.length) return 0;
+    if (/lowe/i.test(marketplace)) return templates.length;
+    if (/menards/i.test(marketplace)) {
+      const fillable = templates.filter((t) => !/recipient|reference\.xls/i.test(t.file_name));
+      const cats = new Set(kept.map((p) => p.category));
+      return fillable.filter((t) => [...cats].some((c) => templateAppliesTo(t, c))).length;
+    }
+    return new Set(kept.map((p) => templateForProduct(templates, p)?.id).filter(Boolean)).size;
   }
 
   // The chosen purpose's files go through the marketplace's own exporter.

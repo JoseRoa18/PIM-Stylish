@@ -2,7 +2,9 @@
 // product's own PIM data — Jessica's instructions (2026-10-09, the
 // "amazon-product-titles" rules): Brand first, then series → size → material →
 // bowls → mounting → type → color → model number; a trimming ladder when the
-// Name is too long, and what it trims (plus the key specs) in the Highlight.
+// Name is too long, and what it trims (plus the key specs) in the Highlight —
+// short comma fragments in Amazon's own wording, which Amazon shows under the
+// Name (user, 2026-10-14: "con el mismo formato actual de Amazon").
 // `amazonTitle(product, { colorVariant })` returns { name, highlight, flags };
 // a color variant (a family sibling with another finish) always keeps its
 // color. English only: the Amazon listing templates carry en_CA / en_US fields.
@@ -136,21 +138,31 @@ function fitName(parts, compose, ladder, flags) {
 }
 // Highlight: comma fragments in priority order; one that would pass 125 or
 // repeat a word a third time is left out and the next ones still get a try.
+// A fragment is its text, a list of shorter alternatives (longest first), or
+// { text, rank }: it is shown where it stands but tried at that rank (a sink's
+// depth reads before its accessories and gives way to them).
 const repeatsWord = (text) => titleIssues(text, 'highlight').some((i) => i.startsWith('word repeated'));
 function fitHighlight(fragments) {
+  const items = fragments.map((frag, i) => (frag && typeof frag === 'object' && !Array.isArray(frag)
+    ? { alts: list(frag.text), rank: frag.rank, i }
+    : { alts: list(frag), rank: i, i }));
+  const chosen = new Map(); // position → text
+  const compose = () => [...chosen].sort((x, y) => x[0] - y[0]).map(([, t]) => t).join(', ');
   const seen = new Set();
-  let out = '';
-  for (const frag of fragments) {
-    // a fragment can offer shorter alternatives, longest first
-    for (const f of list(frag).map((x) => tidy(x ?? '')).filter(Boolean)) {
+  for (const it of [...items].sort((x, y) => x.rank - y.rank || x.i - y.i)) {
+    for (const f of it.alts.map((x) => tidy(x ?? '')).filter(Boolean)) {
       if (seen.has(f.toLowerCase())) break;
-      const next = out ? `${out}, ${f}` : f;
-      if (next.length > HIGHLIGHT_MAX || repeatsWord(next)) continue;
+      chosen.set(it.i, f);
+      const next = compose();
+      if (next.length > HIGHLIGHT_MAX || repeatsWord(next)) {
+        chosen.delete(it.i);
+        continue;
+      }
       seen.add(f.toLowerCase());
-      out = next;
       break;
     }
   }
+  const out = compose();
   return out ? out.charAt(0).toUpperCase() + out.slice(1) : '';
 }
 // Title Case for the English Name: every word starts with a capital except
@@ -197,21 +209,31 @@ function kitchenSink(p, ctx, flags) {
   const ladder = ['model', 'bowl', 'workstation', 'series', ...(ctx.colorVariant ? [] : ['color'])];
   const { name, dropped } = fitName(parts, compose, ladder, flags);
 
+  // Amazon's own Highlight wording (user, 2026-10-14: "18 gauge T-304
+  // stainless steel, 12 inch deep, strainer included"): the steel, the bowls
+  // the Name dropped, the depth, the accessories, then what still fits.
   const frags = [];
   if (isStainless(p)) {
     const gauge = numText(a.gauge) ? `${numText(a.gauge)} gauge ` : '';
-    frags.push(`${gauge}T-304${material ? '' : ' stainless steel'}${coating ? ` with ${coating}` : ''}`);
+    // a coated sink reads "16 gauge T-304 with graphite black coating"
+    frags.push(`${gauge}T-304${coating ? ` with ${coating}` : ' stainless steel'}`);
   } else if (coating) frags.push(coating);
   const lowDivider = a.low_divider === true && bowl.includes('Double');
   const bowlFrag = dropped.includes('bowl') && bowl
     ? (lowDivider ? bowl.replace('Double Bowl', 'low divider double bowl') : bowl).toLowerCase()
     : lowDivider ? 'low divider' : '';
   frags.push(tidy(`${bowlFrag}${dropped.includes('workstation') ? ' workstation' : ''}`));
-  if (acc.items.length) frags.push(includedFrag(acc.items));
+  // a grid sits on the bowl's floor: Amazon's "bottom grid"
+  const items = acc.items.map((x) => x.replace(/^((?:\d+ )?)(grids?)$/, '$1bottom $2'));
+  const depth = numText(ext.depth ?? ext.height);
+  // the depth reads before the accessories but gives way to them
+  if (depth) frags.push({ text: `${depth} inch deep`, rank: frags.length + (items.length ? 1.5 : 0) });
+  if (items.length) frags.push(includedFrag(items));
+  if (numText(a.min_internal_cabinet_size_in)) frags.push(`${numText(a.min_internal_cabinet_size_in)} inch minimum cabinet size`);
   if (install === 'Dual Mount') frags.push('undermount or drop-in install');
   if (dropped.includes('series') && series) frags.push(`${series} series`);
   frags.push(drainText(a.drain_hole_location));
-  if (numText(a.sink_radius_mm)) frags.push(`R${numText(a.sink_radius_mm)} corners`);
+  if (numText(a.sink_radius_mm)) frags.push(`${numText(a.sink_radius_mm)} mm radius corners`);
   const pieces = Number(a.number_of_pieces);
   if (acc.items.length && Number.isFinite(pieces) && pieces > 0 && pieces !== 1 + acc.total) {
     flags.push(`Number of Pieces ${pieces} vs 1 sink + ${acc.total} accessories listed`);
@@ -285,22 +307,32 @@ function faucet(p, ctx, flags) {
   }
   if (name.length > NAME_MAX) flags.push(`VERIFICATION REQUIRED: Name ${name.length}/75 after every trim`);
 
+  // Amazon's own wording (user, 2026-10-14): "Single handle, stream, shower
+  // and filtered water modes, lead-free stainless steel, ceramic disc
+  // cartridge, 360 degree swivel spout", then the flow, the install and sizes.
   const frags = [];
+  if (dropped.includes('handles') && handleText) frags.push(handleText.toLowerCase());
   const fns = s(a.spray_head_functions).split(/\s*[;,]\s*/).filter(Boolean).map((x) => x.toLowerCase());
   const hasSpray = a.spray_included !== false && !notApplicable(a.spray_type) && fns.length > 1;
-  if (hasSpray) frags.push(`${fns.length}-function spray: ${joinItems(fns)}`);
+  if (hasSpray) frags.push(`${joinItems(fns)} modes`);
   else if (fns.length) frags.push(joinItems(fns));
-  if (trimmed.length) frags.push(`${trimmed.join(' ').toLowerCase()} design`);
-  if (numText(a.max_flow_rate)) frags.push(`${numText(a.max_flow_rate)} GPM flow rate`);
+  if (s(a.sensor_activation)) frags.push(`${s(a.sensor_activation).toLowerCase()} sensor activation`);
   const m = materialName(p);
-  if (m) frags.push(`${m.toLowerCase()} construction`);
-  if (dropped.includes('handles') && handleText) frags.push(handleText.toLowerCase());
-  if (dropped.includes('model') && model) frags.push(`${model} collection`);
-  if (numText(a.faucet_height_in)) frags.push(`${numText(a.faucet_height_in)} inch height`);
-  if (numText(a.spout_reach_in)) frags.push(`${numText(a.spout_reach_in)} inch reach`);
+  if (m || a.lead_free === true) frags.push(tidy(`${a.lead_free === true ? 'lead-free' : ''} ${m.toLowerCase()}`));
+  if (/cartridge|valve/i.test(s(a.cartridge_type))) frags.push(s(a.cartridge_type).toLowerCase());
+  if (/^(yes|true)$/i.test(s(a.swivel_spout))) {
+    frags.push(numText(a.spout_rotation_degrees) ? `${numText(a.spout_rotation_degrees)} degree swivel spout` : 'swivel spout');
+  }
+  if (numText(a.max_flow_rate)) frags.push(`${numText(a.max_flow_rate)} GPM`);
+  const holes = Number(a.number_of_installation_holes);
+  if (holes === 1) frags.push('single-hole install');
+  else if (holes > 1) frags.push(`${holes}-hole install`);
+  if (trimmed.length) frags.push(`${trimmed.join(' ').toLowerCase()} design`);
   if (a.deck_plate_included === true) frags.push('deck plate included');
   if (a.supply_line_included === true) frags.push('supply lines included');
-  if (a.lead_free === true) frags.push('lead-free');
+  if (numText(a.faucet_height_in)) frags.push(`${numText(a.faucet_height_in)} inch overall height`);
+  if (numText(a.spout_reach_in)) frags.push(`${numText(a.spout_reach_in)} inch spout reach`);
+  if (dropped.includes('model') && model) frags.push(`${model} collection`);
   return { name, highlight: fitHighlight(frags) };
 }
 
@@ -327,12 +359,15 @@ function bathroomSink(p, ctx, flags) {
   const compose = (on) => `${['brand', 'model', 'size', 'material', 'shape', 'install'].filter((k) => on.has(k)).map((k) => parts[k]).join(' ')} Bathroom Sink${on.has('drain') ? ` ${parts.drain}` : ''}${on.has('color') ? `, ${parts.color}` : ''}${on.has('pack') ? `, ${parts.pack}` : ''}`;
   const { name, dropped } = fitName(parts, compose, ['shape', 'model', 'material', 'drain', ...(ctx.colorVariant ? [] : ['color'])], flags);
 
+  // Amazon's own wording (user, 2026-10-14): "Rectangular basin, porcelain,
+  // with overflow, center drain, 8 inch deep, … included".
   const frags = [];
-  if (dropped.includes('material') && material) frags.push(material.toLowerCase());
-  if (dropped.includes('shape') && shape) frags.push(`${shape.toLowerCase()} basin`);
-  if (numText(ext.depth)) frags.push(`${numText(ext.depth)} inch deep`);
+  if (shape) frags.push(`${shape.toLowerCase()} basin`);
+  if (material) frags.push(material.toLowerCase());
   if (/^yes$/i.test(s(a.overflow))) frags.push('with overflow');
   if (/^no$/i.test(s(a.overflow))) frags.push('no overflow');
+  frags.push(drainText(a.drain_hole_location));
+  if (numText(ext.depth ?? ext.height)) frags.push(`${numText(ext.depth ?? ext.height)} inch deep`);
   const rest = acc.items.filter((x) => !(x === drain && !dropped.includes('drain')));
   if (rest.length) frags.push(includedFrag(rest));
   if (dropped.includes('model') && parts.model) frags.push(`${parts.model} collection`);
@@ -403,19 +438,27 @@ function accessory(p, ctx, flags) {
   }
 
   const frags = [];
+  // Amazon's own wording (user, 2026-10-14): the material first, as the PIM
+  // writes it ("Wood fiber composite, 16.75 x 11 x 0.37 inch, juice groove"),
+  // then what the Name dropped, the accessories, the size and the features.
+  const m = (s(p.material) || materialName(p)).toLowerCase().replace(/[.\s]+$/, '');
+  if (m) frags.push(m);
   if (dropped.includes('clause')) frags.push(parts.clause.toLowerCase());
-  const m = materialName(p);
-  if (m && !name.toLowerCase().includes(m.toLowerCase())) frags.push(m.toLowerCase());
+  const acc = accessoriesOf(p);
+  if (acc.items.length) frags.push(includedFrag(acc.items));
   const [L, W, H] = [ext.length, ext.width, ext.height ?? ext.depth].map(numText);
   if (SIZED.test(head)) {
     const shown = [L, W, H].filter(Boolean);
     if (shown.length >= 2) frags.push(`${shown.join(' x ')} inch`);
   } else if (/strainer/i.test(head) && W && H) frags.push(`${W} inch wide, ${H} inch deep`);
+  else {
+    // deck plates, drains, hoses…: the size, longest side first ("6.13 x 2.5 inch")
+    const shown = [L, W, H].filter(Boolean).sort((x, y) => Number(y) - Number(x));
+    if (shown.length >= 2) frags.push(`${shown.join(' x ')} inch`);
+  }
   const lowName = name.toLowerCase();
   if (dropped.includes('color') && color) frags.push(`${color.toLowerCase()} finish`);
-  else if (finish && !color && !isPlainBrushed(p) && !/,|multi/i.test(finish) && !lowName.includes(finish.toLowerCase())) frags.push(`${finish.toLowerCase()} finish`);
-  const acc = accessoriesOf(p);
-  if (acc.items.length) frags.push(includedFrag(acc.items));
+  else if (finish && !color && !isPlainBrushed(p) && !/,|multi/i.test(finish) && !lowName.includes(finish.toLowerCase()) && !m.includes(finish.toLowerCase())) frags.push(`${finish.toLowerCase()} finish`);
   if (a.juice_grooves === true) frags.push('juice grooves');
   if (a.collapsible === true && !/roll-up|foldable|collapsible/i.test(name)) frags.push('collapsible');
   if (a.bpa_free === true) frags.push('BPA-free');

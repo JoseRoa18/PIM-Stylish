@@ -9,9 +9,9 @@
 // generator, so rules return the *intended* value ("Stylish", "Undermount")
 // and the exact casing comes from the template.
 
-import { channelCategory } from '@/features/products/lib/categories';
-import { accessoryKind } from '@/features/templates/api/templates';
+import { isFaucetCategory } from '@/features/products/lib/categories';
 import { amazonTitle } from '@/features/syndication/lib/amazonTitles';
+import { amazonKeywords } from '@/features/syndication/lib/amazonKeywords';
 
 const attr = (p) => p.attributes || {};
 const num = (v) => {
@@ -36,6 +36,7 @@ const brandMap = (b) => (/azuni/i.test(b || '') ? 'AZUNI' : 'Stylish');
 // Stylish products → "Stylish International Inc.", Azuni products → "Azuni".
 const manufacturerOf = (b) => (/azuni/i.test(b || '') ? 'Azuni' : 'Stylish International Inc.');
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+const holeCount = (p) => (isFaucetCategory(p.category) ? attr(p).number_of_installation_holes : attr(p).number_of_faucet_holes);
 const dropDNA = (v) => (/does\s*no\w*\s*appl/i.test(String(v ?? '')) ? '' : String(v ?? ''));
 
 // Regulatory contact address, per marketplace (Amazon prints it on the listing
@@ -139,8 +140,9 @@ export const AMAZON_RULES = {
   'Unit Count Type': () => 'Count',
   'Included Components': (p) => list(attr(p).accessories_included).slice(0, 5),
   'Part Number': (p) => p.sku,
-  'Hole Count': (p) => num(attr(p).number_of_faucet_holes),
-  'Hole Count Unit': (p) => (num(attr(p).number_of_faucet_holes) ? 'Count' : ''),
+  // a sink's faucet holes; a faucet's own installation holes
+  'Hole Count': (p) => num(holeCount(p)),
+  'Hole Count Unit': (p) => (num(holeCount(p)) ? 'Holes' : ''), // the templates' only count unit
   // Amazon axes: Width = side-to-side (PIM length), Depth = front-to-back
   // (PIM width), Height = base-to-top (PIM depth for sinks).
   'Item Width Side To Side': (p) => num(attr(p).external_dimensions_in?.length),
@@ -148,7 +150,8 @@ export const AMAZON_RULES = {
   // below (width-based) — a duplicate key here was shadowed and never ran.
   'Item Depth Front To Back': (p) => num(attr(p).external_dimensions_in?.width),
   'Item Depth Unit': (p) => (num(attr(p).external_dimensions_in?.width) ? 'Inches' : ''),
-  'Item Height Base to Top': (p) => num(attr(p).external_dimensions_in?.height ?? attr(p).external_dimensions_in?.depth),
+  // a faucet has no external dimensions: its height is the faucet height
+  'Item Height Base to Top': (p) => num(attr(p).external_dimensions_in?.height ?? attr(p).external_dimensions_in?.depth ?? attr(p).faucet_height_in),
   'Item Height Unit': (p) =>
     num(attr(p).external_dimensions_in?.height ?? attr(p).external_dimensions_in?.depth ?? attr(p).faucet_height_in)
       ? 'Inches'
@@ -320,9 +323,14 @@ const installManual = (p) => englishDoc(p, [
 ]);
 // Single Bowl / Double Bowl node: Canada's "Recommended Browse Nodes", the
 // USA's "Item Type Keyword" — each kitchen sink template lists exactly those two.
+// The listing templates spell the node as a path ("… > Kitchen Sinks > Single
+// Bowl (8842616011)"), the listings report by name ("Single Bowl Kitchen Sinks
+// (8842616011)"): either form, the same node.
 const bowlNode = (label) => (p, ctx) => {
   const b = bowlKind(p);
-  return b ? (ctx?.validValues?.[label] ?? []).find((o) => o.includes(`> ${b} (`)) ?? '' : '';
+  if (!b) return '';
+  const options = ctx?.validValues?.[label] ?? [];
+  return options.find((o) => o.includes(`> ${b} (`)) ?? options.find((o) => o.startsWith(`${b} Kitchen Sinks (`)) ?? '';
 };
 // Every listing is fulfilled by us (user, 2026-10-09: "todos deberían ser
 // FBM"), in each template's own wording ("Fulfilment" in Canada, "Fulfillment"
@@ -330,86 +338,6 @@ const bowlNode = (label) => (p, ctx) => {
 const FULFILMENT = { ca: 'Fulfilment by Merchant (Default)', us: 'Fulfillment by Merchant (Default)' };
 // Our stock in that market; not tracked = 0, as in Rona's stock column.
 const quantity = (p) => String(Math.max(0, Math.floor(Number(p._stock?.available) || 0)));
-
-// Search terms: ONE cell, single words, English + French + Spanish, at most
-// 250 bytes (a French accent counts twice, so the 250-character limit always
-// holds). Composite granite sinks always carry "composite" and "granite".
-const KEYWORD_STOP = new Set([
-  'a', 'an', 'and', 'the', 'with', 'for', 'of', 'in', 'on', 'to', 'by', 'or', 'x',
-  'de', 'du', 'des', 'la', 'le', 'les', 'et', 'pour', 'avec', 'en', 'à', 'au', 'aux', 'un', 'une', 'sur', 'po',
-  'stylish', 'azuni',
-]);
-const words = (phrases) => list(phrases)
-  .flatMap((s) => String(s).toLowerCase().split(/[\s,;/()"“”]+/))
-  .map((w) => w.replace(/^[-'.]+|[-'.]+$/g, ''))
-  .filter((w) => w && !KEYWORD_STOP.has(w) && !/^[\d.]+(in|po|mm|cm)?$/.test(w));
-// The PIM has no Spanish keywords: these words describe the product itself,
-// by what it is (channelCategory: a colander filed as an Accessory is a
-// colander), its material, mounting and color.
-const SPANISH_BY_KIND = {
-  kitchen_sink: ['fregadero', 'cocina', 'lavaplatos', 'tarja'],
-  bathroom_sink: ['lavabo', 'lavamanos', 'baño', 'tocador'],
-  kitchen_faucet: ['grifo', 'llave', 'cocina', 'mezcladora', 'monomando'],
-  bathroom_faucet: ['grifo', 'llave', 'baño', 'lavabo', 'monomando'],
-  pot_filler: ['grifo', 'llave', 'cocina', 'llenaollas', 'pared'],
-  colander_drying_rack: ['colador', 'escurridor', 'escurreplatos', 'fregadero', 'cocina'],
-  'cutting board': ['tabla', 'cortar', 'picar', 'cocina', 'fregadero'],
-  strainer: ['coladera', 'colador', 'canastilla', 'fregadero', 'desagüe'],
-  'soap dispenser': ['dispensador', 'jabón', 'fregadero', 'cocina'],
-  drain: ['desagüe', 'drenaje', 'lavabo', 'baño'],
-  'faucet plate': ['placa', 'cubierta', 'grifo', 'llave'],
-  grid: ['rejilla', 'protector', 'fregadero'],
-  accessory: ['accesorio', 'fregadero', 'cocina'],
-};
-const spanishKind = (p) => {
-  const c = channelCategory(p);
-  if (c === 'accessory') return accessoryKind(p) ?? 'accessory';
-  if (c === 'bathroom_sink' || c === 'bathroom_faucet' || c === 'pot_filler' || c === 'colander_drying_rack' || c === 'kitchen_faucet') return c;
-  return /sink/.test(c ?? '') ? 'kitchen_sink' : 'accessory';
-};
-const spanishWords = (p) => {
-  const out = [...(SPANISH_BY_KIND[spanishKind(p)] ?? [])];
-  const m = String(p.material ?? '');
-  if (/stainless/i.test(m)) out.push('acero', 'inoxidable');
-  if (isCompositeGranite(p)) out.push('granito', 'compuesto', 'cuarzo');
-  if (/porcelain|ceramic/i.test(m)) out.push('porcelana', 'cerámica');
-  if (/brass/i.test(m)) out.push('latón');
-  if (/bamboo/i.test(m)) out.push('bambú');
-  const inst = installLabel(p);
-  if (inst === 'Undermount' || inst === 'Dual Mount') out.push('submontaje');
-  if (inst === 'Drop-In' || inst === 'Top Mount' || inst === 'Dual Mount') out.push('sobreponer');
-  const t = `${p.product_type ?? ''} ${attr(p).general_title_en ?? ''}`;
-  if (/workstation/i.test(t)) out.push('estación', 'trabajo');
-  if (/farmhouse|apron/i.test(t)) out.push('granja');
-  if (/vessel/i.test(t)) out.push('sobreponer');
-  if (/pull[- ]?down|pull[- ]?out/i.test(t)) out.push('extraíble', 'rociador');
-  const f = String(p.finish ?? '').toLowerCase();
-  if (/black/.test(f)) out.push('negro');
-  if (/white/.test(f)) out.push('blanco');
-  if (/gr[ae]y/.test(f)) out.push('gris');
-  if (/gold/.test(f)) out.push('dorado');
-  if (/chrome/.test(f)) out.push('cromo');
-  if (/nickel/.test(f)) out.push('níquel');
-  return out;
-};
-const MAX_KEYWORD_BYTES = 250;
-const genericKeywords = (p) => {
-  const bytes = (s) => new TextEncoder().encode(s).length;
-  const lists = [words(attr(p).keywords_en), words(attr(p).keywords_fr), spanishWords(p)];
-  const seen = new Set();
-  let out = '';
-  const add = (w) => {
-    if (seen.has(w)) return;
-    const next = out ? `${out} ${w}` : w;
-    if (bytes(next) > MAX_KEYWORD_BYTES) return;
-    seen.add(w);
-    out = next;
-  };
-  if (isCompositeGranite(p)) { add('composite'); add('granite'); }
-  // Round robin, so the three languages all make it before the limit.
-  for (let i = 0; lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length) add(l[i]);
-  return out;
-};
 
 export const AMAZON_LISTING_RULES = {
   // G / H: Item Name (75) and Item Highlight (125) from the product's own data
@@ -424,7 +352,8 @@ export const AMAZON_LISTING_RULES = {
   'Manufacturer': (p, ctx) => (/azuni/i.test(p.brand || '') ? 'Azuni' : ctx?.market === 'us' ? 'Stylish USA Inc.' : 'Stylish International Inc.'),
   // AH: the swatch is the main picture.
   'Swatch Image URL': (p) => (p._images ?? [])[0] ?? '',
-  'Generic Keyword': genericKeywords,
+  // AO: search terms, one cell — English, Spanish and French phrases (amazonKeywords.js)
+  'Generic Keyword': (p) => amazonKeywords(p),
   // BQ: every component in one cell, one per line.
   'Included Components': (p) => list(attr(p).accessories_included).join('\n'),
   'Skip Offer': () => 'No',
@@ -451,6 +380,45 @@ export const AMAZON_LISTING_RULES = {
   'Compliance Media Source Location (en_CA, Installation Manual)': installManual,
   'Compliance Media Source Location (en_CA, Specification Sheet)': (p) => englishDoc(p, ['spec_sheet']),
   'Compliance Media Source Location (en_CA, User Manual)': (p) => englishDoc(p, ['owner_manual']),
+};
+
+// Update listing — Amazon's Category Listings Report (2026-10-14). On top of
+// the listing rules, row by row:
+// - "Edit (Partial Update)": Amazon changes only the cells sent; a blank cell
+//   leaves the listing's value as it is ("Create or Replace" would wipe it).
+// - Status stays the report's and Title = the new Item Name (both required);
+//   the product id is the one the listing already has on Amazon (its ASIN /
+//   UPC from the report — required, and never changed); the variation columns
+//   go blank (Amazon's "Family N" parents are kept as they are).
+// - The report spells some dimension columns its own way ("Item Depth Front
+//   to Back", "Height Base to Top"): they take the listing's dimension rules.
+// - Prices: Your Price = MAP Blue of the market and, when one is running on
+//   that Amazon, the PIM's promotion as Sale Price with its window (user:
+//   "enviaría todo, los precios del PIM son los correctos").
+const salePrice = (p) => (p._sale ? num(p._sale.price) : '');
+const saleStart = (p) => p._sale?.windowStart ?? '';
+const saleEnd = (p) => p._sale?.windowEnd ?? '';
+export const AMAZON_UPDATE_RULES = {
+  'Status': (p) => p._report?.status ?? '',
+  'Title': (p) => p._title?.name || '',
+  'Listing Action': () => 'Edit (Partial Update)',
+  'Parentage Level': () => '',
+  'Parent SKU': () => '',
+  'Variation Theme Name': () => '',
+  'Product Id Type': (p) => p._report?.productIdType ?? '',
+  'Product Id': (p) => p._report?.productId ?? '',
+  'Item Depth Front to Back': AMAZON_RULES['Item Depth Front To Back'],
+  'Item Width Side to Side': AMAZON_RULES['Item Width Side To Side'],
+  'Height Base to Top': AMAZON_RULES['Item Height Base to Top'],
+  'Height Top to Bottom': AMAZON_RULES['Item Height Base to Top'],
+  'Your Price CAD (Sell on Amazon, CA)': (p) => num(p.map_cad),
+  'Your Price USD (Sell on Amazon, US)': (p) => num(p.map_usd),
+  'Sale Price CAD (Sell on Amazon, CA)': salePrice,
+  'Sale Start Date (Sell on Amazon, CA)': saleStart,
+  'Sale End Date (Sell on Amazon, CA)': saleEnd,
+  'Sale Price USD (Sell on Amazon, US)': salePrice,
+  'Sale Start Date (Sell on Amazon, US)': saleStart,
+  'Sale End Date (Sell on Amazon, US)': saleEnd,
 };
 
 export const AMAZON_KITCHEN_SINK_RULES = {
