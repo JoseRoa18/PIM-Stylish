@@ -1,14 +1,16 @@
 /**
- * Segmented in/cm switch for the dimension fields. Display-only: the PIM keeps
- * storing inches, so the choice never touches the data (see features/products/
- * lib/units.js). Disabled while editing, where fields always show inches.
+ * Segmented in/cm switch for the dimension and weight fields: "in" shows inches
+ * and pounds, "cm" centimetres and kilos. Display-only: the PIM keeps storing
+ * inches and pounds, so the choice never touches the data (see features/
+ * products/lib/units.js). Disabled while editing, where fields always show
+ * inches and pounds.
  */
 export default function UnitToggle({ value, onChange, disabled = false }) {
   return (
     <div
       role="group"
-      aria-label="Dimension units"
-      title={disabled ? 'Editing always uses inches' : 'Switch how dimensions are displayed'}
+      aria-label="Units: inches and pounds, or centimetres and kilos"
+      title={disabled ? 'Editing always uses inches and pounds' : 'Switch how dimensions and weights are displayed'}
       className={`inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-container ${disabled ? 'opacity-38 pointer-events-none' : ''}`}
     >
       {['in', 'cm'].map((unit) => {

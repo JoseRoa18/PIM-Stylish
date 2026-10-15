@@ -57,7 +57,7 @@ import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct, purposesIn, templatePurpose, templatePurposeLabel } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import { useAuth } from '@/features/auth/AuthContext';
-import { useLengthUnit, toDisplayLength, withUnit, toFractionLength } from '@/features/products/lib/units';
+import { useLengthUnit, toDisplayLength, withUnit, toFractionLength, weightUnitFor, toDisplayWeight } from '@/features/products/lib/units';
 import UnitToggle from '@/components/ui/UnitToggle';
 
 // Loaded on first use (performance pass 2026-09-29): the Media, Marketplaces
@@ -1465,7 +1465,7 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Right Bowl Depth" attrKey="right_bowl_depth_in" type="number" unit={unit} product={product} edit={edit} />
             </div>
           )}
-          <AttrField label="Product Weight (lb)" attrKey="product_weight_lb" type="number" product={product} edit={edit} />
+          <AttrField label="Product Weight" attrKey="product_weight_lb" type="number" weight={unit} product={product} edit={edit} />
           {!isFaucet && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Min External Cabinet" attrKey="min_external_cabinet_size_in" type="number" unit={unit} product={product} edit={edit} />
@@ -1482,7 +1482,7 @@ function SpecsTab({ product, edit }) {
 
       <Section title="Shipping" action={unitToggle}>
         <div className="space-y-5">
-          <EditableField label="Shipping Weight (lb)" fieldKey="shipping_weight_lb" type="number" product={product} edit={edit} />
+          <EditableField label="Shipping Weight" fieldKey="shipping_weight_lb" type="number" weight={unit} product={product} edit={edit} />
           <AttrDimensionsField label="Shipping Dimensions" unit={unit} attrKey="shipping_dimensions_in"
             keys={['length', 'width', 'height']} labels={['Length', 'Width', 'Height']} product={product} edit={edit} />
           {/* Master carton (user, 2026-10-15): it only applies when the product ships on a pallet. */}
@@ -1490,7 +1490,7 @@ function SpecsTab({ product, edit }) {
             <h4 className="text-label-md text-on-surface-variant">Master Carton — pallet shipments only</h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Units per Master Carton" attrKey="master_carton_quantity" type="number" product={product} edit={edit} />
-              <AttrField label="Master Carton Weight (lb)" attrKey="master_carton_weight_lb" type="number" product={product} edit={edit} />
+              <AttrField label="Master Carton Weight" attrKey="master_carton_weight_lb" type="number" weight={unit} product={product} edit={edit} />
             </div>
             <AttrDimensionsField label="Master Carton Dimensions" unit={unit} attrKey="master_carton_dimensions_in"
               keys={['length', 'width', 'height']} labels={['Length', 'Width', 'Height']} product={product} edit={edit} />
@@ -2199,11 +2199,14 @@ function FractionField({ label, attrKey, product, edit }) {
 // `options` = a fixed list (a <select>); `suggest` = true for the catalog's own
 // values plus "Other…", or a list that leads them; `skuList` = the SKUs that
 // can be picked, several at once ("A-802B; A-803B").
-function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit, suggest, skuList, help }) {
+function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit, weight, suggest, skuList, help }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;
   const shownUnit = unit ? (isEditing ? 'in' : unit) : null;
   if (shownUnit) label = withUnit(label, shownUnit);
+  // `weight` = the page's unit switch: pounds while editing (what is stored), kilos under "cm"
+  const shownWeight = weight ? (isEditing ? 'lb' : weightUnitFor(weight)) : null;
+  if (shownWeight) label = withUnit(label, shownWeight);
   // The controls' accessible name — the plain text, before HelpTip wraps it.
   const name = typeof label === 'string' ? label : undefined;
   const helpText = help ?? FIELD_HELP[attrKey];
@@ -2213,6 +2216,7 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     const val = attr(product, attrKey);
     if (type === 'select') return <Field label={label} value={val} />;
     if (shownUnit) return <Field label={label} value={toDisplayLength(val, shownUnit)} mono={mono} />;
+    if (shownWeight) return <Field label={label} value={toDisplayWeight(val, shownWeight)} mono={mono} />;
     if (type === 'boolean') {
       return (
         <div className="flex flex-col gap-1">
@@ -2609,8 +2613,11 @@ function DerivedCost({ label, baseKey, factor, product, edit, help }) {
   return <Field label={l} value={value != null ? formatCAD(value) : null} />;
 }
 
-function EditableField({ label, fieldKey, type = 'text', product, edit, mono, options, suggest, help }) {
+function EditableField({ label, fieldKey, type = 'text', product, edit, mono, options, suggest, help, weight }) {
   const { isEditing, form, setField } = edit;
+  // `weight` = the page's unit switch: pounds while editing (what is stored), kilos under "cm"
+  const shownWeight = weight ? (isEditing ? 'lb' : weightUnitFor(weight)) : null;
+  if (shownWeight) label = withUnit(label, shownWeight);
   // The controls' accessible name — the plain text, before HelpTip wraps it.
   const name = typeof label === 'string' ? label : undefined;
   const helpText = help ?? FIELD_HELP[fieldKey];
@@ -2618,6 +2625,7 @@ function EditableField({ label, fieldKey, type = 'text', product, edit, mono, op
 
   if (!isEditing) {
     let displayValue = product[fieldKey];
+    if (shownWeight) return <Field label={label} value={toDisplayWeight(displayValue, shownWeight)} mono={mono} />;
     if (type === 'currency') return <Field label={label} value={formatCAD(displayValue)} />;
     if (type === 'date') return <Field label={label} value={formatDate(displayValue)} />;
     if (type === 'select' && options) {

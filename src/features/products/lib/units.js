@@ -21,6 +21,20 @@ export function toDisplayLength(inches, unit = 'in') {
 /** "External Dimensions" + "cm" → "External Dimensions (cm)". */
 export const withUnit = (label, unit) => `${label} (${unit})`;
 
+// Weights are stored in POUNDS the same way. The one switch picks the system
+// (user, 2026-10-15: "in" = inches and pounds, "cm" = centimetres and kilos).
+const KG_PER_LB = 0.45359237;
+/** The weight unit shown alongside a length unit: in → lb, cm → kg. */
+export const weightUnitFor = (lengthUnit) => (lengthUnit === 'cm' ? 'kg' : 'lb');
+/** Value stored in pounds → string in the display unit (null if empty). */
+export function toDisplayWeight(pounds, unit = 'lb') {
+  if (pounds == null || pounds === '') return null;
+  const n = Number(pounds);
+  if (!Number.isFinite(n)) return String(pounds);
+  if (unit === 'lb') return String(pounds);
+  return String(Math.round(n * KG_PER_LB * 100) / 100);
+}
+
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 
 /**
