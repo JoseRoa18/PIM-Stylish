@@ -1,9 +1,9 @@
 import { supabase } from '@/lib/supabase';
-import { loadJSZip } from './templateFiller';
 import {
-  FIELD_DEFS,
   normalizeHeader,
   BULLET_RE,
+  defForHeader,
+  templateLayout,
   TEMPLATE_HEADERS,
   BATH_SINK_TEMPLATE_HEADERS,
   FAUCET_TEMPLATE_HEADERS,
@@ -15,13 +15,15 @@ import {
   FAUCET_PLATE_TEMPLATE_HEADERS,
   COLANDER_TEMPLATE_HEADERS,
 } from '@/features/import/lib/importSchema';
+import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { accessoryKind } from '@/features/templates/api/templates';
 import { channelCategory } from '@/features/products/lib/categories';
 
 // Exports products back into the PIM's OWN category templates (the same
-// header sets the importer accepts), filled from the database — the exact
-// inverse of the import mapping, so a exported file re-imports cleanly.
-// One CSV per category; several categories bundle into a single ZIP.
+// sectioned layout the bulk upload downloads and accepts), filled from the
+// database — the exact inverse of the import mapping, so an exported file
+// re-imports cleanly. One .xlsx, one sheet per category (user, 2026-10-15:
+// "seccionalo"; it was one CSV per category in a ZIP).
 
 // category → template headers. Accessories split further by kind.
 const CATEGORY_HEADERS = {
@@ -60,24 +62,28 @@ const CATEGORY_LABELS = {
   accessory: 'Accessory',
 };
 
-// normalized header → field def (labels + every alias, first def wins —
-// mirrors how the importer resolves columns).
-const DEF_BY_HEADER = (() => {
-  const map = new Map();
-  for (const def of FIELD_DEFS) {
-    for (const key of [normalizeHeader(def.label), ...def.aliases]) {
-      if (!map.has(key)) map.set(key, def);
-    }
-  }
-  return map;
-})();
-
-const fmt = (v) => {
-  if (v == null || v === '') return '';
-  if (Array.isArray(v)) return v.join('; ');
-  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
-  return String(v);
+// The sheet each group lands on.
+const SHEET_NAMES = {
+  kitchen_sink: 'Kitchen Sinks',
+  bar_prep_sink: 'Bar & Prep Sinks',
+  laundry_sink: 'Laundry Sinks',
+  outdoor_sink: 'Outdoor Sinks',
+  bathroom_sink: 'Bathroom Sinks',
+  kitchen_faucet: 'Kitchen Faucets',
+  kitchen_faucet_combo: 'Kitchen Faucet Combos',
+  cold_water_tap: 'Cold Water Taps',
+  pot_filler: 'Pot Fillers',
+  bathroom_faucet: 'Bathroom Faucets',
+  colander_drying_rack: 'Colanders & Drying Racks',
+  'accessory cutting board': 'Cutting Boards',
+  'accessory strainer': 'Strainers',
+  'accessory drain': 'Drains',
+  'accessory faucet plate': 'Faucet Plates',
+  'accessory soap dispenser': 'Soap Dispensers',
+  'accessory grid': 'Grids',
+  'accessory other': 'Other Accessories',
 };
+const SHEET_ORDER = Object.keys(SHEET_NAMES);
 
 // Descriptions are stored as TipTap HTML; the sheet gets plain text with line
 // breaks. This is also the correct import inverse — the importer converts
@@ -97,6 +103,9 @@ const stripHtml = (h) =>
     .replace(/\n{2,}/g, '\n')
     .trim();
 
+const NUMERIC = new Set(['number', 'int', 'money']);
+// A cell's value: a number stays a number (prices, sizes), a list reads
+// "a; b", a yes / no reads Yes / No.
 function cellValue(product, header) {
   const nh = normalizeHeader(header);
 
@@ -104,11 +113,11 @@ function cellValue(product, header) {
   if (bullet) {
     const key = bullet[2] === 'fr' ? 'bullet_points_fr' : 'bullet_points';
     const list = product.attributes?.[key];
-    return fmt(Array.isArray(list) ? list[Number(bullet[1]) - 1] : '');
+    return Array.isArray(list) ? (list[Number(bullet[1]) - 1] ?? '') : '';
   }
 
-  const def = DEF_BY_HEADER.get(nh);
-  if (!def) return ''; // informational column (Family #, retailer SKUs…)
+  const def = defForHeader(header);
+  if (!def) return '';
   if (def.type === 'category') return CATEGORY_LABELS[product.category] ?? product.category ?? '';
 
   const t = def.target;
@@ -119,18 +128,12 @@ function cellValue(product, header) {
       : t.dim
         ? product.attributes?.[t.dim[0]]?.[t.dim[1]]
         : '';
+  if (raw == null || raw === '') return '';
   if (def.type === 'description') return stripHtml(raw);
-  return fmt(raw);
-}
-
-// RFC-4180 CSV with BOM so Excel opens it as UTF-8.
-function toCsv(headers, products) {
-  const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
-  const lines = [headers.map(esc).join(',')];
-  for (const p of products) {
-    lines.push(headers.map((h) => esc(cellValue(p, h))).join(','));
-  }
-  return '﻿' + lines.join('\r\n') + '\r\n';
+  if (NUMERIC.has(def.type) && raw !== '' && Number.isFinite(Number(raw))) return Number(raw);
+  if (Array.isArray(raw)) return raw.join('; ');
+  if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
+  return String(raw);
 }
 
 // Colanders and racks filed as Accessories keep the colander sheet (channelCategory).
@@ -172,44 +175,38 @@ export async function fetchAllProducts() {
   return all;
 }
 
-/**
- * Export products into the PIM's category templates. One CSV per category
- * (accessories split by kind); multiple files bundle into one ZIP.
- */
-export async function generatePimExport(products) {
-  if (!products?.length) throw new Error('No products to export.');
-
+/** The export's sheets, in SHEET_ORDER: [{ name, sections, rows, count }]. */
+export function pimExportSheets(products) {
   const groups = new Map(); // group key → products[]
   for (const p of products) {
     const key = groupKeyOf(p);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
   }
+  const rank = (k) => (SHEET_ORDER.includes(k) ? SHEET_ORDER.indexOf(k) : SHEET_ORDER.length);
+  return [...groups.entries()]
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
+    .map(([key, list]) => {
+      const sections = templateLayout(headersFor(list[0]));
+      const headers = sections.flatMap((s) => s.headers);
+      const rows = [...list].sort((a, b) => a.sku.localeCompare(b.sku)).map((p) => headers.map((h) => cellValue(p, h)));
+      return { key, name: SHEET_NAMES[key] ?? key, sections, rows, count: list.length };
+    });
+}
 
+/**
+ * Export products into the PIM's category templates: one sectioned .xlsx,
+ * one sheet per category (accessories split by kind).
+ */
+export async function generatePimExport(products) {
+  if (!products?.length) throw new Error('No products to export.');
+  const sheets = pimExportSheets(products);
   const date = new Date().toISOString().slice(0, 10);
-  const files = [...groups.entries()].map(([key, list]) => {
-    const slug = key.replace(/[^a-z0-9]+/gi, '_');
-    return {
-      name: `Stylish_PIM_${slug}_${date}.csv`,
-      csv: toCsv(headersFor(list[0]), list),
-      count: list.length,
-      key,
-    };
-  });
-
-  if (files.length === 1) {
-    downloadBlob(new Blob([files[0].csv], { type: 'text/csv;charset=utf-8' }), files[0].name);
-  } else {
-    const JSZip = await loadJSZip();
-    const zip = new JSZip();
-    for (const f of files) zip.file(f.name, f.csv);
-    const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/zip', compression: 'DEFLATE' });
-    downloadBlob(blob, `Stylish_PIM_Export_${date}.zip`);
-  }
-
+  downloadBlob(await buildSectionedWorkbook(sheets), `Stylish_PIM_Export_${date}.xlsx`);
   return {
     count: products.length,
-    files: files.length,
-    categories: [...groups.keys()],
+    files: 1,
+    sheets: sheets.length,
+    categories: sheets.map((s) => s.name),
   };
 }

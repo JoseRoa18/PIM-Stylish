@@ -192,8 +192,9 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     await runBatch(linkedSkus, (sku) => readWixProduct(sku), 'refresh');
   }
 
-  // Exports products back into the PIM's own category templates (round-trip
-  // CSVs the importer accepts) — selection or the whole catalog.
+  // Exports products back into the PIM's own category templates (one sectioned
+  // .xlsx, a sheet per category, that the importer accepts) — selection or the
+  // whole catalog.
   async function handleExportPim(scope) {
     setBusy('export');
     setResult(null);
@@ -204,7 +205,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const res = await generatePimExport(productList);
       setResult({
         type: 'success',
-        message: `Exported ${res.count} product(s) into ${res.files} template file(s): ${res.categories.join(', ')}.`,
+        message: `Exported ${res.count} product(s) into one Excel file, ${res.sheets} sheet${res.sheets === 1 ? '' : 's'}: ${res.categories.join(', ')}.`,
       });
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'PIM export failed' });

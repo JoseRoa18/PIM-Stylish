@@ -49,46 +49,38 @@ function getCellValue(cellEl, ns, sharedStrings) {
   return v ? (v.textContent ?? '') : '';
 }
 
-async function findFirstSheetPath(zip) {
+// The workbook's sheets in tab order: [{ name, path }].
+async function listSheets(zip) {
   const wbFile = zip.file('xl/workbook.xml');
   const relsFile = zip.file('xl/_rels/workbook.xml.rels');
+  const out = [];
   if (wbFile && relsFile) {
     const wbDoc = parseXml(await wbFile.async('string'));
     const wbNs = wbDoc.documentElement.namespaceURI;
     const sheets = wbDoc.getElementsByTagNameNS(wbNs, 'sheet');
-    if (sheets.length > 0) {
+    const relsDoc = parseXml(await relsFile.async('string'));
+    const rels = relsDoc.getElementsByTagName('Relationship');
+    for (let s = 0; s < sheets.length; s++) {
       const rId =
-        sheets[0].getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') ||
-        sheets[0].getAttribute('r:id');
-      const relsDoc = parseXml(await relsFile.async('string'));
-      const rels = relsDoc.getElementsByTagName('Relationship');
+        sheets[s].getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') ||
+        sheets[s].getAttribute('r:id');
       for (let i = 0; i < rels.length; i++) {
         if (rels[i].getAttribute('Id') === rId) {
           const target = rels[i].getAttribute('Target') ?? '';
-          return target.startsWith('/') ? target.slice(1) : `xl/${target}`;
+          out.push({ name: sheets[s].getAttribute('name') ?? `Sheet${s + 1}`, path: target.startsWith('/') ? target.slice(1) : `xl/${target}` });
         }
       }
     }
   }
-  return 'xl/worksheets/sheet1.xml';
+  return out.length ? out : [{ name: 'Sheet1', path: 'xl/worksheets/sheet1.xml' }];
 }
 
-async function parseXlsx(file) {
-  const { default: JSZip } = await import('jszip');
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
-
-  const ssFile = zip.file('xl/sharedStrings.xml');
-  const sharedStrings = parseSharedStrings(ssFile ? await ssFile.async('string') : null);
-
-  const sheetPath = await findFirstSheetPath(zip);
-  const sheetFile = zip.file(sheetPath);
-  if (!sheetFile) throw new Error('Could not find a worksheet in the file.');
-
-  const doc = parseXml(await sheetFile.async('string'));
+// Materialize a sheet as rows of sparse arrays indexed by column; each row
+// keeps its sheet row number.
+function sheetGrid(xml, sharedStrings) {
+  const doc = parseXml(xml);
   const ns = doc.documentElement.namespaceURI;
   const rowEls = doc.getElementsByTagNameNS(ns, 'row');
-
-  // Materialize each row as a sparse array indexed by column
   const grid = [];
   for (let r = 0; r < rowEls.length; r++) {
     const cells = rowEls[r].getElementsByTagNameNS(ns, 'c');
@@ -99,26 +91,73 @@ async function parseXlsx(file) {
       if (!m) continue;
       rowArr[colLetterToIndex(m[1])] = getCellValue(cells[c], ns, sharedStrings);
     }
+    rowArr.rowNumber = Number(rowEls[r].getAttribute('r')) || r + 1;
     grid.push(rowArr);
   }
+  return grid;
+}
 
-  // First row with content = headers
-  const headerIdx = grid.findIndex((row) => row.some((v) => String(v ?? '').trim() !== ''));
-  if (headerIdx === -1) throw new Error('The file appears to be empty.');
+const filled = (row) => row && Array.from(row, (v) => String(v ?? '').trim()).some(Boolean);
 
-  const headers = grid[headerIdx].map((h) => String(h ?? '').trim());
+// The header row: the first row with content — or, with a scorer, the best
+// scoring of the first ten rows with content (the PIM's own Excel carries a
+// section band above its headers).
+function headerIndex(grid, scoreHeader) {
+  const candidates = [];
+  for (let r = 0; r < grid.length && candidates.length < 10; r++) if (filled(grid[r])) candidates.push(r);
+  if (!candidates.length) return { index: -1, score: 0 };
+  if (!scoreHeader) return { index: candidates[0], score: 1 };
+  let best = { index: candidates[0], score: -1 };
+  for (const r of candidates) {
+    const score = scoreHeader(Array.from(grid[r], (v) => String(v ?? '').trim()));
+    if (score > best.score) best = { index: r, score };
+  }
+  return best;
+}
+
+// Rows under the header row as objects keyed by header; each knows its sheet
+// row (__row) and sheet (__sheet).
+function rowsBelow(grid, index, sheetName) {
+  const headers = Array.from(grid[index], (h) => String(h ?? '').trim());
   const rows = [];
-  for (let r = headerIdx + 1; r < grid.length; r++) {
+  for (let r = index + 1; r < grid.length; r++) {
     const arr = grid[r];
-    if (!arr || !arr.some((v) => String(v ?? '').trim() !== '')) continue; // skip blank rows
+    if (!filled(arr)) continue; // skip blank rows
     const obj = {};
     headers.forEach((h, i) => {
       if (h) obj[h] = String(arr[i] ?? '').trim();
     });
+    Object.defineProperty(obj, '__row', { value: arr.rowNumber ?? r + 1, enumerable: false });
+    if (sheetName) Object.defineProperty(obj, '__sheet', { value: sheetName, enumerable: false });
     rows.push(obj);
   }
-
   return { headers: headers.filter(Boolean), rows };
+}
+
+async function parseXlsx(file, { scoreHeader = null, allSheets = false } = {}) {
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+
+  const ssFile = zip.file('xl/sharedStrings.xml');
+  const sharedStrings = parseSharedStrings(ssFile ? await ssFile.async('string') : null);
+
+  const sheets = await listSheets(zip);
+  const wanted = allSheets ? sheets : sheets.slice(0, 1);
+  const headers = [];
+  const rows = [];
+  for (const sheet of wanted) {
+    const sheetFile = zip.file(sheet.path);
+    if (!sheetFile) continue;
+    const grid = sheetGrid(await sheetFile.async('string'), sharedStrings);
+    const { index, score } = headerIndex(grid, scoreHeader);
+    // with every sheet read, one that names no known column (a notes tab) is skipped
+    if (index === -1 || (allSheets && scoreHeader && score < 2)) continue;
+    const part = rowsBelow(grid, index, allSheets ? sheet.name : null);
+    for (const h of part.headers) if (!headers.includes(h)) headers.push(h);
+    rows.push(...part.rows);
+  }
+  if (!headers.length) throw new Error(allSheets ? 'No sheet in the file has the template columns.' : 'The file appears to be empty.');
+  return { headers, rows, sheets: wanted.length };
 }
 
 // Exported: promo file fillers need the raw grid (their header row isn't
@@ -160,24 +199,23 @@ export function parseCsvText(text) {
   return rows;
 }
 
-function parseCsv(text) {
-  const grid = parseCsvText(text).filter((r) => r.some((v) => v.trim() !== ''));
-  if (grid.length === 0) throw new Error('The file appears to be empty.');
-
-  const headers = grid[0].map((h) => h.trim());
-  const rows = grid.slice(1).map((arr) => {
-    const obj = {};
-    headers.forEach((h, i) => {
-      if (h) obj[h] = (arr[i] ?? '').trim();
-    });
-    return obj;
-  });
-  return { headers: headers.filter(Boolean), rows };
+function parseCsv(text, { scoreHeader = null } = {}) {
+  const grid = parseCsvText(text).map((arr, i) => Object.assign(arr, { rowNumber: i + 1 }));
+  const { index } = headerIndex(grid, scoreHeader);
+  if (index === -1) throw new Error('The file appears to be empty.');
+  return { ...rowsBelow(grid, index, null), sheets: 1 };
 }
 
-export async function parseSpreadsheetFile(file) {
+/**
+ * Options (the bulk import uses both; the promo files use neither):
+ *   scoreHeader(cells) → how much a row looks like the header row; the best of
+ *     the first ten rows with content wins (else the first one).
+ *   allSheets — read every sheet of an .xlsx (a sheet that scores under 2 is
+ *     skipped); rows then carry their sheet name.
+ */
+export async function parseSpreadsheetFile(file, options = {}) {
   const name = file.name.toLowerCase();
-  if (name.endsWith('.csv')) return parseCsv(await file.text());
-  if (name.endsWith('.xlsx')) return parseXlsx(file);
+  if (name.endsWith('.csv')) return parseCsv(await file.text(), options);
+  if (name.endsWith('.xlsx')) return parseXlsx(file, options);
   throw new Error('Unsupported file type — upload a .xlsx or .csv file.');
 }

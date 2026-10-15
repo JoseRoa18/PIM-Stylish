@@ -84,9 +84,41 @@ export const CATEGORY_MAP = {
   'colanders and drying racks': 'colander_drying_rack',
 };
 
+// Price columns, three levels each: Blue (base) / Orange (monthly promotion) /
+// Purple (flash deal / special event). `col(suffix)` names the products column
+// ("" for Blue, "_orange", "_purple"). Header "MAP CAD (Orange)"; the Blue one
+// also answers to the bare name ("MAP CAD").
+const PRICE_LEVELS = [['', 'Blue'], ['_orange', 'Orange'], ['_purple', 'Purple']];
+const priceDefs = (name, col) => PRICE_LEVELS.map(([sfx, level]) => {
+  const label = `${name} (${level})`;
+  const column = col(sfx);
+  return {
+    key: column,
+    label,
+    aliases: [normalizeHeader(label), normalizeHeader(column), ...(sfx ? [] : [normalizeHeader(name)])],
+    type: 'money',
+    target: { col: column },
+  };
+});
+const PRICE_DEFS = [
+  // Canada, CAD
+  ...priceDefs('MAP CAD', (s) => `map${s}_cad`),
+  ...priceDefs('WC Rona / Home Depot CAD', (s) => `cost_cad_rona_hd${s}`),
+  ...priceDefs('WC Small Online Dealers CAD', (s) => `cost_cad_wayfair_sod${s}`),
+  // USA, USD
+  { key: 'msrp_usd', label: 'MSRP USD$', aliases: ['msrpusd'], type: 'money', target: { col: 'msrp_usd' } },
+  ...priceDefs('MAP USD', (s) => `map${s}_usd`),
+  ...priceDefs("WC Lowe's / HD USA / SOD / BB&B USD", (s) => `cost_usd_lowes_sod_bbb${s}`),
+  ...priceDefs('WC Wayfair USD', (s) => `cost_usd_wayfair${s}`),
+  ...priceDefs('WC Menards USD', (s) => `cost_usd_menards${s}`),
+  // Wayfair Canada, in USD (its supplier account is priced in US dollars)
+  ...priceDefs('MAP Wayfair Canada USD', (s) => `map_usd_wayfair_ca${s}`),
+  ...priceDefs('WC Wayfair Canada USD', (s) => `cost_usd_wayfair_ca${s}`),
+];
+
 export const FIELD_DEFS = [
   // ---------- Identification ----------
-  { key: 'sku', label: 'Model Number', aliases: ['modelnumber', 'sku', 'suppliersku'], type: 'text', target: { col: 'sku' }, required: true },
+  { key: 'sku', label: 'SKU (Model Number)', aliases: ['modelnumber', 'sku', 'suppliersku', 'skumodelnumber'], type: 'text', target: { col: 'sku' }, required: true },
   { key: 'model_name', label: 'Model Name', aliases: ['modelname'], type: 'text', target: { col: 'model_name' } },
   // Bathroom-faucet sheets have no "Model Name" column — buildImportRows falls
   // back to the QuickBooks Description as the product name when Model Name is empty.
@@ -95,11 +127,11 @@ export const FIELD_DEFS = [
   // families are derived automatically from the SKU base model (S-300XG → S-300).
   { key: 'brand', label: 'Brand', aliases: ['brand'], type: 'brand', target: { col: 'brand' }, required: true },
   { key: 'category', label: 'Category', aliases: ['category'], type: 'category', target: { col: 'category' }, required: true },
-  { key: 'msrp_cad', label: 'MSRP CAD$', aliases: ['msrpcad', 'msrp', 'msrpcad$'], type: 'number', target: { col: 'msrp_cad' } },
+  { key: 'msrp_cad', label: 'MSRP CAD$', aliases: ['msrpcad', 'msrp', 'msrpcad$'], type: 'money', target: { col: 'msrp_cad' } },
   { key: 'launch_lead', label: 'Launch Lead', aliases: ['launchlead'], type: 'date', target: { col: 'launch_lead' } },
   { key: 'sample_available_date', label: 'When is sample available', aliases: ['whenissampleavailable', 'sampleavailable', 'whensampleavailable', 'sampleavailabledate'], type: 'date', target: { col: 'sample_available_date' } },
   { key: 'ready_to_sell_date', label: 'When will it be ready to sell?', aliases: ['whenwillitbereadytosell', 'readytosell', 'readytoselldate'], type: 'date', target: { col: 'ready_to_sell_date' } },
-  { key: 'series', label: 'Sinks Series', aliases: ['sinksseries', 'sinkseries', 'series'], type: 'text', target: { col: 'series' } },
+  { key: 'series', label: 'Series', aliases: ['sinksseries', 'sinkseries', 'series'], type: 'text', target: { col: 'series' } },
   { key: 'product_type', label: 'Product Type', aliases: ['producttype'], type: 'text', target: { col: 'product_type' } },
 
   // ---------- Sink configuration ----------
@@ -111,7 +143,7 @@ export const FIELD_DEFS = [
   { key: 'low_divider', label: 'Low Divider', aliases: ['lowdivider', 'lowdividershortheightdivider'], type: 'bool', target: { attr: 'low_divider' } },
   { key: 'gauge', label: 'Gauge', aliases: ['gauge'], type: 'text', target: { attr: 'gauge' } },
   { key: 'material', label: 'Material', aliases: ['material'], type: 'text', target: { col: 'material' } },
-  { key: 'finish', label: 'Finish / Color', aliases: ['finishcolor', 'colorfinish', 'finish'], type: 'text', target: { col: 'finish' } },
+  { key: 'finish', label: 'Finish', aliases: ['finishcolor', 'colorfinish', 'finish'], type: 'text', target: { col: 'finish' } },
   // Dual-mount sinks list two options ("Undermount; Drop-In") → stored as array
   // Single value since 2026-07-31 (Undermount / Drop-In / Dual Mount / Top
   // Mount) — imports listing both undermount and drop-in mean Dual Mount.
@@ -133,12 +165,12 @@ export const FIELD_DEFS = [
   { key: 'sink_radius_mm', label: 'Sink Radius', aliases: ['sinkradius', 'sinkradiusmm'], type: 'number', target: { attr: 'sink_radius_mm' } },
 
   // ---------- External / internal dimensions ----------
-  { key: 'ext_length', label: 'External Lenght', aliases: ['externallenght', 'externallength', 'externalsinksizelengthinches', 'overallproductlengthendtoend', 'overalllengthendtoend', 'overalllengthtoptobottom'], type: 'number', target: { dim: ['external_dimensions_in', 'length'] } },
+  { key: 'ext_length', label: 'External Length', aliases: ['externallenght', 'externallength', 'externalsinksizelengthinches', 'overallproductlengthendtoend', 'overalllengthendtoend', 'overalllengthtoptobottom'], type: 'number', target: { dim: ['external_dimensions_in', 'length'] } },
   { key: 'ext_width', label: 'External Width', aliases: ['externalwidth', 'externalsinksizewidthinches', 'overallproductwidthsidetoside', 'overallwidthfronttoback', 'overallwidthsidetoside'], type: 'number', target: { dim: ['external_dimensions_in', 'width'] } },
   { key: 'ext_depth', label: 'External Depth', aliases: ['externaldepth', 'externalsinksizedepthinches', 'overallproductthickness', 'overalldepthfronttoback'], type: 'number', target: { dim: ['external_dimensions_in', 'depth'] } },
   { key: 'ext_height', label: 'Overall Height - Top to Bottom', aliases: ['overallheighttoptobottom', 'overallproductheighttoptobottom'], type: 'number', target: { dim: ['external_dimensions_in', 'height'] } },
   { key: 'min_ext_cabinet', label: 'External Minimum Cabinet Size', aliases: ['externalminimumcabinetsize', 'minimunexternalcabinetsizeminimumcountertoplength'], type: 'number', target: { attr: 'min_external_cabinet_size_in' } },
-  { key: 'int_length', label: 'Internal Lenght', aliases: ['internallenght', 'internallength', 'internalsinksizelengthinches'], type: 'number', target: { dim: ['internal_dimensions_in', 'length'] } },
+  { key: 'int_length', label: 'Internal Length', aliases: ['internallenght', 'internallength', 'internalsinksizelengthinches'], type: 'number', target: { dim: ['internal_dimensions_in', 'length'] } },
   { key: 'int_width', label: 'Internal Width', aliases: ['internalwidth', 'internalsinksizewidthinches'], type: 'number', target: { dim: ['internal_dimensions_in', 'width'] } },
   { key: 'int_depth', label: 'Internal Depth', aliases: ['internaldepth', 'internalsinksizedepthinches'], type: 'number', target: { dim: ['internal_dimensions_in', 'depth'] } },
   { key: 'min_int_cabinet', label: 'Internal Minimum Cabinet Size', aliases: ['internalminimumcabinetsize', 'minimuminternalcabinetsize'], type: 'number', target: { attr: 'min_internal_cabinet_size_in' } },
@@ -151,23 +183,23 @@ export const FIELD_DEFS = [
   { key: 'number_of_pieces', label: 'Number of pieces Included', aliases: ['numberofpiecesincluded', 'totalnumberofpiecesincluded'], type: 'int', target: { attr: 'number_of_pieces' } },
   { key: 'drain_hole_location', label: 'Drain Hole location', aliases: ['drainholelocation', 'drainholelocationplacement', 'drainplacement'], type: 'text', target: { attr: 'drain_hole_location' } },
   { key: 'drain_diameter_in', label: 'Drain Diameter', aliases: ['draindiameter', 'drainholediameter'], type: 'number', target: { attr: 'drain_diameter_in' } },
-  { key: 'product_weight_lb', label: 'Product Weight lb', aliases: ['productweightlb', 'overallproductweight'], type: 'number', target: { attr: 'product_weight_lb' } },
+  { key: 'product_weight_lb', label: 'Product Weight (lb)', aliases: ['productweightlb', 'overallproductweight'], type: 'number', target: { attr: 'product_weight_lb' } },
 
   // ---------- Trade & compliance ----------
   // "CN", "Viet Nam", "CHN" → the dropdown's name ("China", "Vietnam"); a value
   // it doesn't know is kept as written.
-  { key: 'country_of_origin', label: 'Country of Origen', aliases: ['countryoforigen', 'countryoforigin'], type: 'text', target: { attr: 'country_of_origin' }, transform: (v) => canonicalCountry(v) ?? v },
+  { key: 'country_of_origin', label: 'Country of Origin', aliases: ['countryoforigen', 'countryoforigin'], type: 'text', target: { attr: 'country_of_origin' }, transform: (v) => canonicalCountry(v) ?? v },
   { key: 'scc_compliant', label: 'SCC Compliant', aliases: ['scccompliant'], type: 'text', target: { attr: 'scc_compliant' } },
   { key: 'safety_listings', label: 'Safety Listing(s)', aliases: ['safetylistings', 'safetylisting'], type: 'text', target: { attr: 'safety_listings' } },
   { key: 'upc_certified', label: 'UPC Certified', aliases: ['upccertified'], type: 'text', target: { attr: 'upc_certified' } },
   { key: 'vermont_compliant', label: 'Vermont Act 193 Compliant', aliases: ['vermontact193compliant'], type: 'text', target: { attr: 'vermont_act_193_compliant' } },
-  { key: 'hs_code', label: 'HS CODE', aliases: ['hscode', 'hscodeusa', 'hscodeus', 'usahscode'], type: 'text', target: { attr: 'hs_code' } },
+  { key: 'hs_code', label: 'HS Code (USA)', aliases: ['hscode', 'hscodeusa', 'hscodeus', 'usahscode'], type: 'text', target: { attr: 'hs_code' } },
   // Canada has its own tariff code (user, 2026-10-15); "HS CODE" alone stays the USA one.
-  { key: 'hs_code_ca', label: 'HS CODE CANADA', aliases: ['hscodecanada', 'hscodeca', 'hscodecan', 'canadahscode', 'cahscode'], type: 'text', target: { attr: 'hs_code_ca' } },
-  { key: 'upc', label: 'Master UPC', aliases: ['masterupc', 'upc'], type: 'upc', target: { attr: 'upc' } },
+  { key: 'hs_code_ca', label: 'HS Code (Canada)', aliases: ['hscodecanada', 'hscodeca', 'hscodecan', 'canadahscode', 'cahscode'], type: 'text', target: { attr: 'hs_code_ca' } },
+  { key: 'upc', label: 'UPC', aliases: ['masterupc', 'upc'], type: 'upc', target: { attr: 'upc' } },
 
   // ---------- Shipping ----------
-  { key: 'shipping_weight_lb', label: 'Shipping Weight Lbs', aliases: ['shippingweightlbs', 'shippingweightlb', 'shippingweight'], type: 'number', target: { col: 'shipping_weight_lb' } },
+  { key: 'shipping_weight_lb', label: 'Shipping Weight (lb)', aliases: ['shippingweightlbs', 'shippingweightlb', 'shippingweight'], type: 'number', target: { col: 'shipping_weight_lb' } },
   { key: 'ship_height', label: 'Shipping Height (in)', aliases: ['shippingheightin', 'shippingheight'], type: 'number', target: { dim: ['shipping_dimensions_in', 'height'] } },
   { key: 'ship_width', label: 'Shipping Width (in)', aliases: ['shippingwidthin', 'shippingwidth'], type: 'number', target: { dim: ['shipping_dimensions_in', 'width'] } },
   { key: 'ship_length', label: 'Shipping Length (in)', aliases: ['shippinglengthin', 'shippinglength'], type: 'number', target: { dim: ['shipping_dimensions_in', 'length'] } },
@@ -309,7 +341,8 @@ export const FIELD_DEFS = [
   // ---------- Colanders & drying racks ----------
   { key: 'collapsible', label: 'Collapsible', aliases: ['collapsible'], type: 'bool', target: { attr: 'collapsible' } },
   { key: 'handheld', label: 'Handheld', aliases: ['handheld'], type: 'bool', target: { attr: 'handheld' } },
-  { key: 'color', label: 'Color', aliases: ['color'], type: 'text', target: { attr: 'color' } },
+  // The Color column (2026-10-08) — what the product page shows and Walmart reads.
+  { key: 'color', label: 'Color', aliases: ['color'], type: 'text', target: { col: 'color' } },
   { key: 'length_with_handles', label: 'Overall Length Including Handles - End to End', aliases: ['overalllengthincludinghandlesendtoend'], type: 'number', target: { attr: 'length_with_handles_in' } },
 
   // ---------- Accessory (soap dispenser / grid) specific ----------
@@ -360,6 +393,25 @@ export const FIELD_DEFS = [
   { key: 'bbb_com_sku', label: 'BB&B.com SKU', aliases: ['bbbcomsku'], type: 'text', target: { attr: 'bbb_com_sku' } },
   { key: 'lowes_sku', label: "Lowe's SKU", aliases: ['lowessku'], type: 'text', target: { attr: 'lowes_sku' } },
   { key: 'wayfair_sku', label: 'Wayfair SKU', aliases: ['wayfairsku'], type: 'text', target: { attr: 'wayfair_sku' } },
+
+  // ---------- PIM fields no vendor sheet carries (user, 2026-10-15) ----------
+  // So the PIM's own Excel holds everything the product page edits.
+  { key: 'manufacturer', label: 'Manufacturer', aliases: ['manufacturer'], type: 'text', target: { attr: 'manufacturer' } },
+  { key: 'finish_type', label: 'Finish Type', aliases: ['finishtype'], type: 'text', target: { attr: 'finish_type' } },
+  { key: 'warranty_url_us', label: 'Warranty URL (USA)', aliases: ['warrantyurlusa', 'warrantyurlus'], type: 'text', target: { attr: 'warranty_url_us' } },
+  { key: 'warranty_url_ca', label: 'Warranty URL (Canada)', aliases: ['warrantyurlcanada', 'warrantyurlca'], type: 'text', target: { attr: 'warranty_url_ca' } },
+  { key: 'warranty_text_us', label: 'Warranty Text (USA)', aliases: ['warrantytextusa', 'warrantytextus'], type: 'text', target: { attr: 'warranty_text_us' } },
+  { key: 'warranty_text_ca', label: 'Warranty Text (Canada)', aliases: ['warrantytextcanada', 'warrantytextca'], type: 'text', target: { attr: 'warranty_text_ca' } },
+  { key: 'left_bowl_depth_in', label: 'Left Bowl Depth (in)', aliases: ['leftbowldepthin', 'leftbowldepth'], type: 'number', target: { attr: 'left_bowl_depth_in' } },
+  { key: 'right_bowl_depth_in', label: 'Right Bowl Depth (in)', aliases: ['rightbowldepthin', 'rightbowldepth'], type: 'number', target: { attr: 'right_bowl_depth_in' } },
+  { key: 'grids_model_code', label: 'Grids Model Code', aliases: ['gridsmodelcode', 'gridmodelcode'], type: 'text', target: { attr: 'grids_model_code' } },
+  { key: 'spout_rotation_degrees', label: 'Spout Rotation (degrees)', aliases: ['spoutrotationdegrees', 'spoutrotation'], type: 'number', target: { attr: 'spout_rotation_degrees' } },
+  { key: 'sensor_activation', label: 'Sensor Activation', aliases: ['sensoractivation'], type: 'text', target: { attr: 'sensor_activation' } },
+
+  // ---------- Prices and costs (user, 2026-10-15: the bulk upload changes them too) ----------
+  // Blue / Orange / Purple per channel, as in the product page's Pricing tab.
+  // An empty cell never clears a price; a filled one replaces it.
+  ...PRICE_DEFS,
 
   // ---------- Marketing content ----------
   { key: 'general_title_en', label: 'General Title (EN)', aliases: ['generaltitleen'], type: 'text', target: { attr: 'general_title_en' } },
@@ -720,5 +772,184 @@ export const ALIAS_LOOKUP = (() => {
   for (const def of FIELD_DEFS) {
     for (const a of def.aliases) map.set(a, def);
   }
+  // a column named exactly as its field's label ("Finish Type") imports too
+  for (const def of FIELD_DEFS) {
+    const label = normalizeHeader(def.label);
+    if (!map.has(label)) map.set(label, def);
+  }
   return map;
 })();
+
+// A header → its field def, by label or alias (first def wins). What the
+// sectioned layout and the PIM export use to place and fill a column.
+const DEF_BY_HEADER = (() => {
+  const map = new Map();
+  for (const def of FIELD_DEFS) {
+    for (const key of [normalizeHeader(def.label), ...def.aliases]) if (!map.has(key)) map.set(key, def);
+  }
+  return map;
+})();
+export const defForHeader = (header) => DEF_BY_HEADER.get(normalizeHeader(header)) ?? null;
+
+// How much a spreadsheet row looks like the import's header row: the number
+// of cells that name a known field. Lets the parser skip the section band
+// above the headers (and any title rows a sheet carries).
+export function scoreImportHeader(cells) {
+  let score = 0;
+  for (const c of cells) {
+    const n = normalizeHeader(c);
+    if (n && (BULLET_RE.test(n) || ALIAS_LOOKUP.has(n))) score += 1;
+  }
+  return score;
+}
+
+// ---------- Sections (user, 2026-10-15: the PIM's Excel "seccionado") ----------
+// The bulk-upload template and the PIM export group their columns under these
+// bands, in this order; `color` is the band's fill (hex, no #).
+export const SECTIONS = [
+  { key: 'identity', title: 'Identity', color: '1F3864' },
+  { key: 'status', title: 'Status & Dates', color: '595959' },
+  { key: 'pricing_ca', title: 'Pricing — Canada (CAD)', color: '9C2A00' },
+  { key: 'pricing_us', title: 'Pricing — USA (USD)', color: '1E5631' },
+  { key: 'pricing_wfca', title: 'Pricing — Wayfair Canada (USD)', color: '6B4F00' },
+  { key: 'physical', title: 'Physical Properties', color: '2E75B6' },
+  { key: 'sink', title: 'Sink Configuration', color: '00695C' },
+  { key: 'faucet', title: 'Faucet Configuration', color: '4527A0' },
+  { key: 'accessory', title: 'Accessory Details', color: '8D6E00' },
+  { key: 'dimensions', title: 'Dimensions & Weight', color: '0B5394' },
+  { key: 'shipping', title: 'Shipping', color: '6A1B9A' },
+  { key: 'carton', title: 'Master Carton — pallet shipments only', color: '880E4F' },
+  { key: 'trade', title: 'Trade, Warranty & Compliance', color: '2E4A1E' },
+  { key: 'certifications', title: 'Certifications', color: '37474F' },
+  { key: 'content_en', title: 'Content — English', color: '0D47A1' },
+  { key: 'content_fr', title: 'Content — French', color: '283593' },
+  { key: 'retailer', title: 'Retailer IDs', color: '5D4037' },
+  { key: 'other', title: 'Other', color: '757575' },
+];
+const SECTION_FIELDS = {
+  identity: ['sku', 'brand', 'category', 'model_name', 'series', 'product_type', 'manufacturer', 'upc', 'quickbooks_description', 'alias'],
+  status: ['launch_lead', 'sample_available_date', 'ready_to_sell_date'],
+  pricing_ca: ['msrp_cad', 'map_cad', 'map_orange_cad', 'map_purple_cad', 'cost_cad_rona_hd', 'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple'],
+  pricing_us: ['msrp_usd', 'map_usd', 'map_orange_usd', 'map_purple_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple',
+    'cost_usd_wayfair', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards', 'cost_usd_menards_orange', 'cost_usd_menards_purple'],
+  pricing_wfca: ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple', 'cost_usd_wayfair_ca', 'cost_usd_wayfair_ca_orange', 'cost_usd_wayfair_ca_purple'],
+  physical: ['material', 'finish', 'color', 'finish_type', 'craftsmanship', 'durability', 'lead_free', 'installation_type', 'mounting_type', 'sink_shape', 'overall_shape',
+    'pattern', 'wood_species', 'antimicrobial', 'application'],
+  sink: ['number_of_bowls', 'bowl_configuration', 'basin_split', 'low_divider', 'gauge', 'sink_radius_mm', 'strainer_model', 'drain_hole_location', 'drain_diameter_in',
+    'has_grooves', 'includes_grids', 'grids_model_code', 'left_bowl_depth_in', 'right_bowl_depth_in', 'number_of_faucet_holes', 'compatible_faucet_type',
+    'faucet_hole_center_spacing', 'overflow', 'pedestal_included', 'compatible_pedestal', 'console_included'],
+  faucet: ['num_install_holes', 'spout_type', 'swivel_spout', 'spout_rotation_degrees', 'max_flow_rate', 'hot_cold_dispenser', 'spray_included', 'spray_type',
+    'spray_function_activation', 'spray_head_functions', 'pull_down_hose_model', 'sensor_activation', 'cartridge_size', 'cartridge_type', 'cold_start_handle',
+    'handles_included', 'number_of_handles', 'handle_style', 'handle_material', 'handle_style_lock', 'deck_plate_included', 'compatible_deck_plate',
+    'supply_line_included', 'aerator_included', 'hose_included', 'connection_size', 'laminar_flow', 'drain_overflow', 'valve_included',
+    'compatible_drain_assembly', 'faucet_centers', 'faucet_height', 'spout_reach', 'spout_height', 'install_hole_dia_mm', 'install_hole_dia_in'],
+  accessory: ['accessories_included', 'number_of_pieces', 'juice_grooves', 'bpa_free', 'flexible_board', 'reversible', 'over_the_sink', 'knife_included',
+    'collapsible', 'handheld', 'length_with_handles', 'soap_dispenser_features', 'grid_hole_placement', 'weight_capacity', 'installation_required',
+    'drain_shape', 'overflow_included', 'trip_lever_included', 'garbage_disposal_compatible', 'drain_closure_type', 'number_of_drain_holes',
+    'compatible_fixture', 'diameter_in', 'drain_connection_diameter_in', 'max_compatible_drain_opening', 'assembly_required'],
+  dimensions: ['ext_length', 'ext_width', 'ext_depth', 'ext_height', 'int_length', 'int_width', 'int_depth', 'min_ext_cabinet', 'min_int_cabinet', 'max_deck',
+    'cutout_length', 'cutout_width', 'cutout_depth', 'product_weight_lb'],
+  shipping: ['shipping_weight_lb', 'ship_length', 'ship_width', 'ship_height'],
+  carton: ['master_carton_quantity', 'master_carton_length', 'master_carton_width', 'master_carton_height', 'master_carton_weight_lb'],
+  trade: ['country_of_origin', 'country_of_origin_details', 'hs_code', 'hs_code_ca', 'warranty', 'warranty_length', 'warranty_url_us', 'warranty_url_ca',
+    'warranty_text_us', 'warranty_text_ca', 'commercial_warranty', 'commercial_warranty_length', 'product_warranty', 'warranty_details',
+    'canada_restriction', 'reason_for_restriction', 'hazardous_material', 'safety_listings', 'safety_listing_reg'],
+  certifications: ['upc_certified', 'cupc_certified', 'vermont_compliant', 'scc_compliant', 'ada_compliant', 'asse_1001', 'asse_1016', 'ista_1a', 'ista_3a_6a',
+    'ista_certified', 'title_20', 'title_24', 'uplr_compliant', 'calgreen_compliant', 'ul_1951', 'asme_csa', 'asme_18_2', 'asme_19_1', 'asme_19_2',
+    'asme_19_3', 'asme_19_4', 'energy_efficiency', 'ab_100', 'ab_1953', 'sdwa', 'nsf_ansi_61', 'nsf_certified', 'csa_b45_5', 'ansi_z124_6_97',
+    'ww_p_541', 'greenguard', 'greenguard_certified', 'greenguard_gold', 'cradle_to_cradle', 'cradle_certified', 'cradle_material_health',
+    'iso_14021', 'epd_type_iii', 'epa_watersense', 'iapmo_certified', 'wqa_gold_seal', 'usda_compliant', 'taa_compliant', 'pefc_certified',
+    'sfi_certifications', 'fsc_certifications'],
+  content_en: ['general_title_en', 'description_en', 'marketing_copy', 'keywords_en', 'product_care', 'product_url'],
+  content_fr: ['general_title_fr', 'description_fr', 'keywords_fr'],
+  retailer: ['bbb_ca_upc', 'asin', 'amazon_fnsku', 'homedepot_ca_sku', 'bbb_ca_sku', 'rona_ca_sku', 'bestbuy_ca_sku', 'bbb_com_sku', 'lowes_sku', 'wayfair_sku'],
+};
+const SECTION_OF_FIELD = new Map(Object.entries(SECTION_FIELDS).flatMap(([s, keys]) => keys.map((k) => [k, s])));
+// A sink's installation holes are the sink's own (its faucet holes); an
+// accessory's drain size and handles are details of the accessory.
+const SECTION_BY_KIND = {
+  kitchen_sink: { num_install_holes: 'sink' },
+  bathroom_sink: { num_install_holes: 'sink' },
+  accessory: { drain_diameter_in: 'accessory', handles_included: 'accessory' },
+};
+// Bullets sit in their language's content, right after the description.
+export function sectionOfHeader(header, kind = null) {
+  const bullet = normalizeHeader(header).match(BULLET_RE);
+  if (bullet) return bullet[2] === 'fr' ? 'content_fr' : 'content_en';
+  const def = defForHeader(header);
+  if (!def) return 'other';
+  return SECTION_BY_KIND[kind]?.[def.key] ?? SECTION_OF_FIELD.get(def.key) ?? 'other';
+}
+
+// Columns every template adds to its vendor-sheet ones, so the PIM's Excel
+// carries everything the product page edits (user, 2026-10-15) — by label.
+const ALWAYS = [
+  'SKU (Model Number)', 'Brand', 'Category', 'Model Name', 'Series', 'Product Type', 'Manufacturer', 'UPC',
+  'MSRP CAD$', ...PRICE_DEFS.map((d) => d.label),
+  'Material', 'Finish', 'Color', 'Finish Type',
+  'Product Weight (lb)', 'Shipping Weight (lb)', 'Shipping Length (in)', 'Shipping Width (in)', 'Shipping Height (in)',
+  'Quantity / Master Carton', 'Master Carton Length (in)', 'Master Carton Width (in)', 'Master Carton Height (in)', 'Master Carton Weight (lb)',
+  'Country of Origin', 'HS Code (USA)', 'HS Code (Canada)', 'Full or Limited Warranty', 'Warranty Length',
+  'Warranty URL (USA)', 'Warranty URL (Canada)', 'Warranty Text (USA)', 'Warranty Text (Canada)',
+  'General Title (EN)', 'Description (EN)', 'Short Description - Marketing Copy', 'Search Keywords (EN)',
+  'General Title (FR)', 'Description (FR)', 'Search Keywords (FR)',
+];
+// …and what one kind of product carries beyond its vendor sheet (the fields
+// the catalog holds for it, 2026-10-15).
+const BY_KIND = {
+  kitchen_sink: ['Number of Installation Holes', 'Left Bowl Depth (in)', 'Right Bowl Depth (in)', 'Grids Model Code'],
+  bathroom_sink: ['Application', 'Product Care', 'Number of Bowls', 'Installation Options', 'Internal Minimum Cabinet Size',
+    'External Minimum Cabinet Size', 'Number of pieces Included', 'Accessories included'],
+  kitchen_faucet: ['Spout Rotation (degrees)', 'Sensor Activation', 'Overall Shape', 'UPC Certified', 'SCC Compliant'],
+  bathroom_faucet: ['Spout Rotation (degrees)', 'Overall Shape', 'UPC Certified', 'Cartridge size', 'Cartridge Type',
+    'Installation Hole Diameter (mm)', 'Lead Free', 'Spout Type', 'Swivel Spout', 'Spray Type', 'Spray Head Functions',
+    'Spray Function Activation', 'ADA Compliant', 'Lock Type'],
+  accessory: ['External Length', 'External Width', 'External Depth', 'Product URL', 'BPA Free', 'Drain Diameter', 'Installation Options'],
+};
+// Which kind a vendor header list is.
+export const TEMPLATE_KIND = new Map([
+  [TEMPLATE_HEADERS, 'kitchen_sink'], [BATH_SINK_TEMPLATE_HEADERS, 'bathroom_sink'], [FAUCET_TEMPLATE_HEADERS, 'kitchen_faucet'],
+  [BATH_FAUCET_TEMPLATE_HEADERS, 'bathroom_faucet'],
+]);
+
+/**
+ * A vendor header list → the PIM's sectioned layout: its columns (each named
+ * by its field's label) plus the ones above, one column per field, grouped in
+ * SECTIONS order (a column keeps its place inside its section). Returns
+ * [{ key, title, color, headers: [...] }] without the empty sections.
+ */
+export function templateLayout(baseHeaders) {
+  const kind = TEMPLATE_KIND.get(baseHeaders) ?? 'accessory';
+  const seen = new Set();
+  const columns = [];
+  const add = (header) => {
+    const n = normalizeHeader(header);
+    if (!n) return;
+    const def = BULLET_RE.test(n) ? null : defForHeader(header);
+    // a vendor column no field reads ("Family #" is derived from the SKU, "BM
+    // Dealer Cost" is MSRP × 0.30) would only ever be empty
+    if (!def && !BULLET_RE.test(n)) return;
+    const id = def ? def.key : `bullet:${n}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    columns.push(def ? def.label : header);
+  };
+  baseHeaders.forEach(add);
+  [...ALWAYS, ...(BY_KIND[kind] ?? [])].forEach(add);
+  // inside a section: SECTION_FIELDS order, bullets right after their description
+  const sectionOf = (header) => sectionOfHeader(header, kind);
+  const rank = (header) => {
+    const fields = SECTION_FIELDS[sectionOf(header)] ?? [];
+    const bullet = normalizeHeader(header).match(BULLET_RE);
+    if (bullet) return fields.indexOf(bullet[2] === 'fr' ? 'description_fr' : 'description_en') + 0.5 + Number(bullet[1]) / 100;
+    const at = fields.indexOf(defForHeader(header)?.key);
+    return at >= 0 ? at : 1000;
+  };
+  return SECTIONS
+    .map((s) => ({
+      ...s,
+      headers: columns.map((h, i) => [h, i]).filter(([h]) => sectionOf(h) === s.key)
+        .sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([h]) => h),
+    }))
+    .filter((s) => s.headers.length);
+}

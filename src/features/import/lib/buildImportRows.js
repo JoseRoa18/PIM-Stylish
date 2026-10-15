@@ -34,6 +34,15 @@ function coerce(type, raw) {
       const n = parseFloat(cleaned);
       return isNaN(n) ? null : n;
     }
+    case 'money': {
+      // "$1,234.50", "1234.5", "1 234,50" → 1234.5 (a comma before three digits
+      // groups thousands; any other comma is the decimal one)
+      let t = s.replace(/[$\s]|CAD|USD/gi, '');
+      if (t.includes('.') || /,\d{3}(?!\d)/.test(t)) t = t.replace(/,/g, '');
+      else t = t.replace(',', '.');
+      const n = parseFloat(t.replace(/[^\d.-]/g, ''));
+      return isNaN(n) ? null : Math.round(n * 100) / 100;
+    }
     case 'bool': {
       const l = s.toLowerCase();
       if (['yes', 'y', 'true', '1', 'si', 'sí'].includes(l)) return true;
@@ -205,16 +214,22 @@ export function buildImportRows(parsed) {
       }
     }
 
-    // Completeness: which expected fields are missing on this row
+    // Completeness: which expected fields are missing on this row — only the
+    // columns its own sheet has (a sink's row never misses a faucet column of
+    // another sheet in the same file)
+    const ownKeys = new Set(headerMap.filter((e) => e.def && Object.hasOwn(raw, e.header)).map((e) => e.def.key));
     for (const def of FIELD_DEFS) {
-      if (!matchedFieldKeys.has(def.key)) continue; // column absent from the file entirely
+      if (!ownKeys.has(def.key)) continue; // column absent from this row's sheet
       if (!filledLabels.has(def.label)) missingLabels.push(def.label);
     }
     if (matchedFieldKeys.has('bullets_en') && compactEn.length === 0) missingLabels.push('Bullets (EN)');
     if (matchedFieldKeys.has('bullets_fr') && compactFr.length === 0) missingLabels.push('Bullets (FR)');
 
+    // the row as the person sees it: its sheet row, with the sheet's name when
+    // the file has several (the PIM export puts each category on its own)
+    const sheetRow = raw.__row ?? idx + 2;
     return {
-      rowNumber: idx + 2, // 1-based + header row
+      rowNumber: parsed.sheets > 1 && raw.__sheet ? `${raw.__sheet} · ${sheetRow}` : sheetRow,
       sku,
       columns,
       attributes,

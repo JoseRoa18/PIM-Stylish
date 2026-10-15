@@ -12,13 +12,21 @@ export async function fetchExistingProducts(skus) {
     const chunk = skus.slice(i, i + 100);
     const { data, error } = await supabase
       .from('products')
-      .select('sku, attributes')
+      .select('sku, attributes, description')
       .in('sku', chunk);
     if (error) throw error;
     for (const row of data ?? []) out.set(row.sku, row);
   }
   return out;
 }
+
+// A description's words, whatever its HTML: tags, entities and spacing out.
+const textOf = (html) => String(html ?? '')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+  .replace(/\s+/g, ' ')
+  .trim();
 
 /**
  * Import rows: new products are bulk-inserted; existing products are updated
@@ -67,6 +75,10 @@ export async function importProducts(rows, existingMap, onProgress) {
           attributes: { ...(prev?.attributes ?? {}), ...r.attributes },
         };
         delete patch.sku; // key, not a patch field
+        // The sheet holds the description as plain text; one whose words did
+        // not change keeps the PIM's formatting (lists, bold) instead of
+        // coming back as bare paragraphs.
+        if (patch.description != null && textOf(patch.description) === textOf(prev?.description)) delete patch.description;
         return supabase.from('products').update(patch).eq('sku', r.sku);
       }),
     );

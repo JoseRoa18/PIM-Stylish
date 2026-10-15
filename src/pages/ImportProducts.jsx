@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS, templateLayout, scoreImportHeader } from '@/features/import/lib/importSchema';
+import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 
@@ -131,15 +132,16 @@ export default function ImportProducts() {
     faucet_plate: FAUCET_PLATE_TEMPLATE_HEADERS,
   };
 
-  function downloadTemplate(category = 'sink') {
+  // The blank template is the same sectioned Excel the PIM export writes
+  // (user, 2026-10-15), with no rows.
+  async function downloadTemplate(category = 'sink') {
     const headers = TEMPLATES[category] ?? TEMPLATE_HEADERS;
-    // RFC-4180: wrap each header in quotes and double any embedded quotes.
-    const csv = '﻿' + headers.map((h) => `"${String(h).replace(/"/g, '""')}"`).join(',') + '\r\n';
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const label = BLANK_TEMPLATE_GROUPS.flatMap((g) => g.templates).find((t) => t.key === category)?.label ?? 'Products';
+    const blob = await buildSectionedWorkbook([{ name: label, sections: templateLayout(headers), rows: [] }]);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `stylish_pim_${category}_import_template.csv`;
+    link.download = `stylish_pim_${category}_import_template.xlsx`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -151,7 +153,8 @@ export default function ImportProducts() {
     setParseError(null);
     setFileName(file.name);
     try {
-      const parsed = await parseSpreadsheetFile(file);
+      // Every sheet (the PIM export has one per category), headers found under the section band.
+      const parsed = await parseSpreadsheetFile(file, { scoreHeader: scoreImportHeader, allSheets: true });
       if (parsed.rows.length === 0) {
         throw new Error('The file has headers but no data rows.');
       }
@@ -255,7 +258,7 @@ export default function ImportProducts() {
           </p>
           <p className="sm:hidden text-body-lg text-on-surface mb-1">Select a .xlsx or .csv file</p>
           <p className="text-body-sm text-on-surface-variant mb-6">
-            First row must be the column headers. SKU (Model Number), Brand and Category are required per row.
+            Use the blank template or a PIM export (every sheet is read). SKU (Model Number), Brand and Category are required per row.
           </p>
           <input
             ref={fileRef}
