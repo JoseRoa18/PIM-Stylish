@@ -5,9 +5,17 @@
 // SKU column stay frozen, and row 2 carries the filter. Built straight as
 // OOXML with JSZip (loaded on demand) — no spreadsheet library.
 //
-// sheets: [{ name, kind?, sections: [{ title, color, headers }], rows: [[value…]] }]
+// sheets: [{ name, kind?, sections: [{ title, color, headers }], rows: [[value…]], formats? }]
 // A row lists its values in the sections' column order; a number is written
-// as a number, anything else as text, '' / null as an empty cell.
+// as a number, anything else as text, '' / null as an empty cell. `formats`
+// (optional, one per column) shows a column as 'money' (#,##0.00), 'percent'
+// (a fraction shown 0%) or 'link' (a clickable URL).
+//
+// A sheet with `blocks` instead is a report page (the full PIM report's
+// Summary and Notes): { name, title, subtitle, widths: [B, C…], blocks: [{
+// title, note?, headers, rows, total?, formats: ['text' | 'center' | 'count' |
+// 'percent' | 'wrap' | 'topic'…], rowFormats?: { [row index]: formats } }] }
+// — stacked tables from column B.
 
 const esc = (s) => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -56,15 +64,46 @@ const columnWidth = (header, values) => {
   return Math.min(36, Math.max(11, fromHeader, Math.round(longest * 1.05) + 2));
 };
 
+// The styles past the per-section pairs, by name: data formats, links and the
+// report pages' title, tables and totals. Their index is 2 + 2 × colors + the
+// position here. Fonts: 3 link, 4 title, 5 gray, 6 block title, 7 bold,
+// 8 white bold 10, 9 gray italic; fills `navy` and `total` follow the
+// sections' fills.
+const EXTRA_STYLES = [
+  ['money', () => '<xf numFmtId="4" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>'],
+  ['percent', () => '<xf numFmtId="9" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>'],
+  ['link', () => '<xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>'],
+  ['title', () => '<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/>'],
+  ['subtitle', () => '<xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1"/>'],
+  ['blockTitle', () => '<xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1"/>'],
+  ['blockNote', () => '<xf numFmtId="0" fontId="9" fillId="0" borderId="0" xfId="0" applyFont="1"/>'],
+  ['blockHead', (f) => `<xf numFmtId="0" fontId="8" fillId="${f.navy}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>`],
+  ['blockHeadLeft', (f) => `<xf numFmtId="0" fontId="8" fillId="${f.navy}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>`],
+  ['text', () => '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>'],
+  ['center', () => '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>'],
+  ['count', () => '<xf numFmtId="3" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>'],
+  ['percentCenter', () => '<xf numFmtId="9" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>'],
+  ['wrap', () => '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'],
+  ['topic', () => '<xf numFmtId="0" fontId="7" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>'],
+  ['totalText', (f) => `<xf numFmtId="0" fontId="7" fillId="${f.total}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>`],
+  ['totalCount', (f) => `<xf numFmtId="3" fontId="7" fillId="${f.total}" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>`],
+  ['totalPercent', (f) => `<xf numFmtId="9" fontId="7" fillId="${f.total}" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>`],
+];
+const extraStyle = (colors, name) => 2 + 2 * colors.length + EXTRA_STYLES.findIndex(([n]) => n === name);
+
 function stylesXml(colors) {
-  // fills 0/1 are Excel's reserved none / gray125; then dark + light per section
+  // fills 0/1 are Excel's reserved none / gray125; then dark + light per
+  // section, then the report tables' header and total fills
   const fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>'];
   for (const c of colors) {
     fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`);
     fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${tint(c)}"/><bgColor indexed="64"/></patternFill></fill>`);
   }
+  const fixedFills = { navy: fills.length, total: fills.length + 1 };
+  fills.push('<fill><patternFill patternType="solid"><fgColor rgb="FF1F3864"/><bgColor indexed="64"/></patternFill></fill>');
+  fills.push('<fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF7"/><bgColor indexed="64"/></patternFill></fill>');
   // xf 0 default, 1 data cell (thin light border, top aligned); per section
-  // 2 + 2i the band, 3 + 2i the header
+  // 2 + 2i the band, 3 + 2i the header; then EXTRA_STYLES
   const xfs = [
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>',
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>',
@@ -73,12 +112,20 @@ function stylesXml(colors) {
     xfs.push(`<xf numFmtId="0" fontId="1" fillId="${2 + 2 * i}" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>`);
     xfs.push(`<xf numFmtId="0" fontId="2" fillId="${3 + 2 * i}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>`);
   });
+  for (const [, xf] of EXTRA_STYLES) xfs.push(xf(fixedFills));
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<fonts count="3">
+<fonts count="10">
 <font><sz val="10"/><color rgb="FF1F1F1F"/><name val="Arial"/><family val="2"/></font>
 <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/><family val="2"/></font>
 <font><b/><sz val="9"/><color rgb="FF1F1F1F"/><name val="Arial"/><family val="2"/></font>
+<font><u/><sz val="10"/><color rgb="FF0B57D0"/><name val="Arial"/><family val="2"/></font>
+<font><b/><sz val="18"/><color rgb="FF1F3864"/><name val="Arial"/><family val="2"/></font>
+<font><sz val="10"/><color rgb="FF595959"/><name val="Arial"/><family val="2"/></font>
+<font><b/><sz val="12"/><color rgb="FF1F3864"/><name val="Arial"/><family val="2"/></font>
+<font><b/><sz val="10"/><color rgb="FF1F1F1F"/><name val="Arial"/><family val="2"/></font>
+<font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/><family val="2"/></font>
+<font><i/><sz val="10"/><color rgb="FF595959"/><name val="Arial"/><family val="2"/></font>
 </fonts>
 <fills count="${fills.length}">${fills.join('')}</fills>
 <borders count="3">
@@ -130,8 +177,13 @@ function validationsXml(validations, untilRow) {
   return `<dataValidations count="${items.length}">${items.join('')}</dataValidations>`;
 }
 
-function sheetXml(sheet, styleOf, validations = []) {
+// A column's data style: its format's, else the plain data cell.
+const formatStyles = (sheet, colors) => (sheet.formats ?? []).map((f) => (f ? extraStyle(colors, f) : 1));
+
+function sheetXml(sheet, styleOf, validations = [], colors = []) {
   const headers = sheet.sections.flatMap((s) => s.headers);
+  const styles = formatStyles(sheet, colors);
+  const links = []; // { ref, url } — written as the sheet's hyperlinks
   const last = colLetter(Math.max(0, headers.length - 1));
   const lastRow = Math.max(2, sheet.rows.length + 2);
   const band = [];
@@ -150,12 +202,16 @@ function sheetXml(sheet, styleOf, validations = []) {
   });
   const rows = sheet.rows.map((values, r) => {
     const n = r + 3;
-    const cells = headers.map((_, c) => cellXml(`${colLetter(c)}${n}`, values[c], 1)).join('');
+    const cells = headers.map((_, c) => {
+      const ref = `${colLetter(c)}${n}`;
+      if (sheet.formats?.[c] === 'link' && /^https?:\/\//i.test(String(values[c] ?? ''))) links.push({ ref, url: String(values[c]) });
+      return cellXml(ref, values[c], styles[c] ?? 1);
+    }).join('');
     return `<row r="${n}">${cells}</row>`;
   });
   const sample = sheet.rows.slice(0, 200);
   const cols = headers.map((h, i) => `<col min="${i + 1}" max="${i + 1}" width="${columnWidth(h, sample.map((r) => r[i]))}" customWidth="1"/>`).join('');
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <dimension ref="A1:${last}${lastRow}"/>
 <sheetViews><sheetView workbookViewId="0" zoomScale="90" zoomScaleNormal="90"><pane xSplit="1" ySplit="2" topLeftCell="B3" activePane="bottomRight" state="frozen"/><selection pane="topRight" activeCell="B1" sqref="B1"/><selection pane="bottomLeft" activeCell="A3" sqref="A3"/><selection pane="bottomRight" activeCell="B3" sqref="B3"/></sheetView></sheetViews>
@@ -169,6 +225,55 @@ ${rows.join('\n')}
 <autoFilter ref="A2:${last}${lastRow}"/>
 ${merges.length ? `<mergeCells count="${merges.length}">${merges.map((m) => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>` : ''}
 ${validationsXml(validations, Math.max(1000, sheet.rows.length + 500))}
+${links.length ? `<hyperlinks>${links.map((l, i) => `<hyperlink ref="${l.ref}" r:id="rIdL${i + 1}"/>`).join('')}</hyperlinks>` : ''}
+<pageMargins left="0.5" right="0.5" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>`;
+  return { xml, links };
+}
+
+// A sheet's external links, one relationship each.
+const linksRelsXml = (links) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${links.map((l, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${esc(l.url)}" TargetMode="External"/>`).join('\n')}
+</Relationships>`;
+
+// A report page: title and subtitle, then each block's title, note, header
+// row, rows and total, one blank row apart — from column B, no gridlines.
+const BLOCK_STYLE = { text: 'text', center: 'center', count: 'count', percent: 'percentCenter', wrap: 'wrap', topic: 'topic' };
+const TOTAL_STYLE = { count: 'totalCount', percent: 'totalPercent' };
+function reportSheetXml(sheet, colors) {
+  const st = (name) => extraStyle(colors, name);
+  const rows = [];
+  let r = 1;
+  // the next row: its values from column B, each with its style name
+  const line = (values, styleOf, height) => {
+    r += 1;
+    const cells = values.map((v, c) => cellXml(`${colLetter(c + 1)}${r}`, v, st(styleOf(c))));
+    rows.push(`<row r="${r}"${height ? ` ht="${height}" customHeight="1"` : ''}>${cells.join('')}</row>`);
+  };
+  line([sheet.title ?? ''], () => 'title', 26);
+  if (sheet.subtitle) line([sheet.subtitle], () => 'subtitle');
+  for (const block of sheet.blocks) {
+    r += 1; // a blank row before each block
+    if (block.title) line([block.title], () => 'blockTitle', 18);
+    if (block.note) line([block.note], () => 'blockNote');
+    line(block.headers, (c) => (c ? 'blockHead' : 'blockHeadLeft'), 30);
+    block.rows.forEach((values, i) => {
+      const formats = block.rowFormats?.[i] ?? block.formats;
+      line(values, (c) => BLOCK_STYLE[formats?.[c]] ?? 'text');
+    });
+    if (block.total) line(block.total, (c) => TOTAL_STYLE[block.formats?.[c]] ?? 'totalText');
+  }
+  const cols = ['<col min="1" max="1" width="2" customWidth="1"/>',
+    ...(sheet.widths ?? []).map((w, i) => `<col min="${i + 2}" max="${i + 2}" width="${w}" customWidth="1"/>`)].join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols>${cols}</cols>
+<sheetData>
+${rows.join('\n')}
+</sheetData>
 <pageMargins left="0.5" right="0.5" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
 </worksheet>`;
 }
@@ -194,7 +299,8 @@ function listsSheetXml(lists) {
 const LISTS_SHEET = 'PIM Lists';
 
 /**
- * The workbook as a Blob (.xlsx). `validationFor(header, kind)` → what a
+ * The workbook as a Blob (.xlsx), its sheets in the given order (report pages
+ * included). `validationFor(header, kind)` → what a
  * column checks from row 3, or null: { type: 'list', values } (a dropdown,
  * its list on a hidden "PIM Lists" sheet), { type: 'decimal' | 'whole' } or
  * { type: 'textLength', min, max } (user, 2026-10-15).
@@ -208,7 +314,7 @@ export async function buildSectionedWorkbook(sheets, { validationFor = null } = 
   const names = sheetNames(sheets.map((s) => s.name));
 
   // one style pair per distinct section color
-  const colors = [...new Set(sheets.flatMap((s) => s.sections.map((x) => x.color)))];
+  const colors = [...new Set(sheets.flatMap((s) => (s.sections ?? []).map((x) => x.color)))];
   const styleOf = (section) => {
     const i = colors.indexOf(section.color);
     return { bandStyle: 2 + 2 * i, headerStyle: 3 + 2 * i };
@@ -219,7 +325,7 @@ export async function buildSectionedWorkbook(sheets, { validationFor = null } = 
   const listIndex = new Map(); // JSON of the values → index
   const perSheet = sheets.map((sheet) => {
     const byRule = new Map(); // rule key → { rule, cols }
-    sheet.sections.flatMap((s) => s.headers).forEach((h, c) => {
+    (sheet.sections ?? []).flatMap((s) => s.headers).forEach((h, c) => {
       let rule = validationFor?.(h, sheet.kind);
       if (!rule || (rule.type === 'list' && !rule.values?.length)) return;
       if (rule.type === 'list') {
@@ -237,11 +343,17 @@ export async function buildSectionedWorkbook(sheets, { validationFor = null } = 
     return [...byRule.values()];
   });
 
-  sheets.forEach((sheet, i) => put(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(sheet, styleOf, perSheet[i])));
+  sheets.forEach((sheet, i) => {
+    if (sheet.blocks) return put(`xl/worksheets/sheet${i + 1}.xml`, reportSheetXml(sheet, colors));
+    const { xml, links } = sheetXml(sheet, styleOf, perSheet[i], colors);
+    put(`xl/worksheets/sheet${i + 1}.xml`, xml);
+    if (links.length) put(`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, linksRelsXml(links));
+  });
   const allNames = lists.length ? [...names, LISTS_SHEET] : names;
   if (lists.length) put(`xl/worksheets/sheet${allNames.length}.xml`, listsSheetXml(lists));
   put('xl/styles.xml', stylesXml(colors));
-  const filterNames = sheets.map((sheet, i) => {
+  const filterNames = sheets.flatMap((sheet, i) => {
+    if (sheet.blocks) return []; // a report page has no filter
     const count = sheet.sections.reduce((n, s) => n + s.headers.length, 0);
     const lastRow = Math.max(2, sheet.rows.length + 2);
     // "Bar & Prep Sinks": the reference is XML text too, so its & must be escaped

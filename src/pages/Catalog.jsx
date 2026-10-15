@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { Plus, Upload } from 'lucide-react';
+import { Plus, Upload, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { useProducts } from '@/features/products/hooks/useProducts';
 import {
   useFilteredProducts,
@@ -40,6 +40,24 @@ export default function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedSkus, setSelectedSkus] = useState(() => new Set());
   const [creating, setCreating] = useState(() => searchParams.get('new') === '1');
+  // The full PIM report (user, 2026-10-15): null, 'busy' or { ok, text }.
+  const [report, setReport] = useState(null);
+
+  // Every product with everything the PIM holds, in one Excel. Read-only, so
+  // viewers get it too; the builder loads on click.
+  async function downloadReport() {
+    setReport('busy');
+    try {
+      const { generatePimReport } = await import('@/features/syndication/exports/pimReport');
+      const r = await generatePimReport();
+      setReport({
+        ok: true,
+        text: `Full report downloaded: ${r.products} products, ${r.columns} columns, ${r.files.toLocaleString()} media files, ${r.ids.toLocaleString()} marketplace IDs.`,
+      });
+    } catch (err) {
+      setReport({ ok: false, text: err.message ?? 'The report could not be built.' });
+    }
+  }
 
   // The URL is the single source of truth for search, filters, sort, and
   // pagination — so a filtered/sorted view can be shared, bookmarked, and
@@ -300,26 +318,41 @@ export default function Catalog() {
               : `${totalCount} ${totalCount === 1 ? 'product' : 'products'}`}
           </p>
         </div>
-        {canEdit && (
-          <div className="flex items-center gap-2">
-            <Link
-              to="/import"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors"
-            >
-              <Upload className="w-4 h-4" />
-              Import
-            </Link>
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
-            >
-              <Plus className="w-4 h-4" />
-              New Product
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={downloadReport}
+            disabled={report === 'busy'}
+            title="One Excel with every product and everything the PIM holds for it"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+          >
+            {report === 'busy' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <FileSpreadsheet className="w-4 h-4" aria-hidden="true" />}
+            {report === 'busy' ? 'Building report…' : 'Full Report'}
+          </button>
+          {canEdit && (
+            <>
+              <Link
+                to="/import"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors"
+              >
+                <Upload className="w-4 h-4" />
+                Import
+              </Link>
+              <button
+                type="button"
+                onClick={() => setCreating(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+              >
+                <Plus className="w-4 h-4" />
+                New Product
+              </button>
+            </>
+          )}
+        </div>
       </header>
+
+      {report?.ok && <p role="status" className="text-body-sm text-on-surface-variant">{report.text}</p>}
+      {report && report !== 'busy' && !report.ok && <p role="alert" className="text-body-sm text-error">{report.text}</p>}
 
       {/* Screen readers hear the result count change as search/filters narrow it. */}
       <p className="sr-only" role="status">

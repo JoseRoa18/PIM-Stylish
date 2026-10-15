@@ -737,7 +737,7 @@ function ExportTemplateDropdown({ disabled, busy, count, onSelect }) {
             {/* PIM data round-trip: fills the PIM's own category templates */}
             <div className="my-1 border-t border-outline-variant" />
             <div className="px-4 pt-1.5 pb-0.5 text-label-md uppercase tracking-wider text-on-surface-variant">
-              PIM data (CSV per category)
+              PIM data (Excel, a sheet per category)
             </div>
             <button
               type="button"
