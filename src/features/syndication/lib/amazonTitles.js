@@ -193,7 +193,11 @@ function kitchenSink(p, ctx, flags) {
   const install = /dual/i.test(it) ? 'Dual Mount' : /under/i.test(it) ? 'Undermount' : /top mount/i.test(it) ? 'Top Mount' : /drop/i.test(it) ? 'Drop-In' : '';
   const acc = accessoriesOf(p);
   const workstation = acc.items.some(isWorkstationItem);
-  const series = s(p.series).replace(/\s*K\+$/i, '').replace(/^(azuni sink|laundry)$/i, '');
+  // A sink without a series of its own ("Azuni Sink", "Laundry") is named by
+  // its model, as on Amazon today: "Stylish Spinel 22 inch…", "Azuni Nantes…"
+  // (user, 2026-10-15).
+  const ownSeries = s(p.series).replace(/\s*K\+$/i, '').replace(/^(azuni sink|laundry)$/i, '');
+  const series = ownSeries || s(p.model_name);
   const color = sinkFinish(p);
   const parts = {
     brand: brandOf(p), series, size: numText(ext.length) ? `${numText(ext.length)} inch` : '', material, bowl, install,
@@ -231,7 +235,7 @@ function kitchenSink(p, ctx, flags) {
   if (items.length) frags.push(includedFrag(items));
   if (numText(a.min_internal_cabinet_size_in)) frags.push(`${numText(a.min_internal_cabinet_size_in)} inch minimum cabinet size`);
   if (install === 'Dual Mount') frags.push('undermount or drop-in install');
-  if (dropped.includes('series') && series) frags.push(`${series} series`);
+  if (dropped.includes('series') && series) frags.push(ownSeries ? `${series} series` : `${series} collection`);
   frags.push(drainText(a.drain_hole_location));
   if (numText(a.sink_radius_mm)) frags.push(`${numText(a.sink_radius_mm)} mm radius corners`);
   const pieces = Number(a.number_of_pieces);

@@ -68,6 +68,18 @@ export const SPRAY_ACTIVATION_OPTIONS = ['Spray Head Button', 'Lever', 'Does Not
 // touchless) — Home Depot USA's Sensor Activation list.
 export const SENSOR_ACTIVATION_OPTIONS = ['No Sensor', 'Touch', 'Touchless', 'Touchless with Voice', 'Voice Control'];
 export const HANDLE_STYLE_OPTIONS = ['Lever', 'Knob', 'Cross'];
+// Maximum flow rate in GPM — the number only, the field says GPM (user,
+// 2026-10-15). The catalog's own rates; a new one goes on the list.
+export const MAX_FLOW_RATE_OPTIONS = ['1.1', '1.2', '1.5', '1.7', '1.8', '2.1', '2.2', '2.5'];
+// Counts and standard sizes, picked instead of typed (user, 2026-10-15:
+// "solo número … también drop down"). Stored as numbers.
+export const BOWL_COUNT_OPTIONS = ['1', '2', '3'];
+export const HANDLE_COUNT_OPTIONS = ['1', '2', '3'];
+export const HOLE_COUNT_OPTIONS = ['0', '1', '2', '3', '4'];
+export const PIECE_COUNT_OPTIONS = Array.from({ length: 15 }, (_, i) => String(i + 1));
+export const DRAIN_HOLE_COUNT_OPTIONS = ['1', '2', '3', '4'];
+export const SPOUT_ROTATION_OPTIONS = ['90', '180', '360'];
+export const SINK_RADIUS_OPTIONS = ['10', '15', '16', '20', '30'];
 
 // Product types whose SKUs other products point at (Strainer Model,
 // Compatible Deck Plate #, Compatible Drain Assembly #).

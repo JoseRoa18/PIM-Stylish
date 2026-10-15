@@ -152,7 +152,8 @@ import {
   WARRANTY_OPTIONS, WARRANTY_LENGTH_OPTIONS, CRAFTSMANSHIP_OPTIONS, SINK_SHAPE_OPTIONS,
   INSTALLATION_TYPE_OPTIONS, GAUGE_OPTIONS, BOWL_CONFIGURATION_OPTIONS, BASIN_SPLIT_OPTIONS,
   DRAIN_LOCATION_OPTIONS, FAUCET_SHAPE_OPTIONS, SPOUT_TYPE_OPTIONS, SPRAY_TYPE_OPTIONS,
-  SPRAY_ACTIVATION_OPTIONS, SENSOR_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS,
+  SPRAY_ACTIVATION_OPTIONS, SENSOR_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS, MAX_FLOW_RATE_OPTIONS,
+  BOWL_COUNT_OPTIONS, HANDLE_COUNT_OPTIONS, HOLE_COUNT_OPTIONS, PIECE_COUNT_OPTIONS, SPOUT_ROTATION_OPTIONS, SINK_RADIUS_OPTIONS,
   STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE, skusOfType,
 } from '@/features/products/lib/fieldOptions';
 import { SUGGEST_COLUMNS, SUGGEST_ATTRS, SUGGEST_FROM } from '@/features/products/lib/suggestFields';
@@ -1215,12 +1216,12 @@ function SpecsTab({ product, edit }) {
       {(isKitchenSink || attr(product, 'number_of_bowls')) && (
         <Section title="Bowl Configuration" action={unitToggle}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-            <AttrField label="Number of Bowls" attrKey="number_of_bowls" type="number" product={product} edit={edit} />
+            <AttrField label="Number of Bowls" attrKey="number_of_bowls" type="select" options={BOWL_COUNT_OPTIONS} product={product} edit={edit} />
             <AttrField label="Bowl Configuration" attrKey="bowl_configuration" type="select" options={BOWL_CONFIGURATION_OPTIONS} product={product} edit={edit} />
             <AttrField label="Basin Split" attrKey="basin_split" type="select" options={BASIN_SPLIT_OPTIONS} product={product} edit={edit} />
             <AttrField label="Low Divider" attrKey="low_divider" type="boolean" product={product} edit={edit} />
             <AttrField label="Strainer Model" attrKey="strainer_model" type="select" options={skusOfType(edit.suggestions, STRAINER_TYPE, brand)} product={product} edit={edit} />
-            <AttrField label="Sink Radius (mm)" attrKey="sink_radius_mm" type="number" product={product} edit={edit} />
+            <AttrField label="Sink Radius (mm)" attrKey="sink_radius_mm" type="select" options={SINK_RADIUS_OPTIONS} product={product} edit={edit} />
             <AttrField label="Drain Diameter" attrKey="drain_diameter_in" type="number" unit={unit} product={product} edit={edit} />
             <AttrField label="Drain Location" attrKey="drain_hole_location" type="select" options={DRAIN_LOCATION_OPTIONS} product={product} edit={edit} />
             <AttrField label="Has Grooves" attrKey="has_grooves" type="boolean" product={product} edit={edit} />
@@ -1269,7 +1270,7 @@ function SpecsTab({ product, edit }) {
           <Section title="Bathroom Sink">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Compatible Faucet Type" attrKey="compatible_faucet_type" suggest product={product} edit={edit} />
-              <AttrField label="Number of Faucet Holes" attrKey="number_of_faucet_holes" type="number" product={product} edit={edit} />
+              <AttrField label="Number of Faucet Holes" attrKey="number_of_faucet_holes" type="select" options={HOLE_COUNT_OPTIONS} product={product} edit={edit} />
               <AttrField label="Faucet Hole Center Spacing" attrKey="faucet_hole_center_spacing" suggest product={product} edit={edit} />
               <AttrField label="Overflow" attrKey="overflow" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
               <AttrField label="Drain Location" attrKey="drain_hole_location" type="select" options={DRAIN_LOCATION_OPTIONS} product={product} edit={edit} />
@@ -1345,9 +1346,9 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Spout Type" attrKey="spout_type" type="select" options={SPOUT_TYPE_OPTIONS} help="Wayfair's Spout Type list. Required for kitchen faucets, recommended for bathroom faucets." product={product} edit={edit} />
               <AttrField label="Overall Shape" attrKey="overall_shape" type="select" options={FAUCET_SHAPE_OPTIONS} help="Wayfair's Overall Shape list for faucets. Falls back to Spout Type when empty." product={product} edit={edit} />
               <AttrField label="Swivel Spout" attrKey="swivel_spout" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
-              <AttrField label="Spout Rotation (Degrees)" attrKey="spout_rotation_degrees" type="number" help="How far the spout swivels, in degrees (e.g. 360)." product={product} edit={edit} />
-              <AttrField label="Max Flow Rate (GPM)" attrKey="max_flow_rate" suggest help="Maximum water flow in gallons per minute, typically measured at 60 psi." product={product} edit={edit} />
-              <AttrField label="Installation Holes" attrKey="number_of_installation_holes" type="number" product={product} edit={edit} />
+              <AttrField label="Spout Rotation (Degrees)" attrKey="spout_rotation_degrees" type="select" options={SPOUT_ROTATION_OPTIONS} help="How far the spout swivels, in degrees (e.g. 360)." product={product} edit={edit} />
+              <AttrField label="Max Flow Rate (GPM)" attrKey="max_flow_rate" type="select" options={MAX_FLOW_RATE_OPTIONS} help="Maximum water flow in gallons per minute, typically measured at 60 psi." product={product} edit={edit} />
+              <AttrField label="Installation Holes" attrKey="number_of_installation_holes" type="select" options={HOLE_COUNT_OPTIONS} product={product} edit={edit} />
               <AttrField label="Mounting / Installation Type" attrKey="mounting_type" suggest product={product} edit={edit} />
               <AttrField label="Connection Size" attrKey="connection_size" suggest help='Water supply connection diameter in inches — enter the decimal (0.375 = 3/8").' product={product} edit={edit} />
               <FractionField label="Connection Size" attrKey="connection_size" product={product} edit={edit} />
@@ -1372,7 +1373,7 @@ function SpecsTab({ product, edit }) {
 
           <Section title="Handles, Spray & Cartridge" defaultOpen={false}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-              <AttrField label="Number of Handles" attrKey="number_of_handles" type="number" product={product} edit={edit} />
+              <AttrField label="Number of Handles" attrKey="number_of_handles" type="select" options={HANDLE_COUNT_OPTIONS} product={product} edit={edit} />
               <AttrField label="Handle(s) Included" attrKey="handles_included" type="boolean" product={product} edit={edit} />
               <AttrField label="Handle Style" attrKey="handle_style" type="select" options={HANDLE_STYLE_OPTIONS} product={product} edit={edit} />
               <AttrField label="Cold Start Handle" attrKey="cold_start_handle" type="boolean" product={product} edit={edit} />
@@ -1492,7 +1493,7 @@ function SpecsTab({ product, edit }) {
         <Section title="Accessories" defaultOpen={false}>
           <AttrListField label="Included Accessories" attrKey="accessories_included" product={product} edit={edit} hint="Separate items with ;" linkSkus />
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-            <AttrField label="Number of Pieces Included" attrKey="number_of_pieces" type="number" product={product} edit={edit} />
+            <AttrField label="Number of Pieces Included" attrKey="number_of_pieces" type="select" options={PIECE_COUNT_OPTIONS} product={product} edit={edit} />
             <AttrField label="Grids Model Code" attrKey="grids_model_code" suggest product={product} edit={edit} />
           </div>
         </Section>
@@ -2204,7 +2205,8 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
 
   if (!isEditing) {
     const val = attr(product, attrKey);
-    if (type === 'select') return <Field label={label} value={val} />;
+    // a count of 0 (installation holes) reads "0", not "—"
+    if (type === 'select') return <Field label={label} value={val != null && val !== '' ? String(val) : null} />;
     if (shownUnit) return <Field label={label} value={toDisplayLength(val, shownUnit)} mono={mono} />;
     if (shownWeight) return <Field label={label} value={toDisplayWeight(val, shownWeight)} mono={mono} />;
     if (type === 'boolean') {
@@ -2274,9 +2276,10 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     return (
       <div className="flex flex-col gap-1">
         <span className="text-label-md text-on-surface-variant">{label}</span>
-        <select value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} aria-label={name} className={inputBase}>
+        <select value={value == null ? '' : String(value)} onChange={(e) => setField(formKey, e.target.value)} aria-label={name} className={inputBase}>
           <option value="">—</option>
-          {(value && !options.includes(value) ? [value, ...options] : options).map((o) => (<option key={o} value={o}>{o}</option>))}
+          {/* a stored number (2) is its option ("2"), not an off-list value */}
+          {(value != null && value !== '' && !options.includes(String(value)) ? [String(value), ...options] : options).map((o) => (<option key={o} value={o}>{o}</option>))}
         </select>
       </div>
     );

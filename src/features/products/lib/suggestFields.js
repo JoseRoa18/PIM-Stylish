@@ -11,7 +11,7 @@ export const SUGGEST_ATTRS = [
   'pull_down_hose_model', 'cartridge_type', 'cartridge_size', 'grids_model_code',
   'warranty_url_us', 'warranty_url_ca', 'reason_for_restriction', 'commercial_warranty',
   'greenguard_certifications', 'cradle_to_cradle_certifications', 'sfi_certifications', 'fsc_certifications',
-  'max_flow_rate', 'connection_size', 'safety_listing_registration_number',
+  'connection_size', 'safety_listing_registration_number',
 ];
 // Fields whose suggestions come from some categories only (the others have a
 // fixed list): accessories' Installation Type and Overall Shape.

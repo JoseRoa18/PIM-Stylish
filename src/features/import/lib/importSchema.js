@@ -17,6 +17,8 @@ import {
   WARRANTY_OPTIONS, WARRANTY_LENGTH_OPTIONS, CRAFTSMANSHIP_OPTIONS, SINK_SHAPE_OPTIONS, INSTALLATION_TYPE_OPTIONS,
   GAUGE_OPTIONS, BOWL_CONFIGURATION_OPTIONS, BASIN_SPLIT_OPTIONS, DRAIN_LOCATION_OPTIONS, FAUCET_SHAPE_OPTIONS,
   SPOUT_TYPE_OPTIONS, SPRAY_TYPE_OPTIONS, SPRAY_ACTIVATION_OPTIONS, SENSOR_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS,
+  MAX_FLOW_RATE_OPTIONS, BOWL_COUNT_OPTIONS, HANDLE_COUNT_OPTIONS, HOLE_COUNT_OPTIONS, PIECE_COUNT_OPTIONS,
+  DRAIN_HOLE_COUNT_OPTIONS, SPOUT_ROTATION_OPTIONS, SINK_RADIUS_OPTIONS,
 } from '@/features/products/lib/fieldOptions';
 
 export const normalizeHeader = (h) =>
@@ -232,7 +234,8 @@ export const FIELD_DEFS = [
   { key: 'num_install_holes', label: 'Number of Installation Holes', aliases: ['numberofinstallationholes', 'numberofmountingholes'], type: 'int', target: { attr: 'number_of_installation_holes' } },
   { key: 'spout_type', label: 'Spout Type', aliases: ['spouttype'], type: 'text', target: { attr: 'spout_type' } },
   { key: 'swivel_spout', label: 'Swivel Spout', aliases: ['swivelspout'], type: 'text', target: { attr: 'swivel_spout' } },
-  { key: 'max_flow_rate', label: 'Maximum Flow Rate', aliases: ['maximumflowrate'], type: 'text', target: { attr: 'max_flow_rate' } },
+  // the number only: the field is in GPM ("1.8 GPM" → "1.8")
+  { key: 'max_flow_rate', label: 'Maximum Flow Rate', aliases: ['maximumflowrate'], type: 'text', target: { attr: 'max_flow_rate' }, transform: (v) => String(v).replace(/\s*gpm\s*$/i, '').trim() },
   { key: 'hot_cold_dispenser', label: 'Instant Hot and Cold Water Dispenser', aliases: ['instanthotandcoldwaterdispenser'], type: 'bool', target: { attr: 'hot_cold_dispenser' } },
   { key: 'spray_included', label: 'Spray Included', aliases: ['sprayincluded'], type: 'bool', target: { attr: 'spray_included' } },
   { key: 'spray_type', label: 'Spray Type', aliases: ['spraytype'], type: 'text', target: { attr: 'spray_type' } },
@@ -1021,6 +1024,15 @@ const LIST_BY_TARGET = {
   'attr:spray_function_activation': SPRAY_ACTIVATION_OPTIONS,
   'attr:sensor_activation': SENSOR_ACTIVATION_OPTIONS,
   'attr:handle_style': HANDLE_STYLE_OPTIONS,
+  'attr:max_flow_rate': MAX_FLOW_RATE_OPTIONS,
+  'attr:number_of_bowls': BOWL_COUNT_OPTIONS,
+  'attr:number_of_handles': HANDLE_COUNT_OPTIONS,
+  'attr:number_of_installation_holes': HOLE_COUNT_OPTIONS,
+  'attr:number_of_faucet_holes': HOLE_COUNT_OPTIONS,
+  'attr:number_of_pieces': PIECE_COUNT_OPTIONS,
+  'attr:number_of_drain_holes': DRAIN_HOLE_COUNT_OPTIONS,
+  'attr:spout_rotation_degrees': SPOUT_ROTATION_OPTIONS,
+  'attr:sink_radius_mm': SINK_RADIUS_OPTIONS,
   'attr:drain_overflow': YES_NO_DNA_OPTIONS,
   ...Object.fromEntries(COMPLIANCE_FIELDS.map((f) => [`attr:${f}`, COMPLIANCE_OPTIONS])),
   ...Object.fromEntries(YES_NO_FIELDS.map((f) => [`attr:${f}`, YES_NO_OPTIONS])),
@@ -1055,17 +1067,22 @@ export function dropdownFor(header, kind = null) {
  *   { type: 'textLength', min: 12, max: 14 } — a UPC;
  *   null — free text (titles, descriptions, HS codes, URLs, part numbers).
  */
+// `strict` (user, 2026-10-15: "solo número, no letras ni símbolos"): a number,
+// a UPC, and a list made only of numbers (counts, radius, rotation, flow
+// rate) refuse anything else; the other lists only warn, as the page keeps a
+// value off its list.
+const NUMERIC_TEXT = /^\d+(\.\d+)?$/;
 export function excelValidationFor(header, kind = null, suggestions = {}) {
   const fixed = dropdownFor(header, kind);
-  if (fixed?.length) return { type: 'list', values: fixed };
+  if (fixed?.length) return { type: 'list', values: fixed, strict: fixed.every((v) => NUMERIC_TEXT.test(v)) };
   if (BULLET_RE.test(normalizeHeader(header))) return null;
   const def = defForHeader(header);
   if (!def) return null;
   const field = def.target.col ?? def.target.attr;
   const known = field ? suggestions[field] : null;
   if (known?.length) return { type: 'list', values: known };
-  if (def.type === 'upc') return { type: 'textLength', min: 12, max: 14 };
-  if (def.type === 'int') return { type: 'whole' };
-  if (def.type === 'number' || def.type === 'money') return { type: 'decimal' };
+  if (def.type === 'upc') return { type: 'upc', min: 12, max: 14, strict: true };
+  if (def.type === 'int') return { type: 'whole', strict: true };
+  if (def.type === 'number' || def.type === 'money') return { type: 'decimal', strict: true };
   return null;
 }

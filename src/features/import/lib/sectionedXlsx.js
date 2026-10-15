@@ -104,18 +104,28 @@ function cellXml(ref, value, style) {
 // of its list), a number ('decimal' / 'whole', zero or more) or a length
 // ('textLength', min–max). Each one only warns: like the product page, a value
 // off the list can be kept.
+// A strict rule (`strict: true`) refuses the value; the others warn and let
+// it be kept. `anchor` is the rule's first cell (a custom formula is written
+// for it and Excel shifts it for the others).
 const VALIDATION = {
-  list: (r) => ({ attrs: 'type="list"', formulas: `<formula1>${r.name}</formula1>`, title: 'Not on the list', error: "This value is not on the PIM's list. Keep it anyway?" }),
-  decimal: () => ({ attrs: 'type="decimal" operator="greaterThanOrEqual"', formulas: '<formula1>0</formula1>', title: 'Not a number', error: 'Enter a number only (no units or text). Keep it anyway?' }),
-  whole: () => ({ attrs: 'type="whole" operator="greaterThanOrEqual"', formulas: '<formula1>0</formula1>', title: 'Not a whole number', error: 'Enter a whole number. Keep it anyway?' }),
-  textLength: (r) => ({ attrs: 'type="textLength" operator="between"', formulas: `<formula1>${r.min}</formula1><formula2>${r.max}</formula2>`, title: 'Check the length', error: `This should have ${r.min} to ${r.max} digits. Keep it anyway?` }),
+  list: (r) => ({ attrs: 'type="list"', formulas: `<formula1>${r.name}</formula1>`, title: 'Not on the list', error: r.strict ? "Pick a value from the PIM's list." : "This value is not on the PIM's list. Keep it anyway?" }),
+  decimal: (r) => ({ attrs: 'type="decimal" operator="greaterThanOrEqual"', formulas: '<formula1>0</formula1>', title: 'Numbers only', error: r.strict ? 'Numbers only — no letters, units or symbols.' : 'Enter a number only (no units or text). Keep it anyway?' }),
+  whole: (r) => ({ attrs: 'type="whole" operator="greaterThanOrEqual"', formulas: '<formula1>0</formula1>', title: 'Whole numbers only', error: r.strict ? 'A whole number only — no letters or symbols.' : 'Enter a whole number. Keep it anyway?' }),
+  textLength: (r) => ({ attrs: 'type="textLength" operator="between"', formulas: `<formula1>${r.min}</formula1><formula2>${r.max}</formula2>`, title: 'Check the length', error: `This should have ${r.min} to ${r.max} characters.` }),
+  // digits only, min–max of them (a UPC)
+  upc: (r, anchor) => ({
+    attrs: 'type="custom"',
+    formulas: `<formula1>${esc(`AND(ISNUMBER(--${anchor}),ISERROR(FIND(".",${anchor})),LEN(${anchor})>=${r.min},LEN(${anchor})<=${r.max})`)}</formula1>`,
+    title: 'Digits only',
+    error: `A UPC is ${r.min} to ${r.max} digits — no letters, spaces or symbols.`,
+  }),
 };
 function validationsXml(validations, untilRow) {
   if (!validations.length) return '';
   const items = validations.map(({ rule, cols }) => {
     const sqref = cols.map((c) => `${colLetter(c)}3:${colLetter(c)}${untilRow}`).join(' ');
-    const v = VALIDATION[rule.type](rule);
-    return `<dataValidation ${v.attrs} errorStyle="warning" allowBlank="1" showErrorMessage="1" errorTitle="${esc(v.title)}" error="${esc(v.error)}" sqref="${sqref}">${v.formulas}</dataValidation>`;
+    const v = VALIDATION[rule.type](rule, `${colLetter(cols[0])}3`);
+    return `<dataValidation ${v.attrs} errorStyle="${rule.strict ? 'stop' : 'warning'}" allowBlank="1" showErrorMessage="1" errorTitle="${esc(v.title)}" error="${esc(v.error)}" sqref="${sqref}">${v.formulas}</dataValidation>`;
   });
   return `<dataValidations count="${items.length}">${items.join('')}</dataValidations>`;
 }
@@ -168,7 +178,12 @@ function listsSheetXml(lists) {
   const height = Math.max(...lists.map((l) => l.values.length)) + 1;
   const rows = [];
   for (let r = 0; r < height; r++) {
-    const cells = lists.map((l, c) => cellXml(`${colLetter(c)}${r + 1}`, r === 0 ? `List ${c + 1}` : (l.values[r - 1] ?? ''), 0)).join('');
+    // a list of numbers holds numbers, so a typed 2 matches its "2"
+    const cell = (l) => {
+      const v = l.values[r - 1] ?? '';
+      return /^\d+(\.\d+)?$/.test(String(v)) ? Number(v) : v;
+    };
+    const cells = lists.map((l, c) => cellXml(`${colLetter(c)}${r + 1}`, r === 0 ? `List ${c + 1}` : cell(l), 0)).join('');
     rows.push(`<row r="${r + 1}">${cells}</row>`);
   }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -213,7 +228,7 @@ export async function buildSectionedWorkbook(sheets, { validationFor = null } = 
           listIndex.set(key, lists.length);
           lists.push({ name: `PIM_List_${lists.length + 1}`, values: rule.values });
         }
-        rule = { type: 'list', name: lists[listIndex.get(key)].name };
+        rule = { type: 'list', name: lists[listIndex.get(key)].name, strict: Boolean(rule.strict) };
       }
       const key = JSON.stringify(rule);
       if (!byRule.has(key)) byRule.set(key, { rule, cols: [] });
