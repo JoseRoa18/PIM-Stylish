@@ -18,6 +18,9 @@
 //   T  Value                        MAP of the level: Orange (monthly) / Purple
 //                                   (flash, event); the promotion's own promo
 //                                   price wins when it has one
+//   W  Comments                     our part number (SKU) — for checking the
+//                                   file; the user deletes it before sending
+//                                   (2026-10-15)
 //   X  Funding Calculation          Per Unit $
 //   Y  What is the amount?          R - T
 //   AA Collection method            Debit Memo
@@ -128,6 +131,7 @@ const HEADERS = {
   currentPrice: /^currentprice/,
   discountType: /^discounttype$/,
   value: /^value$/,
+  comments: /^comments$/,
   fundingCalculation: /^fundingcalculation$/,
   amount: /^whatistheamount/,
   collectionMethod: /^whatisthecollectionmethod/,
@@ -286,6 +290,7 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
       put('currentPrice', l.map);
       put('discountType', LOWES_CONSTANTS.discountType);
       put('value', l.promo, priceStyle);
+      put('comments', l.sku);
       put('fundingCalculation', LOWES_CONSTANTS.fundingCalculation);
       put('amount', l.amount);
       put('collectionMethod', LOWES_CONSTANTS.collectionMethod);
