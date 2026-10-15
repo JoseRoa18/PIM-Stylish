@@ -268,6 +268,7 @@ function buildEditForm(product) {
     _manufacturer: a.manufacturer ?? '',
     _country_of_origin: a.country_of_origin ?? '',
     _hs_code: a.hs_code ?? '',
+    _hs_code_ca: a.hs_code_ca ?? '',
     _installation_type: joinList(a.installation_type),
     _sink_shape: a.sink_shape ?? '',
     _gauge: a.gauge ?? '',
@@ -1146,7 +1147,8 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
       <Section title="Trade & Compliance">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <AttrField label="Country of Origin" attrKey="country_of_origin" type="select" options={COUNTRY_NAMES} product={product} edit={edit} />
-          <AttrField label="HS Code" attrKey="hs_code" product={product} edit={edit} mono />
+          <AttrField label="HS Code (USA)" attrKey="hs_code" product={product} edit={edit} mono />
+          <AttrField label="HS Code (Canada)" attrKey="hs_code_ca" product={product} edit={edit} mono />
           <AttrField label="Warranty" attrKey="warranty" type="select" options={WARRANTY_OPTIONS} product={product} edit={edit} />
           <AttrField label="Warranty Length" attrKey="warranty_length" type="select" options={WARRANTY_LENGTH_OPTIONS} product={product} edit={edit} />
           <AttrField label="Warranty URL (USA)" attrKey="warranty_url_us" type="url" suggest help="Warranty page sent to US marketplaces (Walmart warrantyURL). Same address for every product." product={product} edit={edit} />

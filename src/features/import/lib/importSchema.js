@@ -161,7 +161,9 @@ export const FIELD_DEFS = [
   { key: 'safety_listings', label: 'Safety Listing(s)', aliases: ['safetylistings', 'safetylisting'], type: 'text', target: { attr: 'safety_listings' } },
   { key: 'upc_certified', label: 'UPC Certified', aliases: ['upccertified'], type: 'text', target: { attr: 'upc_certified' } },
   { key: 'vermont_compliant', label: 'Vermont Act 193 Compliant', aliases: ['vermontact193compliant'], type: 'text', target: { attr: 'vermont_act_193_compliant' } },
-  { key: 'hs_code', label: 'HS CODE', aliases: ['hscode'], type: 'text', target: { attr: 'hs_code' } },
+  { key: 'hs_code', label: 'HS CODE', aliases: ['hscode', 'hscodeusa', 'hscodeus', 'usahscode'], type: 'text', target: { attr: 'hs_code' } },
+  // Canada has its own tariff code (user, 2026-10-15); "HS CODE" alone stays the USA one.
+  { key: 'hs_code_ca', label: 'HS CODE CANADA', aliases: ['hscodecanada', 'hscodeca', 'hscodecan', 'canadahscode', 'cahscode'], type: 'text', target: { attr: 'hs_code_ca' } },
   { key: 'upc', label: 'Master UPC', aliases: ['masterupc', 'upc'], type: 'upc', target: { attr: 'upc' } },
 
   // ---------- Shipping ----------

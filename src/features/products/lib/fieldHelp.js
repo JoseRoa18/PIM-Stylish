@@ -11,7 +11,8 @@ export const FIELD_HELP = {
   series: 'Product line / collection name (e.g. Versa, Pietra).',
   family_number: 'Internal number grouping variants of the same model (finishes, gauges…). Videos and documents are shared across the family.',
   product_type: 'Finer-grained type inside the category, used by some marketplace templates.',
-  hs_code: 'Harmonized System customs code used for international shipping and duties.',
+  hs_code: 'USA Harmonized System (HTS) customs code, ####.##.####, used for US shipping and duties.',
+  hs_code_ca: 'Canadian customs tariff (HS) code used for Canadian shipping and duties — the USA code does not apply in Canada.',
   country_of_origin: 'Country of manufacture — required by customs and most marketplaces.',
   product_url: 'Public product page on the SinksDirect website.',
 

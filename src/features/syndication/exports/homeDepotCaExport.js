@@ -397,7 +397,8 @@ const BASIC_DATA_RULES = {
   K: () => 'National',
   L: (p) => brandMap(p.brand),
   M: () => VENDOR_NUMBER,
-  O: (p) => attr(p).hs_code ?? p.hs_code ?? '',
+  // Canada's own HS code; the USA one until a product has it (2026-10-15)
+  O: (p) => attr(p).hs_code_ca || attr(p).hs_code || p.hs_code || '',
   P: () => 'No',
   Q: () => L1_UOM,
   R: () => 1,
