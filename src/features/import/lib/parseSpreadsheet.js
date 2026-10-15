@@ -67,7 +67,11 @@ async function listSheets(zip) {
       for (let i = 0; i < rels.length; i++) {
         if (rels[i].getAttribute('Id') === rId) {
           const target = rels[i].getAttribute('Target') ?? '';
-          out.push({ name: sheets[s].getAttribute('name') ?? `Sheet${s + 1}`, path: target.startsWith('/') ? target.slice(1) : `xl/${target}` });
+          out.push({
+            name: sheets[s].getAttribute('name') ?? `Sheet${s + 1}`,
+            path: target.startsWith('/') ? target.slice(1) : `xl/${target}`,
+            hidden: /hidden/i.test(sheets[s].getAttribute('state') ?? ''),
+          });
         }
       }
     }
@@ -142,7 +146,8 @@ async function parseXlsx(file, { scoreHeader = null, allSheets = false } = {}) {
   const sharedStrings = parseSharedStrings(ssFile ? await ssFile.async('string') : null);
 
   const sheets = await listSheets(zip);
-  const wanted = allSheets ? sheets : sheets.slice(0, 1);
+  // every visible sheet (the PIM's Excel keeps its dropdown lists on a hidden one)
+  const wanted = allSheets ? sheets.filter((s) => !s.hidden) : sheets.slice(0, 1);
   const headers = [];
   const rows = [];
   for (const sheet of wanted) {

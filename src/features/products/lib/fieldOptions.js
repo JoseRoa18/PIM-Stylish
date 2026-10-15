@@ -56,8 +56,10 @@ export const FAUCET_SHAPE_OPTIONS = [
   'Flat', 'Elongated', 'Random', 'Crescent', 'Unique', 'Rounded Back', 'Can', 'P-Shaped', 'Unavailable',
 ];
 // Wayfair's "Spout Type" vocabulary (Kitchen Faucets 653 requires it, Bathroom
-// Sink Faucets 655 recommends it; read 2026-09-21). Same six values in both.
-export const SPOUT_TYPE_OPTIONS = ['Gooseneck / High Arc', 'Low Arc', 'Rigid / Fixed', 'Swivel', 'Swing', 'Spring Neck'];
+// Sink Faucets 655 recommends it; read 2026-09-21). Same six values in both —
+// plus Foldable, the K-145 pot fillers' own (user, 2026-10-15), which is not
+// one of Wayfair's.
+export const SPOUT_TYPE_OPTIONS = ['Gooseneck / High Arc', 'Low Arc', 'Rigid / Fixed', 'Swivel', 'Swing', 'Spring Neck', 'Foldable'];
 // What the exporters recognise: Wayfair's Construction Features (pull down /
 // pull out), Best Buy / BB&B handle styles (lever / knob / cross).
 export const SPRAY_TYPE_OPTIONS = ['Pull Down', 'Pull Out', 'Standard Faucet', 'Pot Filler', 'Does Not Apply'];

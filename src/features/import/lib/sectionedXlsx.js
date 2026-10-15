@@ -5,7 +5,7 @@
 // SKU column stay frozen, and row 2 carries the filter. Built straight as
 // OOXML with JSZip (loaded on demand) — no spreadsheet library.
 //
-// sheets: [{ name, sections: [{ title, color, headers }], rows: [[value…]] }]
+// sheets: [{ name, kind?, sections: [{ title, color, headers }], rows: [[value…]] }]
 // A row lists its values in the sections' column order; a number is written
 // as a number, anything else as text, '' / null as an empty cell.
 
@@ -99,7 +99,28 @@ function cellXml(ref, value, style) {
   return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${esc(value)}</t></is></c>`;
 }
 
-function sheetXml(sheet, styleOf) {
+// validations: [{ rule, cols: [index…] }] on those columns, from row 3 to
+// `untilRow`. A rule is a dropdown ({ type: 'list', name } — the defined name
+// of its list), a number ('decimal' / 'whole', zero or more) or a length
+// ('textLength', min–max). Each one only warns: like the product page, a value
+// off the list can be kept.
+const VALIDATION = {
+  list: (r) => ({ attrs: 'type="list"', formulas: `<formula1>${r.name}</formula1>`, title: 'Not on the list', error: "This value is not on the PIM's list. Keep it anyway?" }),
+  decimal: () => ({ attrs: 'type="decimal" operator="greaterThanOrEqual"', formulas: '<formula1>0</formula1>', title: 'Not a number', error: 'Enter a number only (no units or text). Keep it anyway?' }),
+  whole: () => ({ attrs: 'type="whole" operator="greaterThanOrEqual"', formulas: '<formula1>0</formula1>', title: 'Not a whole number', error: 'Enter a whole number. Keep it anyway?' }),
+  textLength: (r) => ({ attrs: 'type="textLength" operator="between"', formulas: `<formula1>${r.min}</formula1><formula2>${r.max}</formula2>`, title: 'Check the length', error: `This should have ${r.min} to ${r.max} digits. Keep it anyway?` }),
+};
+function validationsXml(validations, untilRow) {
+  if (!validations.length) return '';
+  const items = validations.map(({ rule, cols }) => {
+    const sqref = cols.map((c) => `${colLetter(c)}3:${colLetter(c)}${untilRow}`).join(' ');
+    const v = VALIDATION[rule.type](rule);
+    return `<dataValidation ${v.attrs} errorStyle="warning" allowBlank="1" showErrorMessage="1" errorTitle="${esc(v.title)}" error="${esc(v.error)}" sqref="${sqref}">${v.formulas}</dataValidation>`;
+  });
+  return `<dataValidations count="${items.length}">${items.join('')}</dataValidations>`;
+}
+
+function sheetXml(sheet, styleOf, validations = []) {
   const headers = sheet.sections.flatMap((s) => s.headers);
   const last = colLetter(Math.max(0, headers.length - 1));
   const lastRow = Math.max(2, sheet.rows.length + 2);
@@ -137,12 +158,33 @@ ${rows.join('\n')}
 </sheetData>
 <autoFilter ref="A2:${last}${lastRow}"/>
 ${merges.length ? `<mergeCells count="${merges.length}">${merges.map((m) => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>` : ''}
+${validationsXml(validations, Math.max(1000, sheet.rows.length + 500))}
 <pageMargins left="0.5" right="0.5" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
 </worksheet>`;
 }
 
-/** The workbook as a Blob (.xlsx). */
-export async function buildSectionedWorkbook(sheets) {
+// The hidden sheet that holds the dropdowns' lists, one per column.
+function listsSheetXml(lists) {
+  const height = Math.max(...lists.map((l) => l.values.length)) + 1;
+  const rows = [];
+  for (let r = 0; r < height; r++) {
+    const cells = lists.map((l, c) => cellXml(`${colLetter(c)}${r + 1}`, r === 0 ? `List ${c + 1}` : (l.values[r - 1] ?? ''), 0)).join('');
+    rows.push(`<row r="${r + 1}">${cells}</row>`);
+  }
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetData>${rows.join('')}</sheetData>
+</worksheet>`;
+}
+const LISTS_SHEET = 'PIM Lists';
+
+/**
+ * The workbook as a Blob (.xlsx). `validationFor(header, kind)` → what a
+ * column checks from row 3, or null: { type: 'list', values } (a dropdown,
+ * its list on a hidden "PIM Lists" sheet), { type: 'decimal' | 'whole' } or
+ * { type: 'textLength', min, max } (user, 2026-10-15).
+ */
+export async function buildSectionedWorkbook(sheets, { validationFor = null } = {}) {
   if (!sheets.length) throw new Error('Nothing to write.');
   const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
@@ -157,7 +199,32 @@ export async function buildSectionedWorkbook(sheets) {
     return { bandStyle: 2 + 2 * i, headerStyle: 3 + 2 * i };
   };
 
-  sheets.forEach((sheet, i) => put(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(sheet, styleOf)));
+  // the distinct lists, and per sheet which columns take which rule
+  const lists = [];
+  const listIndex = new Map(); // JSON of the values → index
+  const perSheet = sheets.map((sheet) => {
+    const byRule = new Map(); // rule key → { rule, cols }
+    sheet.sections.flatMap((s) => s.headers).forEach((h, c) => {
+      let rule = validationFor?.(h, sheet.kind);
+      if (!rule || (rule.type === 'list' && !rule.values?.length)) return;
+      if (rule.type === 'list') {
+        const key = JSON.stringify(rule.values);
+        if (!listIndex.has(key)) {
+          listIndex.set(key, lists.length);
+          lists.push({ name: `PIM_List_${lists.length + 1}`, values: rule.values });
+        }
+        rule = { type: 'list', name: lists[listIndex.get(key)].name };
+      }
+      const key = JSON.stringify(rule);
+      if (!byRule.has(key)) byRule.set(key, { rule, cols: [] });
+      byRule.get(key).cols.push(c);
+    });
+    return [...byRule.values()];
+  });
+
+  sheets.forEach((sheet, i) => put(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(sheet, styleOf, perSheet[i])));
+  const allNames = lists.length ? [...names, LISTS_SHEET] : names;
+  if (lists.length) put(`xl/worksheets/sheet${allNames.length}.xml`, listsSheetXml(lists));
   put('xl/styles.xml', stylesXml(colors));
   const filterNames = sheets.map((sheet, i) => {
     const count = sheet.sections.reduce((n, s) => n + s.headers.length, 0);
@@ -166,16 +233,17 @@ export async function buildSectionedWorkbook(sheets) {
     const ref = `'${names[i].replace(/'/g, "''")}'!$A$2:$${colLetter(Math.max(0, count - 1))}$${lastRow}`;
     return `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">${esc(ref)}</definedName>`;
   });
+  const listNames = lists.map((l, c) => `<definedName name="${l.name}">'${LISTS_SHEET}'!$${colLetter(c)}$2:$${colLetter(c)}$${l.values.length + 1}</definedName>`);
   put('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <bookViews><workbookView activeTab="0"/></bookViews>
-<sheets>${names.map((n, i) => `<sheet name="${esc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>
-<definedNames>${filterNames.join('')}</definedNames>
+<sheets>${allNames.map((n, i) => `<sheet name="${esc(n)}" sheetId="${i + 1}"${i >= names.length ? ' state="hidden"' : ''} r:id="rId${i + 1}"/>`).join('')}</sheets>
+<definedNames>${[...filterNames, ...listNames].join('')}</definedNames>
 </workbook>`);
   put('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-${names.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('\n')}
-<Relationship Id="rId${names.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+${allNames.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('\n')}
+<Relationship Id="rId${allNames.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`);
   put('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -187,7 +255,7 @@ ${names.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openx
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
 <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-${names.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('\n')}
+${allNames.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('\n')}
 </Types>`);
   return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
 }

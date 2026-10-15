@@ -13,8 +13,9 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS, templateLayout, scoreImportHeader } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS, templateLayout, templateKindOf, scoreImportHeader, excelValidationFor } from '@/features/import/lib/importSchema';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
+import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 
@@ -136,8 +137,11 @@ export default function ImportProducts() {
   // (user, 2026-10-15), with no rows.
   async function downloadTemplate(category = 'sink') {
     const headers = TEMPLATES[category] ?? TEMPLATE_HEADERS;
+    const suggestions = await loadSuggestionLists();
     const label = BLANK_TEMPLATE_GROUPS.flatMap((g) => g.templates).find((t) => t.key === category)?.label ?? 'Products';
-    const blob = await buildSectionedWorkbook([{ name: label, sections: templateLayout(headers), rows: [] }]);
+    const blob = await buildSectionedWorkbook([{ name: label, kind: templateKindOf(headers), sections: templateLayout(headers), rows: [] }], {
+      validationFor: (h, kind) => excelValidationFor(h, kind, suggestions),
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

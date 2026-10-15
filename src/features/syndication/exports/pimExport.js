@@ -3,7 +3,10 @@ import {
   normalizeHeader,
   BULLET_RE,
   defForHeader,
+  excelValidationFor,
+  CATEGORY_LABELS,
   templateLayout,
+  templateKindOf,
   TEMPLATE_HEADERS,
   BATH_SINK_TEMPLATE_HEADERS,
   FAUCET_TEMPLATE_HEADERS,
@@ -16,6 +19,7 @@ import {
   COLANDER_TEMPLATE_HEADERS,
 } from '@/features/import/lib/importSchema';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
+import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { accessoryKind } from '@/features/templates/api/templates';
 import { channelCategory } from '@/features/products/lib/categories';
 
@@ -44,22 +48,6 @@ const ACCESSORY_KIND_HEADERS = {
   strainer: STRAINER_TEMPLATE_HEADERS,
   drain: DRAIN_TEMPLATE_HEADERS,
   'faucet plate': FAUCET_PLATE_TEMPLATE_HEADERS,
-};
-
-// The Category cell must round-trip through the importer's CATEGORY_MAP.
-const CATEGORY_LABELS = {
-  kitchen_sink: 'Kitchen Sink',
-  bathroom_sink: 'Bathroom Sink',
-  kitchen_faucet: 'Kitchen Faucet',
-  kitchen_faucet_combo: 'Kitchen Faucet Combo',
-  cold_water_tap: 'Cold Water Tap',
-  bathroom_faucet: 'Bathroom Faucet',
-  pot_filler: 'Pot Filler',
-  bar_prep_sink: 'Bar Prep Sink',
-  laundry_sink: 'Laundry Sink',
-  outdoor_sink: 'Outdoor Sink',
-  colander_drying_rack: 'Colanders & Drying Racks',
-  accessory: 'Accessory',
 };
 
 // The sheet each group lands on.
@@ -187,10 +175,11 @@ export function pimExportSheets(products) {
   return [...groups.entries()]
     .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
     .map(([key, list]) => {
-      const sections = templateLayout(headersFor(list[0]));
+      const base = headersFor(list[0]);
+      const sections = templateLayout(base);
       const headers = sections.flatMap((s) => s.headers);
       const rows = [...list].sort((a, b) => a.sku.localeCompare(b.sku)).map((p) => headers.map((h) => cellValue(p, h)));
-      return { key, name: SHEET_NAMES[key] ?? key, sections, rows, count: list.length };
+      return { key, name: SHEET_NAMES[key] ?? key, kind: templateKindOf(base), sections, rows, count: list.length };
     });
 }
 
@@ -201,8 +190,10 @@ export function pimExportSheets(products) {
 export async function generatePimExport(products) {
   if (!products?.length) throw new Error('No products to export.');
   const sheets = pimExportSheets(products);
+  // the open fields' dropdowns list what the whole catalog uses
+  const suggestions = await loadSuggestionLists();
   const date = new Date().toISOString().slice(0, 10);
-  downloadBlob(await buildSectionedWorkbook(sheets), `Stylish_PIM_Export_${date}.xlsx`);
+  downloadBlob(await buildSectionedWorkbook(sheets, { validationFor: (h, kind) => excelValidationFor(h, kind, suggestions) }), `Stylish_PIM_Export_${date}.xlsx`);
   return {
     count: products.length,
     files: 1,

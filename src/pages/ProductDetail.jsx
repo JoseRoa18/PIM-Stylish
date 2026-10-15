@@ -80,22 +80,9 @@ const CreateProductDialog = lazy(() => import('@/features/products/components/Cr
 // uses), shared across product visits for a few minutes — the page used to
 // scan the whole catalog on every visit for dropdowns only Edit mode shows.
 const SUGGESTIONS_TTL_MS = 5 * 60 * 1000;
-// Open-vocabulary fields: their dropdown lists what the catalog already uses
-// (the fixed lists live in fieldOptions.js).
-const SUGGEST_COLUMNS = ['material', 'finish', 'series', 'product_type', 'standards_compliance'];
-const SUGGEST_ATTRS = [
-  'mounting_type', 'lock_type', 'application', 'safety_listings',
-  'compatible_faucet_type', 'faucet_hole_center_spacing', 'compatible_pedestal',
-  'wood_species', 'pattern', 'handle_material', 'faucet_centers', 'spray_head_functions',
-  'pull_down_hose_model', 'cartridge_type', 'cartridge_size', 'grids_model_code',
-  'warranty_url_us', 'warranty_url_ca', 'reason_for_restriction', 'commercial_warranty',
-  'greenguard_certifications', 'cradle_to_cradle_certifications', 'sfi_certifications', 'fsc_certifications',
-];
-// Fields whose suggestions come from some categories only.
-const SUGGEST_FROM = {
-  installation_type: (r) => !String(r.category ?? '').includes('sink'), // accessories (sinks have a fixed list)
-  overall_shape: (r) => r.category === 'accessory', // faucets use Wayfair's fixed list
-};
+// Open-vocabulary fields (SUGGEST_COLUMNS / SUGGEST_ATTRS / SUGGEST_FROM in
+// suggestFields.js, shared with the PIM's Excel): their dropdown lists what the
+// catalog already uses (the fixed lists live in fieldOptions.js).
 const SKU_TYPES = [STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE];
 let suggestionsCache = null; // { at, promise }
 function loadSuggestions() {
@@ -168,6 +155,7 @@ import {
   SPRAY_ACTIVATION_OPTIONS, SENSOR_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS,
   STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE, skusOfType,
 } from '@/features/products/lib/fieldOptions';
+import { SUGGEST_COLUMNS, SUGGEST_ATTRS, SUGGEST_FROM } from '@/features/products/lib/suggestFields';
 
 const MAX_BULLETS = 12;
 
@@ -1284,7 +1272,7 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Number of Faucet Holes" attrKey="number_of_faucet_holes" type="number" product={product} edit={edit} />
               <AttrField label="Faucet Hole Center Spacing" attrKey="faucet_hole_center_spacing" suggest product={product} edit={edit} />
               <AttrField label="Overflow" attrKey="overflow" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
-              <AttrField label="Drain Location" attrKey="drain_hole_location" product={product} edit={edit} />
+              <AttrField label="Drain Location" attrKey="drain_hole_location" type="select" options={DRAIN_LOCATION_OPTIONS} product={product} edit={edit} />
               <AttrField label="Drain Diameter" attrKey="drain_diameter_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Pedestal Included" attrKey="pedestal_included" type="boolean" product={product} edit={edit} />
               <AttrField label="Compatible Pedestal #" attrKey="compatible_pedestal" suggest product={product} edit={edit} />
@@ -1341,7 +1329,7 @@ function SpecsTab({ product, edit }) {
               <AttrField label="ISTA Certified" attrKey="ista_certified" type="select" options={COMPLIANCE_OPTIONS} product={product} edit={edit} />
               <AttrField label="SFI Certifications" attrKey="sfi_certifications" suggest={['Not Certified']} product={product} edit={edit} />
               <AttrField label="FSC Certifications" attrKey="fsc_certifications" suggest={['Not Certified']} product={product} edit={edit} />
-              <AttrField label="Safety Reg. #" attrKey="safety_listing_registration_number" product={product} edit={edit} mono />
+              <AttrField label="Safety Reg. #" attrKey="safety_listing_registration_number" suggest product={product} edit={edit} mono />
               <AttrField label="Commercial Warranty" attrKey="commercial_warranty" suggest={YES_NO_OPTIONS} product={product} edit={edit} />
               <AttrField label="Canada Restriction" attrKey="canada_product_restriction" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
               <AttrField label="Reason for Restriction" attrKey="reason_for_restriction" suggest={['Does Not Apply']} product={product} edit={edit} />
@@ -1358,10 +1346,10 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Overall Shape" attrKey="overall_shape" type="select" options={FAUCET_SHAPE_OPTIONS} help="Wayfair's Overall Shape list for faucets. Falls back to Spout Type when empty." product={product} edit={edit} />
               <AttrField label="Swivel Spout" attrKey="swivel_spout" type="select" options={YES_NO_OPTIONS} product={product} edit={edit} />
               <AttrField label="Spout Rotation (Degrees)" attrKey="spout_rotation_degrees" type="number" help="How far the spout swivels, in degrees (e.g. 360)." product={product} edit={edit} />
-              <AttrField label="Max Flow Rate (GPM)" attrKey="max_flow_rate" help="Maximum water flow in gallons per minute, typically measured at 60 psi." product={product} edit={edit} />
+              <AttrField label="Max Flow Rate (GPM)" attrKey="max_flow_rate" suggest help="Maximum water flow in gallons per minute, typically measured at 60 psi." product={product} edit={edit} />
               <AttrField label="Installation Holes" attrKey="number_of_installation_holes" type="number" product={product} edit={edit} />
               <AttrField label="Mounting / Installation Type" attrKey="mounting_type" suggest product={product} edit={edit} />
-              <AttrField label="Connection Size" attrKey="connection_size" help='Water supply connection diameter in inches — enter the decimal (0.375 = 3/8").' product={product} edit={edit} />
+              <AttrField label="Connection Size" attrKey="connection_size" suggest help='Water supply connection diameter in inches — enter the decimal (0.375 = 3/8").' product={product} edit={edit} />
               <FractionField label="Connection Size" attrKey="connection_size" product={product} edit={edit} />
               <AttrField label="Lock Type" attrKey="lock_type" suggest product={product} edit={edit} />
               <AttrField label="Hot & Cold Dispenser" attrKey="hot_cold_dispenser" type="boolean" product={product} edit={edit} />

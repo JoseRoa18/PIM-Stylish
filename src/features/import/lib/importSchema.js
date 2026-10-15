@@ -10,7 +10,14 @@
  *   { attr: 'x' }         → products.attributes JSONB key
  *   { dim: [group, axis]} → grouped dimension object in attributes
  */
-import { canonicalCountry } from '@/features/products/lib/countries';
+import { canonicalCountry, COUNTRY_NAMES } from '@/features/products/lib/countries';
+import { BRANDS } from '@/features/products/lib/brands';
+import {
+  YES_NO_OPTIONS, YES_NO_DNA_OPTIONS, COMPLIANCE_OPTIONS, MANUFACTURER_OPTIONS, COLOR_OPTIONS, FINISH_TYPE_OPTIONS,
+  WARRANTY_OPTIONS, WARRANTY_LENGTH_OPTIONS, CRAFTSMANSHIP_OPTIONS, SINK_SHAPE_OPTIONS, INSTALLATION_TYPE_OPTIONS,
+  GAUGE_OPTIONS, BOWL_CONFIGURATION_OPTIONS, BASIN_SPLIT_OPTIONS, DRAIN_LOCATION_OPTIONS, FAUCET_SHAPE_OPTIONS,
+  SPOUT_TYPE_OPTIONS, SPRAY_TYPE_OPTIONS, SPRAY_ACTIVATION_OPTIONS, SENSOR_ACTIVATION_OPTIONS, HANDLE_STYLE_OPTIONS,
+} from '@/features/products/lib/fieldOptions';
 
 export const normalizeHeader = (h) =>
   String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -919,7 +926,7 @@ export const TEMPLATE_KIND = new Map([
  * [{ key, title, color, headers: [...] }] without the empty sections.
  */
 export function templateLayout(baseHeaders) {
-  const kind = TEMPLATE_KIND.get(baseHeaders) ?? 'accessory';
+  const kind = templateKindOf(baseHeaders);
   const seen = new Set();
   const columns = [];
   const add = (header) => {
@@ -952,4 +959,113 @@ export function templateLayout(baseHeaders) {
         .sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([h]) => h),
     }))
     .filter((s) => s.headers.length);
+}
+
+// ---------- Dropdowns (user, 2026-10-15) ----------
+// The Category cell the PIM writes, one per category — names CATEGORY_MAP
+// reads back (the PIM export and the Excel dropdown use them).
+export const CATEGORY_LABELS = {
+  kitchen_sink: 'Kitchen Sink',
+  bathroom_sink: 'Bathroom Sink',
+  kitchen_faucet: 'Kitchen Faucet',
+  kitchen_faucet_combo: 'Kitchen Faucet Combo',
+  cold_water_tap: 'Cold Water Tap',
+  bathroom_faucet: 'Bathroom Faucet',
+  pot_filler: 'Pot Filler',
+  bar_prep_sink: 'Bar Prep Sink',
+  laundry_sink: 'Laundry Sink',
+  outdoor_sink: 'Outdoor Sink',
+  colander_drying_rack: 'Colanders & Drying Racks',
+  accessory: 'Accessory',
+};
+
+// The product page's dropdowns, by the field they write: the PIM's Excel puts
+// the same list on that column. A yes / no field gets Yes / No. (Strainer
+// Model and the deck plate / drain pickers list the catalog's own SKUs per
+// brand, so they stay free text here.)
+const COMPLIANCE_FIELDS = [
+  'ada_compliant', 'ansi_z124_6_97_compliant', 'asme_a112_19_1_compliant', 'asme_a112_19_2_compliant', 'asme_a112_19_3_compliant',
+  'asme_a112_19_4_compliant', 'asme_csa_certified', 'asse_1001_certified', 'cradle_to_cradle_material_health', 'calgreen_compliant',
+  'csa_b45_5_iapmo_z124_compliant', 'ab_100_compliant', 'cradle_to_cradle_certified', 'epa_watersense_certified',
+  'energy_efficiency_compliant', 'greenguard_certified', 'greenguard_gold_certified', 'iso_14021_certified', 'ista_1a_certified',
+  'ista_3a_6a_certified', 'ista_certified', 'nsf_certified', 'nsf_ansi_61_certified', 'pefc_certified', 'sdwa_compliant',
+  'taa_compliant', 'title_20_compliant', 'title_24_compliant', 'epd_type_iii', 'ul_1951_listed', 'uplr_compliant',
+  'usda_compliant', 'ww_p_541_certified', 'cupc_certified',
+  // vendor-sheet certifications the page does not show, same answers
+  'iapmo_certified', 'asme_a112_18_2_compliant', 'asse_1016_certified', 'ab_1953_compliant', 'wqa_gold_seal_certified',
+];
+const YES_NO_FIELDS = [
+  'antimicrobial', 'canada_product_restriction', 'laminar_flow', 'overflow', 'scc_compliant', 'swivel_spout', 'upc_certified',
+  'vermont_act_193_compliant',
+];
+const LIST_BY_TARGET = {
+  'col:brand': BRANDS,
+  'col:category': Object.values(CATEGORY_LABELS),
+  'col:color': COLOR_OPTIONS,
+  'attr:manufacturer': MANUFACTURER_OPTIONS,
+  'attr:finish_type': FINISH_TYPE_OPTIONS,
+  'attr:country_of_origin': COUNTRY_NAMES,
+  'attr:warranty': WARRANTY_OPTIONS,
+  'attr:warranty_length': WARRANTY_LENGTH_OPTIONS,
+  'attr:commercial_warranty_length': WARRANTY_LENGTH_OPTIONS,
+  'attr:craftsmanship': CRAFTSMANSHIP_OPTIONS,
+  'attr:sink_shape': SINK_SHAPE_OPTIONS,
+  'attr:installation_type': INSTALLATION_TYPE_OPTIONS,
+  'attr:gauge': GAUGE_OPTIONS,
+  'attr:bowl_configuration': BOWL_CONFIGURATION_OPTIONS,
+  'attr:basin_split': BASIN_SPLIT_OPTIONS,
+  'attr:drain_hole_location': DRAIN_LOCATION_OPTIONS,
+  'attr:overall_shape': FAUCET_SHAPE_OPTIONS,
+  'attr:spout_type': SPOUT_TYPE_OPTIONS,
+  'attr:spray_type': SPRAY_TYPE_OPTIONS,
+  'attr:spray_function_activation': SPRAY_ACTIVATION_OPTIONS,
+  'attr:sensor_activation': SENSOR_ACTIVATION_OPTIONS,
+  'attr:handle_style': HANDLE_STYLE_OPTIONS,
+  'attr:drain_overflow': YES_NO_DNA_OPTIONS,
+  ...Object.fromEntries(COMPLIANCE_FIELDS.map((f) => [`attr:${f}`, COMPLIANCE_OPTIONS])),
+  ...Object.fromEntries(YES_NO_FIELDS.map((f) => [`attr:${f}`, YES_NO_OPTIONS])),
+};
+// Lists the page shows for some kinds only: Installation Type is a dropdown
+// on sinks (free on accessories, faucets use Mounting), Overall Shape on
+// faucets (free on accessories — a board is "Rectangular").
+const LIST_ONLY_FOR = {
+  'attr:installation_type': ['kitchen_sink', 'bathroom_sink'],
+  'attr:overall_shape': ['kitchen_faucet', 'bathroom_faucet'],
+};
+/** The kind of a vendor header list (TEMPLATE_KIND), accessories by default. */
+export const templateKindOf = (baseHeaders) => TEMPLATE_KIND.get(baseHeaders) ?? 'accessory';
+/** The dropdown a column of the PIM's Excel carries on a kind's sheet, or null. */
+export function dropdownFor(header, kind = null) {
+  if (BULLET_RE.test(normalizeHeader(header))) return null;
+  const def = defForHeader(header);
+  if (!def) return null;
+  const target = def.target.col ? `col:${def.target.col}` : def.target.attr ? `attr:${def.target.attr}` : null;
+  if (target && LIST_ONLY_FOR[target] && !LIST_ONLY_FOR[target].includes(kind)) return null;
+  if (target && LIST_BY_TARGET[target]) return LIST_BY_TARGET[target];
+  return def.type === 'bool' ? YES_NO_OPTIONS : null;
+}
+
+/**
+ * What a column of the PIM's Excel checks as it is typed (user, 2026-10-15:
+ * "todo donde el usuario deba meter algo manual … drop down", against typos):
+ *   { type: 'list', values } — the page's fixed list, else the values the
+ *     catalog already uses for an open field (`suggestions`, from
+ *     loadSuggestionLists);
+ *   { type: 'decimal' } / { type: 'whole' } — a number (prices, sizes, counts);
+ *   { type: 'textLength', min: 12, max: 14 } — a UPC;
+ *   null — free text (titles, descriptions, HS codes, URLs, part numbers).
+ */
+export function excelValidationFor(header, kind = null, suggestions = {}) {
+  const fixed = dropdownFor(header, kind);
+  if (fixed?.length) return { type: 'list', values: fixed };
+  if (BULLET_RE.test(normalizeHeader(header))) return null;
+  const def = defForHeader(header);
+  if (!def) return null;
+  const field = def.target.col ?? def.target.attr;
+  const known = field ? suggestions[field] : null;
+  if (known?.length) return { type: 'list', values: known };
+  if (def.type === 'upc') return { type: 'textLength', min: 12, max: 14 };
+  if (def.type === 'int') return { type: 'whole' };
+  if (def.type === 'number' || def.type === 'money') return { type: 'decimal' };
+  return null;
 }
