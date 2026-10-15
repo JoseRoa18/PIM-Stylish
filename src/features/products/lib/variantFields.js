@@ -10,6 +10,8 @@ export const VARIANT_DISTINGUISHING = new Set([
   // Finish-specific: deck-plate part numbers match the faucet's finish
   // (A-803G for gold, A-803N for black, …), so they differ per variant.
   'compatible_deck_plate',
+  // The master carton can differ by finish (K-146N 6 per carton, K-146S 5).
+  'master_carton_quantity', 'master_carton_dimensions_in', 'master_carton_weight_lb',
 ]);
 
 // Fields whose value is UNIQUE to each product (identity/barcodes and

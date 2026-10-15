@@ -192,6 +192,7 @@ const NUMBER_ATTRS = new Set([
   'faucet_height_in', 'spout_reach_in', 'spout_height_in',
   'install_hole_diameter_mm', 'install_hole_diameter_in', 'number_of_faucet_holes',
   'spout_rotation_degrees',
+  'master_carton_quantity', 'master_carton_weight_lb',
 ]);
 
 
@@ -286,6 +287,7 @@ function buildEditForm(product) {
     _internal_dimensions_in: a.internal_dimensions_in ?? { length: '', width: '', depth: '' },
     _cut_out_dimensions_in: a.cut_out_dimensions_in ?? { length: '', width: '', depth: '' },
     _shipping_dimensions_in: a.shipping_dimensions_in ?? { length: '', width: '', height: '' },
+    _master_carton_dimensions_in: a.master_carton_dimensions_in ?? { length: '', width: '', height: '' },
     _min_external_cabinet_size_in: a.min_external_cabinet_size_in ?? '',
     _min_internal_cabinet_size_in: a.min_internal_cabinet_size_in ?? '',
     _max_deck_thickness_in: a.max_deck_thickness_in ?? '',
@@ -1483,6 +1485,16 @@ function SpecsTab({ product, edit }) {
           <EditableField label="Shipping Weight (lb)" fieldKey="shipping_weight_lb" type="number" product={product} edit={edit} />
           <AttrDimensionsField label="Shipping Dimensions" unit={unit} attrKey="shipping_dimensions_in"
             keys={['length', 'width', 'height']} labels={['Length', 'Width', 'Height']} product={product} edit={edit} />
+          {/* Master carton (user, 2026-10-15): it only applies when the product ships on a pallet. */}
+          <div className="space-y-4 pt-1">
+            <h4 className="text-label-md text-on-surface-variant">Master Carton — pallet shipments only</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Units per Master Carton" attrKey="master_carton_quantity" type="number" product={product} edit={edit} />
+              <AttrField label="Master Carton Weight (lb)" attrKey="master_carton_weight_lb" type="number" product={product} edit={edit} />
+            </div>
+            <AttrDimensionsField label="Master Carton Dimensions" unit={unit} attrKey="master_carton_dimensions_in"
+              keys={['length', 'width', 'height']} labels={['Length', 'Width', 'Height']} product={product} edit={edit} />
+          </div>
         </div>
       </Section>
 

@@ -22,8 +22,10 @@ export const MANUFACTURER_OPTIONS = ['Stylish International Inc.', 'Azuni'];
 export const COLOR_OPTIONS = [
   'Black', 'White', 'Gray', 'Dark Gray', 'Silver', 'Stainless Steel', 'Chrome', 'Gold',
   'Graphite Black', 'Gunmetal', 'Brown', 'Red', 'Black and Gold', 'Black and Silver', 'Mixed',
+  'Not Applicable', // H-02 cleaning kit (user's Missing Items file, 2026-10-15)
 ];
-export const FINISH_TYPE_OPTIONS = ['Brushed', 'Matte', 'Glossy', 'Polished', 'Honey-toned', 'Dura-Tek'];
+// Braided: the H-24 faucet hoses; Not Applicable: the H-02 cleaning kit (2026-10-15)
+export const FINISH_TYPE_OPTIONS = ['Brushed', 'Matte', 'Glossy', 'Polished', 'Honey-toned', 'Dura-Tek', 'Braided', 'Not Applicable'];
 // Wayfair always gets "Limited"; Amazon's Warranty Type reads this field.
 export const WARRANTY_OPTIONS = ['Limited', 'Full Warranty'];
 // Matches Wayfair's "Warranty Length" valid values (used in exports).

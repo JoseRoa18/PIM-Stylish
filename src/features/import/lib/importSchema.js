@@ -169,6 +169,12 @@ export const FIELD_DEFS = [
   { key: 'ship_height', label: 'Shipping Height (in)', aliases: ['shippingheightin', 'shippingheight'], type: 'number', target: { dim: ['shipping_dimensions_in', 'height'] } },
   { key: 'ship_width', label: 'Shipping Width (in)', aliases: ['shippingwidthin', 'shippingwidth'], type: 'number', target: { dim: ['shipping_dimensions_in', 'width'] } },
   { key: 'ship_length', label: 'Shipping Length (in)', aliases: ['shippinglengthin', 'shippinglength'], type: 'number', target: { dim: ['shipping_dimensions_in', 'length'] } },
+  // Master carton — pallet shipments only (user, 2026-10-15)
+  { key: 'master_carton_quantity', label: 'Quantity / Master Carton', aliases: ['quantitymastercarton', 'mastercartonquantity', 'mastercartonqty', 'unitspermastercarton'], type: 'number', target: { attr: 'master_carton_quantity' } },
+  { key: 'master_carton_length', label: 'Master Carton Length (in)', aliases: ['mastercartonlengthin', 'mastercartonlength'], type: 'number', target: { dim: ['master_carton_dimensions_in', 'length'] } },
+  { key: 'master_carton_width', label: 'Master Carton Width (in)', aliases: ['mastercartonwidthin', 'mastercartonwidth'], type: 'number', target: { dim: ['master_carton_dimensions_in', 'width'] } },
+  { key: 'master_carton_height', label: 'Master Carton Height (in)', aliases: ['mastercartonheightin', 'mastercartonheight'], type: 'number', target: { dim: ['master_carton_dimensions_in', 'height'] } },
+  { key: 'master_carton_weight_lb', label: 'Master Carton Weight (lb)', aliases: ['mastercartonweightlbs', 'mastercartonweightlb', 'mastercartonweight'], type: 'number', target: { attr: 'master_carton_weight_lb' } },
 
   // ---------- Cut-out ----------
   { key: 'cutout_depth', label: 'Cut-Out Below Counter Depth', aliases: ['cutoutbelowcounterdepth'], type: 'number', target: { dim: ['cut_out_dimensions_in', 'depth'] } },
