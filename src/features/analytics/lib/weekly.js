@@ -134,14 +134,24 @@ export function delta(now, before, metric) {
   return a - b;
 }
 
-/** Which checks were closed (fewer products missing) between two snapshots. */
+/**
+ * Which checks were closed (fewer products missing) between two snapshots.
+ * Where both carry per-SKU detail (the catalog row), a product that left the
+ * score since (archived, obsolete) closed nothing: its old gaps are not counted.
+ */
 export function gapsClosed(now, before) {
   const a = now?.metrics?.missing ?? {};
   const b = before?.metrics?.missing ?? {};
+  const scoredNow = now?.metrics?.scores;
+  const la = now?.metrics?.missing_skus;
+  const lb = before?.metrics?.missing_skus;
+  const detailed = scoredNow && la && lb;
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   const out = [];
   for (const k of keys) {
-    const diff = (b[k] ?? 0) - (a[k] ?? 0);
+    const diff = detailed
+      ? (lb[k] ?? []).filter((sku) => sku in scoredNow).length - (la[k] ?? []).length
+      : (b[k] ?? 0) - (a[k] ?? 0);
     if (diff !== 0) out.push({ key: k, closed: diff });
   }
   return out.sort((x, y) => y.closed - x.closed);

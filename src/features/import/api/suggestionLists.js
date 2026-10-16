@@ -22,8 +22,9 @@ const SKU_PICKERS = { strainer_model: STRAINER_TYPE, compatible_deck_plate: DECK
  * dropdowns of the PIM's Excel for the fields with no fixed list (user,
  * 2026-10-15: "todo donde el usuario deba meter algo manual … drop down").
  * The product page's open fields (suggestFields.js) and every other text
- * field of the import, but FREE_TEXT. Returns { field: [values…] } (sorted,
- * distinct), keyed by column or attribute name.
+ * field of the import, but FREE_TEXT; the part-number pickers list SKUs.
+ * Returns { field: [values…] } (sorted, distinct), keyed by column or
+ * attribute name.
  */
 export async function loadSuggestionLists() {
   const rows = [];

@@ -66,8 +66,13 @@ function coerce(type, raw) {
     case 'date': {
       // Already ISO → keep. Excel serial number → convert. Otherwise best-effort
       // parse; anything unrecognized is dropped (null) rather than risking a bad
-      // insert into a DATE column.
-      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      // insert into a DATE column — an impossible ISO day too (2026-02-30: the
+      // database refuses it and the whole batch with it).
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+        const day = new Date(Date.UTC(y, m - 1, d));
+        return day.getUTCFullYear() === y && day.getUTCMonth() === m - 1 && day.getUTCDate() === d ? s.slice(0, 10) : null;
+      }
       if (/^\d+(\.\d+)?$/.test(s)) {
         const serial = parseFloat(s);
         const ms = Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000;
@@ -216,10 +221,12 @@ export function buildImportRows(parsed) {
 
     // Completeness: which expected fields are missing on this row — only the
     // columns its own sheet has (a sink's row never misses a faucet column of
-    // another sheet in the same file)
+    // another sheet in the same file), never an optional one (the obsolete
+    // details are empty on every product that is not obsolete)
     const ownKeys = new Set(headerMap.filter((e) => e.def && Object.hasOwn(raw, e.header)).map((e) => e.def.key));
     for (const def of FIELD_DEFS) {
       if (!ownKeys.has(def.key)) continue; // column absent from this row's sheet
+      if (def.optional) continue;
       if (!filledLabels.has(def.label)) missingLabels.push(def.label);
     }
     if (matchedFieldKeys.has('bullets_en') && compactEn.length === 0) missingLabels.push('Bullets (EN)');

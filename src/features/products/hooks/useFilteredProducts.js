@@ -1,5 +1,10 @@
 import { useMemo } from 'react';
 
+// The obsolete mark (user, 2026-10-16) filters like a column: each product
+// reads Yes or No (the pill says "Obsolete: Yes"), and both are always offered.
+const OBSOLETE_OPTIONS = ['Yes', 'No'];
+const obsoleteValue = (p) => (p.is_obsolete ? 'Yes' : 'No');
+
 /**
  * Filter products client-side based on search term + multi-select filters.
  * For ~50 products, in-memory filtering is faster and simpler than re-querying.
@@ -40,6 +45,10 @@ export function useFilteredProducts(products, { searchTerm, filters }) {
       }
     });
 
+    if (filters.obsolete?.length) {
+      result = result.filter((p) => filters.obsolete.includes(obsoleteValue(p)));
+    }
+
     return result;
   }, [products, searchTerm, filters]);
 }
@@ -49,7 +58,7 @@ export function useFilteredProducts(products, { searchTerm, filters }) {
  * As products are added, filter dropdowns auto-populate with new values.
  */
 export function getFilterOptions(products) {
-  const empty = { brand: [], category: [], series: [], material: [] };
+  const empty = { brand: [], category: [], series: [], material: [], obsolete: OBSOLETE_OPTIONS };
   if (!products) return empty;
 
   const collect = (field) => {
@@ -65,5 +74,6 @@ export function getFilterOptions(products) {
     category: collect('category'),
     series: collect('series'),
     material: collect('material'),
+    obsolete: OBSOLETE_OPTIONS,
   };
 }

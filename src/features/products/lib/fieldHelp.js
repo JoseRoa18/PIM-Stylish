@@ -15,6 +15,8 @@ export const FIELD_HELP = {
   hs_code_ca: 'Canadian customs tariff (HS) code used for Canadian shipping and duties — the USA code does not apply in Canada.',
   country_of_origin: 'Country of manufacture — required by customs and most marketplaces.',
   product_url: 'Public product page on the SinksDirect website.',
+  // The obsolete mark (user, 2026-10-16)
+  is_obsolete: 'A mark of its own: it changes no status, listing, export or promotion. Obsolete products are left out of PIM completeness, and promotions warn about them.',
 
   // ---------- Content ----------
   description: 'Main sales description (rich text). Pushed to Wix and used as a base for marketplace copy.',

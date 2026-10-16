@@ -24,6 +24,7 @@ export async function listProducts() {
       created_at,
       wix_product_id,
       factory_code,
+      is_obsolete,
       product_media (storage_path, alt_text, is_primary),
       product_aliases (marketplace, alias),
       amazon_links (marketplace, seller_sku, asin)
@@ -63,6 +64,8 @@ export async function listProducts() {
       factory_code: p.factory_code ?? null,
       product_aliases: p.product_aliases ?? [],
       amazon_links: p.amazon_links ?? [],
+      // The obsolete mark (user, 2026-10-16): the row's pill and the Obsolete filter.
+      is_obsolete: !!p.is_obsolete,
     };
   });
 }
@@ -153,11 +156,13 @@ export async function getProducts(skus) {
  */
 // Fields that must never travel to a clone (user rule: everything copies
 // EXCEPT images, UPC, SKU, and any API/channel connection): identity,
-// every channel link/sync column, and system columns.
+// every channel link/sync column, and system columns. The obsolete mark
+// stays behind too: a clone is a new product, never obsolete (2026-10-16).
 const CLONE_EXCLUDE = [
   'sku', 'created_at', 'updated_at',
   'wix_product_id', 'wix_synced_at', 'wix_raw', 'wix_collection_ids',
   'wayfair_item_group_id', 'wayfair_synced_at',
+  'is_obsolete',
 ];
 // Identity attributes stripped from the cloned attributes object. The UPC
 // barcode is unique per product; upc_certified (plumbing code cert) stays.
@@ -412,6 +417,47 @@ export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}) {
     autoLinkChannels(skus).catch((err) => console.error('Channel auto-link failed:', err));
   }
   return data ?? [];
+}
+
+/**
+ * Set or remove the obsolete mark (user, 2026-10-16) on many products. Only
+ * the mark is written, never workflow_status: listings, pushes, exports and
+ * promotions don't change. Products already in the requested state are left
+ * alone, so the rows returned and the Activity Log entry are the products
+ * that actually changed. When a batch fails after others were saved, the
+ * error carries those (`err.changed`) so the caller can say so.
+ */
+export async function setProductsObsolete(skus, obsolete) {
+  const mark = Boolean(obsolete);
+  const list = [...new Set(skus ?? [])];
+  const changed = [];
+  try {
+    // 200 per request, so one batch can never reach the API's 1,000-row cap.
+    for (let i = 0; i < list.length; i += 200) {
+      const { data, error } = await supabase
+        .from('products')
+        .update({ is_obsolete: mark })
+        .in('sku', list.slice(i, i + 200))
+        .eq('is_obsolete', !mark)
+        .select('sku, is_obsolete');
+      if (error) throw Object.assign(new Error(error.message), { changed });
+      changed.push(...(data ?? []));
+    }
+  } finally {
+    // Logged even when a later batch fails: the earlier ones are saved.
+    if (changed.length) {
+      const changedSkus = changed.map((p) => p.sku);
+      const noun = `${changedSkus.length} ${changedSkus.length === 1 ? 'product' : 'products'}`;
+      logActivity({
+        action: 'update',
+        entityType: 'product',
+        entityId: changedSkus.length === 1 ? changedSkus[0] : `${changedSkus.length} products`,
+        summary: mark ? `Marked ${noun} obsolete` : `Removed the obsolete mark from ${noun}`,
+        metadata: { count: changedSkus.length, skus: changedSkus, is_obsolete: mark },
+      });
+    }
+  }
+  return changed;
 }
 
 /**

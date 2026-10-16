@@ -8,6 +8,8 @@ const FILTER_FIELDS = [
   { id: 'category', label: 'Category' },
   { id: 'series', label: 'Series' },
   { id: 'material', label: 'Material' },
+  // The obsolete mark (user, 2026-10-16): Yes / No.
+  { id: 'obsolete', label: 'Obsolete' },
 ];
 
 // The full placeholder gets cut off mid-word on narrow phones, so below sm

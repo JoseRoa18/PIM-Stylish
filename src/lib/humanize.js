@@ -29,6 +29,8 @@ const FIELD_LABELS = {
   spare_parts_diagram: 'spare parts diagram',
   wix_product_id: 'Wix product ID',
   wayfair_item_group_id: 'Wayfair item group ID',
+  // The obsolete mark (2026-10-16), named as on the product page
+  is_obsolete: 'obsolete',
   en_fr: 'English-French',
   en_es: 'English-Spanish',
 };

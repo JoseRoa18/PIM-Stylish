@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   X,
   Tag,
@@ -11,11 +11,12 @@ import {
   Trash2,
   Pencil,
   Sparkles,
+  PackageX,
 } from 'lucide-react';
 import BulkEditDialog from './BulkEditDialog';
 import ExportReadinessDialog from '@/features/syndication/components/ExportReadinessDialog';
 import { ThinkingOrb } from 'thinking-orbs';
-import { bulkUpdateProducts, getProducts, deleteProducts } from '../api/products';
+import { bulkUpdateProducts, getProducts, deleteProducts, setProductsObsolete } from '../api/products';
 import { generateKeywords } from '../api/keywords';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind, purposesIn, templatePurpose } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
@@ -44,6 +45,12 @@ const WORKFLOW_OPTIONS = [
   { value: 'in_review', label: 'In Review' },
   { value: 'ready_to_sell', label: 'Ready to Sell' },
   { value: 'archived', label: 'Archived' },
+];
+
+// The obsolete mark (user, 2026-10-16), apart from the status it never changes.
+const OBSOLETE_ACTIONS = [
+  { value: true, label: 'Mark as obsolete' },
+  { value: false, label: 'Remove obsolete mark' },
 ];
 
 export default function BulkActionsBar({ selectedSkus, products, filteredCount = 0, onSelectAll, onClear, onChanged }) {
@@ -83,6 +90,56 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       onChanged?.();
     } catch (err) {
       setResult({ type: 'error', message: err.message ?? 'Update failed' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // The obsolete mark only marks: the status, listings, exports and
+  // promotions stay as they are, and PIM completeness leaves the products out.
+  async function handleObsolete(obsolete) {
+    const noun = `${count} product${count === 1 ? '' : 's'}`;
+    const ok = await confirm(obsolete
+      ? {
+          title: `Mark ${noun} as obsolete?`,
+          message: 'Only the mark changes: status, listings, exports and promotions stay as they are. Obsolete products are left out of PIM completeness.',
+          confirmLabel: 'Mark as obsolete',
+        }
+      : {
+          title: `Remove the obsolete mark from ${noun}?`,
+          message: 'They count in PIM completeness again. Status, listings, exports and promotions stay as they are.',
+          confirmLabel: 'Remove mark',
+        });
+    if (!ok) return;
+    const skus = [...selectedSkus];
+    setBusy('obsolete');
+    setResult(null);
+    setProgress({ done: 0, total: 0 });
+    try {
+      const changed = await setProductsObsolete(skus, obsolete);
+      const n = changed.length;
+      // The others were already in that state (setProductsObsolete skips them).
+      const rest = skus.length - n;
+      setResult({
+        type: 'success',
+        message: (obsolete
+          ? `Marked ${n} product${n === 1 ? '' : 's'} obsolete.`
+          : `Removed the obsolete mark from ${n} product${n === 1 ? '' : 's'}.`) +
+          (rest ? ` ${rest} ${rest === 1 ? 'was' : 'were'} ${obsolete ? 'already obsolete' : 'not marked'}.` : ''),
+      });
+      // Nothing changed: the selection, and this message, stay on screen.
+      if (n) onChanged?.();
+    } catch (err) {
+      // A later batch failed: the earlier ones did change. The selection and
+      // this message stay (reloading the catalog would clear both); running it
+      // again finishes the rest, as the products already done are skipped.
+      const n = err.changed?.length ?? 0;
+      setResult({
+        type: 'error',
+        message: n
+          ? `${obsolete ? 'Marked' : 'Removed the mark from'} ${n} of ${skus.length} products before an error: ${err.message} Run it again to finish — the ones already done are skipped.`
+          : err.message ?? 'Update failed',
+      });
     } finally {
       setBusy(null);
     }
@@ -577,6 +634,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
                 <StatusDropdown disabled={!!busy} onChange={handleStatusChange} />
 
+                <ObsoleteDropdown disabled={!!busy} busy={busy === 'obsolete'} onChange={handleObsolete} />
+
                 <button
                   type="button"
                   onClick={handleGenerateKeywords}
@@ -680,12 +739,22 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
 // One export button; the menu lists every marketplace with an uploaded
 // template (loaded lazily when the menu opens).
+// The bar's menus open upward, aligned to their button's right edge. On a
+// narrow phone the button can start a line, where a right-aligned menu would
+// run off the left edge of the screen — there it aligns left instead.
+function menuAlign(button, menuWidth) {
+  const box = button?.getBoundingClientRect();
+  return box && box.right < menuWidth + 8 ? 'left-0' : 'right-0';
+}
+
 function ExportTemplateDropdown({ disabled, busy, count, onSelect }) {
   const [open, setOpen] = useState(false);
+  const [align, setAlign] = useState('right-0');
   const [marketplaces, setMarketplaces] = useState(null); // null = not loaded
 
-  async function toggle() {
+  async function toggle(e) {
     if (open) return setOpen(false);
+    setAlign(menuAlign(e.currentTarget, 192));
     setOpen(true);
     if (marketplaces === null) {
       try {
@@ -713,7 +782,7 @@ function ExportTemplateDropdown({ disabled, busy, count, onSelect }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full mb-1 right-0 min-w-[12rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 z-40 animate-menu-in-up">
+          <div className={`absolute bottom-full mb-1 ${align} min-w-[12rem] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 z-40 animate-menu-in-up`}>
             {marketplaces === null && (
               <div className="px-4 py-2 text-body-sm text-on-surface-variant inline-flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
@@ -762,12 +831,13 @@ function ExportTemplateDropdown({ disabled, busy, count, onSelect }) {
 
 function StatusDropdown({ disabled, onChange }) {
   const [open, setOpen] = useState(false);
+  const [align, setAlign] = useState('right-0');
 
   return (
     <div className="relative" onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => { setAlign(menuAlign(e.currentTarget, 200)); setOpen((v) => !v); }}
         disabled={disabled}
         aria-expanded={open && !disabled}
         aria-haspopup="true"
@@ -779,13 +849,63 @@ function StatusDropdown({ disabled, onChange }) {
       {open && !disabled && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 bottom-full mb-1 z-20 min-w-[160px] rounded-lg border border-outline-variant bg-surface shadow-lg overflow-hidden animate-menu-in-up">
+          <div className={`absolute ${align} bottom-full mb-1 z-20 min-w-[160px] rounded-lg border border-outline-variant bg-surface shadow-lg overflow-hidden animate-menu-in-up`}>
             {WORKFLOW_OPTIONS.map((o) => (
               <button
                 key={o.value}
                 type="button"
                 onClick={() => {
                   setOpen(false);
+                  onChange(o.value);
+                }}
+                className="block w-full text-left px-3 py-2 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Same menu as StatusDropdown. Closing it (Escape or a choice) puts focus
+// back on the trigger, so the confirm dialog also returns focus there.
+function ObsoleteDropdown({ disabled, busy, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [align, setAlign] = useState('right-0');
+  const triggerRef = useRef(null);
+  const close = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div className="relative" onKeyDown={(e) => e.key === 'Escape' && open && close()}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={(e) => { setAlign(menuAlign(e.currentTarget, 200)); setOpen((v) => !v); }}
+        disabled={disabled}
+        aria-expanded={open && !disabled}
+        aria-haspopup="true"
+        title="Mark the selected products as obsolete, or remove the mark (their status doesn't change)"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <PackageX className="w-3.5 h-3.5" aria-hidden="true" />}
+        Obsolete
+      </button>
+      {open && !disabled && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className={`absolute ${align} bottom-full mb-1 z-20 min-w-[160px] rounded-lg border border-outline-variant bg-surface shadow-lg overflow-hidden animate-menu-in-up`}>
+            {OBSOLETE_ACTIONS.map((o) => (
+              <button
+                key={o.label}
+                type="button"
+                onClick={() => {
+                  close();
                   onChange(o.value);
                 }}
                 className="block w-full text-left px-3 py-2 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"

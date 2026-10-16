@@ -9,6 +9,10 @@
  *   { col: 'x' }          → direct products column
  *   { attr: 'x' }         → products.attributes JSONB key
  *   { dim: [group, axis]} → grouped dimension object in attributes
+ *
+ * `optional: true` marks a field most products leave empty (the obsolete
+ * mark — empty reads "not obsolete"): the import preview does not count its
+ * empty cell as missing.
  */
 import { canonicalCountry, COUNTRY_NAMES } from '@/features/products/lib/countries';
 import { BRANDS } from '@/features/products/lib/brands';
@@ -140,6 +144,11 @@ export const FIELD_DEFS = [
   { key: 'launch_lead', label: 'Launch Lead', aliases: ['launchlead'], type: 'date', target: { col: 'launch_lead' } },
   { key: 'sample_available_date', label: 'When is sample available', aliases: ['whenissampleavailable', 'sampleavailable', 'whensampleavailable', 'sampleavailabledate'], type: 'date', target: { col: 'sample_available_date' } },
   { key: 'ready_to_sell_date', label: 'When will it be ready to sell?', aliases: ['whenwillitbereadytosell', 'readytosell', 'readytoselldate'], type: 'date', target: { col: 'ready_to_sell_date' } },
+  // The obsolete mark (user, 2026-10-16), only Yes / No, apart from the
+  // workflow status: it changes no listing, channel push or marketplace file.
+  // No "discontinued" alias: a vendor sheet's own Discontinued column must
+  // not set it.
+  { key: 'is_obsolete', label: 'Obsolete', aliases: ['obsolete', 'isobsolete'], type: 'bool', target: { col: 'is_obsolete' }, optional: true },
   { key: 'series', label: 'Series', aliases: ['sinksseries', 'sinkseries', 'series'], type: 'text', target: { col: 'series' } },
   { key: 'product_type', label: 'Product Type', aliases: ['producttype'], type: 'text', target: { col: 'product_type' } },
 
@@ -838,7 +847,7 @@ export const SECTIONS = [
 ];
 const SECTION_FIELDS = {
   identity: ['sku', 'brand', 'category', 'model_name', 'series', 'product_type', 'manufacturer', 'upc', 'quickbooks_description', 'alias'],
-  status: ['launch_lead', 'sample_available_date', 'ready_to_sell_date'],
+  status: ['launch_lead', 'sample_available_date', 'ready_to_sell_date', 'is_obsolete'],
   pricing_ca: ['msrp_cad', 'map_cad', 'map_orange_cad', 'map_purple_cad', 'cost_cad_rona_hd', 'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple'],
   pricing_us: ['msrp_usd', 'map_usd', 'map_orange_usd', 'map_purple_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple',
     'cost_usd_wayfair', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards', 'cost_usd_menards_orange', 'cost_usd_menards_purple'],
@@ -895,6 +904,7 @@ export function sectionOfHeader(header, kind = null) {
 // carries everything the product page edits (user, 2026-10-15) — by label.
 const ALWAYS = [
   'SKU (Model Number)', 'Brand', 'Category', 'Model Name', 'Series', 'Product Type', 'Manufacturer', 'UPC',
+  'Obsolete',
   'MSRP CAD$', ...PRICE_DEFS.map((d) => d.label),
   'Material', 'Finish', 'Color', 'Finish Type',
   'Product Weight (lb)', 'Shipping Weight (lb)', 'Shipping Length (in)', 'Shipping Width (in)', 'Shipping Height (in)',

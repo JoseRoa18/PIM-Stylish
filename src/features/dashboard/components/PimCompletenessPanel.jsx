@@ -68,6 +68,9 @@ export default function PimCompletenessPanel() {
   if (!data) return null;
 
   const scope = brand === 'all' ? '' : `${brand} `;
+  // Obsolete products are not scored (user, 2026-10-16); the line under the
+  // title says how many of the brand on screen were left out.
+  const obsoleteOut = (data.obsoleteLeftOut ?? []).filter((p) => brand === 'all' || p.brand === brand).length;
 
   return (
     <div className="space-y-6">
@@ -78,6 +81,7 @@ export default function PimCompletenessPanel() {
             <h2 className="text-title-lg text-on-surface">PIM data completeness</h2>
             <p className="text-body-sm text-on-surface-variant mt-1">
               Live from the PIM, no channel state · updated {formatTimeAgo(data.computedAt)}
+              {obsoleteOut > 0 ? ` · ${obsoleteOut} obsolete product${obsoleteOut === 1 ? '' : 's'} left out` : ''}
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">

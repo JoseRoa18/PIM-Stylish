@@ -285,6 +285,15 @@ export function completenessContext(products) {
 }
 
 /**
+ * Whether PIM completeness scores a product: archived products are not being
+ * completed, and obsolete ones are being phased out (user, 2026-10-16) — the
+ * Listing Health panel, the daily snapshot and the KPI history leave both out.
+ * Build completenessContext from every non-archived product all the same, so
+ * a UPC an obsolete product also carries is still caught on the active one.
+ */
+export const inCompleteness = (product) => product?.workflow_status !== 'archived' && !product?.is_obsolete;
+
+/**
  * `ctx` (from completenessContext) is optional: without it a UPC is not
  * compared with other products.
  * @returns {{ score: number, complete: boolean, passed: object[], missing: object[] }}

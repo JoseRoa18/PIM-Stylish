@@ -73,9 +73,11 @@ export function completenessDetail(index, week, names = new Map()) {
   const row = (sku) => ({ sku, name: names.get(sku) ?? null, score: s[sku], before: b ? b[sku] ?? null : null });
   const all = Object.keys(s).filter((k) => s[k] === 100).sort().map(row);
   const reached = b ? Object.keys(s).filter((k) => s[k] === 100 && (b[k] ?? 0) < 100).sort().map(row) : [];
-  const dropped = b ? Object.keys(b).filter((k) => b[k] === 100 && (s[k] ?? 0) < 100).sort().map(row) : [];
+  // a product no longer scored (archived, obsolete) left the list, it did not drop
+  const dropped = b ? Object.keys(b).filter((k) => b[k] === 100 && k in s && s[k] < 100).sort().map(row) : [];
+  const left = b ? Object.keys(b).filter((k) => !(k in s)).sort().map(row) : [];
   const movers = b
     ? Object.keys(s).map(row).filter((r) => r.before != null && r.score !== r.before).sort((x, y) => Math.abs(y.score - y.before) - Math.abs(x.score - x.before)).slice(0, 40)
     : [];
-  return { all, reached, dropped, movers, hasBefore: !!b };
+  return { all, reached, dropped, left, movers, hasBefore: !!b };
 }

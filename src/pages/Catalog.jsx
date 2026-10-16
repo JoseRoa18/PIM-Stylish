@@ -69,6 +69,7 @@ export default function Catalog() {
       category: parseList(searchParams.get('category')),
       series: parseList(searchParams.get('series')),
       material: parseList(searchParams.get('material')),
+      obsolete: parseList(searchParams.get('obsolete')),
     }),
     [searchParams],
   );
@@ -117,6 +118,7 @@ export default function Catalog() {
       category: next.category,
       series: next.series,
       material: next.material,
+      obsolete: next.obsolete,
       page: null,
     });
   const onSort = (key) => {
@@ -131,7 +133,7 @@ export default function Catalog() {
   const clearFilters = () =>
     patchParams({
       search: null, brand: null, category: null, series: null, material: null,
-      status: null, page: null,
+      obsolete: null, status: null, page: null,
     });
 
   // Remember the current view (search/filters/sort/page) so the product

@@ -22,7 +22,7 @@
 // @ts-ignore — plain JS module shared with the browser app
 import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHealth.js";
 // @ts-ignore — plain JS module shared with the browser app
-import { completenessContext, scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
+import { completenessContext, inCompleteness, scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
 import { etToday, promoWindow, windowContains } from "../_shared/promoCalendar.ts";
 import { WIX_SITES, siteSells, type WixSite } from "../_shared/wixSites.ts";
 
@@ -298,8 +298,10 @@ async function runRefresh() {
     try {
       const today = new Date().toISOString().slice(0, 10);
       const active = (list as Record<string, unknown>[]).filter((p) => p.workflow_status !== "archived");
+      // The UPC check sees every non-archived product; obsolete ones are not
+      // scored (user, 2026-10-16).
       const ctx = completenessContext(active);
-      const scored = active.map((p) => ({
+      const scored = active.filter(inCompleteness).map((p) => ({
         sku: p.sku,
         category: p.category,
         workflow_status: p.workflow_status,

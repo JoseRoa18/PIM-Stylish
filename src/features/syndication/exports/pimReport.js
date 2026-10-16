@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { FIELD_DEFS, SECTIONS, sectionOfHeader, CATEGORY_LABELS } from '@/features/import/lib/importSchema';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
-import { scoreCompleteness, completenessContext } from '@/features/products/lib/completeness';
+import { scoreCompleteness, completenessContext, inCompleteness } from '@/features/products/lib/completeness';
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { fetchAllProducts } from './pimExport';
 
@@ -95,8 +95,10 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
   const stockOf = (sku, market) => (stockBy.get(sku) ?? []).find((r) => r.market === market);
   const categoryName = (c) => CATEGORY_LABELS[c] ?? CATEGORY_OPTIONS.find((o) => o.value === c)?.label ?? c ?? '';
 
-  // the same score as Listing Health → PIM
-  const ctx = completenessContext(products);
+  // the same score as Listing Health → PIM: the UPC check sees every product
+  // that is not archived, obsolete ones included (user, 2026-10-16); every
+  // product keeps its own score here, the Summary counts only the scored ones
+  const ctx = completenessContext(products.filter((p) => p.workflow_status !== 'archived'));
   const score = new Map(products.map((p) => [p.sku, scoreCompleteness(p, mediaBy.get(p.sku) ?? [], ctx)]));
 
   // ---- every field of the PIM's Excel, in its section ----
@@ -245,20 +247,26 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
   };
 
   // ---- Summary ----
-  const avg = (ps) => (ps.length ? ps.reduce((s, p) => s + score.get(p.sku).score, 0) / ps.length / 100 : 0);
+  // The completeness figures count what Listing Health scores: archived and
+  // obsolete products are left out (user, 2026-10-16); the counts keep them.
+  const scored = products.filter(inCompleteness);
+  // a group with nothing scored has no average (blank, not 0%)
+  const avg = (ps) => (ps.length ? ps.reduce((s, p) => s + score.get(p.sku).score, 0) / ps.length / 100 : '');
   const complete = (ps) => ps.filter((p) => score.get(p.sku).complete).length;
+  const obsolete = (ps) => ps.filter((p) => p.is_obsolete).length;
   const count = (rows, type) => rows.filter((m) => m.media_type === type).length;
   const catRows = catOrder.map((cat) => {
     const ps = products.filter((p) => p.category === cat);
     if (!ps.length) return null;
-    return [categoryName(cat), ps.length, ps.filter((p) => p.brand === 'Stylish').length, ps.filter((p) => p.brand === 'Azuni').length,
-      avg(ps), complete(ps), ps.reduce((s, p) => s + imagesOf(p.sku).length, 0), ps.reduce((s, p) => s + docsOf(p.sku).length, 0),
+    const inScore = ps.filter(inCompleteness);
+    return [categoryName(cat), ps.length, ps.filter((p) => p.brand === 'Stylish').length, ps.filter((p) => p.brand === 'Azuni').length, obsolete(ps),
+      avg(inScore), complete(inScore), ps.reduce((s, p) => s + imagesOf(p.sku).length, 0), ps.reduce((s, p) => s + docsOf(p.sku).length, 0),
       ps.filter((p) => stockOf(p.sku, 'ca')).length, ps.filter((p) => stockOf(p.sku, 'us')).length];
   }).filter(Boolean);
   const sum = (i) => catRows.reduce((s, r) => s + r[i], 0);
   const statusRows = [...groupBy(products, 'workflow_status')].map(([s, ps]) => [s ?? '—', ps.length]).sort((a, b) => b[1] - a[1]);
   const gaps = new Map();
-  for (const p of products) {
+  for (const p of scored) {
     for (const m of score.get(p.sku).missing) {
       const key = `${m.label}\u0000${m.tab}`;
       gaps.set(key, (gaps.get(key) ?? 0) + 1);
@@ -268,38 +276,40 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
     const [label, tab] = key.split('\u0000');
     return [label, TAB[tab] ?? tab, n];
   });
+  const totals = [
+    ['Products', products.length],
+    ['Stylish', products.filter((p) => p.brand === 'Stylish').length],
+    ['Azuni', products.filter((p) => p.brand === 'Azuni').length],
+    ['Obsolete products', obsolete(products)],
+    ['Average PIM completeness', avg(scored)],
+    ['Products 100% complete', complete(scored)],
+    ['Images', count(media, 'image')],
+    ['Documents', count(media, 'document')],
+    ['Videos', count(media, 'video')],
+    ['Products with Canada stock tracked', products.filter((p) => stockOf(p.sku, 'ca')).length],
+    ['Products with USA stock tracked', products.filter((p) => stockOf(p.sku, 'us')).length],
+    ['Marketplace IDs (aliases, Amazon, Wix)', idsSheet.rows.length],
+  ];
   const summary = {
     name: 'Summary',
     title: 'Stylish PIM — Full Product Report',
     subtitle: `Every product in the PIM, generated ${generatedOn}. A snapshot: later edits in the PIM are not in this file.`,
-    widths: [40, 12, 12, 12, 16, 16, 14, 14, 14, 14],
+    widths: [40, 12, 12, 12, 12, 16, 16, 14, 14, 14, 14],
     blocks: [
       {
         title: 'Totals',
         headers: ['Measure', 'Value'],
         formats: ['text', 'count'],
-        rows: [
-          ['Products', products.length],
-          ['Stylish', products.filter((p) => p.brand === 'Stylish').length],
-          ['Azuni', products.filter((p) => p.brand === 'Azuni').length],
-          ['Average PIM completeness', avg(products)],
-          ['Products 100% complete', complete(products)],
-          ['Images', count(media, 'image')],
-          ['Documents', count(media, 'document')],
-          ['Videos', count(media, 'video')],
-          ['Products with Canada stock tracked', products.filter((p) => stockOf(p.sku, 'ca')).length],
-          ['Products with USA stock tracked', products.filter((p) => stockOf(p.sku, 'us')).length],
-          ['Marketplace IDs (aliases, Amazon, Wix)', idsSheet.rows.length],
-        ],
+        rows: totals,
         // the completeness row is a percentage
-        rowFormats: { 3: ['text', 'percent'] },
+        rowFormats: { [totals.findIndex(([measure]) => measure === 'Average PIM completeness')]: ['text', 'percent'] },
       },
       {
         title: 'By category',
-        headers: ['Category', 'Products', 'Stylish', 'Azuni', 'Avg completeness', '100% complete', 'Images', 'Documents', 'Stock CA tracked', 'Stock US tracked'],
-        formats: ['text', 'count', 'count', 'count', 'percent', 'count', 'count', 'count', 'count', 'count'],
+        headers: ['Category', 'Products', 'Stylish', 'Azuni', 'Obsolete', 'Avg completeness', '100% complete', 'Images', 'Documents', 'Stock CA tracked', 'Stock US tracked'],
+        formats: ['text', 'count', 'count', 'count', 'count', 'percent', 'count', 'count', 'count', 'count', 'count'],
         rows: catRows,
-        total: ['Total', sum(1), sum(2), sum(3), avg(products), sum(5), sum(6), sum(7), sum(8), sum(9)],
+        total: ['Total', sum(1), sum(2), sum(3), sum(4), avg(scored), sum(6), sum(7), sum(8), sum(9), sum(10)],
       },
       { title: 'By workflow status', headers: ['Status', 'Products'], formats: ['text', 'count'], rows: statusRows },
       {
@@ -326,6 +336,7 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
         ['Prices', 'Blue = the regular level, Orange and Purple = the promotion levels. MAP and WC (wholesale cost) per channel, in CAD or USD as each header says.'],
         ['Descriptions', 'Plain text (the formatting of the product page is removed). Each bullet has its own column.'],
         ['PIM Completeness', "The same score as Listing Health → PIM: only the fields that apply to the product count. 'Missing' lists each gap and, for a value that is filled but wrong, the reason."],
+        ['Obsolete', "A mark of its own (Status & Dates, Yes / No), apart from the workflow status: it changes no listing, channel push or marketplace file. Obsolete products keep their own score in All Products but, like archived ones, are left out of the Summary's completeness figures, as in Listing Health."],
         ['Stock', 'Canada = the Stylish Inventory file, USA = ShipStation. An empty cell means the SKU is not tracked in that market (not 0).'],
         ['Images & Documents', "Counts per product; the Media sheet lists every file with its type, language set (Universal = language-neutral), order and link. Videos and documents are shared by a family's products."],
         ['Marketplace IDs', "The product's Aliases tab (retailer item numbers), the Amazon Seller SKUs and ASINs, and the product of each Wix website — one row per ID."],

@@ -12,6 +12,9 @@ export const VARIANT_DISTINGUISHING = new Set([
   'compatible_deck_plate',
   // The master carton can differ by finish (K-146N 6 per carton, K-146S 5).
   'master_carton_quantity', 'master_carton_dimensions_in', 'master_carton_weight_lb',
+  // Each variant is marked obsolete on its own (user, 2026-10-16); still
+  // offered, so a whole family can be marked at once.
+  'is_obsolete',
 ]);
 
 // Fields whose value is UNIQUE to each product (identity/barcodes and

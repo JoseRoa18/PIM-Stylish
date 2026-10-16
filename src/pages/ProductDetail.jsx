@@ -44,6 +44,7 @@ import Dialog from '@/components/ui/Dialog';
 import { getThumbnailUrl, thumbFallback } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
 import StatusBadge from '@/features/products/components/StatusBadge';
+import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
 import StockBadge from '@/features/products/components/StockBadge';
 import { getStockFor } from '@/features/pricing/api/inventory';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
@@ -210,6 +211,8 @@ function buildEditForm(product) {
     series: product.series ?? '',
     product_type: product.product_type ?? '',
     workflow_status: product.workflow_status ?? '',
+    // The obsolete mark (user, 2026-10-16): only obsolete or not.
+    is_obsolete: product.is_obsolete ?? false,
     material: product.material ?? '',
     finish: product.finish ?? '',
     color: product.color ?? '',
@@ -595,7 +598,7 @@ export default function ProductDetail() {
 
       {/* Hero */}
       <div className="flex flex-col sm:flex-row gap-6 mb-6 items-start">
-        <ProductHeroImage primary={primary} name={product.model_name || `SKU ${product.sku}`} />
+        <ProductHeroImage primary={primary} name={product.model_name || `SKU ${product.sku}`} obsolete={product.is_obsolete} />
         <div className="flex-1 min-w-0 w-full">
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container text-body-sm font-mono text-on-surface-variant">
@@ -615,6 +618,8 @@ export default function ProductDetail() {
             ) : (
               <StatusBadge status={product.workflow_status} />
             )}
+            {/* the saved mark, while editing too */}
+            <ObsoleteBadge product={product} />
             <WixLinkBadge product={product} />
             <StockBadge market="ca" stock={stock?.ca} loading={stock === undefined} />
             <StockBadge market="us" stock={stock?.us} loading={stock === undefined} />
@@ -1128,6 +1133,7 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
           <EditableField label="Series" fieldKey="series" suggest product={product} edit={edit} />
           <EditableField label="Family Number" fieldKey="family_number" type="number" product={product} edit={edit} />
           <EditableField label="Product Type" fieldKey="product_type" suggest product={product} edit={edit} />
+          <ObsoleteField product={product} edit={edit} />
         </div>
       </Section>
 
@@ -1158,6 +1164,15 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
 
     </div>
   );
+}
+
+// The obsolete mark (user, 2026-10-16): only obsolete or not, a mark of its
+// own beside the status, which it never changes. When it was set and by whom
+// is in the product's History and the Activity Log.
+function ObsoleteField({ product, edit }) {
+  if (edit.isEditing) return <EditableField label="Obsolete" fieldKey="is_obsolete" type="boolean" product={product} edit={edit} />;
+  // A plain Yes / No: the switches' green "Yes" would read as good news.
+  return <Field label={<>Obsolete<HelpTip text={FIELD_HELP.is_obsolete} /></>} value={product.is_obsolete ? 'Yes' : 'No'} />;
 }
 
 // ===================== Specifications Tab =====================
@@ -2898,20 +2913,35 @@ function WixLinkBadge({ product }) {
   );
 }
 
-function ProductHeroImage({ primary, name }) {
+// A corner ribbon across the photo of an obsolete product (user, 2026-10-16:
+// "como una franja encima de la foto", like a PAID stamp). Decorative: the
+// header's Obsolete pill already says it to screen readers.
+function ObsoleteRibbon() {
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute top-0 right-0 w-32 h-32 overflow-hidden">
+      <span className="absolute top-7 -right-11 w-48 rotate-45 bg-inverse-surface text-on-inverse-surface text-center text-label-md font-bold uppercase tracking-[0.2em] py-1.5 shadow-md">
+        Obsolete
+      </span>
+    </div>
+  );
+}
+
+function ProductHeroImage({ primary, name, obsolete = false }) {
   if (primary) {
     return (
-      <div className="w-full sm:w-60 max-w-[240px] aspect-square rounded-xl overflow-hidden bg-surface-container flex-shrink-0 mx-auto sm:mx-0 border border-outline-variant">
+      <div className="relative w-full sm:w-60 max-w-[240px] aspect-square rounded-xl overflow-hidden bg-surface-container flex-shrink-0 mx-auto sm:mx-0 border border-outline-variant">
         <img src={getThumbnailUrl(primary.storage_path, 480)} onError={thumbFallback(primary.storage_path)} alt={primary.alt_text || name || ''} className="w-full h-full object-cover" />
+        {obsolete && <ObsoleteRibbon />}
       </div>
     );
   }
   return (
-    <div className="w-full sm:w-60 max-w-[240px] aspect-square rounded-xl bg-surface-container-low border-2 border-dashed border-outline-variant flex items-center justify-center flex-shrink-0 mx-auto sm:mx-0">
+    <div className="relative w-full sm:w-60 max-w-[240px] aspect-square rounded-xl overflow-hidden bg-surface-container-low border-2 border-dashed border-outline-variant flex items-center justify-center flex-shrink-0 mx-auto sm:mx-0">
       <div className="text-center text-on-surface-variant px-4">
         <Camera className="w-10 h-10 mx-auto mb-2 opacity-40" strokeWidth={1.5} />
         <span className="text-body-sm block">No image yet</span>
       </div>
+      {obsolete && <ObsoleteRibbon />}
     </div>
   );
 }

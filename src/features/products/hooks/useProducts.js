@@ -5,7 +5,8 @@ import { listProducts } from '../api/products';
 // (or reloading the tab) paints instantly with the last known list while a
 // background refetch brings it up to date. Memory covers in-app navigation;
 // sessionStorage survives a tab refresh. Cleared when the tab closes.
-const CACHE_KEY = 'pim.catalog.products.v1';
+// v2: rows carry the obsolete mark (2026-10-16); v1 rows lacked it.
+const CACHE_KEY = 'pim.catalog.products.v2';
 let memoryCache = null;
 
 function readCache() {

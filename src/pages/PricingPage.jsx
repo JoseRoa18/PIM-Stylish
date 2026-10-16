@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import FilterDropdown from '@/features/products/components/FilterDropdown';
+import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
 import { getStockFor, refreshInventory, describeInventoryPull, describeStock, stockAge } from '@/features/pricing/api/inventory';
 // Icon DATA (vanilla lucide) for MorphIcon — it animates the strokes between
 // the two shapes instead of swapping elements.
@@ -916,6 +917,38 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   }, [stockKey, stockSkus, stockMarkets]);
   const zeroNow = zeroStock?.key === stockKey && stockSkus.length ? stockMarkets.filter((m) => zeroStock[m]?.length) : [];
 
+  // Obsolete check (user, 2026-10-16): obsolete products in the list are
+  // flagged the same way — a warning, never a block. The mark changes no
+  // price and no automation; the promotion's table shows it on their rows.
+  const [obsolete, setObsolete] = useState(null); // { key, skus: [obsolete SKUs, in list order] }
+  const obsoleteKey = stockSkus.join(',');
+  useEffect(() => {
+    if (!stockSkus.length) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      // Chunks of 100 in parallel, so no read can reach the API's 1,000 rows.
+      const chunks = [];
+      for (let i = 0; i < stockSkus.length; i += 100) chunks.push(stockSkus.slice(i, i + 100));
+      Promise.all(chunks.map((part) => supabase
+        .from('products')
+        .select('sku')
+        .in('sku', part)
+        .eq('is_obsolete', true)))
+        .then((results) => {
+          if (!active) return;
+          const found = new Set();
+          for (const { data, error } of results) {
+            if (error) throw error;
+            for (const p of data ?? []) found.add(p.sku);
+          }
+          setObsolete({ key: obsoleteKey, skus: stockSkus.filter((s) => found.has(s)) });
+        })
+        .catch(() => {});
+    }, 400);
+    return () => { active = false; clearTimeout(timer); };
+  }, [obsoleteKey, stockSkus]);
+  const obsoleteNow = obsolete?.key === obsoleteKey && stockSkus.length ? obsolete.skus : [];
+
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
       <div className="flex items-center justify-between">
@@ -1093,6 +1126,18 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           </div>
         </div>
       )}
+      {obsoleteNow.length > 0 && (
+        <div role="status" className="flex items-start gap-2.5 text-body-sm text-on-surface bg-error-container/35 rounded-lg px-3 py-2.5">
+          <AlertTriangle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" aria-hidden="true" />
+          <div className="space-y-0.5 min-w-0">
+            <p>
+              <span className="font-medium">{obsoleteNow.length} obsolete product{obsoleteNow.length === 1 ? '' : 's'}:</span>{' '}
+              {obsoleteNow.slice(0, 12).join(', ')}{obsoleteNow.length > 12 ? ` and ${obsoleteNow.length - 12} more` : ''}
+            </p>
+            <p className="text-on-surface-variant">You can still create it — they are marked on its table.</p>
+          </div>
+        </div>
+      )}
       {overlap?.skus?.length > 0 && (
         <p className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">
           {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). A {PROMOTION_KINDS[kind].toLowerCase()} adds nothing for them.
@@ -1124,6 +1169,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   const [catFilter, setCatFilter] = useState([]);
   const [brandFilter, setBrandFilter] = useState([]);
   const [stockFilter, setStockFilter] = useState([]);
+  // Only the obsolete products (user, 2026-10-16) — the "N obsolete" chip.
+  const [obsoleteOnly, setObsoleteOnly] = useState(false);
   // Stock per market and SKU from product_inventory (ShipStation); null
   // until loaded.
   const [stockByMarket, setStockByMarket] = useState(null);
@@ -1150,9 +1197,10 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         const stockPromise = getStockFor(skus).catch(() => ({ ca: {}, us: {} }));
         const chunks = [];
         for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
+        // The obsolete mark is for the rows' Obsolete pill.
         const parts = await Promise.all(chunks.map((part) => supabase
           .from('products')
-          .select('sku, map_cad, map_usd, category, brand')
+          .select('sku, map_cad, map_usd, category, brand, is_obsolete')
           .in('sku', part)));
         const maps = {};
         for (const { data } of parts) for (const p of data ?? []) maps[p.sku] = p;
@@ -1470,14 +1518,17 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             };
             const stockSyncedAt = Object.values(stockRows).reduce((latest, s) => (s.synced_at > (latest ?? '') ? s.synced_at : latest), null);
             const outCount = marketRows.filter((r) => stockStateOf(r) === 'Out of stock').length;
+            const isObsolete = (r) => Boolean(mapBySku?.[r.sku]?.is_obsolete);
+            const obsoleteCount = marketRows.filter(isObsolete).length;
             const visibleRows = marketRows.filter((r) =>
               (!q || r.sku.toUpperCase().includes(q)) &&
               (!catFilter.length || catFilter.includes(catOf(r))) &&
               (!brandFilter.length || brandFilter.includes(brandOf(r))) &&
-              (!stockFilter.length || stockFilter.includes(stockStateOf(r))),
+              (!stockFilter.length || stockFilter.includes(stockStateOf(r))) &&
+              (!obsoleteOnly || isObsolete(r)),
             );
-            const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0 || stockFilter.length > 0;
-            const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); setStockFilter([]); };
+            const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0 || stockFilter.length > 0 || obsoleteOnly;
+            const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); setStockFilter([]); setObsoleteOnly(false); };
             // Membership per market for the tab labels — same rule as the
             // table: a promo price OR any cost of that market counts.
             const countFor = (m) => rows.filter((r) =>
@@ -1554,6 +1605,26 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       >
                         <AlertTriangle className="w-3.5 h-3.5" />
                         {outCount} out of stock
+                      </button>
+                    )}
+                    {/* Obsolete products (user, 2026-10-16) in the badge's
+                        neutral colors — the mark is a heads-up, not an error.
+                        It stays while pressed, so the filter can always be
+                        turned off from where it was turned on. */}
+                    {(obsoleteCount > 0 || obsoleteOnly) && (
+                      <button
+                        type="button"
+                        onClick={() => setObsoleteOnly(!obsoleteOnly)}
+                        aria-pressed={obsoleteOnly}
+                        title={`Show only the obsolete products of the ${market === 'ca' ? 'Canada' : 'USA'} list`}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-label-md font-medium whitespace-nowrap transition-colors ${
+                          obsoleteOnly
+                            ? 'bg-inverse-surface text-on-inverse-surface'
+                            : 'bg-inverse-surface/10 text-on-surface hover:bg-inverse-surface/20'
+                        }`}
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
+                        {obsoleteCount} obsolete
                       </button>
                     )}
                     <span className="text-body-sm text-on-surface-variant tabular-nums whitespace-nowrap">
@@ -1644,7 +1715,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                               className={`border-t border-outline-variant/40 ${out ? 'bg-error-container/30' : 'odd:bg-surface-container-low/30'}`}
                               title={out ? `0 units in ${market === 'ca' ? 'Canada' : 'the USA'}` : undefined}
                             >
-                              <td className="px-4 py-2 font-mono text-on-surface">{r.sku}</td>
+                              <td className="px-4 py-2 font-mono text-on-surface">
+                                {r.sku}
+                                {/* The pill in the page's own font (the cell is
+                                    mono); -my-1 keeps the row its usual height. */}
+                                {p?.is_obsolete && (
+                                  <span className="ml-2 inline-flex align-middle -my-1 font-sans"><ObsoleteBadge product={p} /></span>
+                                )}
+                              </td>
                               <td className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
                               <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[mapKey])}</td>
                               {(() => {

@@ -49,7 +49,11 @@ export default function Analytics() {
   const trendPoints = trend.filter((p) => typeof p.value === 'number').length;
   const projection = useMemo(() => projectToTarget(trend, targets?.global), [trend, targets]);
   const categories = useMemo(() => {
-    const fromSnaps = [...index.keys()].filter((k) => k.startsWith('pim_category|')).map((k) => k.split('|')[1]);
+    // A category with nothing scored on the latest day (every product archived
+    // or obsolete) gets no row that day: it is gone, not frozen at its last one.
+    const latestDay = latestSnapshot(index, 'pim', 'all')?.snapshot_date;
+    const fromSnaps = [...index.keys()].filter((k) => k.startsWith('pim_category|')).map((k) => k.split('|')[1])
+      .filter((cat) => !latestDay || latestSnapshot(index, 'pim_category', cat)?.snapshot_date === latestDay);
     return fromSnaps.length ? fromSnaps : Object.keys(CATEGORY_LABEL);
   }, [index]);
   const latestTaken = snapshots.length ? snapshots.reduce((a, r) => (r.taken_at > a ? r.taken_at : a), '') : null;
@@ -78,6 +82,8 @@ export default function Analytics() {
         scores: { sections: [
           { label: `Reached 100% in ${week.name}`, rows: c.reached, empty: c.hasBefore ? 'No product reached 100% this week yet.' : 'Needs a snapshot from before the week.' },
           { label: 'Dropped below 100%', rows: c.dropped, empty: c.hasBefore ? 'None dropped.' : 'Needs a snapshot from before the week.' },
+          // explains a drop in the count that is no product getting worse
+          ...(c.left.length ? [{ label: 'No longer scored (archived or obsolete)', rows: c.left }] : []),
           { label: 'All products at 100% now', rows: c.all },
         ] },
       };

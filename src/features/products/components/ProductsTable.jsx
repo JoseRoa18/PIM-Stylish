@@ -7,6 +7,7 @@ import { prefetchProductMedia } from '@/features/media/hooks/useProductMedia';
 import Skeleton from '@/components/ui/Skeleton';
 import Checkbox from '@/components/ui/Checkbox';
 import StatusBadge from './StatusBadge';
+import ObsoleteBadge from './ObsoleteBadge';
 import { prefetchRoute } from '@/lib/routePrefetch';
 
 // Explicit widths (table-fixed) so column positions don't shift between
@@ -243,7 +244,16 @@ export default function ProductsTable({
                     <div className="text-body-md font-semibold text-on-surface">
                       {product.model_name || '—'}
                     </div>
-                    {product.family_number && (
+                    {product.is_obsolete ? (
+                      // The obsolete mark (user, 2026-10-16) as a small pill
+                      // on the line under the name, beside the family: two
+                      // lines fit the thumbnail's height, so the row keeps
+                      // its height and the Status cell its one pill.
+                      <div className="flex items-center gap-2 text-body-sm text-on-surface-variant">
+                        <ObsoleteBadge product={product} compact />
+                        {product.family_number && <span>Family {product.family_number}</span>}
+                      </div>
+                    ) : product.family_number && (
                       <div className="text-body-sm text-on-surface-variant">
                         Family {product.family_number}
                       </div>
