@@ -27,9 +27,13 @@
 //   K Applicable Market      "ALL"
 //   L NLP Duration           "30 Days"
 //   M Funding Type           "Cost Reduction"
+//   (a product under Home Depot's 5% NLP minimum — the J formula's
+//   ROUNDDOWN((G - H) / G, 4) below 0.05 — is left out and reported, user
+//   2026-10-16)
 //   O Old Cost               WC Blue (cost_cad_rona_hd)
 //   P New Cost               the product's WC of the level (cost_cad_rona_hd_<level>)
-//   N, Q… everything else    empty
+//   Q Notes                  our SKU (user 2026-10-16: "en notes agreguemos los SKUs")
+//   N, R… everything else    empty
 //
 // Event / NLP submission — sheet "Vendor Submission" (Faucets & Porcelain:
 // kitchen and bathroom faucets, bathroom sinks), rules 2026-09-28:
@@ -45,9 +49,10 @@
 //   L Old Cost               WC Blue          M New Cost    WC of the level
 //   N NLP Forecast           60% of the Canada stock, rounded
 //   Q Retail Change %        the template's formula, untouched
-//   W Notes                  "<Month> Promotion", the monthly promotion's own
-//                            month (flash deal / special event: their kind,
-//                            the month of their first day)
+//   W Notes                  "<Month> Promotion - <our SKU>", the monthly
+//                            promotion's own month (flash deal / special
+//                            event: their kind, the month of their first day);
+//                            the SKU per product (user 2026-10-16)
 //   I, K, P, S, T, U, everything else  empty
 //
 // The products' levels are the truth (user 2026-09-28): the promotion's own
@@ -95,6 +100,7 @@ const LAYOUTS = {
       week: /^fiscalweek$/, merchant: /^merchant$/, article: /^article$/, description: /^articledescription/, unit: /^unitofmeasure/,
       forecast: /^nlpforecast/, wasPrice: /^wasprice/, nlpPrice: /^nlpprice/, priceUp: /^automaticpriceup/,
       market: /^applicablemarket/, duration: /^nlpduration$/, funding: /^fundingtype/, oldCost: /^oldcost/, newCost: /^newcost/,
+      notes: /^notes$/,
     },
     forecastShare: 1,
     constants: { merchant: 'Wendy Chan', unit: 'Ea', priceUp: 'YES', market: 'ALL', duration: '30 Days', funding: 'Cost Reduction' },
@@ -180,6 +186,12 @@ function nlpLaunchWeek(day) {
   return best && best.gap <= 20 ? best.week : null;
 }
 
+// Home Depot's NLP minimum: "Minimum discount for NLPs is 5%" (the NLP
+// workbook's own note). Below it a product stays out of that sheet (user,
+// 2026-10-16) — measured as its J formula does: ROUNDDOWN((WAS - NLP) / WAS, 4).
+const NLP_MIN_DISCOUNT = 0.05;
+const nlpDiscount = (was, nlp) => Math.floor(((was - nlp) / was) * 10000 + 1e-9) / 10000;
+
 const monthName = (day) => new Date(`${day}T12:00:00`).toLocaleDateString('en-CA', { month: 'long' });
 
 const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? ` and ${list.length - n} more` : ''}`;
@@ -234,6 +246,7 @@ async function buildWorkbook(template, promotion, channel) {
   const noMap = [];
   const noPromoMap = [];
   const atOrAbove = [];
+  const belowMin = []; // NLP workbook: under the 5% minimum, left out
   const noCost = [];
   const noPromoCost = [];
   const noStock = [];
@@ -254,7 +267,10 @@ async function buildWorkbook(template, promotion, channel) {
     if (listed != null && level != null && listed !== level) listDiffers.push(`${m.sku} (list ${listed}, ${levelLabel(tier)} ${level})`);
     const map = p.map_cad != null ? Number(p.map_cad) : null;
     if (map == null) noMap.push(m.sku);
-    else if (promoMap >= map) atOrAbove.push(m.sku);
+    else if (hit.layout === 'nlp' && nlpDiscount(map, promoMap) < NLP_MIN_DISCOUNT) {
+      belowMin.push(`${m.sku} (${(nlpDiscount(map, promoMap) * 100).toFixed(2)}%)`);
+      continue;
+    } else if (promoMap >= map) atOrAbove.push(m.sku);
     const regularCost = p.cost_cad_rona_hd != null ? Number(p.cost_cad_rona_hd) : null;
     const listedCost = m.promo_costs?.rona_hd_cad;
     const promoCost = listedCost != null ? Number(listedCost) : p[promoCostField] != null ? Number(p[promoCostField]) : null;
@@ -323,6 +339,7 @@ async function buildWorkbook(template, promotion, channel) {
       put(cols.funding, k.funding);
       put(cols.oldCost, l.regularCost);
       put(cols.newCost, l.promoCost);
+      put(cols.notes, l.sku);
     } else {
       put(cols.quarter, quarter);
       put(cols.vendor, k.vendor);
@@ -334,7 +351,7 @@ async function buildWorkbook(template, promotion, channel) {
       put(cols.oldCost, l.regularCost);
       put(cols.newCost, l.promoCost);
       put(cols.forecast, l.forecast);
-      put(cols.notes, notes);
+      put(cols.notes, `${notes} - ${l.sku}`);
     }
     if (inTemplate) cellsByRow.set(rn, cells);
     else appended += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
@@ -351,7 +368,7 @@ async function buildWorkbook(template, promotion, channel) {
     rows: lines.length, tier, fromList, listDiffers, categories: tagged, family: [...categories],
     forecastShare: layout.forecastShare, notes: hit.layout === 'event' ? notes : null, quarter: hit.layout === 'event' ? quarter : null,
     week: hit.layout === 'nlp' && cols.week != null ? fiscalWeek : undefined, windowStart: labelDay,
-    otherCategory, noAlias, noMap, noPromoMap, atOrAbove, noCost, noPromoCost, noStock,
+    otherCategory, noAlias, noMap, noPromoMap, atOrAbove, belowMin, noCost, noPromoCost, noStock,
     atZero: lines.filter((l) => l.stocked && l.forecast === 0).length, excluded,
   };
   return { zip, name: `HomeDepotCA_${catLabel || 'Promo'}_${period}`, ext: templateExt(template.storage_path), report };
@@ -402,7 +419,7 @@ export async function fillHomeDepotCaPromoTemplates(templates, promotion, channe
     target: channel.key,
     summary: `Filled Home Depot Canada promotion file${files.length > 1 ? 's' : ''} for "${promotion.name}": ${reports.map((r) => `${r.categories.map(labelOf).join(' / ') || r.layout} ${r.rows}`).join(', ')} (${levelLabel(reports[0].tier)} level, forecast = Canada stock)`,
     metadata: {
-      files: reports.map((r) => ({ template: r.template, layout: r.layout, rows: r.rows, categories: r.categories, otherCategory: r.otherCategory.length, noAlias: r.noAlias.length, noMap: r.noMap.length, noPromoMap: r.noPromoMap.length, atOrAbove: r.atOrAbove.length, listDiffers: r.listDiffers.length, noCost: r.noCost.length, noPromoCost: r.noPromoCost.length, noStock: r.noStock.length, atZero: r.atZero })),
+      files: reports.map((r) => ({ template: r.template, layout: r.layout, rows: r.rows, categories: r.categories, otherCategory: r.otherCategory.length, noAlias: r.noAlias.length, noMap: r.noMap.length, noPromoMap: r.noPromoMap.length, atOrAbove: r.atOrAbove.length, belowMin: r.belowMin.length, listDiffers: r.listDiffers.length, noCost: r.noCost.length, noPromoCost: r.noPromoCost.length, noStock: r.noStock.length, atZero: r.atZero })),
       skipped,
     },
   });
@@ -418,6 +435,7 @@ function describeFile(r) {
   if (r.noAlias.length) parts.push(`no Home Depot Canada id in Aliases, left out: ${few(r.noAlias)}`);
   if (r.noPromoMap.length) parts.push(`no MAP ${levelLabel(r.tier)} in the PIM, left out: ${few(r.noPromoMap)}`);
   if (r.noMap.length) parts.push(`${r.noMap.length} without MAP CAD (WAS price empty): ${few(r.noMap, 5)}`);
+  if (r.belowMin?.length) parts.push(`${r.belowMin.length} under Home Depot's 5% NLP minimum, left out: ${few(r.belowMin, 6)}`);
   if (r.atOrAbove.length) parts.push(`${r.atOrAbove.length} with the promo MAP not below MAP, check them: ${few(r.atOrAbove, 5)}`);
   if (r.noCost.length) parts.push(`${r.noCost.length} without WC Rona / Home Depot (old cost empty): ${few(r.noCost, 5)}`);
   if (r.noPromoCost.length) parts.push(`${r.noPromoCost.length} without WC ${levelLabel(r.tier)} (new cost empty): ${few(r.noPromoCost, 5)}`);
