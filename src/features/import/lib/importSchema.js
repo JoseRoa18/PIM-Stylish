@@ -448,6 +448,11 @@ export const FIELD_DEFS = [
 // → normalized "bulletfeature3en".
 export const BULLET_RE = /^bulletfeature(\d{1,2})(en|fr)$/;
 
+// The PIM export's image links ("Image 1", "Image 2"…, user 2026-10-16):
+// read-only — the import skips them (images are uploaded on the product page).
+export const imageLinkHeader = (n) => `Image ${n}`;
+export const IMAGE_LINK_RE = /^image\d+$/;
+
 // Canonical value maps applied on import (keyed by field def key, then by
 // lowercased incoming value). `null` means "treat as empty / drop the value".
 // Keeps spreadsheet inconsistencies from re-polluting the normalized catalog.

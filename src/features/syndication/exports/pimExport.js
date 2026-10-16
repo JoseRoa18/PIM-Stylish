@@ -17,7 +17,9 @@ import {
   STRAINER_TEMPLATE_HEADERS,
   FAUCET_PLATE_TEMPLATE_HEADERS,
   COLANDER_TEMPLATE_HEADERS,
+  imageLinkHeader,
 } from '@/features/import/lib/importSchema';
+import { listMediaFor, getMediaUrl } from '@/features/media/api/media';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { accessoryKind } from '@/features/templates/api/templates';
@@ -163,8 +165,21 @@ export async function fetchAllProducts() {
   return all;
 }
 
-/** The export's sheets, in SHEET_ORDER: [{ name, sections, rows, count }]. */
-export function pimExportSheets(products) {
+// The product's image links, the main one first, then in their order (user,
+// 2026-10-16: "agregar los links de las imágenes"). Read-only in the sheet.
+function imageLinks(media) {
+  return (media ?? [])
+    .filter((m) => m.media_type === 'image' && m.storage_path)
+    .sort((a, b) => Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)) || (a.display_order ?? 0) - (b.display_order ?? 0))
+    .map((m) => getMediaUrl(m.storage_path));
+}
+
+/**
+ * The export's sheets, in SHEET_ORDER: [{ name, sections, rows, count, formats }].
+ * With `mediaBySku` (sku → media rows) each sheet ends with an "Images
+ * (links)" section: Image 1 (the main), Image 2… as clickable links.
+ */
+export function pimExportSheets(products, mediaBySku = null) {
   const groups = new Map(); // group key → products[]
   for (const p of products) {
     const key = groupKeyOf(p);
@@ -178,8 +193,18 @@ export function pimExportSheets(products) {
       const base = headersFor(list[0]);
       const sections = templateLayout(base);
       const headers = sections.flatMap((s) => s.headers);
-      const rows = [...list].sort((a, b) => a.sku.localeCompare(b.sku)).map((p) => headers.map((h) => cellValue(p, h)));
-      return { key, name: SHEET_NAMES[key] ?? key, kind: templateKindOf(base), sections, rows, count: list.length };
+      const sorted = [...list].sort((a, b) => a.sku.localeCompare(b.sku));
+      let rows = sorted.map((p) => headers.map((h) => cellValue(p, h)));
+      let formats;
+      const links = mediaBySku ? sorted.map((p) => imageLinks(mediaBySku.get(p.sku))) : [];
+      const most = Math.max(0, ...links.map((l) => l.length));
+      if (most) {
+        const imageHeaders = Array.from({ length: most }, (_, i) => imageLinkHeader(i + 1));
+        sections.push({ key: 'images', title: 'Images (links)', color: '4E342E', headers: imageHeaders });
+        rows = rows.map((r, i) => [...r, ...imageHeaders.map((_, k) => links[i][k] ?? '')]);
+        formats = [...headers.map(() => null), ...imageHeaders.map(() => 'link')];
+      }
+      return { key, name: SHEET_NAMES[key] ?? key, kind: templateKindOf(base), sections, rows, formats, count: list.length };
     });
 }
 
@@ -189,9 +214,9 @@ export function pimExportSheets(products) {
  */
 export async function generatePimExport(products) {
   if (!products?.length) throw new Error('No products to export.');
-  const sheets = pimExportSheets(products);
   // the open fields' dropdowns list what the whole catalog uses
-  const suggestions = await loadSuggestionLists();
+  const [mediaBySku, suggestions] = await Promise.all([listMediaFor(products.map((p) => p.sku)), loadSuggestionLists()]);
+  const sheets = pimExportSheets(products, mediaBySku);
   const date = new Date().toISOString().slice(0, 10);
   downloadBlob(await buildSectionedWorkbook(sheets, { validationFor: (h, kind) => excelValidationFor(h, kind, suggestions) }), `Stylish_PIM_Export_${date}.xlsx`);
   return {

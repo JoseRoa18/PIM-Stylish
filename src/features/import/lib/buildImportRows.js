@@ -5,6 +5,7 @@ import {
   CATEGORY_MAP,
   VALUE_CANONICALS,
   normalizeHeader,
+  IMAGE_LINK_RE,
 } from './importSchema';
 import { BRANDS, canonicalBrand } from '@/features/products/lib/brands';
 
@@ -121,6 +122,8 @@ export function buildImportRows(parsed) {
     if (def) {
       headerMap.push({ header: h, def });
       matchedFieldKeys.add(def.key);
+    } else if (IMAGE_LINK_RE.test(norm)) {
+      // the PIM export's image links: read-only, never imported
     } else {
       unknownHeaders.push(h);
     }
