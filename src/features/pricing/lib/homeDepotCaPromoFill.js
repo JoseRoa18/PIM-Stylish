@@ -7,7 +7,11 @@
 // prep, laundry and outdoor sinks — Home Depot files sinks by family).
 //
 // NLP workbook — sheet "D29K" (Kitchen Sinks), rules 2026-09-28:
-//   A Fiscal Week            left for whoever uploads the file
+//   A Fiscal Week            the Launch Week of Home Depot's FY 2026 Monthly
+//                            NLP Launch Schedule whose NLP start is nearest the
+//                            promotion's first day in Canada (user 2026-10-16:
+//                            the monthly table, not the off-cycle one) — Oct
+//                            35, Nov 40, Dec 44; empty past the schedule
 //   B Merchant               "Wendy Chan"
 //   C Article #              Home Depot Canada's id (Aliases, "Home Depot CA")
 //   D Article Description    the alias' listing title
@@ -84,7 +88,7 @@ const LAYOUTS = {
     label: 'NLP workbook',
     required: ['article', 'wasPrice', 'nlpPrice'],
     headers: {
-      merchant: /^merchant$/, article: /^article$/, description: /^articledescription/, unit: /^unitofmeasure/,
+      week: /^fiscalweek$/, merchant: /^merchant$/, article: /^article$/, description: /^articledescription/, unit: /^unitofmeasure/,
       forecast: /^nlpforecast/, wasPrice: /^wasprice/, nlpPrice: /^nlpprice/, priceUp: /^automaticpriceup/,
       market: /^applicablemarket/, duration: /^nlpduration$/, funding: /^fundingtype/, oldCost: /^oldcost/, newCost: /^newcost/,
     },
@@ -149,6 +153,29 @@ function fiscalQuarter(day) {
   if (month >= 8 && month <= 10) return 'Q3';
   return 'Q4';
 }
+// Home Depot Canada's FY 2026 Monthly NLP Launch Schedule (user, 2026-10-16:
+// "toma los datos de arriba" — the monthly table, not the off-cycle one):
+// launch week and NLP effective start. A promotion takes the launch week whose
+// start is nearest its first day in Canada (Oct 1 → 35, the Canada November
+// window from Oct 22 → 40); past the table's reach the week stays empty — the
+// next fiscal year's schedule goes here.
+const NLP_LAUNCH_WEEKS = [
+  [1, '2026-02-03'], [5, '2026-03-03'], [9, '2026-03-31'], [14, '2026-05-05'],
+  [18, '2026-06-02'], [22, '2026-06-30'], [27, '2026-08-04'], [31, '2026-09-01'],
+  [35, '2026-09-29'], [40, '2026-11-03'], [44, '2026-12-01'], [48, '2026-12-29'],
+];
+const DAY_MS = 86400000;
+function nlpLaunchWeek(day) {
+  const at = Date.parse(`${day}T12:00:00Z`);
+  let best = null;
+  for (const [week, start] of NLP_LAUNCH_WEEKS) {
+    const gap = Math.abs(Date.parse(`${start}T12:00:00Z`) - at) / DAY_MS;
+    if (!best || gap < best.gap) best = { week, gap };
+  }
+  // more than about half a launch cycle away: outside this schedule
+  return best && best.gap <= 20 ? best.week : null;
+}
+
 const monthName = (day) => new Date(`${day}T12:00:00`).toLocaleDateString('en-CA', { month: 'long' });
 
 const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? ` and ${list.length - n} more` : ''}`;
@@ -253,6 +280,7 @@ async function buildWorkbook(template, promotion, channel) {
   const window = promoWindow(promotion, 'ca');
   const kind = promotion.kind ?? 'monthly';
   const notes = `${monthName(window.start)} ${kind === 'monthly' ? 'Promotion' : PROMOTION_KINDS[kind] ?? 'Promotion'}`;
+  const fiscalWeek = nlpLaunchWeek(window.start);
   let lastUsed = hit.headerRow;
   for (let i = hit.headerRow + 1; i < hit.grid.length; i++) if ((hit.grid[i] ?? []).some((v) => String(v ?? '').trim())) lastUsed = i;
   const firstRow = lastUsed + 2; // 1-based row number of the first line we write
@@ -272,6 +300,7 @@ async function buildWorkbook(template, promotion, channel) {
     const put = (c, v) => { if (c != null && v != null && v !== '') cells.set(c + 1, buildCell(`${col(c)}${rn}`, v, styleFor(c))); };
     const k = layout.constants;
     if (hit.layout === 'nlp') {
+      put(cols.week, fiscalWeek);
       put(cols.merchant, k.merchant);
       put(cols.article, l.article);
       put(cols.description, l.description);
@@ -312,6 +341,7 @@ async function buildWorkbook(template, promotion, channel) {
     template: template.file_name, layout: layout.label, sheet: hit.name, firstRow,
     rows: lines.length, tier, fromList, listDiffers, categories: tagged, family: [...categories],
     forecastShare: layout.forecastShare, notes: hit.layout === 'event' ? notes : null, quarter: hit.layout === 'event' ? fiscalQuarter(window.start) : null,
+    week: hit.layout === 'nlp' && cols.week != null ? fiscalWeek : undefined, windowStart: window.start,
     otherCategory, noAlias, noMap, noPromoMap, atOrAbove, noCost, noPromoCost, noStock,
     atZero: lines.filter((l) => l.stocked && l.forecast === 0).length, excluded,
   };
@@ -373,7 +403,7 @@ export async function fillHomeDepotCaPromoTemplates(templates, promotion, channe
 function describeFile(r) {
   const extra = (r.family ?? []).filter((c) => !r.categories.includes(c)).map((c) => labelOf(c).toLowerCase());
   const cats = r.categories.length ? r.categories.map(labelOf).join(' / ') + (extra.length ? ` incl. ${extra.join(', ')}` : '') : 'every category';
-  const parts = [`${cats}: ${r.rows} articles from row ${r.firstRow} of "${r.sheet}" (${r.layout}${r.quarter ? `, ${r.quarter}, notes "${r.notes}"` : ''}); prices = the promotion's promo MAP / WC (the file's values; the ${levelLabel(r.tier)} level where it has none), forecast = ${r.forecastShare === 1 ? 'the Canada stock' : `${Math.round(r.forecastShare * 100)}% of the Canada stock`}${r.atZero ? ` (${r.atZero} at 0)` : ''}`];
+  const parts = [`${cats}: ${r.rows} articles from row ${r.firstRow} of "${r.sheet}" (${r.layout}${r.quarter ? `, ${r.quarter}, notes "${r.notes}"` : ''}${r.week ? `, Fiscal Week ${r.week}` : ''}); prices = the promotion's promo MAP / WC (the file's values; the ${levelLabel(r.tier)} level where it has none), forecast = ${r.forecastShare === 1 ? 'the Canada stock' : `${Math.round(r.forecastShare * 100)}% of the Canada stock`}${r.atZero ? ` (${r.atZero} at 0)` : ''}`];
   if (r.listDiffers?.length) parts.push(`${r.listDiffers.length} where the promotion's list differs from the ${levelLabel(r.tier)} level (the promotion's price went in): ${few(r.listDiffers, 4)}`);
   if (r.otherCategory.length) parts.push(`${r.otherCategory.length} promo products of other categories left out`);
   if (r.noAlias.length) parts.push(`no Home Depot Canada id in Aliases, left out: ${few(r.noAlias)}`);
@@ -384,6 +414,7 @@ function describeFile(r) {
   if (r.noPromoCost.length) parts.push(`${r.noPromoCost.length} without WC ${levelLabel(r.tier)} (new cost empty): ${few(r.noPromoCost, 5)}`);
   if (r.noStock.length) parts.push(`${r.noStock.length} not in the Canada inventory file, forecast 0: ${few(r.noStock, 5)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from Home Depot Canada: ${few(r.excluded)}`);
+  if (r.week === null) parts.push(`no NLP launch week near ${r.windowStart} in the FY 2026 schedule — fill Fiscal Week by hand`);
   return parts.join(' · ');
 }
 
@@ -391,6 +422,6 @@ export function summarizeHomeDepotCaFill(channel, r) {
   const head = r.zipped ? `${channel.label}: ${r.files.length} files in one ZIP.` : `${channel.label} file ready.`;
   const parts = [head, ...r.files.map(describeFile)];
   if (r.skipped?.length) parts.push(`skipped: ${r.skipped.map((s) => `${s.template} — ${s.error}`).join(' · ')}`);
-  parts.push('Fiscal Week / anything the sheet leaves to the vendor is yours to fill');
+  parts.push('anything else the sheet leaves to the vendor is yours to fill');
   return parts.join(' · ');
 }
