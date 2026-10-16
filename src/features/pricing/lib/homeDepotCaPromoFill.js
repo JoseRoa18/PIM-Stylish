@@ -9,7 +9,8 @@
 // NLP workbook — sheet "D29K" (Kitchen Sinks), rules 2026-09-28:
 //   A Fiscal Week            the Launch Week of Home Depot's FY 2026 Monthly
 //                            NLP Launch Schedule whose NLP start is nearest the
-//                            promotion's first day in Canada (user 2026-10-16:
+//                            promotion's month (its 1st; a deal's first day)
+//                            (user 2026-10-16:
 //                            the monthly table, not the off-cycle one) — Oct
 //                            35, Nov 40, Dec 44; empty past the schedule
 //   B Merchant               "Wendy Chan"
@@ -33,7 +34,8 @@
 // Event / NLP submission — sheet "Vendor Submission" (Faucets & Porcelain:
 // kitchen and bathroom faucets, bathroom sinks), rules 2026-09-28:
 //   B Quarter                Home Depot's fiscal quarter of the promotion's
-//                            first day (Feb–Apr Q1, May–Jul Q2, Aug–Oct Q3,
+//                            month (a monthly promotion's own month, a deal's
+//                            first day: Feb–Apr Q1, May–Jul Q2, Aug–Oct Q3,
 //                            Nov–Jan Q4)
 //   C Vendor Name            "Stylish WAREHOUSE"
 //   D THD Article #          the alias        E Article Description  its title
@@ -43,7 +45,9 @@
 //   L Old Cost               WC Blue          M New Cost    WC of the level
 //   N NLP Forecast           60% of the Canada stock, rounded
 //   Q Retail Change %        the template's formula, untouched
-//   W Notes                  "<Month> Promotion" (flash deal / special event: their kind)
+//   W Notes                  "<Month> Promotion", the monthly promotion's own
+//                            month (flash deal / special event: their kind,
+//                            the month of their first day)
 //   I, K, P, S, T, U, everything else  empty
 //
 // The products' levels are the truth (user 2026-09-28): the promotion's own
@@ -155,10 +159,10 @@ function fiscalQuarter(day) {
 }
 // Home Depot Canada's FY 2026 Monthly NLP Launch Schedule (user, 2026-10-16:
 // "toma los datos de arriba" — the monthly table, not the off-cycle one):
-// launch week and NLP effective start. A promotion takes the launch week whose
-// start is nearest its first day in Canada (Oct 1 → 35, the Canada November
-// window from Oct 22 → 40); past the table's reach the week stays empty — the
-// next fiscal year's schedule goes here.
+// launch week and NLP effective start. A monthly promotion takes the launch
+// week whose start is nearest the 1st of its month (Oct → 35, Nov → 40), a
+// deal the one nearest its first day; past the table's reach the week stays
+// empty — the next fiscal year's schedule goes here.
 const NLP_LAUNCH_WEEKS = [
   [1, '2026-02-03'], [5, '2026-03-03'], [9, '2026-03-31'], [14, '2026-05-05'],
   [18, '2026-06-02'], [22, '2026-06-30'], [27, '2026-08-04'], [31, '2026-09-01'],
@@ -279,8 +283,13 @@ async function buildWorkbook(template, promotion, channel) {
   const { cols } = hit;
   const window = promoWindow(promotion, 'ca');
   const kind = promotion.kind ?? 'monthly';
-  const notes = `${monthName(window.start)} ${kind === 'monthly' ? 'Promotion' : PROMOTION_KINDS[kind] ?? 'Promotion'}`;
-  const fiscalWeek = nlpLaunchWeek(window.start);
+  // The day the labels go by: a monthly promotion is its own month (the
+  // November one opens in Canada on Oct 22 and is still "November Promotion",
+  // Q4 — user 2026-10-16); a flash deal / special event its first day.
+  const labelDay = kind === 'monthly' && promotion.period ? String(promotion.period).slice(0, 10) : window.start;
+  const notes = `${monthName(labelDay)} ${kind === 'monthly' ? 'Promotion' : PROMOTION_KINDS[kind] ?? 'Promotion'}`;
+  const quarter = fiscalQuarter(labelDay);
+  const fiscalWeek = nlpLaunchWeek(labelDay);
   let lastUsed = hit.headerRow;
   for (let i = hit.headerRow + 1; i < hit.grid.length; i++) if ((hit.grid[i] ?? []).some((v) => String(v ?? '').trim())) lastUsed = i;
   const firstRow = lastUsed + 2; // 1-based row number of the first line we write
@@ -315,7 +324,7 @@ async function buildWorkbook(template, promotion, channel) {
       put(cols.oldCost, l.regularCost);
       put(cols.newCost, l.promoCost);
     } else {
-      put(cols.quarter, fiscalQuarter(window.start));
+      put(cols.quarter, quarter);
       put(cols.vendor, k.vendor);
       put(cols.article, l.article);
       put(cols.description, l.description);
@@ -340,8 +349,8 @@ async function buildWorkbook(template, promotion, channel) {
   const report = {
     template: template.file_name, layout: layout.label, sheet: hit.name, firstRow,
     rows: lines.length, tier, fromList, listDiffers, categories: tagged, family: [...categories],
-    forecastShare: layout.forecastShare, notes: hit.layout === 'event' ? notes : null, quarter: hit.layout === 'event' ? fiscalQuarter(window.start) : null,
-    week: hit.layout === 'nlp' && cols.week != null ? fiscalWeek : undefined, windowStart: window.start,
+    forecastShare: layout.forecastShare, notes: hit.layout === 'event' ? notes : null, quarter: hit.layout === 'event' ? quarter : null,
+    week: hit.layout === 'nlp' && cols.week != null ? fiscalWeek : undefined, windowStart: labelDay,
     otherCategory, noAlias, noMap, noPromoMap, atOrAbove, noCost, noPromoCost, noStock,
     atZero: lines.filter((l) => l.stocked && l.forecast === 0).length, excluded,
   };
