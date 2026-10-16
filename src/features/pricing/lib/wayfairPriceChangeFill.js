@@ -17,7 +17,12 @@
 //                    (map_usd_wayfair_ca / _<level>) only on the rows where
 //                    Wayfair keeps a USD MAP too; BaseCost = WC Wayfair Canada
 //                    Blue (cost_usd_wayfair_ca), END only
-//   MSRP columns stay empty (no change), and so does the USA supplier's CAD MAP.
+//   The MSRP goes with the MAP, the same value (user, 2026-10-16: "se debe
+//   llenar la G y la I, las dos con el mismo dato MAP" — Wayfair keeps MSRP =
+//   MAP): NewMsrpUSD / NewMsrpCAD next to each MAP written, at both ends, so
+//   Back to Blue puts the MSRP back up with the MAP. The USA supplier's CAD
+//   MAP and MSRP stay empty. Every price is a plain number (General format:
+//   no "$", decimals only when it has them).
 // The file lists every Wayfair product: only the promotion's rows are kept
 // (renumbered from the first data row); promotion products the file doesn't
 // list are not live there and are reported. Rows whose Current values already
@@ -33,7 +38,6 @@ import {
   buildCell,
   mergeRows,
   keepOnlyRows,
-  ensureNumberFormat,
   downloadZip,
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pricing/api/promotions';
@@ -41,7 +45,6 @@ import { markPromotionTask, savePromoFile, loadPromoFile, freshFileTasks } from 
 import { logActivity } from '@/features/activity/api/activityLog';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 
-const MONEY = '"$"#,##0.00';
 const COLUMNS = {
   sku: 'SupplierPartNumber',
   currentBaseCost: 'CurrentBaseCost',
@@ -50,6 +53,8 @@ const COLUMNS = {
   newMapUsd: 'NewMapUSD',
   currentMapCad: 'CurrentMapCAD',
   newMapCad: 'NewMapCAD',
+  newMsrpUsd: 'NewMsrpUSD',
+  newMsrpCad: 'NewMsrpCAD',
 };
 
 function locate(grid) {
@@ -95,6 +100,7 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   // The MAP column Wayfair keeps for this supplier: USD for the USA, CAD for
   // Canada (which also carries a USD MAP on a few rows — see the header).
   const mapCol = usa ? cols.newMapUsd : cols.newMapCad;
+  const msrpCol = usa ? cols.newMsrpUsd : cols.newMsrpCad;
   const currentMapCol = usa ? cols.currentMapUsd : cols.currentMapCad;
   if (mapCol == null) throw new Error(`The file has no ${usa ? 'NewMapUSD' : 'NewMapCAD'} column — is it the ${label} pricing file from Partner Home?`);
 
@@ -139,7 +145,10 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
     }
   }
 
-  const money = await ensureNumberFormat(zip, MONEY, 0);
+  // Plain numbers in the General format: no dollar sign, and decimals only
+  // when the price has them (user, 2026-10-16) — 533, 450.05. The file's
+  // default style (xf 0) is General, so the written cells carry no style.
+  const money = null;
   const firstData = hit.headerRow + 3; // labels, instructions, then data
   const cellsByRow = new Map();
   const fileSkus = new Set();
@@ -157,11 +166,15 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
     const rn = i + 1;
     const cells = new Map();
     if (cost != null) cells.set(cols.baseCost + 1, buildCell(`${colLetter(cols.baseCost)}${rn}`, cost, money));
-    if (map != null) cells.set(mapCol + 1, buildCell(`${colLetter(mapCol)}${rn}`, map, money));
+    if (map != null) {
+      cells.set(mapCol + 1, buildCell(`${colLetter(mapCol)}${rn}`, map, money));
+      if (msrpCol != null) cells.set(msrpCol + 1, buildCell(`${colLetter(msrpCol)}${rn}`, map, money));
+    }
     // Canada: the USD MAP moves with the CAD one where Wayfair keeps both.
     const keepsUsd = !usa && cols.newMapUsd != null && String(grid[i][cols.currentMapUsd] ?? '').trim() !== '';
     if (keepsUsd && usdMap != null) {
       cells.set(cols.newMapUsd + 1, buildCell(`${colLetter(cols.newMapUsd)}${rn}`, usdMap, money));
+      if (cols.newMsrpUsd != null) cells.set(cols.newMsrpUsd + 1, buildCell(`${colLetter(cols.newMsrpUsd)}${rn}`, usdMap, money));
       usdRows += 1;
     }
     cellsByRow.set(rn, cells);

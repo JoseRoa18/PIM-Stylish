@@ -257,6 +257,7 @@ export async function searchProducts(query, limit = 8) {
       brand,
       category,
       workflow_status,
+      is_obsolete,
       product_media (storage_path, is_primary)
     `;
   const toResult = (p, matched = null) => ({
@@ -266,6 +267,7 @@ export async function searchProducts(query, limit = 8) {
     brand: p.brand,
     category: p.category,
     workflow_status: p.workflow_status,
+    is_obsolete: !!p.is_obsolete, // the result's Obsolete pill (2026-10-16)
     primary_image: p.product_media?.find((m) => m.is_primary) ?? null,
     // The marketplace id that matched, when the product was found through
     // one (Home Depot article #, Rona id, Amazon seller SKU / ASIN…).
@@ -417,6 +419,16 @@ export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}) {
     autoLinkChannels(skus).catch((err) => console.error('Channel auto-link failed:', err));
   }
   return data ?? [];
+}
+
+/** Which of these SKUs carry the obsolete mark (a Set) — for lists that keep
+ * their own copy of a product, like the top search's recent ones. */
+export async function obsoleteAmong(skus) {
+  const list = [...new Set(skus ?? [])];
+  if (!list.length) return new Set();
+  const { data, error } = await supabase.from('products').select('sku').in('sku', list).eq('is_obsolete', true);
+  if (error) throw error;
+  return new Set((data ?? []).map((p) => p.sku));
 }
 
 /**

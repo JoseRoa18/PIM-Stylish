@@ -19,6 +19,8 @@ import { prefetchRoute } from '@/lib/routePrefetch';
 import { getThumbnailUrl, preloadImage, thumbFallback } from '@/features/media/api/media';
 import { prefetchProductMedia } from '@/features/media/hooks/useProductMedia';
 import { formatCategory } from '@/lib/format';
+import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
+import { obsoleteAmong } from '@/features/products/api/products';
 
 const IS_MAC =
   typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
@@ -67,6 +69,16 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
   // The empty bar, opened: the recently opened products.
   const showRecent = isOpen && !trimmed && recent.length > 0;
   const options = showRecent ? recent : results;
+  // A recent entry is a copy kept from when it was opened: its obsolete mark
+  // is read fresh each time the list shows (user, 2026-10-16).
+  const [obsoleteRecent, setObsoleteRecent] = useState(() => new Set());
+  const recentSkus = recent.map((r) => r.sku).join(',');
+  useEffect(() => {
+    if (!showRecent) return undefined;
+    let active = true;
+    obsoleteAmong(recentSkus.split(',')).then((set) => { if (active) setObsoleteRecent(set); }).catch(() => {});
+    return () => { active = false; };
+  }, [showRecent, recentSkus]);
 
   // Reset highlight when results change — adjusted during render instead of
   // in an effect so it doesn't trigger a second render pass after commit.
@@ -334,6 +346,8 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
                               <span className="min-w-0 text-body-md text-on-surface font-medium truncate">
                                 <HighlightedText text={p.model_name || p.sku} query={trimmed} />
                               </span>
+                              {/* the obsolete mark (user, 2026-10-16) */}
+                              {p.is_obsolete && <span className="shrink-0"><ObsoleteBadge product={p} compact /></span>}
                             </div>
                             {(hasModelName || p.brand || p.category || p.matched_alias) && (
                               <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap text-body-sm text-on-surface-variant mt-0.5">
@@ -426,7 +440,10 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
                     >
                       <ProductThumb product={p} />
                       <div className="min-w-0 flex-1">
-                        <span className="block text-body-md text-on-surface font-medium truncate">{p.model_name || p.sku}</span>
+                        <span className="flex items-baseline gap-2 min-w-0">
+                          <span className="min-w-0 text-body-md text-on-surface font-medium truncate">{p.model_name || p.sku}</span>
+                          {obsoleteRecent.has(p.sku) && <span className="shrink-0"><ObsoleteBadge product={{ is_obsolete: true }} compact /></span>}
+                        </span>
                         {(hasModelName || p.brand || p.category) && (
                           <span className="block text-body-sm text-on-surface-variant mt-0.5 truncate">
                             {[hasModelName && p.sku, p.brand, p.category && formatCategory(p.category)].filter(Boolean).join(' · ')}

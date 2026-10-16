@@ -69,7 +69,16 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 function lazyLib(loader) {
   let mod = null;
   return {
-    load: async () => (mod ??= await loader()),
+    load: async () => {
+      if (!mod) {
+        const loaded = await loader();
+        // nothing: the file belonged to an older deploy and the page is
+        // reloading to the new one (main.jsx)
+        if (!loaded) throw new Error('A new version of the PIM is available — reload the page and try again.');
+        mod = loaded;
+      }
+      return mod;
+    },
     get: () => mod,
   };
 }
