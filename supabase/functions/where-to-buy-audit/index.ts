@@ -311,6 +311,16 @@ function missingRows(base: Base, links: Link[], standard: string[]): Row[] {
   return rows;
 }
 
+function dedupeRows(rows: Row[]): Row[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    const k = `${r.sku}|${r.section}|${r.retailer}|${r.url ?? ""}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 // The store links of a live WHERE TO BUY section.
 function liveLinks(html: string): Link[] {
   const out: Link[] = [];
@@ -338,11 +348,14 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
   const rows: Row[] = [];
   const counts = { products: 0, links: 0, broken: 0, missing: 0, notInPim: 0, differsFromPim: [] as string[], standardPortals: [] as string[] };
   const perProduct: Array<{ base: Base; links: Link[] }> = [];
+  const seenSku = new Set<string>();
   for (const { p, sku } of withSku) {
     // Only the PIM's products are audited (user, 2026-10-19): a Wix page
     // whose SKU the PIM does not have (spare parts like RSH-K107B, old
-    // listings) is left out.
+    // listings) is left out. A SKU listed twice on Wix (B-122NG) counts once.
     if (!pim.skus.has(sku)) { counts.notInPim += 1; continue; }
+    if (seenSku.has(sku)) continue;
+    seenSku.add(sku);
     counts.products += 1;
     const wtb = (p.additionalInfoSections ?? []).find((s) => /where\s*to\s*buy/i.test(s.title ?? ""));
     const live = liveLinks(wtb?.description ?? "");
@@ -369,9 +382,11 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
     rows.push(...mr);
   }
 
+  // One row per (sku, section, retailer, url) — the table's unique key.
+  const unique = dedupeRows(rows);
   await rest(`where_to_buy_links?site=eq.${siteKey}`, { method: "DELETE" });
-  for (const part of chunk(rows, 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
-  return { site: siteKey, label: site.label, rows: rows.length, ...counts };
+  for (const part of chunk(unique, 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
+  return { site: siteKey, label: site.label, rows: unique.length, ...counts };
 }
 
 // What the last scan learned, kept for the panel and for "sync": each site's
@@ -412,7 +427,7 @@ async function syncSkus(skus: string[]) {
       out.push({ site: siteKey, sku: w.sku, links: lr.length, missing: mr.length });
     }
     await rest(`where_to_buy_links?site=eq.${siteKey}&sku=${inList(onSite.map((x) => x.sku))}`, { method: "DELETE" });
-    for (const part of chunk(rows, 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
+    for (const part of chunk(dedupeRows(rows), 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
   }
   // The pages were just pushed from the PIM: they no longer differ.
   if (state.differs) {

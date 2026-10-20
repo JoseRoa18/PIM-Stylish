@@ -41,14 +41,20 @@ const fmtWhen = (iso) => {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-function VerdictChip({ verdict }) {
+// `detail` (the reason, who checked it and when) shows on hover and is read
+// by screen readers, so each link keeps one line.
+function VerdictChip({ verdict, detail }) {
   const v = WTB_VERDICTS[verdict] ?? { label: verdict, tone: 'muted' };
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold ${CHIP_TONE[v.tone]}`} title={v.hint ?? ''}>
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold whitespace-nowrap cursor-default ${CHIP_TONE[v.tone]}`} title={detail || v.hint || ''}>
       {v.label}
+      {detail && <span className="sr-only">. {detail}</span>}
     </span>
   );
 }
+
+const STORE_ORDER = new Map(WTB_RETAILERS.map((r, i) => [r.key, i]));
+const byStoreOrder = (a, b) => (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDER.get(b.retailer) ?? 99);
 
 function Cell({ links }) {
   if (!links?.length) return <span className="text-on-surface-variant/50">·</span>;
@@ -358,26 +364,43 @@ export default function WhereToBuyPanel() {
                       {open && (
                         <tr className="border-t border-outline-variant bg-surface-container-low/60">
                           <td colSpan={columns.length + 3} className="px-4 py-3">
-                            <ul className="space-y-1.5">
-                              {g.links.map((l) => (
-                                <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                  <VerdictChip verdict={l.verdict} />
-                                  <span className="text-on-surface font-semibold min-w-[9rem]">
-                                    {l.section === 'documents' ? `Document · ${l.label || 'file'}` : (WTB_RETAILERS.find((r) => r.key === l.retailer)?.label ?? l.host ?? l.retailer)}
-                                  </span>
-                                  {l.note && <span className="text-on-surface-variant">{l.note}</span>}
-                                  {l.checked_via && (l.verdict === 'ok' || l.verdict === 'broken') && (
-                                    <span className="text-on-surface-variant/80">checked by {WTB_VIA[l.checked_via] ?? l.checked_via} · {fmtWhen(l.checked_at)}</span>
-                                  )}
-                                  {l.url && (
-                                    <a href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline truncate max-w-[32rem]" title={l.url}>
-                                      <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
-                                      <span className="truncate">{l.url.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                                    </a>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
+                            <table className="w-full max-w-5xl table-fixed text-body-sm">
+                              <caption className="sr-only">Where to Buy links of {g.sku}</caption>
+                              <colgroup>
+                                <col className="w-[8.5rem]" />
+                                <col className="w-[12rem]" />
+                                <col />
+                                <col className="w-[14rem]" />
+                              </colgroup>
+                              <tbody className="divide-y divide-outline-variant/50">
+                                {[...g.links].sort(byStoreOrder).map((l) => {
+                                  const checked = l.checked_via && (l.verdict === 'ok' || l.verdict === 'broken');
+                                  const when = checked ? `${WTB_VIA[l.checked_via] ?? l.checked_via} · ${fmtWhen(l.checked_at)}` : '';
+                                  const detail = [l.verdict !== 'ok' ? l.note : null, when ? `Checked by ${when}` : null].filter(Boolean).join('\n');
+                                  return (
+                                    <tr key={l.id} className="h-9 align-middle">
+                                      <td className="pr-3"><VerdictChip verdict={l.verdict} detail={detail} /></td>
+                                      <th scope="row" className="pr-3 text-left font-semibold text-on-surface truncate">
+                                        {WTB_RETAILERS.find((r) => r.key === l.retailer)?.label ?? l.retailer}
+                                      </th>
+                                      <td className="pr-3">
+                                        {l.url ? (
+                                          <a href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 min-w-0 text-primary hover:underline" title={l.url}>
+                                            <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                                            <span className="truncate">{l.url.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                                          </a>
+                                        ) : (
+                                          <span className="text-on-surface-variant">No link yet</span>
+                                        )}
+                                      </td>
+                                      <td className="text-label-md text-on-surface-variant truncate" title={detail || undefined}>
+                                        {when || (l.verdict === 'pending' ? (l.note ? 'Trying again soon' : 'Waiting for its check') : '')}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                             <p className="mt-2 text-body-sm text-on-surface-variant">
                               Change the links in the product&apos;s <Link to={`/catalog/${encodeURIComponent(g.sku)}?tab=where_to_buy`} className="text-primary underline underline-offset-2">Where to Buy tab</Link> — the PIM writes both Stylish pages from it.
                             </p>
