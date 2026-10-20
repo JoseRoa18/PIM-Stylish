@@ -85,11 +85,12 @@ function readBestBuy(html, url) {
   let ids = models([product?.modelNumber, ld?.model, ld?.mpn]);
   if (!ids.length) ids = models([shownModel]);
   if (!ids.length) ids = models([modelAtEnd(product?.name ?? ld?.name)]);
-  // Options: the listing's other colour items, by the model that ends their name.
-  const options = models((product?.productVariants ?? []).flat()
-    .filter((v) => v && String(v.sku) !== String(product.sku))
-    .map((v) => modelAtEnd(v.name)))
+  // Options: the listing's other colour items, by the model that ends their name. Each is a Best Buy item
+  // of its own, opened by its Web Code.
+  const others = (product?.productVariants ?? []).flat().filter((v) => v?.sku && String(v.sku) !== String(product.sku));
+  const options = models(others.map((v) => modelAtEnd(v.name)))
     .filter((m) => !ids.some((id) => normSku(id) === normSku(m)));
+  const optionLinks = others.map((v) => ({ model: modelAtEnd(v.name), name: v.name ? decode(String(v.name)) : null, itemId: String(v.sku), url: `https://www.bestbuy.ca/en-ca/product/${v.sku}` }));
 
   const ldAvailability = String([].concat(ld?.offers ?? [])[0]?.availability ?? ''); // "OnlineOnly" says nothing on stock
   const inStock = stockOf(state?.product?.availability, product?.sku)
@@ -98,6 +99,7 @@ function readBestBuy(html, url) {
   return {
     ids,
     options,
+    optionLinks,
     price,
     wasPrice,
     currency: offer?.currency ?? 'CAD', // Best Buy Canada sells in CAD only

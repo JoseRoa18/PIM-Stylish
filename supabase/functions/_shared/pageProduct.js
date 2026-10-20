@@ -14,6 +14,14 @@
 //            discount taken in the cart, an open-box listing, a price shown only
 //            in the cart, a link that selects no option of the listing
 //   gone     the page is there but the store no longer sells the product
+//   optionLinks  the listing's OTHER options with the address that opens each
+//            ({ model, name, subSku, itemId, gtin, url }: KB Authority and the
+//            Shopify dealers by model, Wayfair and Home Depot Canada by name and
+//            id, BB&B / Overstock by sub-SKU, Best Buy / Walmart / Amazon each
+//            option an item of its own) — to suggest the link that opens the
+//            right product when a link opens another option
+//   subSku   BB&B / Overstock: the sub-SKU of the option shown ("…-000-001")
+//   canonical the page's own address of its product
 // null = no product data on the page (not found, bot check, home, brand,
 // category or search page).
 // Each store family has its reader in ./pageReaders, written and tested on the
@@ -24,7 +32,7 @@
 //
 // skuCheck(read, sku, catalog) says whether that product is the link's SKU.
 
-import { jsonLdProducts, jsonLdOffer, jsonLdIds, meta, money, normSku, uniq } from "./pageReaders/common.js";
+import { jsonLdProducts, jsonLdOffer, jsonLdIds, meta, money, normSku, uniq, canonicalOf } from "./pageReaders/common.js";
 import { readers as wayfair } from "./pageReaders/wayfair.js";
 import { readers as homeDepot } from "./pageReaders/homeDepot.js";
 import { readers as bestBuy } from "./pageReaders/bestBuy.js";
@@ -62,8 +70,9 @@ function readGeneric(html) {
 // ---------------------------------------------------------------- menards
 // Menards is read through Bright Data's Menards scraper: its record already
 // carries the product's data (title, brand, mpn = our SKU, price, sale_price,
-// availability, gtin, item_id).
-export function menardsRead(rec) {
+// availability, gtin, item_id). The scraper also returns a record for each
+// other finish of the product (`siblings`): the listing's options.
+export function menardsRead(rec, siblings = []) {
   if (!rec || rec.error) return null;
   const sale = money(rec.sale_price);
   const regular = money(rec.price);
@@ -75,6 +84,9 @@ export function menardsRead(rec) {
     currency: String(rec.currency ?? "USD").toUpperCase(),
     inStock: rec.availability ? /IN_STOCK|InStock|in stock/i.test(String(rec.availability)) : null,
     itemId: rec.item_id ? String(rec.item_id) : null,
+    options: siblings.filter((s) => s && !s.error).map((s) => s.mpn),
+    optionLinks: siblings.filter((s) => s && !s.error && s.url).map((s) => ({ model: s.mpn ?? null, name: s.title ?? null, itemId: s.item_id ?? null, gtin: s.gtin ?? null, url: s.url })),
+    canonical: rec.url ?? null,
     source: "menards-scraper",
   });
 }
@@ -103,6 +115,9 @@ function clean(read) {
     gtins, price, wasPrice, currency,
     inStock: typeof read.inStock === "boolean" ? read.inStock : null,
     itemId: read.itemId ? String(read.itemId).slice(0, 40) : null,
+    subSku: read.subSku ? String(read.subSku).slice(0, 40) : null,
+    optionLinks: optionLinksOf(read.optionLinks),
+    canonical: /^https?:\/\//i.test(String(read.canonical ?? "")) ? String(read.canonical).slice(0, 500) : null,
     source: read.source ? String(read.source).slice(0, 120) : null,
     optionDefaulted: read.optionDefaulted === true,
     gone,
@@ -110,11 +125,28 @@ function clean(read) {
   };
 }
 
+// The listing's other options with their own address (see common.js), kept
+// small: at most 30, each field cut short, only web addresses.
+const short = (v, n) => (v === null || v === undefined || v === "" ? null : String(v).slice(0, n));
+function optionLinksOf(list) {
+  const out = [];
+  for (const o of Array.isArray(list) ? list : []) {
+    const url = short(o?.url, 500);
+    if (!url || !/^https?:\/\//i.test(url) || out.some((x) => x.url === url)) continue;
+    out.push({ model: short(o.model, 40), name: short(o.name, 120), subSku: short(o.subSku, 40), itemId: short(o.itemId, 40), gtin: short(o.gtin, 20), url });
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
 export function readProductPage(html, retailer, url) {
   if (!html) return null;
   try {
     const own = READERS[retailer];
-    return clean(own ? own(html, url ?? "") : readGeneric(html));
+    const read = own ? own(html, url ?? "") : readGeneric(html);
+    // The page's own address of its product (for a link found by an id: the
+    // store's full address of it).
+    return clean(read ? { canonical: canonicalOf(html), ...read } : read);
   } catch {
     return null; // a page the reader does not understand reads as nothing
   }

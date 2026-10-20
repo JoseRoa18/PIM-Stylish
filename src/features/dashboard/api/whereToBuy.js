@@ -63,6 +63,26 @@ export async function checkWhereToBuy({ onProgress, maxCalls = 10 } = {}) {
   return { checked: total, done: false };
 }
 
+/**
+ * The suggested links ready to use (found and opened by the audit's "suggest"
+ * mode: their page shows the product) and how many are still being checked.
+ */
+export async function loadWhereToBuySuggestions() {
+  const [{ data, error }, { count, error: e2 }] = await Promise.all([
+    supabase
+      .from('where_to_buy_suggestions')
+      .select('id, sku, retailer, url, reason, source, detail, current_url, status, status_note, page_model, price, currency, in_stock, checked_at')
+      .eq('status', 'ready')
+      .order('sku')
+      .order('retailer')
+      .limit(1000),
+    supabase.from('where_to_buy_suggestions').select('id', { count: 'exact', head: true }).eq('status', 'to_check'),
+  ]);
+  if (error) throw error;
+  if (e2) throw e2;
+  return { ready: data ?? [], checking: count ?? 0 };
+}
+
 /** { due, scannedAt, differs: { [site]: skus whose live section is not the PIM's list } } */
 export async function whereToBuyStatus() {
   return invoke({ mode: 'status' });

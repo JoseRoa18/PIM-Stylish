@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AlertCircle, Check, ChevronDown, Copy, ExternalLink, RefreshCw, Search, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy, whereToBuyStatus, republishWhereToBuy } from '@/features/dashboard/api/whereToBuy';
+import WhereToBuySuggestions from './WhereToBuySuggestions';
 import {
   WTB_SITES,
   WTB_RETAILERS,
@@ -22,7 +23,9 @@ import {
 // when its page shows another product (2026-10-20). Expanding a row lists
 // every link with the reason, who checked it and what the page showed (its
 // model and price). The portals a page does not link are a KPI of their own
-// ("Links to add"), not a problem.
+// ("Links to add"), not a problem. "Suggested links" lists the right
+// addresses the PIM found and opened for wrong, broken and missing links;
+// "Use" saves one into the product's list and publishes its pages.
 
 const TONE = {
   ok: 'bg-success',
@@ -111,6 +114,7 @@ export default function WhereToBuyPanel() {
 
   const summary = useMemo(() => summarizeWhereToBuy(rows), [rows]);
   const groups = useMemo(() => groupWhereToBuy(rows), [rows]);
+  const siteSkus = useMemo(() => new Set(rows.map((r) => r.sku)), [rows]);
   const toAddList = useMemo(() => linksToAdd(rows), [rows]);
   // Only retailers present on this site get a column.
   const columns = useMemo(() => {
@@ -289,6 +293,8 @@ export default function WhereToBuyPanel() {
           {copied && <p role="status" className="sr-only">SKUs copied</p>}
         </div>
       )}
+
+      {rows.length > 0 && <WhereToBuySuggestions skus={siteSkus} onApplied={() => reload()} />}
 
       {error && (
         <div role="alert" className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ExternalLink, Loader2, Upload } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, ExternalLink, Lightbulb, Loader2, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
-import { loadProductWhereToBuy, saveProductWhereToBuy, publishWhereToBuy } from '../api/whereToBuy';
+import { loadProductWhereToBuy, saveProductWhereToBuy, publishWhereToBuy, dismissWhereToBuySuggestion } from '../api/whereToBuy';
 import { WTB_MARKETS, WTB_RETAILERS, wtbUrlProblem, cleanWtbUrl } from '../lib/whereToBuy';
 import { PAGE_STORE_KEYS, readingCounts } from '@/features/pricing/lib/pageStores';
 
@@ -10,7 +10,10 @@ import { PAGE_STORE_KEYS, readingCounts } from '@/features/pricing/lib/pageStore
 // the WHERE TO BUY section of both Stylish pages (Canada and USA) from it.
 // Each row shows what the Listing Health check last found on that address —
 // and what the page showed: its product's model (a link that opens another
-// product says so) and its price (2026-10-20).
+// product says so) and its price (2026-10-20). Under a link that opens the
+// wrong product, a broken one or a missing one, the PIM may suggest the right
+// address — found and opened by the audit, its page shows this product. "Use"
+// puts it in the field; nothing changes until "Save and publish".
 
 const inputCls = 'w-full px-3 py-1.5 rounded-lg border bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
@@ -37,6 +40,12 @@ const PUBLISH_TEXT = {
 };
 const VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperapi: 'ScraperAPI', price2spy: 'Price2Spy' };
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+const shortUrl = (u) => String(u ?? '').replace(/^https?:\/\/(www\.)?/, '');
+const SUGGESTION_WHY = {
+  wrong_link: 'The current link opens another product',
+  broken_link: 'The current link does not open',
+  missing: 'No link to this store yet',
+};
 
 export default function WhereToBuyTab({ product }) {
   const { canEdit } = useAuth();
@@ -46,11 +55,12 @@ export default function WhereToBuyTab({ product }) {
   const [busy, setBusy] = useState(null); // 'save' | 'publish'
   const [result, setResult] = useState(null);
 
-  async function reload() {
+  // `keepDraft`: the fields keep what the person typed (after a dismiss).
+  async function reload({ keepDraft = false } = {}) {
     try {
       const d = await loadProductWhereToBuy(product);
       setData(d);
-      setDraft(d.links);
+      if (!keepDraft) setDraft(d.links);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -63,14 +73,28 @@ export default function WhereToBuyTab({ product }) {
   ), [draft]);
   const dirty = data && WTB_RETAILERS.some((r) => (draft[r.key]?.trim() ? cleanWtbUrl(draft[r.key]) : '') !== (data.links[r.key] ?? ''));
   const count = data ? Object.keys(data.links).length : 0;
+  // The stores whose field holds a suggested address (kept as the link's source).
+  const suggestedNow = data ? Object.entries(data.suggestions ?? {}).filter(([k, list]) => list.some((s) => s.url === draft[k])).map(([k]) => k) : [];
 
   async function handleSave() {
     setBusy('save');
     setResult(null);
     try {
-      const r = await saveProductWhereToBuy(product, draft, data.links);
+      const r = await saveProductWhereToBuy(product, draft, data.links, { suggested: suggestedNow });
       setResult(r.published);
       await reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function handleDismiss(suggestion) {
+    setBusy(`dismiss-${suggestion.id}`);
+    try {
+      await dismissWhereToBuySuggestion(suggestion);
+      setDraft((d) => (d[suggestion.retailer] === suggestion.url ? { ...d, [suggestion.retailer]: data.links[suggestion.retailer] ?? '' } : d));
+      await reload({ keepDraft: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -195,8 +219,13 @@ export default function WhereToBuyTab({ product }) {
                         price ? `Price on the page: ${price}${check.was_price != null ? ` (was ${check.currency === 'USD' ? '$' : 'C$'}${Number(check.was_price).toFixed(2)})` : ''}${check.in_stock === false ? ', sold out' : ''} · read ${fmt(check.read_at)}${PAGE_STORE_KEYS.has(r.key) ? ' — Pricing → Price Alignment compares it with the MAP' : ''}` : null,
                         check?.verdict === 'broken' ? 'Not shown on the Stylish websites until it works again (fix the link or wait for the next check).' : null,
                       ].filter(Boolean).join('\n') : '';
+                      // The PIM's suggestion for this store (the newest checked one),
+                      // unless it is already the saved link.
+                      const suggestion = (data.suggestions?.[r.key] ?? []).find((s) => s.url !== saved) ?? null;
+                      const using = suggestion && draft[r.key] === suggestion.url;
                       return (
-                        <tr key={r.key} className="h-12 align-middle">
+                        <Fragment key={r.key}>
+                        <tr className="h-12 align-middle">
                           <th scope="row" className="pr-3 text-left font-semibold text-on-surface">
                             <label htmlFor={id} className="block truncate" title={r.label}>{r.label}</label>
                           </th>
@@ -239,6 +268,59 @@ export default function WhereToBuyTab({ product }) {
                             )}
                           </td>
                         </tr>
+                        {suggestion && (
+                          <tr className="border-t-0!">
+                            <td colSpan={4} className="pb-2">
+                              <div className={`sm:ml-[9.5rem] rounded-lg px-3 py-2 text-label-md flex flex-wrap items-center gap-x-3 gap-y-1 ${using ? 'bg-success-container/60 text-on-success-container' : 'bg-surface-container text-on-surface'}`}>
+                                <Lightbulb className={`w-3.5 h-3.5 flex-shrink-0 ${using ? '' : 'text-primary'}`} aria-hidden="true" />
+                                <span className="font-semibold whitespace-nowrap">{using ? 'Suggested link in the field' : 'Suggested link'}</span>
+                                <a
+                                  href={suggestion.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={`min-w-0 max-w-full truncate underline underline-offset-2 ${using ? '' : 'text-primary'}`}
+                                  title={[suggestion.url, SUGGESTION_WHY[suggestion.reason], suggestion.detail, suggestion.status_note, suggestion.checked_at ? `Opened ${fmt(suggestion.checked_at)}` : null].filter(Boolean).join('\n')}
+                                >
+                                  {shortUrl(suggestion.url)}
+                                </a>
+                                <span className="whitespace-nowrap">
+                                  shows {suggestion.page_model ?? product.sku}{suggestion.price != null ? ` · ${priceText(suggestion)}` : ''}{suggestion.in_stock === false ? ' · sold out' : ''}
+                                </span>
+                                {canEdit && (
+                                  <span className="ml-auto flex items-center gap-1">
+                                    {using ? (
+                                      <>
+                                        <span className="whitespace-nowrap">Press Save and publish to use it</span>
+                                        <button type="button" onClick={() => setDraft((d) => ({ ...d, [r.key]: saved }))} className="px-2 py-0.5 rounded-md font-semibold hover:bg-surface/60">Undo</button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => setDraft((d) => ({ ...d, [r.key]: suggestion.url }))}
+                                          aria-label={`Use the suggested ${r.label} link`}
+                                          className="px-2.5 py-0.5 rounded-md bg-primary text-on-primary font-semibold hover:bg-primary/90"
+                                        >
+                                          Use
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDismiss(suggestion)}
+                                          disabled={busy != null}
+                                          aria-label={`Dismiss the suggested ${r.label} link`}
+                                          className="px-2 py-0.5 rounded-md font-semibold hover:bg-surface/60 disabled:opacity-40"
+                                        >
+                                          Dismiss
+                                        </button>
+                                      </>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -250,7 +332,7 @@ export default function WhereToBuyTab({ product }) {
       )}
       {data && (
         <p className="px-6 sm:px-8 pb-5 -mt-2 text-label-md text-on-surface-variant">
-          Point at a status to see when and how the link was checked, why it is not OK and which product the page shows; the price under it is the one the page showed at that check. Only the stores with a working link show on the websites.
+          Point at a status to see when and how the link was checked, why it is not OK and which product the page shows; the price under it is the one the page showed at that check. Only the stores with a working link show on the websites. A suggested link was found and opened by the PIM: its page shows this product.
         </p>
       )}
       {data?.sites.some((s) => !s.linked) && (

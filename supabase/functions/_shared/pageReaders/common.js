@@ -13,6 +13,9 @@
 //     inStock:  boolean|null
 //     itemId:   string|null  the store's own id of the product (Home Depot internet #, Lowe's item #,
 //                            Rona article #, Beyond product id, ASIN…)
+//     optionLinks: [{ model, name, subSku, itemId, url }]  the listing's OTHER options with the
+//                            address that opens each one, when the page gives it (to suggest the
+//                            right link when a link opens another option)
 //     source:   string    which part of the page the reading came from ("jsonld", "next-data"…)
 //   }
 // or null when the page carries no product data (bot page, error page, home page).
@@ -132,6 +135,28 @@ export function scriptJson(html, id) {
 
 // Unique, trimmed, non-empty strings in their first order.
 export const uniq = (list) => [...new Set((list ?? []).map((x) => String(x ?? '').trim()).filter(Boolean))];
+
+// The address with one query parameter set (Shopify ?variant=, BB&B /
+// Overstock ?option=) — the link to another option of the listing.
+export function withParam(url, key, value) {
+  try {
+    const u = new URL(String(url));
+    u.searchParams.set(key, String(value));
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+
+// An address of the page made absolute ("/en/ip/…" on walmart.ca), or null.
+export function absUrl(href, base) {
+  if (!href) return null;
+  try { return new URL(String(href), String(base)).href; } catch { return null; }
+}
+
+// The page's canonical address, when it names one.
+export const canonicalOf = (html) => decode(String(html).match(/<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)/i)?.[1]
+  ?? String(html).match(/<link[^>]+href=["']([^"']+)["'][^>]*rel=["']canonical["']/i)?.[1] ?? '') || null;
 
 // Currency from a market when the page does not say it.
 export const currencyOfMarket = (market) => (market === 'ca' ? 'CAD' : market === 'us' ? 'USD' : null);

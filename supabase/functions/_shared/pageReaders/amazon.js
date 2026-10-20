@@ -114,8 +114,14 @@ function readAmazon(html, url) {
   const foreignExit = !deliverTo || !market ? null
     : market === 'us' ? !/\b\d{5}\b|United States|USA/i.test(deliverTo) : !/\b[A-Z]\d[A-Z]\b|Canada/i.test(deliverTo);
 
+  // Each option is an ASIN of its own: amazon.<market>/dp/<ASIN>, named by its twister labels.
+  const site = market === 'ca' ? 'https://www.amazon.ca' : market === 'us' ? 'https://www.amazon.com' : null;
+  const optionLinks = site ? others.filter(([asin]) => /^[A-Z0-9]{10}$/.test(asin)).map(([asin, labels]) => {
+    const names = [].concat(labels).map((l) => String(l).trim()).filter(Boolean);
+    return { model: names.find((l) => MODEL_LIKE.test(l)) ?? null, name: names.join(' / ') || null, itemId: asin, url: `${site}/dp/${asin}` };
+  }) : [];
   return {
-    ids, options, price: core?.amount ?? null, wasPrice: core?.was ?? null, currency: core ? currencyOf(core.text, cartCode, market) : null,
+    ids, options, optionLinks, price: core?.amount ?? null, wasPrice: core?.was ?? null, currency: core ? currencyOf(core.text, cartCode, market) : null,
     inStock, itemId, source: ['details', core && `price:${core.block}`].filter(Boolean).join('+'),
     // Extra fields (not in the PageRead contract): the other options' ASINs, coupon, buy box seller, delivery place.
     optionItemIds: others.map(([asin]) => asin), coupon, seller, deliverTo, foreignExit,

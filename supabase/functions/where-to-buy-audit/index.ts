@@ -38,6 +38,13 @@
 //                parses it here: the Gmail Apps Script posts the daily
 //                Price2Spy attachments this way, authenticated with the
 //                P2S_INBOUND_SECRET header (x-p2s-secret).
+// mode "suggest" — the right link, suggested (user, 2026-10-20): for a link
+//                that opens another option or product, a broken link, or a
+//                store a product has no link to yet, looks for the product's
+//                own page at that store (another link that opens it, an
+//                option a page lists, an id the PIM keeps) and opens each
+//                candidate before it is shown (where_to_buy_suggestions).
+//                Cron every 10 minutes; the candidates are looked for hourly.
 // mode "status"— count of rows due for a probe.
 //
 // Verdicts (user rules 2026-09-15 and 2026-10-19 — the list says OK or Broken):
@@ -68,6 +75,7 @@
 import { resolveWixSite } from "../_shared/wixSites.ts";
 import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, withWhereToBuySection } from "../_shared/whereToBuy.js";
 import { readProductPage, menardsRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
+import { normSku } from "../_shared/pageReaders/common.js";
 import { PAGE_STORES } from "../_shared/pageStores.js";
 import { etToday, periodOfDay, prevPeriod, promoWindow, shiftDay, PROMO_DATE_COLUMNS, type Market } from "../_shared/promoCalendar.ts";
 
@@ -228,8 +236,9 @@ const skuOf = (p: WixProduct) => (p.sku?.trim() || p.variants?.[0]?.variant?.sku
 interface Reading {
   page_model: string | null; page_item_id: string | null; sku_check: string | null; page_note: string | null;
   price: number | null; was_price: number | null; currency: string | null; in_stock: boolean | null; read_at: string | null;
+  page_options: OptionLink[] | null;
 }
-const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null };
+const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null, page_options: null };
 interface Row extends Reading {
   site: string; sku: string; wix_product_id: string | null; section: string; market: string | null;
   retailer: string; label: string | null; url: string | null; host: string | null;
@@ -241,7 +250,7 @@ interface Row extends Reading {
 }
 // The checker's state on a link, carried over by URL when a scan rebuilds the rows.
 type LinkState = Pick<Row, "verdict" | "http_status" | "final_url" | "note" | "checked_at" | "next_check_at" | "checked_via" | "fail_count" | "signal_count" | "signal_at" | "job_id" | "job_at" | keyof Reading>;
-const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,signal_at,job_id,job_at,page_model,page_item_id,sku_check,page_note,price,was_price,currency,in_stock,read_at";
+const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,signal_at,job_id,job_at,page_model,page_item_id,sku_check,page_note,price,was_price,currency,in_stock,read_at,page_options";
 type Base = { site: string; sku: string; wix_product_id: string | null; scanned_at: string };
 type Link = { retailer: string; url: string };
 interface PimLinks { skus: Set<string>; brands: Map<string, string>; links: Map<string, Link[]> }
@@ -495,6 +504,8 @@ async function syncSkus(skus: string[]) {
     const differs = Object.fromEntries(Object.entries(state.differs).map(([k, v]) => [k, v.filter((s) => !skus.includes(s))]));
     await writeScanState({ ...state, differs });
   }
+  // A suggestion whose address is now the product's link was used.
+  await settleSuggestions(skus, pim);
   return out;
 }
 
@@ -733,9 +744,11 @@ async function refreshSinksDirect(pim: PimLinks, now: string) {
 //   later        not tried: the call ran out of time
 type Kind = "ok" | "broken" | "soft" | "none" | "waiting" | "submitted" | "later";
 // What an OK page says about its product (pageProduct.js).
+interface OptionLink { model: string | null; name: string | null; subSku: string | null; itemId: string | null; gtin: string | null; url: string }
 interface PageRead {
   ids: string[]; options: string[]; gtins: string[]; price: number | null; wasPrice: number | null; currency: string | null;
   inStock: boolean | null; itemId: string | null; source: string | null; optionDefaulted: boolean; gone: boolean; note: string | null;
+  subSku: string | null; optionLinks: OptionLink[]; canonical: string | null;
 }
 interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string }
 
@@ -882,6 +895,20 @@ const MENARDS_DATASET = "gd_motp6b7s1n9zlq6lwj";
 const MENARDS_BATCH = 300;
 const MENARDS_GIVEUP_HOURS = 3;
 
+// The record of the address itself among the ones the scraper returned for
+// it: the same page (address without its query), else the same Menards id
+// (".../p-1642874277884313-c-8509.htm"), else the first one (the scraper
+// lists the page's own product first).
+const menardsPath = (u: unknown) => String(u ?? "").split(/[?#]/)[0].toLowerCase().replace(/\/+$/, "");
+const menardsId = (u: unknown) => String(u ?? "").match(/\/p-(\d{6,})(?:-c-|\.htm)/i)?.[1] ?? null;
+function menardsOwnRecord(recs: Array<Record<string, unknown>>, url: string): Record<string, unknown> | null {
+  if (!recs.length) return null;
+  const id = menardsId(url);
+  return recs.find((r) => r.url && menardsPath(r.url) === menardsPath(url))
+    ?? (id ? recs.find((r) => String(r.item_id ?? "") === id || menardsId(r.url) === id) : undefined)
+    ?? recs[0];
+}
+
 async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Outcome }>> {
   const out: Array<{ row: DueRow; o: Outcome }> = [];
   if (!leads.length) return out;
@@ -900,17 +927,24 @@ async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Ou
       }
       const s = await fetch(`https://api.brightdata.com/datasets/v3/snapshot/${encodeURIComponent(job)}?format=json`, { headers: auth, signal: AbortSignal.timeout(60000) });
       const records = s.ok ? await s.json().catch(() => []) : [];
-      const byUrl = new Map<string, Record<string, unknown>>();
+      // The scraper returns, for each address, one record per finish of the
+      // product — the page's own and its siblings', all under the same input
+      // (K-142N's link also brings K-142S's record). Taking the last one gave
+      // the K-142N link K-142S's model and price (2026-10-20).
+      const byInput = new Map<string, Array<Record<string, unknown>>>();
       for (const rec of Array.isArray(records) ? records : []) {
         const u = (rec?.input as { url?: string } | undefined)?.url ?? (rec?.url as string | undefined);
-        if (u) byUrl.set(u, rec);
+        if (!u) continue;
+        if (!byInput.has(u)) byInput.set(u, []);
+        byInput.get(u)!.push(rec);
       }
       for (const row of rows) {
-        const rec = byUrl.get(row.url) ?? byUrl.get(row.url.replace(/ /g, "%20"));
+        const recs = byInput.get(row.url) ?? byInput.get(row.url.replace(/ /g, "%20")) ?? [];
+        const rec = menardsOwnRecord(recs, row.url);
         if (!rec) out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper returned nothing for it" } });
         else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "broken", via: "menards", status: 404, note: "Menards: the product page is gone (404)" } });
         else if (rec.error) out.push({ row, o: { kind: "none", via: "menards", note: `Menards scraper: ${String(rec.error).slice(0, 80)}` } });
-        else if (rec.title) out.push({ row, o: { kind: "ok", via: "menards", status: 200, page: menardsRead(rec) } });
+        else if (rec.title) out.push({ row, o: { kind: "ok", via: "menards", status: 200, page: menardsRead(rec, recs.filter((x) => x !== rec)) } });
         else out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper read no product" } });
       }
     } catch (e) {
@@ -1068,7 +1102,10 @@ async function unreadableStores(answers: Array<{ row: DueRow; o: Outcome }>): Pr
 function readingFor(o: Judged, now: string): Partial<Reading> {
   if (o.page === undefined) return o.kind === "broken" ? NO_READING : {};
   if (!o.page) return o.priceBlind ? {} : { ...NO_READING, read_at: now };
-  const model = { page_model: o.check?.model ?? o.page.ids[0] ?? null, page_item_id: o.page.itemId, sku_check: o.check?.check ?? null, page_note: o.page.note };
+  const model = {
+    page_model: o.check?.model ?? o.page.ids[0] ?? null, page_item_id: o.page.itemId, sku_check: o.check?.check ?? null, page_note: o.page.note,
+    page_options: o.page.optionLinks?.length ? o.page.optionLinks : null,
+  };
   if (o.priceBlind) return model; // the last price read stays as it was
   return { ...model, price: o.page.price, was_price: o.page.wasPrice, currency: o.page.currency, in_stock: o.page.inStock, read_at: now };
 }
@@ -1300,6 +1337,437 @@ async function promoReread(opts: { asOf?: string; dryRun?: boolean } = {}) {
   }
   if (changes.length && !opts.dryRun) console.log(`[where-to-buy] promotion day ${today}: ${changes.join("; ")}`);
   return { day: today, dryRun: Boolean(opts.dryRun), changes, stores, rows: Object.values(stores).reduce((a, s) => a + s.rows, 0) };
+}
+
+// ---------------------------------------------------------------- suggestions
+// The right link, suggested (user, 2026-10-20: "1 hazlo" / "2 hazlo"). For a
+// link that opens another option or product, a broken link, or a store a
+// product has no link to yet, the audit looks for the product's own page at
+// that store in what it already knows (the sources are described in the
+// where_to_buy_suggestions migration) and OPENS each candidate before it is
+// shown: a suggestion is "ready" only when its page shows the product's own
+// SKU or its own store id. Using one is a person's click ("Use" — the
+// product's list is saved and published as usual); a dismissed one never
+// comes back. Mode "suggest" (cron every 10 minutes): the candidates are
+// looked for once an hour, the waiting ones opened on every call.
+type SuggestReason = "wrong_link" | "broken_link" | "missing";
+type SuggestSource = "other_link" | "page_option" | "store_id";
+interface Suggestion {
+  id?: string; sku: string; retailer: string; url: string; found_url: string | null; reason: SuggestReason; source: SuggestSource;
+  detail: string | null; current_url: string | null; status: string; status_note: string | null; hops: number; attempts: number;
+  page_model: string | null; price: number | null; currency: string | null; in_stock: boolean | null;
+  checked_at: string | null; next_check_at: string | null; decided_at?: string | null; updated_at?: string;
+}
+// Sinks Direct links follow the stores themselves, Faucetline is checked by
+// hand, an eBay listing is one seller's offer of the day.
+const SUGGEST_SKIP = new Set(["sinksdirect_ca", "sinksdirect_us", "faucetline", "ebay"]);
+const SUGGEST_FRESH_MS = 14 * 86400e3; // readings used to find candidates
+const SUGGEST_BUILD_MS = 55 * 60e3;    // candidates are looked for once an hour
+// Per call: the stores the server opens itself (fast, free) and the ones
+// opened through an unlocker (up to a minute a page) go in pools of their own,
+// so the slow ones never hold the fast ones back.
+const SUGGEST_DIRECT = { max: 40, lanes: 2 };
+const SUGGEST_UNLOCKER = { max: 18, lanes: 6 };
+const SUGGEST_MAX_ATTEMPTS = 6;        // opens without an answer before it fails
+const SUGGEST_RETRY_HOURS = 6;         // × the attempts so far: 6 h, 12 h, … (BB&B / Overstock turn many away)
+const SUGGEST_RECHECK_DAYS = 7;        // a ready suggestion is opened again after a week
+const SUGGEST_FAILED_DAYS = 14;        // a failed candidate is tried again after two weeks
+const SUGGEST_KEY = "where_to_buy_suggest";
+const SUGGEST_COLUMNS = "id,sku,retailer,url,found_url,reason,source,detail,current_url,status,status_note,hops,attempts,page_model,price,currency,in_stock,checked_at,next_check_at,decided_at";
+
+// The stores' own ids of the products, as the PIM keeps them — a key that
+// opens the product page (Best Buy, Home Depot USA, BB&B / Overstock) or
+// confirms which product a page shows (Home Depot Canada item #, Amazon.ca
+// ASIN, BB&B / Overstock sub-SKU). Best Buy's comes from its offers API (the
+// latest snapshot), only for an active offer. Rona's article # and Lowe's
+// item # need a slug or a search to open (Rona answers 404 to the bare
+// number, Lowe's search a captcha — 2026-10-20): they only confirm.
+const ALIAS_STORES: Record<string, string[]> = {
+  "BB&B / Overstock": ["bbb_us", "overstock_us"], "Home Depot CA": ["homedepot_ca"], "Home Depot US": ["homedepot_us"], Rona: ["rona"], "Lowe's US": ["lowes_us"],
+};
+interface StoreIds { bySku: Map<string, Map<string, string>>; owner: Map<string, Map<string, string>> } // retailer → sku → id / id → sku
+async function loadStoreIds(): Promise<StoreIds> {
+  const ids: StoreIds = { bySku: new Map(), owner: new Map() };
+  const put = (retailer: string, sku: string, id: string | null | undefined) => {
+    const v = String(id ?? "").trim();
+    if (!v) return;
+    if (!ids.bySku.has(retailer)) { ids.bySku.set(retailer, new Map()); ids.owner.set(retailer, new Map()); }
+    if (!ids.bySku.get(retailer)!.has(sku)) ids.bySku.get(retailer)!.set(sku, v);
+    // An id two products share names neither.
+    const owner = ids.owner.get(retailer)!;
+    owner.set(v, owner.has(v) && owner.get(v) !== sku ? "" : sku);
+  };
+  for (const a of await restAll<{ sku: string; marketplace: string; alias: string }>(`product_aliases?select=sku,marketplace,alias&marketplace=${encodeURIComponent(inList(Object.keys(ALIAS_STORES)))}`)) {
+    for (const retailer of ALIAS_STORES[a.marketplace] ?? []) put(retailer, a.sku, a.alias);
+  }
+  for (const l of await restAll<{ sku: string; asin: string }>("amazon_links?select=sku,asin&marketplace=eq.ca&asin=not.is.null")) put("amazon_ca", l.sku, l.asin);
+  const snap = await rest<Array<{ results: Array<{ sku?: string; bb_product_id?: string | null; active?: boolean }> | null }>>("channel_health?select=results&channel=eq.bestbuy&order=run_at.desc&limit=1");
+  for (const o of snap[0]?.results ?? []) if (o?.sku && o.bb_product_id && o.active === true) put("bestbuy_ca", o.sku, o.bb_product_id);
+  return ids;
+}
+const idOwner = (ids: StoreIds, retailer: string, id: string | null | undefined) => (id ? ids.owner.get(retailer)?.get(String(id)) || null : null);
+
+// The address a store opens a product at from its id alone (tried on
+// 2026-10-20: Best Buy and Home Depot USA by number; BB&B and Overstock need
+// /<product id>/product.html with a path before it on Overstock — the
+// category and slug can be anything; the option is chosen on the opened page).
+function idAddress(retailer: string, id: string): string | null {
+  const pid = id.split("-")[0];
+  if (retailer === "bestbuy_ca" && /^\d{6,10}$/.test(id)) return `https://www.bestbuy.ca/en-ca/product/${id}`;
+  if (retailer === "homedepot_us" && /^\d{6,12}$/.test(id)) return `https://www.homedepot.com/p/${id}`;
+  if (retailer === "bbb_us" && /^\d{6,10}$/.test(pid)) return `https://www.bedbathandbeyond.com/${pid}/product.html`;
+  if (retailer === "overstock_us" && /^\d{6,10}$/.test(pid)) return `https://www.overstock.com/Home-Garden/x/${pid}/product.html`;
+  return null;
+}
+
+// Query parameters that choose the product on a store page; every other one
+// (tracking: refccid, searchidx, redir, rtype, tid…) is left out of a suggestion.
+const KEEP_PARAMS = new Set(["piid", "variant", "option"]);
+function cleanSuggestionUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const x = new URL(asUri(u));
+    if (!/^https?:$/.test(x.protocol)) return null;
+    for (const k of [...x.searchParams.keys()]) if (!KEEP_PARAMS.has(k.toLowerCase())) x.searchParams.delete(k);
+    x.hash = "";
+    return x.href;
+  } catch { return null; }
+}
+// Same page? (www, a trailing slash, tracking parameters and the encoding aside.)
+const samePage = (a: string | null | undefined, b: string | null | undefined) => {
+  const k = (u: string | null | undefined) => cleanSuggestionUrl(u)?.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/(?=\?|$)/, "").toLowerCase() ?? "";
+  return Boolean(a && b) && k(a) === k(b);
+};
+
+// Words of a finish / colour name, in English: "Finition : Noir mat" and
+// "Finish: Matte Black" give the same words. The option's own label
+// ("Finish:", "Actual Color:") is left out.
+const FR_WORDS: Record<string, string> = {
+  noir: "black", mat: "matte", brosse: "brushed", poli: "polished", or: "gold", dore: "gold", blanc: "white", gris: "gray", grey: "gray",
+  argent: "silver", argente: "silver", acier: "steel", inoxydable: "stainless", inox: "stainless", rouge: "red", fonce: "dark", clair: "light",
+  cuivre: "copper", bronze: "bronze", graphite: "graphite", nickel: "nickel", chrome: "chrome", chrom: "chrome",
+};
+const NOT_COLOR = new Set(["with", "and", "et", "avec", "de", "du", "finish", "finition", "color", "colour", "couleur", "the", "a", "in", "en"]);
+const colorWords = (s: string | null | undefined) => new Set(String(s ?? "")
+  .replace(/(^|·)\s*[^:·]{1,30}:\s*/g, " ")
+  .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+  .split(/[^a-z]+/).map((w) => FR_WORDS[w] ?? w).filter((w) => w.length > 1 && !NOT_COLOR.has(w)));
+// The options of a listing that best fit the product's colour and finish
+// (Wayfair and Amazon name their options, never by model): the best one, or
+// the two best when they tie — each is opened before it is suggested.
+function optionsByName(options: OptionLink[], product: { color: string | null; finish: string | null; finish_type: string | null }): OptionLink[] {
+  const want = colorWords([product.color, product.finish, product.finish_type].filter(Boolean).join(" "));
+  if (!want.size) return [];
+  const scored = options.map((o) => {
+    const words = colorWords(o.name);
+    const hits = [...words].filter((w) => want.has(w)).length;
+    return { o, score: words.size ? hits / words.size : 0, hits };
+  }).filter((x) => x.hits > 0 && x.score >= 0.5).sort((a, b) => b.score - a.score || b.hits - a.hits);
+  if (!scored.length) return [];
+  return scored.filter((x) => x.score === scored[0].score && x.hits === scored[0].hits).slice(0, 2).map((x) => x.o);
+}
+
+// The PIM product an option of a page is: by its model (the exact spelling
+// between a Stylish SKU and its Azuni twin), its store id, or its UPC.
+interface SuggestCtx { bySku: Map<string, string[]>; byUpc: Map<string, string>; ids: StoreIds }
+const upcDigits = (v: string | null | undefined) => String(v ?? "").replace(/\D/g, "").replace(/^0+/, "");
+function optionOwner(o: OptionLink, retailer: string, ctx: SuggestCtx): { sku: string; how: string } | null {
+  if (o.model) {
+    const skus = ctx.bySku.get(normSku(o.model)) ?? [];
+    const exact = skus.find((s) => s.toUpperCase().replace(/\s+/g, "") === o.model!.toUpperCase().replace(/\s+/g, ""));
+    if (exact || skus.length === 1) return { sku: exact ?? skus[0], how: `model ${o.model}` };
+  }
+  const byId = idOwner(ctx.ids, retailer, o.subSku) ?? idOwner(ctx.ids, retailer, o.itemId);
+  if (byId) return { sku: byId, how: o.subSku && idOwner(ctx.ids, retailer, o.subSku) ? `sub-SKU ${o.subSku}` : `item ${o.itemId}` };
+  const upc = upcDigits(o.gtin);
+  if (upc.length >= 8 && ctx.byUpc.get(upc)) return { sku: ctx.byUpc.get(upc)!, how: `UPC ${o.gtin}` };
+  return null;
+}
+
+interface SugLink {
+  sku: string; retailer: string; url: string | null; verdict: string; sku_check: string | null; page_model: string | null;
+  page_note: string | null; page_options: OptionLink[] | null; read_at: string | null; price: number | null; currency: string | null; in_stock: boolean | null;
+}
+interface SugProduct { sku: string; brand: string | null; color: string | null; finish: string | null; finish_type: string | null; upc: string | null; family_number: number | null }
+
+// Look for candidates and write them (new ones wait to be opened; a link
+// another product's page already showed is ready at once). `dryRun` only
+// returns what it would write.
+async function buildSuggestions(dryRun = false) {
+  const now = new Date().toISOString();
+  const [links, pimRows, products, ids, existing] = await Promise.all([
+    restAll<SugLink>("where_to_buy_links?select=sku,retailer,url,verdict,sku_check,page_model,page_note,page_options,read_at,price,currency,in_stock"),
+    restAll<{ sku: string; retailer: string; url: string }>("product_where_to_buy?select=sku,retailer,url"),
+    restAll<SugProduct>("products?select=sku,brand,color,finish,finish_type:attributes->>finish_type,upc:attributes->>upc,family_number"),
+    loadStoreIds(),
+    restAll<Suggestion>(`where_to_buy_suggestions?select=${SUGGEST_COLUMNS}`),
+  ]);
+  const productBySku = new Map(products.map((p) => [p.sku, p]));
+  const catalog = pimCatalog(products);
+  const ctx: SuggestCtx = { bySku: catalog.bySku, byUpc: catalog.byUpc, ids };
+  const pim = new Map(pimRows.map((r) => [`${r.sku}|${r.retailer}`, r.url]));
+  const fresh = (l: SugLink) => Boolean(l.read_at) && Date.now() - Date.parse(l.read_at!) < SUGGEST_FRESH_MS;
+  // The products on the Stylish pages (Azuni is never there).
+  const audited = new Set(links.map((l) => l.sku).filter((s) => productBySku.has(s) && !/azuni/i.test(productBySku.get(s)?.brand ?? "")));
+
+  // What the pages already showed: store → product → an address that shows it
+  // (its own link that reads as it, or another product's link that opens it).
+  // Not a page that only fell on the listing's default option.
+  const shows = new Map<string, Map<string, SugLink>>();
+  const note = (r: string, sku: string, l: SugLink) => {
+    if (!shows.has(r)) shows.set(r, new Map());
+    const prev = shows.get(r)!.get(sku);
+    if (!prev || (l.read_at ?? "") > (prev.read_at ?? "")) shows.get(r)!.set(sku, l);
+  };
+  // Options pages list with their own address: store → product → [{ url, how, from }].
+  const listed = new Map<string, Map<string, Array<{ url: string; how: string; from: string }>>>();
+  for (const l of links) {
+    if (!l.url || !fresh(l) || l.verdict === "broken") continue;
+    if (l.sku_check === "match") note(l.retailer, l.sku, l);
+    else if ((l.sku_check === "variant" || l.sku_check === "other") && l.page_model && productBySku.has(l.page_model) && !/selects no option/.test(l.page_note ?? "")) note(l.retailer, l.page_model, l);
+    for (const o of l.page_options ?? []) {
+      const owner = optionOwner(o, l.retailer, ctx);
+      const url = cleanSuggestionUrl(o.url);
+      if (!owner || !url) continue;
+      if (!listed.has(l.retailer)) listed.set(l.retailer, new Map());
+      const list = listed.get(l.retailer)!.get(owner.sku) ?? [];
+      if (!list.some((x) => x.url === url)) list.push({ url, how: owner.how, from: l.sku });
+      listed.get(l.retailer)!.set(owner.sku, list);
+    }
+  }
+  // The audit's verdict on each product's current link (both sites carry it).
+  const current = new Map<string, SugLink>();
+  for (const l of links) {
+    if (!l.url || pim.get(`${l.sku}|${l.retailer}`) !== l.url) continue;
+    const k = `${l.sku}|${l.retailer}`;
+    const prev = current.get(k);
+    if (!prev || (l.read_at ?? "") > (prev.read_at ?? "")) current.set(k, l);
+  }
+
+  const storeName = (k: string) => wtbRetailer(k)?.label ?? k;
+  const candidates: Suggestion[] = [];
+  const needs = new Set<string>(); // sku|retailer that need a suggestion
+  for (const sku of audited) {
+    const product = productBySku.get(sku)!;
+    for (const store of WTB_RETAILERS as Array<{ key: string }>) {
+      const r = store.key;
+      if (SUGGEST_SKIP.has(r)) continue;
+      const cur = pim.get(`${sku}|${r}`) ?? null;
+      const state = cur ? current.get(`${sku}|${r}`) : undefined;
+      const reason: SuggestReason | null = !cur ? "missing"
+        : state?.verdict === "broken" ? "broken_link"
+        : state && (state.sku_check === "variant" || state.sku_check === "other") ? "wrong_link" : null;
+      if (!reason) continue;
+      const found: Suggestion[] = [];
+      const add = (url: string | null, source: SuggestSource, detail: string, ready?: SugLink) => {
+        const clean = cleanSuggestionUrl(url);
+        if (!clean || samePage(clean, cur) || found.some((f) => samePage(f.url, clean))) return;
+        // Wayfair addresses need the listing's sku; a cut one cannot open.
+        if ((r === "wayfair_ca" || r === "wayfair_us") && !WAYFAIR_SKU_RE.test(clean)) return;
+        found.push({
+          sku, retailer: r, url: clean, found_url: clean, reason, source, detail, current_url: cur, status: ready ? "ready" : "to_check", status_note: null, hops: 0, attempts: 0,
+          page_model: ready?.page_model ?? null, price: ready ? ready.price : null, currency: ready?.currency ?? null, in_stock: ready?.in_stock ?? null,
+          checked_at: ready?.read_at ?? null, next_check_at: ready ? new Date(Date.now() + SUGGEST_RECHECK_DAYS * 86400e3).toISOString() : now,
+        });
+      };
+      // 1. An address at this store whose page showed this product.
+      const seen = shows.get(r)?.get(sku);
+      if (seen?.url) add(seen.url, "other_link", seen.sku === sku ? `${storeName(r)} showed ${sku} on this page` : `${seen.sku}'s ${storeName(r)} link opens ${sku}'s page`, seen);
+      // 2. A page that lists it as an option, with its own address.
+      for (const x of listed.get(r)?.get(sku) ?? []) add(x.url, "page_option", `The ${storeName(r)} page of ${x.from}'s link lists ${sku} as an option (${x.how})`);
+      // 3. The store's own id of the product.
+      const id = ids.bySku.get(r)?.get(sku);
+      const byId = id ? idAddress(r, id) : null;
+      if (byId && !(cur && cur.includes(id!.split("-")[0]))) add(byId, "store_id", r === "bestbuy_ca" ? `Best Buy's offers API: product ${id}` : r === "homedepot_us" ? `Home Depot USA id ${id} (Aliases)` : `BB&B / Overstock id ${id} (Aliases)`);
+      // 4. The listing the wrong link opens: its option named like this product's finish.
+      if (reason === "wrong_link" && state?.page_options?.length) {
+        const unowned = state.page_options.filter((o) => !optionOwner(o, r, ctx));
+        for (const o of optionsByName(unowned, product)) add(o.url, "page_option", `The page of the link names an option "${o.name}" (${[product.color, product.finish].filter(Boolean).join(" / ")})`);
+      }
+      if (found.length) { needs.add(`${sku}|${r}`); candidates.push(...found.slice(0, 3)); }
+      else if (cur) needs.add(`${sku}|${r}`); // still wrong or broken: a suggestion found before stays
+    }
+  }
+
+  // Reconcile with what is stored — by the address a suggestion was found at
+  // (it may since have moved to its option's or the store's own address).
+  const key = (s: { sku: string; retailer: string; url: string; found_url?: string | null }) => `${s.sku}|${s.retailer}|${s.found_url ?? s.url}`;
+  const stored = new Map<string, Suggestion>();
+  for (const s of existing) { stored.set(key(s), s); stored.set(`${s.sku}|${s.retailer}|${s.url}`, s); }
+  const inserts: Suggestion[] = [];
+  const patches: Array<{ id: string; patch: Record<string, unknown> }> = [];
+  for (const c of candidates) {
+    const ex = stored.get(key(c));
+    if (!ex) { inserts.push(c); continue; }
+    if (ex.status === "dismissed" || ex.status === "applied") continue;
+    if (ex.status === "failed") {
+      if (ex.checked_at && Date.now() - Date.parse(ex.checked_at) > SUGGEST_FAILED_DAYS * 86400e3) {
+        patches.push({ id: ex.id!, patch: { status: "to_check", attempts: 0, hops: 0, status_note: null, next_check_at: now, reason: c.reason, current_url: c.current_url, updated_at: now } });
+      }
+      continue;
+    }
+    if (ex.reason !== c.reason || ex.current_url !== c.current_url || ex.detail !== c.detail) {
+      patches.push({ id: ex.id!, patch: { reason: c.reason, current_url: c.current_url, detail: c.detail, updated_at: now } });
+    }
+  }
+  // A waiting or ready suggestion whose link is now fine, or is now its
+  // address: used (the link is its address) or no longer needed.
+  const stale: string[] = [];
+  for (const ex of existing) {
+    if (ex.status !== "to_check" && ex.status !== "ready") continue;
+    const cur = pim.get(`${ex.sku}|${ex.retailer}`);
+    if (cur && samePage(cur, ex.url)) patches.push({ id: ex.id!, patch: { status: "applied", decided_at: ex.decided_at ?? now, updated_at: now } });
+    else if (!needs.has(`${ex.sku}|${ex.retailer}`)) stale.push(ex.id!);
+  }
+  if (dryRun) {
+    const tally: Record<string, number> = {};
+    for (const c of inserts) tally[`${c.retailer} · ${c.reason} · ${c.source}${c.status === "ready" ? " (ready)" : ""}`] = (tally[`${c.retailer} · ${c.reason} · ${c.source}${c.status === "ready" ? " (ready)" : ""}`] ?? 0) + 1;
+    return {
+      dryRun: true, candidates: candidates.length, wouldAdd: inserts.length, wouldUpdate: patches.length, wouldRemove: stale.length, tally,
+      sample: inserts.slice(0, 80).map((c) => `${c.sku} ${c.retailer} ${c.reason} ${c.source}${c.status === "ready" ? " READY" : ""}: ${c.url} — ${c.detail}`),
+    };
+  }
+  for (const part of chunk(inserts, 300)) {
+    await rest("where_to_buy_suggestions?on_conflict=sku,retailer,url", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(part) });
+  }
+  for (const part of chunk(patches, 6)) await Promise.all(part.map((p) => rest(`where_to_buy_suggestions?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify(p.patch) })));
+  for (const part of chunk(stale, 100)) await rest(`where_to_buy_suggestions?id=in.(${part.join(",")})`, { method: "DELETE" });
+  const bySource: Record<string, number> = {};
+  for (const c of inserts) bySource[`${c.source}${c.status === "ready" ? " (ready)" : ""}`] = (bySource[`${c.source}${c.status === "ready" ? " (ready)" : ""}`] ?? 0) + 1;
+  return { candidates: candidates.length, added: inserts.length, updated: patches.length, removed: stale.length, bySource };
+}
+
+// Open the waiting suggestions (and the ready ones due a second look): a page
+// that shows the product's own SKU or store id makes it ready; a page that
+// lists it as an option sends the suggestion to that option's address once.
+async function verifySuggestions(deadline: number) {
+  const nowIso = new Date().toISOString();
+  const dueFilter = `select=${SUGGEST_COLUMNS}&status=in.(to_check,ready)&next_check_at=lte.${nowIso}&order=status.desc,next_check_at.asc`;
+  const slow = inList(UNLOCKER_RETAILERS);
+  const [fastDue, slowDue] = await Promise.all([
+    rest<Suggestion[]>(`where_to_buy_suggestions?${dueFilter}&retailer=not.${slow}&limit=${SUGGEST_DIRECT.max}`),
+    rest<Suggestion[]>(`where_to_buy_suggestions?${dueFilter}&retailer=${slow}&limit=${SUGGEST_UNLOCKER.max}`),
+  ]);
+  const due = [...fastDue, ...slowDue];
+  if (!due.length) return { opened: 0, ready: 0, failed: 0, moved: 0, waiting: 0 };
+  // Claimed for 15 minutes (an overlapping call skips them).
+  await rest(`where_to_buy_suggestions?id=in.(${due.map((s) => s.id).join(",")})`, { method: "PATCH", body: JSON.stringify({ next_check_at: at(LEASE_MIN * 60e3) }) });
+  if (due.some((s) => routeFor(s.retailer, "").includes("scraperapi"))) await refreshScraperCredits();
+  const [products, ids] = await Promise.all([
+    restAll<{ sku: string; upc: string | null; family_number: number | null }>("products?select=sku,upc:attributes->>upc,family_number"),
+    loadStoreIds(),
+  ]);
+  const catalog = pimCatalog(products);
+  const ctx: SuggestCtx = { bySku: catalog.bySku, byUpc: catalog.byUpc, ids };
+  const counts = { opened: 0, ready: 0, failed: 0, moved: 0, waiting: 0 };
+  const now = () => new Date().toISOString();
+  const patch = (s: Suggestion, p: Record<string, unknown>) => rest(`where_to_buy_suggestions?id=eq.${s.id}`, { method: "PATCH", body: JSON.stringify({ ...p, updated_at: now() }) });
+  const fail = (s: Suggestion, why: string) => { counts.failed += 1; return patch(s, { status: "failed", status_note: why.slice(0, 300), checked_at: now(), next_check_at: null }); };
+  // Give a suggestion another address (its option's, or the store's own
+  // address of the product). When that address is a suggestion of its own
+  // already, this one is set aside — it stays as failed, so it is not found
+  // again every hour.
+  const moveTo = async (s: Suggestion, url: string, p: Record<string, unknown>) => {
+    const twin = await rest<Array<{ id: string }>>(`where_to_buy_suggestions?select=id&sku=eq.${encodeURIComponent(s.sku)}&retailer=eq.${s.retailer}&url=eq.${encodeURIComponent(url)}&id=neq.${s.id}`);
+    if (twin.length) { await fail(s, "Same page as another suggestion"); return false; }
+    await patch(s, { ...p, url, found_url: s.found_url ?? s.url });
+    return true;
+  };
+  const lane = async (queue: Suggestion[]) => {
+    while (queue.length && Date.now() + 15000 < deadline) {
+      const s = queue.shift()!;
+      // Menards opens only through its scraper (minutes per batch): the
+      // scraper itself read the option it lists, so that one counts as seen.
+      if (s.retailer === "menards") {
+        counts.ready += 1;
+        await patch(s, { status: "ready", status_note: "Read by the Menards scraper", checked_at: now(), next_check_at: new Date(Date.now() + 365 * 86400e3).toISOString() });
+        continue;
+      }
+      let host = "";
+      try { host = new URL(s.url).hostname.toLowerCase(); } catch { await fail(s, "Not a valid web address"); continue; }
+      const row: DueRow = { id: s.id!, sku: s.sku, url: s.url, host, retailer: s.retailer, verdict: "pending", note: null, fail_count: 0, signal_count: 0, signal_at: null, job_id: null, job_at: null };
+      const o = await checkRow(row, deadline);
+      counts.opened += o.kind === "later" ? 0 : 1;
+      if (o.kind === "later") { await patch(s, { next_check_at: at(5 * 60e3) }); continue; }
+      if (o.kind === "none") {
+        const attempts = s.attempts + 1;
+        if (attempts >= SUGGEST_MAX_ATTEMPTS) await fail(s, `No service could open the page (${o.note ?? "no answer"})`);
+        else { counts.waiting += 1; await patch(s, { attempts, status_note: `Not opened yet — ${o.note ?? "no answer"}`, next_check_at: at(SUGGEST_RETRY_HOURS * attempts * 3600e3) }); }
+        continue;
+      }
+      if (o.kind === "broken") { await fail(s, o.note ?? "The page does not exist"); continue; }
+      const page = o.page ?? null;
+      if (o.kind !== "ok" || !page) { await fail(s, o.note ?? "The page does not show the product"); continue; }
+      if (page.gone) { await fail(s, page.note ?? "The store no longer sells it"); continue; }
+      const check = skuCheck(page, s.sku, catalog);
+      const ownId = ids.bySku.get(s.retailer)?.get(s.sku);
+      const byOwnId = Boolean(ownId) && [page.subSku, page.itemId].some((v) => v && String(v) === ownId);
+      if (check?.check === "match" || byOwnId) {
+        // An address built from an id becomes the store's own address of the
+        // product (its canonical, with the option the page was opened on).
+        let url = s.url;
+        if (s.source === "store_id" && page.canonical) {
+          try {
+            const c = new URL(page.canonical);
+            const opened = new URL(s.url);
+            if (c.hostname.replace(/^www\./, "") === opened.hostname.replace(/^www\./, "")) {
+              for (const k of KEEP_PARAMS) if (opened.searchParams.get(k)) c.searchParams.set(k, opened.searchParams.get(k)!);
+              url = cleanSuggestionUrl(c.href) ?? s.url;
+            }
+          } catch { /* keep the opened address */ }
+        }
+        const reading = {
+          status: "ready", status_note: byOwnId && check?.check !== "match" ? `The page shows its ${s.retailer === "bbb_us" || s.retailer === "overstock_us" ? "sub-SKU" : "store id"} ${ownId}` : null,
+          page_model: check?.model ?? page.ids[0] ?? null, price: page.price, currency: page.currency, in_stock: page.inStock,
+          checked_at: now(), next_check_at: new Date(Date.now() + SUGGEST_RECHECK_DAYS * 86400e3).toISOString(), attempts: 0,
+        };
+        if (url === s.url) await patch(s, reading);
+        else if (!(await moveTo(s, url, reading))) continue;
+        counts.ready += 1;
+        continue;
+      }
+      // The page lists the product as one of its options: that option's address, once.
+      const option = s.hops < 1 ? page.optionLinks.find((x) => optionOwner(x, s.retailer, ctx)?.sku === s.sku) : undefined;
+      const optionUrl = cleanSuggestionUrl(option?.url);
+      if (option && optionUrl && !samePage(optionUrl, s.url)) {
+        if (await moveTo(s, optionUrl, { hops: s.hops + 1, attempts: 0, status: "to_check", status_note: null, next_check_at: now() })) counts.moved += 1;
+        continue;
+      }
+      await fail(s, check?.check === "unknown" && !check.model ? "The page names no model the PIM can match" : `The page shows ${check?.model ?? page.ids[0] ?? "another product"}, not ${s.sku}`);
+    }
+  };
+  await Promise.all([
+    ...Array.from({ length: SUGGEST_DIRECT.lanes }, () => lane(fastDue)),
+    ...Array.from({ length: SUGGEST_UNLOCKER.lanes }, () => lane(slowDue)),
+  ]);
+  // Claimed but not reached this call: due again now.
+  const left = [...fastDue, ...slowDue].map((s) => s.id);
+  if (left.length) await rest(`where_to_buy_suggestions?id=in.(${left.join(",")})`, { method: "PATCH", body: JSON.stringify({ next_check_at: new Date().toISOString() }) });
+  return counts;
+}
+
+async function suggest(opts: { build?: boolean; dryRun?: boolean } = {}) {
+  const started = Date.now();
+  const deadline = started + BATCH_MS;
+  if (opts.dryRun) return { built: await buildSuggestions(true), verified: null, ms: Date.now() - started };
+  const state = (await rest<Array<{ value: { built_at?: string } }>>(`app_settings?select=value&key=eq.${SUGGEST_KEY}`))[0]?.value ?? {};
+  const build = opts.build || !state.built_at || Date.now() - Date.parse(state.built_at) > SUGGEST_BUILD_MS;
+  const built = build ? await buildSuggestions() : null;
+  if (build) {
+    await rest("app_settings?on_conflict=key", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ key: SUGGEST_KEY, value: { built_at: new Date().toISOString(), last: built }, updated_at: new Date().toISOString() }) });
+  }
+  const verified = await verifySuggestions(deadline);
+  return { built, verified, ms: Date.now() - started };
+}
+
+// After a product's list is saved: its suggestions whose address is now the
+// link were used.
+async function settleSuggestions(skus: string[], pim: PimLinks) {
+  try {
+    const open = await rest<Array<{ id: string; sku: string; retailer: string; url: string }>>(`where_to_buy_suggestions?select=id,sku,retailer,url&sku=${inList(skus)}&status=in.(to_check,ready)`);
+    const used = open.filter((s) => (pim.links.get(s.sku) ?? []).some((l) => l.retailer === s.retailer && samePage(l.url, s.url))).map((s) => s.id);
+    if (used.length) await rest(`where_to_buy_suggestions?id=in.(${used.join(",")})`, { method: "PATCH", body: JSON.stringify({ status: "applied", decided_at: new Date().toISOString(), updated_at: new Date().toISOString() }) });
+  } catch (e) { console.warn("[where-to-buy] suggestions not settled:", (e as Error).message); }
 }
 
 async function status() {
@@ -1555,6 +2023,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, rebuilt, published });
     }
     if (mode === "promo-reread") return json({ ok: true, ...(await promoReread({ asOf: body.asOf, dryRun: body.dryRun === true })) });
+    if (mode === "suggest") return json({ ok: true, ...(await suggest({ build: body.build === true, dryRun: body.dryRun === true })) });
     if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
     if (mode === "p2s-file") {
       // body: { files: [{ name, base64 }] } (or a single { name, base64 })

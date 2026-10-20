@@ -2,7 +2,7 @@
 // (homedepot.ca/product/<slug>/<item #>). Two platforms: each returns the PageRead of common.js for the
 // page's MAIN product, or null when the page carries no product (not-found page, bot page, empty body).
 // Checked on Bright Data (rendered) and ScraperAPI (server HTML) pages of 2026-10-19 / 20.
-import { decode, textOf, money, jsonLdProducts, jsonLdOffer, scriptJson, uniq } from './common.js';
+import { decode, textOf, money, jsonLdProducts, jsonLdOffer, scriptJson, uniq, absUrl } from './common.js';
 
 // ------------------------------------------------------------------ shared helpers
 // The JSON object written after `marker` inside a script ("window.__APOLLO_STATE__={…};window.X=…"),
@@ -141,9 +141,19 @@ function readHomeDepotCa(html, url) {
   const status = String(p?.stock?.stockLevelStatus ?? '');
   const availability = schema.match(/itemprop="availability"[^>]*href="[^"]*\/(\w+)"/)?.[1] ?? '';
   const inCart = heroPrice === null && /Lower Price in Cart/i.test(heroText);
+  // The other finishes: Home Depot items of their own, by item # and finish name (no model #).
+  const optionLinks = [];
+  for (const group of [].concat(p?.variantOptionsSorted ?? [])) {
+    for (const q of [].concat(group?.variantOptionQualifiers ?? [])) {
+      if (!q?.code || q.selected || String(q.code) === String(p?.code ?? '') || optionLinks.some((o) => o.itemId === String(q.code))) continue;
+      const href = absUrl(q.url, 'https://www.homedepot.ca/');
+      if (href) optionLinks.push({ model: null, name: q.value ? `${group.name ? `${group.name}: ` : ''}${q.value}` : null, itemId: String(q.code), url: href });
+    }
+  }
   return {
     ids: uniq([p?.modelNumber, decode(visibleModel ?? '')]),
     options: [],
+    optionLinks,
     price,
     wasPrice,
     currency: (p?.price?.currencyIso ?? md('priceCurrency') ?? 'CAD').toUpperCase(),

@@ -4,7 +4,7 @@
 // the page's MAIN product, or null when the page carries no product (404, bot page, "Too many requests"…).
 // One optional field beyond the contract: `note`, when the page says something that changes what the price
 // means (eBay "Open box" / "Used", Warehouse-USA's "additional 11% discount applied in the cart").
-import { decode, pageTitle, normSku, money, jsonLdProducts, jsonLdOffer, meta, uniq } from './common.js';
+import { decode, pageTitle, normSku, money, jsonLdProducts, jsonLdOffer, meta, uniq, withParam } from './common.js';
 
 // ── small helpers ─────────────────────────────────────────────────────────────────────────────────────
 const strip = (s) => decode(String(s ?? '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
@@ -40,9 +40,12 @@ function kbauthority(html) {
   const price = money(grab(html, /id="product_price">([^<]*)/)) ?? money(meta(html, 'price'));
   const variants = jsonLdProducts(html).filter((p) => p.sku);
   const self = variants.find((p) => normSku(p.sku) === normSku(sku));
+  const others = variants.filter((p) => normSku(p.sku) !== normSku(sku));
   return {
     ids: uniq([sku, self ? self.gtin : variants.length ? null : meta(html, 'gtin')]),
-    options: uniq(variants.map((p) => p.sku).filter((s) => normSku(s) !== normSku(sku))),
+    options: uniq(others.map((p) => p.sku)),
+    // Each finish of a family page has its own address (hasVariant url).
+    optionLinks: others.filter((p) => p.url).map((p) => ({ model: String(p.sku), name: p.color ? String(p.color) : null, gtin: p.gtin ? String(p.gtin) : null, url: String(p.url) })),
     price,
     wasPrice: higher(money(grab(html, /id="product_list_price">([^<]*)/)), price),
     currency: (meta(html, 'priceCurrency') ?? meta(html, 'product:price:currency'))?.toUpperCase() ?? null,
@@ -122,6 +125,10 @@ function shopify(html, url) {
   return {
     ids: uniq([v.sku, ...(v.sku ? [] : titleSkus(v.name))]),
     options: uniq(variants.filter((x) => String(x.id) !== chosen).map((x) => x.sku)),
+    // The other options open with the product address + ?variant=<id>.
+    optionLinks: variants.filter((x) => String(x.id) !== chosen).map((x) => ({
+      model: x.sku ? String(x.sku) : null, name: x.public_title ?? x.name ?? null, itemId: String(x.id), url: withParam(url, 'variant', x.id),
+    })).filter((o) => o.url),
     price,
     wasPrice: higher(full?.compare_at_price ? money(full.compare_at_price / 100) : null, price),
     currency: currency?.toUpperCase() ?? null,

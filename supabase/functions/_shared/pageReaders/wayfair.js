@@ -6,7 +6,7 @@
 // (pdpContext.variantId). A listing (TKJS1134) covers several options; the URL selects one with ?piid=… and the page
 // renders that option, or the listing's DEFAULT option when the URL has no piid or one that is not an option of the
 // listing (parsedParams.isOptionIdMismatched). The page's language (en-CA / fr-CA) does not matter: no label is read.
-import { decode, money, uniq, currencyOfMarket } from './common.js';
+import { decode, money, uniq, currencyOfMarket, absUrl } from './common.js';
 
 // The flight payload: the JSON strings of every self.__next_f.push([1,"…"]) joined.
 function flightOf(html) {
@@ -93,18 +93,23 @@ function readWayfair(html, url) {
   if (price !== null && !currency) currency = currencyOfMarket(/wayfair\.ca/i.test(String(url ?? '')) ? 'ca' : 'us');
   // 5. Stock of the selected option.
   const inStock = stockOf(main.map((v) => v.fulfillmentv2?.stockStatus ?? v.fulfillment?.stockStatus).find(Boolean));
-  // 6. The listing's options (Finish, Size…): Wayfair names them and gives their piid, never their part number.
+  // 6. The listing's options (Finish, Size…): Wayfair names them and gives their piid and the address that
+  //    selects them (the variant a click on the choice opens), never their part number.
   const choices = [];
   for (const cat of main.flatMap((v) => (Array.isArray(v.choiceCategories) ? v.choiceCategories : []))) {
     for (const e of cat?.variantChoices?.edges ?? []) {
       const c = e?.node?.choice;
       if (!c?.displayId || choices.some((x) => x.piid === String(c.displayId))) continue;
-      choices.push({ piid: String(c.displayId), name: `${cat.name ? `${cat.name}: ` : ''}${c.name}`, selected: selected.split(',').includes(String(c.displayId)), inStock: stockOf(e.node.selectableVariant?.fulfillmentv2?.stockStatus) });
+      choices.push({
+        piid: String(c.displayId), name: `${cat.name ? `${cat.name}: ` : ''}${c.name}`, selected: selected.split(',').includes(String(c.displayId)),
+        inStock: stockOf(e.node.selectableVariant?.fulfillmentv2?.stockStatus), url: absUrl(e.node.selectableVariant?.listingUrl, url),
+      });
     }
   }
   return {
     ids, options: [], price, wasPrice, currency: currency ? currency.toUpperCase() : null, inStock, itemId: listing,
     piids: selected ? selected.split(',') : [], optionDefaulted: ctx?.parsedParams?.isOptionIdMismatched === true, choices,
+    optionLinks: choices.filter((c) => !c.selected && c.url).map((c) => ({ name: c.name, itemId: c.piid, url: c.url })),
     source: fromBlock && price !== null ? 'rsc-flight+pricing-block' : 'rsc-flight',
   };
 }

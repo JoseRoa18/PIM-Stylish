@@ -9,7 +9,7 @@
 //   Both: the buy box writes the price as <span itemprop="price" data-seo-id="hero-price">.
 // Only data fields are read, so a page rendered in Spanish (walmart.com) or French reads the same.
 // Not the price: "$38.00 when you subscribe" (product.discounts, walmart.ca's subscribe & save).
-import { pageTitle, normSku, money, jsonLdProducts, jsonLdOffer, scriptJson, uniq, currencyOfMarket } from './common.js';
+import { pageTitle, normSku, money, jsonLdProducts, jsonLdOffer, scriptJson, uniq, currencyOfMarket, absUrl } from './common.js';
 
 // Bot checks Walmart answers with status 200 ("Robot or human?" on .com, "Verify Your Identity" on .ca).
 const BOT_TITLE = /robot or human|verify your identity|access denied|captcha|are you a human/i;
@@ -52,9 +52,20 @@ function readWalmart(html, url) {
   const self = new Set([p?.usItemId, p?.id, asked].filter(Boolean));
   const named = (p?.variantCriteria ?? []).filter((c) => /^model$/i.test(String(c.id ?? c.name ?? '')))
     .flatMap((c) => c.variantList ?? []).filter((v) => !v.selected && !(v.products ?? []).some((id) => self.has(id))).map((v) => v.name);
-  const addressed = Object.values(p?.variantsMap ?? {}).filter((v) => !self.has(v.usItemId) && !self.has(v.id)).map((v) => modelOfAddress(v.productUrl));
+  const otherItems = Object.values(p?.variantsMap ?? {}).filter((v) => v?.usItemId && !self.has(v.usItemId) && !self.has(v.id));
+  const addressed = otherItems.map((v) => modelOfAddress(v.productUrl));
   const own = new Set(ids.map(normSku));
   const options = withBase(uniq([...named, ...addressed])).filter((o) => !own.has(normSku(o)));
+  // Each option is a Walmart item of its own: its address, the model its name ends with (the "-1" of
+  // walmart.com dropped) and the option values that pick it ("Actual Color: Silver & Red").
+  const choiceNames = new Map();
+  for (const c of p?.variantCriteria ?? []) {
+    for (const v of c.variantList ?? []) for (const id of v.products ?? []) choiceNames.set(id, [...(choiceNames.get(id) ?? []), `${c.name ?? c.id}: ${v.name}`]);
+  }
+  const optionLinks = [...new Map(otherItems.map((v) => [v.usItemId, v])).values()].map((v) => ({
+    model: modelOfAddress(v.productUrl)?.replace(/^([A-Z]{1,3}-?\d[A-Z0-9-]*)-1$/i, '$1') ?? null,
+    name: (choiceNames.get(v.usItemId) ?? []).join(' · ') || null, itemId: String(v.usItemId), url: absUrl(v.productUrl, url),
+  })).filter((o) => o.url);
 
   // Price: the buy-box offer's current price (a third-party seller's offer when it holds the buy box).
   // A listing that shows a range has no option chosen: no price then.
@@ -71,6 +82,7 @@ function readWalmart(html, url) {
   return {
     ids,
     options,
+    optionLinks,
     price,
     wasPrice: price !== null && was !== null && was > price ? was : null,
     currency,

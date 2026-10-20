@@ -13,7 +13,7 @@
 //   - no option selected → the base option's price, not the listing's lowest ("From") price, which can be another
 //     finish on sale; when the base option is not offered any more → price null, inStock false.
 // Sold-out listings drop their options: Overstock then has no price at all, BB&B keeps the last one (JSON-LD too).
-import { decode, money, jsonLd, jsonLdOffer, scriptJson, uniq } from './common.js';
+import { decode, money, jsonLd, jsonLdOffer, scriptJson, uniq, withParam } from './common.js';
 
 const urlProductId = (url) => String(url ?? '').match(/\/(\d{6,9})\/product\.html|\/products\/[^?#]*-(\d{6,9})(?:[?#/]|$)/)?.slice(1).find(Boolean) ?? null;
 const urlOption = (url) => String(url ?? '').match(/[?&]option=(\d+)/)?.[1] ?? null;
@@ -33,9 +33,10 @@ function jsonAt(text, i) {
   return null;
 }
 
-// Shared ending. listing: { models, price, was, inStock }; opts: [{ id, model, base, name, price, was, inStock }];
-// sel: the option the URL selected (one of opts) or null.
-function reading({ itemId, listing, opts, sel, currency, source }) {
+// Shared ending. listing: { models, price, was, inStock }; opts: [{ id, model, subSku, base, name, price, was, inStock }];
+// sel: the option the URL selected (one of opts) or null. `url` = the address opened (each option's link is
+// it with ?option=<id>).
+function reading({ itemId, listing, opts, sel, currency, source, url }) {
   const shown = sel ?? opts.find((o) => o.base) ?? null;
   const ids = shown ? (shown.model ? [shown.model] : shown.base ? listing.models : []) : listing.models;
   const at = shown ?? (opts.length ? { price: null, was: null, inStock: false } : listing); // base option gone → not offered
@@ -48,6 +49,9 @@ function reading({ itemId, listing, opts, sel, currency, source }) {
     currency: currency ? String(currency).toUpperCase() : null,
     inStock: typeof at.inStock === 'boolean' ? at.inStock : null,
     itemId: itemId ? String(itemId) : null,
+    // The Beyond sub-SKU of the option shown ("37792706-000-001": the PIM's "BB&B / Overstock" alias).
+    subSku: shown?.subSku ?? null,
+    optionLinks: opts.filter((o) => o !== shown).map((o) => ({ model: o.model, name: o.name || null, subSku: o.subSku ?? null, itemId: o.id, url: withParam(url, 'option', o.id) })).filter((o) => o.url),
     source: source + how,
   };
 }
@@ -58,7 +62,7 @@ function fromNextData(html, url) {
   const p = pp?.product;
   if (!p?.id) return null;
   const opts = [].concat(p.options ?? []).map((o) => ({
-    id: String(o.optionId), model: pp.optionMap?.[o.optionId]?.modelNumber ?? null, base: isBase(o.subSku),
+    id: String(o.optionId), model: pp.optionMap?.[o.optionId]?.modelNumber ?? null, subSku: o.subSku ? String(o.subSku) : null, base: isBase(o.subSku),
     name: o.decription ?? o.description ?? '', // BB&B spells it "decription"
     price: money(o.price), was: money(o.comparePrice), inStock: o.isInStock ?? (o.qtyOnHand > 0),
   }));
@@ -66,7 +70,7 @@ function fromNextData(html, url) {
   const set = Object.fromEntries([].concat(p.priceSet ?? []).map((x) => [x.priceType, money(x.formattedPrice)]));
   const spec = (p.specificationAttributes?.attributeGroups ?? []).flatMap((g) => g.attributes ?? []).find((a) => /^model number$/i.test(a.label))?.values ?? [];
   return reading({
-    itemId: p.id, opts, sel: opts.find((o) => o.id === want) ?? null, currency: pp.meta?.currencyCode,
+    url, itemId: p.id, opts, sel: opts.find((o) => o.id === want) ?? null, currency: pp.meta?.currencyCode,
     listing: { models: uniq([p.manufacturerPartNumber, ...spec].map(decode)), price: set.CURRENT_PRICE ?? money(p.basePrice), was: set.COMPARISON_PRICE, inStock: p.inStock },
     source: p.hideMAPProductPrice || [].concat(p.options ?? []).some((o) => o.hideMAPProductPrice) ? 'next-data · price in cart only' : 'next-data',
   });
@@ -92,7 +96,7 @@ function fromFlight(html, url) {
     return { price: amt(pr?.salePrice) ?? amt(pr?.basePrice), was: ref ?? (pr?.salePrice ? amt(pr?.basePrice) : null), currency: pr?.basePrice?.currency ?? null };
   };
   const toOpt = (v) => ({ // status SELLABLE / OUT_OF_STOCK
-    id: String(v.variationId), model: null, base: isBase(v.fullSku), name: v.description ?? '', ...prices(v.prices),
+    id: String(v.variationId), model: null, subSku: v.fullSku ? String(v.fullSku) : null, base: isBase(v.fullSku), name: v.description ?? '', ...prices(v.prices),
     inStock: v.status ? v.status === 'SELLABLE' : typeof v.quantityAvailable === 'number' ? v.quantityAvailable > 0 : null,
   });
   // a variation can be a reference to the selected one: "$3c:4:props:initialPDPState:selectedVariation"
@@ -100,7 +104,7 @@ function fromFlight(html, url) {
   const want = String(sv?.variationId ?? urlOption(url) ?? '');
   const low = prices(p.lowestVariationPrice);
   return reading({
-    itemId: p.productId, opts, sel: opts.find((o) => o.id === want) ?? null, currency: opts[0]?.currency ?? low.currency,
+    url, itemId: p.productId, opts, sel: opts.find((o) => o.id === want) ?? null, currency: opts[0]?.currency ?? low.currency,
     listing: { models: uniq([].concat(p.specifications?.['Model Number'] ?? []).map(decode)), price: low.price, was: low.was, inStock: p.inStock },
     source: 'rsc',
   });
@@ -127,7 +131,7 @@ function fromMarkup(html, url) {
     ids: other ? [] : models, options: other ? models : [], price, wasPrice: null,
     currency: offer?.currency ?? utag?.order_currency ?? null,
     inStock: offer?.inStock ?? (utag?.product_in_stock ? utag.product_in_stock === '1' : null),
-    itemId: id, source: `${offer ? 'jsonld' : utag && !box && !today ? 'utag' : 'html'}${optSku ? ` · option ${optSku}` : ''}`,
+    itemId: id, subSku: optSku, source: `${offer ? 'jsonld' : utag && !box && !today ? 'utag' : 'html'}${optSku ? ` · option ${optSku}` : ''}`,
   };
 }
 
