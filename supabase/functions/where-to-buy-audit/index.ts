@@ -1208,7 +1208,9 @@ const DIRECT_BATCH = 250;
 // At most this many rows of one host in a batch (its lanes cannot open more
 // in one call): a store with a long backlog — a dealer's 640 new links, BB&B
 // and Overstock waiting for ScraperAPI — never fills a batch and holds the
-// other stores back. Each pool is read deeper than its batch for that.
+// other stores back. Each pool is read 1,000 rows deep for that (the API's
+// page): at 360 rows, 191 pending Aquarina links and two stores' re-checks
+// filled the window and Amazon.ca got no turn for 15 minutes (2026-10-20).
 const UNLOCKER_PER_HOST = 10;
 const DIRECT_PER_HOST = 40;
 function capPerHost(rows: DueRow[], perHost: number, total: number): DueRow[] {
@@ -1239,8 +1241,8 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   const rows = opts.skus?.length
     ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
     : [
-      ...await pool(`retailer=${inList(UNLOCKER_RETAILERS)}`, "verdict.desc,next_check_at.asc.nullsfirst", UNLOCKER_BATCH * 5, UNLOCKER_PER_HOST, UNLOCKER_BATCH),
-      ...await pool(`retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}`, "next_check_at.asc.nullsfirst", (opts.limit ?? DIRECT_BATCH) * 3, DIRECT_PER_HOST, opts.limit ?? DIRECT_BATCH),
+      ...await pool(`retailer=${inList(UNLOCKER_RETAILERS)}`, "verdict.desc,next_check_at.asc.nullsfirst", 1000, UNLOCKER_PER_HOST, UNLOCKER_BATCH),
+      ...await pool(`retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}`, "next_check_at.asc.nullsfirst", 1000, DIRECT_PER_HOST, opts.limit ?? DIRECT_BATCH),
       ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(SCRAPER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${SCRAPER_POOL}`, { headers: { Prefer: "count=none" } }),
     ];
   // Claim the batch so an overlapping call (cron chain + UI) skips it; every
