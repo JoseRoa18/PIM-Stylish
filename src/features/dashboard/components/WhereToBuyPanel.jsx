@@ -184,7 +184,7 @@ export default function WhereToBuyPanel() {
               Scanned {fmtWhen(summary.lastScan)} · last check {fmtWhen(summary.lastCheck)} · OK links are checked again every 3 days, broken ones every 2 days · stores that block the PIM are opened through Bright Data or ScraperAPI
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label="Stylish site">
               {WTB_SITES.map((s) => (
                 <button
@@ -199,6 +199,7 @@ export default function WhereToBuyPanel() {
                 </button>
               ))}
             </div>
+            {rows.length > 0 && <WhereToBuySuggestions skus={siteSkus} onApplied={() => reload()} />}
             {canEdit && (
               <>
                 <button
@@ -293,8 +294,6 @@ export default function WhereToBuyPanel() {
           {copied && <p role="status" className="sr-only">SKUs copied</p>}
         </div>
       )}
-
-      {rows.length > 0 && <WhereToBuySuggestions skus={siteSkus} onApplied={() => reload()} />}
 
       {error && (
         <div role="alert" className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
