@@ -98,12 +98,20 @@ const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').
 const escText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
+ * The links a page shows: the product's list minus the ones the audit found
+ * broken (user, 2026-10-20) — a broken link stays in the PIM to be fixed and
+ * comes back on the page once it answers again.
+ */
+export const linksToShow = (links, brokenUrls) => (links ?? []).filter((l) => l?.url && !brokenUrls?.has(l.url));
+
+/**
  * The WHERE TO BUY section of one Stylish site from the product's links
  * ([{ retailer, url }]), in the shape the pages already use:
  *   <p><strong>Online in Canada:</strong></p><ul><li><a href target=_blank>Label</a></li>…</ul>
- * A country with no link is left out. Returns '' when nothing would show.
+ * A country with no link is left out. Returns '' when nothing would show —
+ * unless `allowEmpty`, where the Canada page keeps its store locator alone.
  */
-export function buildWhereToBuyHtml(links, siteKey) {
+export function buildWhereToBuyHtml(links, siteKey, { allowEmpty = false } = {}) {
   const site = WTB_SITES.find((s) => s.key === siteKey);
   if (!site) throw new Error(`Unknown Stylish site ${siteKey}`);
   const byRetailer = new Map(links.filter((l) => l?.url).map((l) => [l.retailer, l.url]));
@@ -123,19 +131,25 @@ export function buildWhereToBuyHtml(links, siteKey) {
     hasLink = true;
     blocks.push(`<p><strong>${market.heading}:</strong></p>\n<ul>\n${items.join('\n')}\n</ul>`);
   }
-  return hasLink ? blocks.join('\n<p>&nbsp;</p>\n') : '';
+  return hasLink || (allowEmpty && site.locator) ? blocks.join('\n<p>&nbsp;</p>\n') : '';
 }
 
 /**
  * The sections to push to a site: the WHERE TO BUY section replaced (or
  * added at the end) and every other section exactly as Wix has it.
- * Returns null when there is nothing to write.
+ * Returns null when there is nothing to write. `owned`: the PIM has a list
+ * for the product, so a section with nothing to show is emptied (Canada:
+ * the store locator alone) or removed (USA) instead of left as it was.
  */
-export function withWhereToBuySection(sections, links, siteKey) {
-  const html = buildWhereToBuyHtml(links, siteKey);
-  if (!html) return null;
+export function withWhereToBuySection(sections, links, siteKey, { owned = false } = {}) {
+  const html = buildWhereToBuyHtml(links, siteKey, { allowEmpty: owned });
   const list = (sections ?? []).map((s) => ({ title: s.title ?? '', description: s.description ?? '' }));
   const i = list.findIndex((s) => /where\s*to\s*buy/i.test(s.title));
+  if (!html) {
+    if (!owned || i < 0) return null;
+    list.splice(i, 1);
+    return list;
+  }
   if (i >= 0) {
     // Wix stores the HTML with its own spacing between tags.
     const norm = (s) => s.replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();

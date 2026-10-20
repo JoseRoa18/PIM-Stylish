@@ -59,7 +59,7 @@
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
 
 import { resolveWixSite } from "../_shared/wixSites.ts";
-import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl } from "../_shared/whereToBuy.js";
+import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, withWhereToBuySection } from "../_shared/whereToBuy.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -363,8 +363,10 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
     // Checked from the PIM's list; the live section is compared with it
     // (a hand edit in Wix shows up as a difference).
     const links = pim.links.get(sku) ?? [];
-    if (links.length && linkSet(live) !== linkSet(links)) counts.differsFromPim.push(sku);
     const lr = linkRows(base, links, prior);
+    // What the page should show: the list without its broken links.
+    const shown = lr.filter((r) => r.verdict !== "broken").map((r) => ({ retailer: r.retailer, url: r.url as string }));
+    if (links.length && linkSet(live) !== linkSet(shown)) counts.differsFromPim.push(sku);
     counts.links += lr.length;
     counts.broken += lr.filter((r) => r.verdict === "broken").length;
     rows.push(...lr);
@@ -481,6 +483,157 @@ async function probe(url: string): Promise<Probe> {
     const msg = (e as Error).name === "AbortError" ? "No answer in 12 s" : /error sending request|connection|reset|refused/i.test((e as Error).message) ? "Connection dropped by the site" : (e as Error).message.slice(0, 120);
     return { verdict: "pending", http_status: null, final_url: null, note: msg };
   } finally { clearTimeout(t); }
+}
+
+// ---------------------------------------------------------------- publish
+// The PIM writes the WHERE TO BUY section of the Stylish pages itself, with
+// every link of the product's list but the broken ones (user, 2026-10-20: a
+// broken link stays in the PIM to be fixed but leaves the website, and comes
+// back when it answers again). Only that section changes — the rest of the
+// page is read from Wix and sent back as it is. Pages to (re)write wait in a
+// queue (app_settings.where_to_buy_publish_queue) that every check call
+// drains a little at a time: Wix lets ~30 changes through, then asks to wait.
+const QUEUE_KEY = "where_to_buy_publish_queue";
+const WIX_BASE = "https://www.wixapis.com";
+const PUBLISH_MAX = 20; // product pages written per call
+
+type PublishStatus = "published" | "up_to_date" | "no_links" | "not_linked" | "not_found" | "error" | "later";
+interface PublishResult { sku: string; site: string; status: PublishStatus; error?: string }
+
+async function brokenUrls(skus: string[]): Promise<Set<string>> {
+  const rows: Array<{ url: string }> = [];
+  for (const part of chunk(skus, 100)) rows.push(...await restAll<{ url: string }>(`where_to_buy_links?select=url&verdict=eq.broken&url=not.is.null&sku=${inList(part)}`));
+  return new Set(rows.map((r) => r.url));
+}
+
+async function publishSkus(skus: string[], deadline: number, maxPushes = PUBLISH_MAX): Promise<PublishResult[]> {
+  if (!skus.length) return [];
+  const [pim, broken, wix, products] = await Promise.all([
+    loadPimLinks(skus),
+    brokenUrls(skus),
+    restAll<{ site: string; sku: string; wix_product_id: string }>(`wix_links?select=site,sku,wix_product_id&site=${inList(SITES)}&sku=${inList(skus)}`),
+    restAll<{ sku: string; brand: string | null }>(`products?select=sku,brand&sku=${inList(skus)}`),
+  ]);
+  const brand = new Map(products.map((p) => [p.sku, p.brand ?? ""]));
+  const linked = new Map(wix.map((w) => [`${w.site}|${w.sku}`, w.wix_product_id]));
+  const out: PublishResult[] = [];
+  let pushes = 0;
+  let wixSaysWait = false;
+  for (const sku of skus) {
+    if (!brand.has(sku) || /azuni/i.test(brand.get(sku) ?? "")) continue; // never on the Stylish sites
+    for (const siteKey of SITES) {
+      const id = linked.get(`${siteKey}|${sku}`);
+      if (!id) { out.push({ sku, site: siteKey, status: "not_linked" }); continue; }
+      if (wixSaysWait || pushes >= maxPushes || Date.now() + 8000 > deadline) { out.push({ sku, site: siteKey, status: "later" }); continue; }
+      try {
+        const site = resolveWixSite(siteKey);
+        const headers = { Authorization: WIX_API_KEY, "wix-site-id": site.siteId, "Content-Type": "application/json" };
+        const g = await fetch(`${WIX_BASE}/stores/v1/products/${id}`, { headers, signal: AbortSignal.timeout(20000) });
+        if (g.status === 404) { out.push({ sku, site: siteKey, status: "not_found" }); continue; }
+        if (g.status === 429) { wixSaysWait = true; out.push({ sku, site: siteKey, status: "later" }); continue; }
+        if (!g.ok) throw new Error(`Wix read ${g.status}`);
+        const sections = (await g.json()).product?.additionalInfoSections ?? [];
+        const all = pim.links.get(sku) ?? [];
+        const next = withWhereToBuySection(sections, linksToShow(all, broken), siteKey, { owned: all.length > 0 });
+        if (!next) { out.push({ sku, site: siteKey, status: all.length ? "up_to_date" : "no_links" }); continue; }
+        const p = await fetch(`${WIX_BASE}/stores/v1/products/${id}`, {
+          method: "PATCH", headers, body: JSON.stringify({ product: { additionalInfoSections: next } }), signal: AbortSignal.timeout(25000),
+        });
+        pushes += 1;
+        if (!p.ok) {
+          const text = await p.text();
+          if (p.status === 429 || /retry after/i.test(text)) { wixSaysWait = true; out.push({ sku, site: siteKey, status: "later" }); continue; }
+          throw new Error(`Wix write ${p.status}: ${text.slice(0, 120)}`);
+        }
+        out.push({ sku, site: siteKey, status: "published" });
+      } catch (e) {
+        out.push({ sku, site: siteKey, status: "error", error: (e as Error).message.slice(0, 160) });
+      }
+    }
+  }
+  return out;
+}
+
+async function readQueue(): Promise<string[]> {
+  const r = await rest<Array<{ value: { skus?: string[] } }>>(`app_settings?select=value&key=eq.${QUEUE_KEY}`);
+  return r[0]?.value?.skus ?? [];
+}
+async function writeQueue(skus: string[]) {
+  await rest("app_settings?on_conflict=key", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key: QUEUE_KEY, value: { skus }, updated_at: new Date().toISOString() }),
+  });
+}
+async function enqueuePublish(skus: string[]) {
+  if (!skus.length) return;
+  const q = new Set(await readQueue());
+  const before = q.size;
+  for (const s of skus) q.add(s);
+  if (q.size !== before) await writeQueue([...q]);
+}
+// Write a few queued products; the ones Wix or the clock put off stay queued.
+async function drainPublishQueue(deadline: number) {
+  const queued = await readQueue();
+  if (!queued.length) return null;
+  const batch = queued.slice(0, Math.ceil(PUBLISH_MAX / 2));
+  const res = await publishSkus(batch, deadline);
+  const later = new Set(res.filter((r) => r.status === "later").map((r) => r.sku));
+  const done = new Set(batch.filter((s) => !later.has(s)));
+  const now = await readQueue(); // keep what other calls queued meanwhile
+  await writeQueue(now.filter((s) => !done.has(s)));
+  return {
+    published: res.filter((r) => r.status === "published").length,
+    errors: res.filter((r) => r.status === "error").map((r) => `${r.sku} ${r.site}: ${r.error}`),
+    queued: now.length - done.size,
+  };
+}
+
+// ---------------------------------------------------------------- sinks direct
+// The Sinks Direct links follow the Sinks Direct stores themselves (user,
+// 2026-10-20): every scan reads both catalogs and gives each product the
+// address of its own page there; a product hidden on that store loses its
+// link (a hidden page answers 404) and gets it back once it is shown again.
+// A SKU the store does not list is left as it is. Wix writes the address
+// as base + path with a double slash ("sinksdirect.ca//product-page/…").
+async function refreshSinksDirect(pim: PimLinks, now: string) {
+  const changed = new Set<string>();
+  const counts: Record<string, { set: number; removed: number }> = {};
+  for (const retailer of ["sinksdirect_ca", "sinksdirect_us"]) {
+    const store = new Map<string, { visible: boolean; url: string | null }>();
+    for (const p of await wixCatalog(retailer)) {
+      const sku = skuOf(p);
+      if (!sku) continue;
+      const url = p.productPageUrl?.base ? `${p.productPageUrl.base}${p.productPageUrl.path ?? ""}`.replace(/^(https?:\/\/[^/]+)\/\/+/, "$1/") : null;
+      const visible = p.visible !== false && Boolean(url);
+      const prev = store.get(sku);
+      if (!prev || (!prev.visible && visible)) store.set(sku, { visible, url });
+    }
+    const upserts: Array<Record<string, unknown>> = [];
+    const removed: string[] = [];
+    for (const sku of pim.skus) {
+      const page = store.get(sku);
+      if (!page) continue;
+      const list = pim.links.get(sku) ?? [];
+      const current = list.find((l) => l.retailer === retailer);
+      if (page.visible && page.url) {
+        if (current?.url === page.url) continue;
+        upserts.push({ sku, retailer, url: page.url, source: "auto", updated_at: now, updated_by: null });
+        pim.links.set(sku, [...list.filter((l) => l.retailer !== retailer), { retailer, url: page.url }]);
+        changed.add(sku);
+      } else if (current) {
+        removed.push(sku);
+        pim.links.set(sku, list.filter((l) => l.retailer !== retailer));
+        changed.add(sku);
+      }
+    }
+    for (const part of chunk(upserts, 500)) {
+      await rest("product_where_to_buy?on_conflict=sku,retailer", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(part) });
+    }
+    for (const part of chunk(removed, 100)) await rest(`product_where_to_buy?retailer=eq.${retailer}&sku=${inList(part)}`, { method: "DELETE" });
+    counts[retailer] = { set: upserts.length, removed: removed.length };
+  }
+  return { changed: [...changed], counts };
 }
 
 // ---------------------------------------------------------------- unlockers
@@ -776,9 +929,11 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
 
   const now = new Date().toISOString();
   const groups = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
+  const republish = new Set<string>();
   for (const { row, o } of results) {
     const patch = patchFor(row, o, now);
     if (!patch) continue;
+    if (typeof patch.verdict === "string" && (patch.verdict === "broken") !== (row.verdict === "broken")) republish.add(row.sku);
     const key = JSON.stringify(patch);
     if (!groups.has(key)) groups.set(key, { patch, ids: [] });
     groups.get(key)!.ids.push(row.id);
@@ -797,8 +952,12 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     byKind[o.kind] = (byKind[o.kind] ?? 0) + 1;
     if (o.via && (o.kind === "ok" || o.kind === "broken")) byVia[o.via] = (byVia[o.via] ?? 0) + 1;
   }
+  // A link that turned broken leaves its pages; one that answers again comes back.
+  await enqueuePublish([...republish]);
+  const published = !opts.skus?.length && Date.now() + 20000 < deadline ? await drainPublishQueue(deadline) : null;
   const morePending = !opts.skus?.length && (untouched.length > 0 || rows.length >= UNLOCKER_BATCH);
   return {
+    published,
     checked: results.filter((r) => r.o.kind !== "later").length, addresses: answers.length, morePending, byKind, byVia,
     scraperCredits: scraperApi.credits, ms: Date.now() - started,
     ...(opts.skus?.length ? { links: answers.map(({ row, o }) => ({ sku: row.sku, retailer: row.retailer, url: row.url, kind: o.kind, via: o.via ?? null, note: o.note ?? null })) } : {}),
@@ -811,7 +970,7 @@ async function status() {
   });
   const due = Number(r.headers.get("content-range")?.split("/")[1] ?? 0);
   const state = await readScanState();
-  return { due, scannedAt: state.scanned_at ?? null, differs: state.differs ?? {} };
+  return { due, scannedAt: state.scanned_at ?? null, differs: state.differs ?? {}, publishQueue: (await readQueue()).length };
 }
 
 // Cron chain: the cron call (every 10 minutes) passes chain: 0; each batch
@@ -1028,27 +1187,34 @@ Deno.serve(async (req) => {
       const now = new Date().toISOString();
       const sites = Array.isArray(body.sites) && body.sites.length ? body.sites.filter((s: string) => SITES.includes(s)) : SITES;
       const pim = await loadPimLinks();
+      const sinksDirect = await refreshSinksDirect(pim, now);
       const out = [];
       for (const s of sites) out.push(await scanSite(s, now, pim));
+      // The PIM owns the section: pages whose Sinks Direct link changed, and
+      // pages that show something else than the PIM, are written again.
+      await enqueuePublish([...new Set([...sinksDirect.changed, ...out.flatMap((o) => o.differsFromPim)])]);
       const prev = await readScanState();
       await writeScanState({
         scanned_at: now,
         standard: { ...(prev.standard ?? {}), ...Object.fromEntries(out.map((o) => [o.site, o.standardPortals])) },
         differs: { ...(prev.differs ?? {}), ...Object.fromEntries(out.map((o) => [o.site, o.differsFromPim])) },
       });
-      return json({ ok: true, scanned_at: now, sites: out.map(({ differsFromPim, ...o }) => ({ ...o, differsFromPim: differsFromPim.length })) });
+      return json({ ok: true, scanned_at: now, sinksDirect: sinksDirect.counts, sites: out.map(({ differsFromPim, ...o }) => ({ ...o, differsFromPim: differsFromPim.length })) });
     }
     if (mode === "sync") {
       // body: { skus } — a product's links were saved in the PIM.
       const skus = Array.isArray(body.skus) ? body.skus.map((s: unknown) => String(s).trim()).filter(Boolean).slice(0, 50) : [];
       if (!skus.length) return json({ error: "skus[] is required" }, 400);
       const rebuilt = await syncSkus(skus);
-      // Check the new addresses now, in the background.
+      const published = await publishSkus(skus, Date.now() + 60000);
+      await enqueuePublish(published.filter((r) => r.status === "later").map((r) => r.sku));
+      // Check the new addresses now, in the background (a broken one then
+      // leaves the pages through the queue).
       const p = check({ skus, dueOnly: true }).catch((e) => console.warn("[where-to-buy] sync check failed:", (e as Error).message));
       // deno-lint-ignore no-explicit-any
       const rt = (globalThis as any).EdgeRuntime;
       if (rt?.waitUntil) rt.waitUntil(p);
-      return json({ ok: true, rebuilt });
+      return json({ ok: true, rebuilt, published });
     }
     if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
     if (mode === "p2s-file") {

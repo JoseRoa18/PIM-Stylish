@@ -23,6 +23,7 @@ const PUBLISH_TEXT = {
   no_links: 'nothing to publish (no links)',
   not_linked: 'not linked to this product in the PIM',
   not_found: 'product not found on the site',
+  later: 'queued — Wix asked to wait, updated within minutes',
 };
 const VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperapi: 'ScraperAPI', price2spy: 'Price2Spy' };
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
@@ -172,6 +173,7 @@ export default function WhereToBuyTab({ product }) {
                       const detail = saved ? [
                         check?.checked_at && (check.verdict === 'ok' || check.verdict === 'broken') ? `Checked by ${VIA[check.checked_via] ?? 'the PIM'} · ${fmt(check.checked_at)}` : null,
                         check?.verdict !== 'ok' ? check?.note : null,
+                        check?.verdict === 'broken' ? 'Not shown on the Stylish websites until it works again (fix the link or wait for the next check).' : null,
                       ].filter(Boolean).join('\n') : '';
                       return (
                         <tr key={r.key} className="h-12 align-middle">

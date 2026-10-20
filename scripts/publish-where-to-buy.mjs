@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WTB_SITES, withWhereToBuySection } from '../supabase/functions/_shared/whereToBuy.js';
+import { WTB_SITES, withWhereToBuySection, linksToShow } from '../supabase/functions/_shared/whereToBuy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = Object.fromEntries(['.env.local', '.env.secrets.local']
@@ -62,6 +62,7 @@ const bySku = new Map();
 for (const l of links) { if (!bySku.has(l.sku)) bySku.set(l.sku, []); bySku.get(l.sku).push({ retailer: l.retailer, url: l.url }); }
 const products = new Map((await getAll('products?select=sku,brand')).map((p) => [p.sku, p]));
 const wix = new Set((await getAll('wix_links?select=site,sku&site=in.(stylish_ca,stylish_us)')).map((w) => `${w.site}|${w.sku}`));
+const broken = new Set((await getAll('where_to_buy_links?select=url&verdict=eq.broken&url=not.is.null')).map((r) => r.url));
 
 const jobs = [];
 for (const [sku, list] of bySku) {
@@ -79,7 +80,8 @@ for (const [i, job] of jobs.entries()) {
   try {
     const read = await call('wix-read-product', { sku: job.sku, site: job.site });
     if (read?.exists === false || !read?.snapshot) { t.notFound += 1; continue; }
-    const next = withWhereToBuySection(read.snapshot.additional_info_sections ?? [], job.links, job.site);
+    // Every link but the broken ones (user, 2026-10-20), as the audit publishes.
+    const next = withWhereToBuySection(read.snapshot.additional_info_sections ?? [], linksToShow(job.links, broken), job.site, { owned: job.links.length > 0 });
     if (!next) { t.upToDate += 1; continue; }
     if (APPLY) await call('wix-push-product', { sku: job.sku, site: job.site, fields: { additional_info_sections: next }, only: ['additionalInfoSections'] });
     t.published += 1;

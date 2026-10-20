@@ -4,9 +4,8 @@
 
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { readWixProduct, pushProductToWix } from '@/features/syndication/api/wixSync';
 import { WIX_SITES, wixSiteSells } from '@/features/syndication/lib/wixSites';
-import { WTB_SITES, cleanWtbUrl, wtbUrlProblem, withWhereToBuySection } from '../lib/whereToBuy';
+import { WTB_SITES, cleanWtbUrl, wtbUrlProblem } from '../lib/whereToBuy';
 
 /**
  * { links: { [retailer]: url }, checks: { [retailer]: { verdict, note, checked_at, checked_via } },
@@ -77,34 +76,20 @@ export async function saveProductWhereToBuy(product, draft, current) {
 
 /**
  * Write the PIM's list into the WHERE TO BUY section of each Stylish page the
- * product is on: the live sections are read first and only that section is
- * replaced (or added), so dimensions, documents, videos… stay as they are.
- * Then the Listing Health audit rebuilds the product's rows and checks the
- * new addresses.
+ * product is on — the audit's `sync` mode does it server side: it rebuilds the
+ * product's audit rows, writes the pages (every link but the broken ones;
+ * only that section changes, dimensions, documents, videos… stay as they
+ * are) and checks the new addresses; one that turns out broken leaves the
+ * pages by itself a few minutes later.
  */
 export async function publishWhereToBuy(product) {
-  const sku = product.sku;
-  const { data: rows, error } = await supabase.from('product_where_to_buy').select('retailer, url').eq('sku', sku);
-  if (error) throw error;
-  const { data: wix } = await supabase.from('wix_links').select('site').eq('sku', sku).in('site', WTB_SITES.map((s) => s.key));
-  const linked = new Set((wix ?? []).map((w) => w.site));
-  const results = [];
-  for (const site of WTB_SITES) {
-    const label = WIX_SITES[site.key]?.label ?? site.label;
-    if (!wixSiteSells(site.key, product)) continue;
-    if (!linked.has(site.key)) { results.push({ site: site.key, label, status: 'not_linked' }); continue; }
-    try {
-      const { exists, snapshot } = await readWixProduct(sku, site.key);
-      if (!exists || !snapshot) { results.push({ site: site.key, label, status: 'not_found' }); continue; }
-      const next = withWhereToBuySection(snapshot.additional_info_sections ?? [], rows ?? [], site.key);
-      if (!next) { results.push({ site: site.key, label, status: rows?.length ? 'up_to_date' : 'no_links' }); continue; }
-      await pushProductToWix(sku, { additional_info_sections: next }, ['additionalInfoSections'], site.key);
-      results.push({ site: site.key, label, status: 'published' });
-    } catch (err) {
-      results.push({ site: site.key, label, status: 'error', error: err.message });
-    }
-  }
-  // The audit follows the PIM's list: new rows now, new addresses checked.
-  try { await supabase.functions.invoke('where-to-buy-audit', { body: { mode: 'sync', skus: [sku] } }); } catch { /* the nightly scan catches up */ }
-  return results;
+  const { data, error } = await supabase.functions.invoke('where-to-buy-audit', { body: { mode: 'sync', skus: [product.sku] } });
+  if (error) throw new Error(error.message ?? 'Publishing failed');
+  if (data?.error) throw new Error(data.error);
+  return (data?.published ?? []).map((r) => ({
+    site: r.site,
+    label: WIX_SITES[r.site]?.label ?? WTB_SITES.find((s) => s.key === r.site)?.label ?? r.site,
+    status: r.status,
+    error: r.error,
+  }));
 }
