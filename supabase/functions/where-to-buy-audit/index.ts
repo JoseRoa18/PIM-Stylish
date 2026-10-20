@@ -74,7 +74,7 @@
 
 import { resolveWixSite } from "../_shared/wixSites.ts";
 import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, withWhereToBuySection } from "../_shared/whereToBuy.js";
-import { readProductPage, menardsRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
+import { readProductPage, menardsRead, lowesRecordRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
 import { normSku } from "../_shared/pageReaders/common.js";
 import { PAGE_STORES } from "../_shared/pageStores.js";
 import { etToday, periodOfDay, prevPeriod, promoWindow, shiftDay, PROMO_DATE_COLUMNS, type Market } from "../_shared/promoCalendar.ts";
@@ -120,22 +120,24 @@ const retailerFor = (host: string): { key: string; market: string; label: string
 
 // How each retailer's links are opened, in order — measured on 2026-10-19
 // with the same links through every service:
-//   Bright Data opens Wayfair, Home Depot CA / USA, Best Buy, Amazon.ca,
-//   Lowe's (7/8) and Rona (ScraperAPI never does); Menards only in async
-//   mode from a US exit. ScraperAPI opens BB&B and Overstock (Akamai turns
-//   Bright Data away, 1-2 of 5) and eBay. Amazon lets the server in, but
-//   without its prices (see below).
+//   Bright Data opens Wayfair, Home Depot CA / USA, Best Buy, Amazon.ca and
+//   Rona (ScraperAPI never does). ScraperAPI opens BB&B and Overstock
+//   (Akamai turns Bright Data away, 1-2 of 5) and eBay. Amazon lets the
+//   server in, but without its prices (see below). Menards and Lowe's go
+//   through Bright Data's ready-made scrapers ("scraper", see SCRAPERS):
+//   Lowe's opened 7 of 8 links on 2026-10-19 and put a captcha in front of
+//   the Web Unlocker the next day.
 // Anything not listed: the server's probe, then one Bright Data try.
-type Method = "direct" | "brightdata" | "scraperapi" | "menards";
+type Method = "direct" | "brightdata" | "scraperapi" | "scraper";
 const ROUTES: Record<string, Method[]> = {
   wayfair_us: ["brightdata", "scraperapi"],
   wayfair_ca: ["brightdata", "scraperapi"],
   homedepot_ca: ["brightdata", "scraperapi"],
   homedepot_us: ["brightdata", "scraperapi"],
   bestbuy_ca: ["brightdata", "scraperapi"],
-  lowes_us: ["brightdata", "scraperapi"],
+  lowes_us: ["scraper"],
   rona: ["brightdata"],
-  menards: ["menards"],
+  menards: ["scraper"],
   bbb_us: ["scraperapi", "brightdata"],
   overstock_us: ["scraperapi", "brightdata"],
   ebay: ["scraperapi", "brightdata"],
@@ -752,9 +754,9 @@ interface PageRead {
 }
 interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string }
 
-const METHOD_LABEL: Record<Method, string> = { direct: "Direct", brightdata: "Bright Data", scraperapi: "ScraperAPI", menards: "Bright Data (Menards)" };
+const METHOD_LABEL: Record<Method, string> = { direct: "Direct", brightdata: "Bright Data", scraperapi: "ScraperAPI", scraper: "Bright Data scraper" };
 // Time an attempt may take, so a call never starts one it cannot finish.
-const METHOD_MS: Record<Method, number> = { direct: 14000, brightdata: 67000, scraperapi: 72000, menards: 35000 };
+const METHOD_MS: Record<Method, number> = { direct: 14000, brightdata: 67000, scraperapi: 72000, scraper: 35000 };
 
 const pageTitle = (html: string) => decode((html.match(/<title[^>]*>([^<]*)/i)?.[1] ?? "").replace(/\s+/g, " ").trim());
 // An address as the services accept it: spaces and non-ASCII letters
@@ -887,35 +889,53 @@ async function viaScraperApi(row: DueRow): Promise<Outcome> {
   } finally { scraperApi.inFlight -= 1; }
 }
 
-// Menards (Imperva + hCaptcha) goes through Bright Data's ready-made Menards
-// scraper (Web Scraper API, dataset "Menards Products") — tested 2026-10-20 on
-// links of known answer: B-108G and S-613W live (title, brand, our SKU as
-// `mpn`), B-112N gone ("HTTP 404 — product page not found", error_code
-// dead_page), in one pass of ~2 minutes. The Web Unlocker gave up on some
-// live Menards pages (B-108G). Links go in batches: one call sends the due
-// ones as a snapshot job (`job_id`), a later call reads the snapshot.
-const MENARDS_DATASET = "gd_motp6b7s1n9zlq6lwj";
-const MENARDS_BATCH = 300;
-const MENARDS_GIVEUP_HOURS = 3;
+// Stores read through one of Bright Data's ready-made scrapers (Web Scraper
+// API) instead of their pages: a call sends the store's due links as one
+// snapshot job (`job_id`) and a later call reads the snapshot (minutes).
+//   Menards (Imperva + hCaptcha) — dataset "Menards Products", tested
+//     2026-10-20 on links of known answer: B-108G and S-613W live (title,
+//     brand, our SKU as `mpn`), B-112N gone ("HTTP 404 — product page not
+//     found", error_code dead_page), one pass of ~2 minutes. The Web Unlocker
+//     gave up on some live Menards pages (B-108G).
+//   Lowe's — dataset "Lowes.com", since 2026-10-20: Lowe's put a captcha in
+//     front of the Web Unlocker ("captcha or protection page found" on 70
+//     links, with or without a US exit) while its scraper read the same links
+//     (B-112C, P-227H, S-306TG: model_number, upc, final_price /
+//     initial_price, in_stock).
+type ScrapedRecord = Record<string, unknown>;
+interface ScraperStore { dataset: string; label: string; read: (rec: ScrapedRecord, siblings: ScrapedRecord[]) => PageRead | null }
+const SCRAPERS: Record<string, ScraperStore> = {
+  menards: { dataset: "gd_motp6b7s1n9zlq6lwj", label: "Menards", read: (rec, siblings) => (rec.title ? menardsRead(rec, siblings) : null) },
+  lowes_us: { dataset: "gd_lnvl79pfftqh18u2o", label: "Lowe's", read: (rec) => lowesRecordRead(rec) },
+};
+const SCRAPER_RETAILERS = Object.keys(SCRAPERS);
+const SCRAPER_BATCH = 300;      // links per job
+const SCRAPER_GIVEUP_HOURS = 3; // a job still running after 3 h: no answer
 
 // The record of the address itself among the ones the scraper returned for
-// it: the same page (address without its query), else the same Menards id
-// (".../p-1642874277884313-c-8509.htm"), else the first one (the scraper
-// lists the page's own product first).
-const menardsPath = (u: unknown) => String(u ?? "").split(/[?#]/)[0].toLowerCase().replace(/\/+$/, "");
+// it: the same page (address without its query), else the same store id
+// (Menards ".../p-1642874277884313-c-8509.htm"), else the first one (the
+// scraper lists the page's own product first).
+const recordPath = (u: unknown) => String(u ?? "").split(/[?#]/)[0].toLowerCase().replace(/\/+$/, "");
 const menardsId = (u: unknown) => String(u ?? "").match(/\/p-(\d{6,})(?:-c-|\.htm)/i)?.[1] ?? null;
-function menardsOwnRecord(recs: Array<Record<string, unknown>>, url: string): Record<string, unknown> | null {
+function ownRecord(recs: ScrapedRecord[], url: string): ScrapedRecord | null {
   if (!recs.length) return null;
   const id = menardsId(url);
-  return recs.find((r) => r.url && menardsPath(r.url) === menardsPath(url))
+  return recs.find((r) => r.url && recordPath(r.url) === recordPath(url))
     ?? (id ? recs.find((r) => String(r.item_id ?? "") === id || menardsId(r.url) === id) : undefined)
     ?? recs[0];
 }
 
-async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Outcome }>> {
+async function checkScrapers(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Outcome }>> {
+  const byStore = new Map<string, DueRow[]>();
+  for (const r of leads) { if (!byStore.has(r.retailer)) byStore.set(r.retailer, []); byStore.get(r.retailer)!.push(r); }
+  return (await Promise.all([...byStore].map(([retailer, rows]) => checkScraper(SCRAPERS[retailer], rows)))).flat();
+}
+
+async function checkScraper(store: ScraperStore, leads: DueRow[]): Promise<Array<{ row: DueRow; o: Outcome }>> {
   const out: Array<{ row: DueRow; o: Outcome }> = [];
   if (!leads.length) return out;
-  if (!BRIGHTDATA_API_TOKEN) return leads.map((row) => ({ row, o: { kind: "none", via: "menards", note: "not configured" } }));
+  if (!BRIGHTDATA_API_TOKEN) return leads.map((row) => ({ row, o: { kind: "none", via: "scraper", note: "not configured" } }));
   const auth = { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" };
   // Jobs in flight: read the ones that are done.
   const byJob = new Map<string, DueRow[]>();
@@ -925,7 +945,7 @@ async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Ou
       const p = await (await fetch(`https://api.brightdata.com/datasets/v3/progress/${encodeURIComponent(job)}`, { headers: auth, signal: AbortSignal.timeout(20000) })).json();
       if (p.status !== "ready" && p.status !== "failed") {
         const hours = (Date.now() - Date.parse(rows[0].job_at ?? "")) / 3600e3;
-        for (const row of rows) out.push({ row, o: hours >= MENARDS_GIVEUP_HOURS ? { kind: "none", via: "menards", note: "the Menards scraper gave no answer" } : { kind: "waiting", via: "menards" } });
+        for (const row of rows) out.push({ row, o: hours >= SCRAPER_GIVEUP_HOURS ? { kind: "none", via: "scraper", note: `the ${store.label} scraper gave no answer` } : { kind: "waiting", via: "scraper" } });
         continue;
       }
       const s = await fetch(`https://api.brightdata.com/datasets/v3/snapshot/${encodeURIComponent(job)}?format=json`, { headers: auth, signal: AbortSignal.timeout(60000) });
@@ -943,28 +963,30 @@ async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Ou
       }
       for (const row of rows) {
         const recs = byInput.get(row.url) ?? byInput.get(row.url.replace(/ /g, "%20")) ?? [];
-        const rec = menardsOwnRecord(recs, row.url);
-        if (!rec) out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper returned nothing for it" } });
-        else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "broken", via: "menards", status: 404, note: "Menards: the product page is gone (404)" } });
-        else if (rec.error) out.push({ row, o: { kind: "none", via: "menards", note: `Menards scraper: ${String(rec.error).slice(0, 80)}` } });
-        else if (rec.title) out.push({ row, o: { kind: "ok", via: "menards", status: 200, page: menardsRead(rec, recs.filter((x) => x !== rec)) } });
-        else out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper read no product" } });
+        const rec = ownRecord(recs, row.url);
+        const page = rec && !rec.error ? store.read(rec, recs.filter((x) => x !== rec)) : null;
+        if (!rec) out.push({ row, o: { kind: "none", via: "scraper", note: `the ${store.label} scraper returned nothing for it` } });
+        else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "broken", via: "scraper", status: 404, note: `${store.label}: the product page is gone (404)` } });
+        else if (rec.error) out.push({ row, o: { kind: "none", via: "scraper", note: `${store.label} scraper: ${String(rec.error).slice(0, 80)}` } });
+        else if (page?.gone) out.push({ row, o: { kind: "broken", via: "scraper", status: 200, note: page.note ?? `${store.label} no longer sells it`, page } });
+        else if (page) out.push({ row, o: { kind: "ok", via: "scraper", status: 200, page } });
+        else out.push({ row, o: { kind: "none", via: "scraper", note: `the ${store.label} scraper read no product` } });
       }
     } catch (e) {
-      for (const row of rows) out.push({ row, o: { kind: "none", via: "menards", note: (e as Error).message.slice(0, 80) } });
+      for (const row of rows) out.push({ row, o: { kind: "none", via: "scraper", note: (e as Error).message.slice(0, 80) } });
     }
   }
   // New ones: one job for the batch.
-  const fresh = leads.filter((r) => !r.job_id).slice(0, MENARDS_BATCH);
+  const fresh = leads.filter((r) => !r.job_id).slice(0, SCRAPER_BATCH);
   if (fresh.length) {
     try {
-      const r = await fetch(`https://api.brightdata.com/datasets/v3/trigger?dataset_id=${MENARDS_DATASET}&include_errors=true&format=json`, {
+      const r = await fetch(`https://api.brightdata.com/datasets/v3/trigger?dataset_id=${store.dataset}&include_errors=true&format=json`, {
         method: "POST", headers: auth, body: JSON.stringify(fresh.map((x) => ({ url: x.url }))), signal: AbortSignal.timeout(30000),
       });
       const j = await r.json().catch(() => ({}));
-      for (const row of fresh) out.push({ row, o: j.snapshot_id ? { kind: "submitted", via: "menards", jobId: j.snapshot_id } : { kind: "none", via: "menards", note: `job not accepted (HTTP ${r.status})` } });
+      for (const row of fresh) out.push({ row, o: j.snapshot_id ? { kind: "submitted", via: "scraper", jobId: j.snapshot_id } : { kind: "none", via: "scraper", note: `job not accepted (HTTP ${r.status})` } });
     } catch (e) {
-      for (const row of fresh) out.push({ row, o: { kind: "none", via: "menards", note: (e as Error).message.slice(0, 80) } });
+      for (const row of fresh) out.push({ row, o: { kind: "none", via: "scraper", note: (e as Error).message.slice(0, 80) } });
     }
   }
   return out;
@@ -1004,7 +1026,7 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
       }
     } else if (m === "brightdata") o = await viaBrightData(row, deadline);
     else if (m === "scraperapi") o = await viaScraperApi(row);
-    else o = { kind: "none", via: "menards", note: "Menards goes through its own batch" }; // never reached: checkMenards
+    else o = { kind: "none", via: "scraper", note: "goes through its store's scraper batch" }; // never reached: checkScrapers
     if (o.kind === "soft") { provisional ??= o; misses.push(`${METHOD_LABEL[m]}: ${o.note ?? "no product"}`); continue; }
     if (o.kind !== "none") return o;
     misses.push(`${METHOD_LABEL[m]}: ${o.note ?? "no answer"}`);
@@ -1119,7 +1141,7 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
   const reading = readingFor(o, now);
   const verdictPatch = (verdict: "ok" | "broken", note: string | null, signals: number) => ({
     verdict, note, http_status: o.status ?? null, final_url: verdict === "broken" ? o.finalUrl ?? null : null,
-    checked_at: now, checked_via: o.via === "menards" ? "brightdata" : o.via ?? null,
+    checked_at: now, checked_via: o.via === "scraper" ? "brightdata" : o.via ?? null,
     fail_count: 0, signal_count: signals, signal_at: null, ...clearJob,
     next_check_at: at((verdict === "ok" ? OK_HOURS : BROKEN_HOURS) * 3600e3),
     ...reading,
@@ -1152,7 +1174,7 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
     }
     case "submitted": return {
       job_id: o.jobId, job_at: now, next_check_at: at(JOB_POLL_MIN * 60e3),
-      ...(row.verdict === "pending" ? { note: "Opening through Menards (takes a few minutes)" } : {}),
+      ...(row.verdict === "pending" ? { note: `Opening through Bright Data's ${SCRAPERS[row.retailer]?.label ?? ""} scraper (takes a few minutes)` } : {}),
     };
     case "waiting": return { next_check_at: at(20 * 60e3) };
     case "later": return { next_check_at: o.via === "brightdata" ? at(5 * 60e3) : now };
@@ -1168,8 +1190,8 @@ const dueFilter = () => `url=not.is.null&verdict=not.in.(missing,manual)&or=(nex
 // stores read through an unlocker (one call opens ~40 of them since the
 // account's verification, 2026-10-20; links never verified first), and the
 // links the server opens itself (fast, free).
-const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([k, r]) => r[0] !== "direct" && k !== "menards").map(([k]) => k);
-const MENARDS_POOL = 400; // rows; Menards goes as one scraper job
+const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([, r]) => r[0] !== "direct" && r[0] !== "scraper").map(([k]) => k);
+const SCRAPER_POOL = 900; // rows (both sites); each store goes as one scraper job
 const UNLOCKER_BATCH = 72;
 const DIRECT_BATCH = 250;
 
@@ -1180,8 +1202,8 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
     : [
       ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(UNLOCKER_RETAILERS)}&order=verdict.desc,next_check_at.asc.nullsfirst&limit=${UNLOCKER_BATCH}`, { headers: { Prefer: "count=none" } }),
-      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=not.${inList([...UNLOCKER_RETAILERS, "menards"])}&order=next_check_at.asc.nullsfirst&limit=${opts.limit ?? DIRECT_BATCH}`, { headers: { Prefer: "count=none" } }),
-      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=eq.menards&order=next_check_at.asc.nullsfirst&limit=${MENARDS_POOL}`, { headers: { Prefer: "count=none" } }),
+      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}&order=next_check_at.asc.nullsfirst&limit=${opts.limit ?? DIRECT_BATCH}`, { headers: { Prefer: "count=none" } }),
+      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(SCRAPER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${SCRAPER_POOL}`, { headers: { Prefer: "count=none" } }),
     ];
   // Claim the batch so an overlapping call (cron chain + UI) skips it; every
   // outcome writes its own next_check_at, and a link this call never reaches
@@ -1201,17 +1223,18 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   // One queue per host. Sites read through an unlocker take 3 lanes (the
   // service spreads them over its own addresses); the server's own probe
   // keeps one paced lane per host.
-  // Menards goes as one batch to its scraper (checkMenards), the rest by host.
+  // Menards and Lowe's go as one batch per store to their scraper
+  // (checkScrapers), the rest by host.
   const byHost = new Map<string, DueRow[]>();
   for (const r of leads) {
-    if (r.retailer === "menards") continue;
+    if (SCRAPERS[r.retailer]) continue;
     const h = (r.host ?? "").replace(/^www\./, "");
     if (!byHost.has(h)) byHost.set(h, []);
     byHost.get(h)!.push(r);
   }
   const answers: Array<{ row: DueRow; o: Outcome }> = [];
-  const menards = checkMenards(leads.filter((r) => r.retailer === "menards")).then((res) => { answers.push(...res); });
-  await Promise.all([menards, ...[...byHost.entries()].map(async ([host, list]) => {
+  const scraped = checkScrapers(leads.filter((r) => SCRAPERS[r.retailer])).then((res) => { answers.push(...res); });
+  await Promise.all([scraped, ...[...byHost.entries()].map(async ([host, list]) => {
     const unlocker = !routeFor(list[0].retailer, host).every((m) => m === "direct");
     const { pace, lanes } = unlocker ? { pace: 500, lanes: 2 } : laneConfig(host);
     let next = 0;
@@ -1682,11 +1705,14 @@ async function verifySuggestions(deadline: number) {
   const lane = async (queue: Suggestion[]) => {
     while (queue.length && Date.now() + 15000 < deadline) {
       const s = queue.shift()!;
-      // Menards opens only through its scraper (minutes per batch): the
-      // scraper itself read the option it lists, so that one counts as seen.
-      if (s.retailer === "menards") {
+      // Menards and Lowe's open only through their scraper (minutes per
+      // batch): the scraper itself read the options it lists (Menards gives a
+      // record per finish), so such a suggestion counts as seen; any other
+      // cannot be opened here.
+      if (SCRAPERS[s.retailer]) {
+        if (s.source !== "page_option") { await fail(s, `${SCRAPERS[s.retailer].label} opens only through its scraper batch`); continue; }
         counts.ready += 1;
-        await patch(s, { status: "ready", status_note: "Read by the Menards scraper", checked_at: now(), next_check_at: new Date(Date.now() + 365 * 86400e3).toISOString() });
+        await patch(s, { status: "ready", status_note: `Read by Bright Data's ${SCRAPERS[s.retailer].label} scraper`, checked_at: now(), next_check_at: new Date(Date.now() + 365 * 86400e3).toISOString() });
         continue;
       }
       let host = "";

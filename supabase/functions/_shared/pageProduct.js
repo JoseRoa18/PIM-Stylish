@@ -91,6 +91,34 @@ export function menardsRead(rec, siblings = []) {
   });
 }
 
+// ---------------------------------------------------------------- lowe's
+// Lowe's is read through Bright Data's Lowes.com scraper since 2026-10-20
+// (Lowe's put a captcha in front of the Web Unlocker): model_number (Lowe's
+// own record — "S-310G1" for S-310G, see lowesRona.js), upc, sku = Lowe's
+// product id, final_price = paid now, initial_price = the regular price,
+// in_stock / availability_status. A gone product answers error_code
+// dead_page ("404 Page Not Found.").
+export function lowesRecordRead(rec) {
+  if (!rec || rec.error) return null;
+  const now = money(rec.final_price) ?? money(rec.sale_price) ?? money(rec.price);
+  const regular = money(rec.initial_price) ?? money(rec.price);
+  const availability = [].concat(rec.availability ?? []).join(" ");
+  const gone = /no longer (sold|available)|discontinued/i.test(availability);
+  return clean({
+    ids: uniq([rec.model_number]),
+    gtins: uniq([rec.upc, rec.gtin_ean_pn]),
+    price: gone ? null : now,
+    wasPrice: !gone && regular !== null && now !== null && regular > now ? regular : null,
+    currency: String(rec.currency ?? "USD").toUpperCase(),
+    inStock: gone ? false : typeof rec.in_stock === "boolean" ? rec.in_stock
+      : /^in_stock$/i.test(String(rec.availability_status ?? "")) ? true : /out_of_stock/i.test(String(rec.availability_status ?? "")) ? false : null,
+    itemId: rec.sku ?? rec.marketplace_pn ?? null,
+    canonical: rec.url ?? null,
+    source: "lowes-scraper",
+    ...(gone ? { gone: true, note: `Lowe's no longer sells it ("${availability.slice(0, 60)}")` } : {}),
+  });
+}
+
 // ---------------------------------------------------------------- reading
 // Keep a reading within sane bounds. A bare 12–14 digit "id" is a GTIN / UPC.
 function clean(read) {
