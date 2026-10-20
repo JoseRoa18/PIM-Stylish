@@ -12,7 +12,7 @@ export async function loadWhereToBuy(site) {
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from('where_to_buy_links')
-      .select('id, site, sku, wix_product_id, section, market, retailer, label, url, host, retailer_id, expected_id, verdict, http_status, final_url, note, scanned_at, checked_at')
+      .select('id, site, sku, wix_product_id, section, market, retailer, label, url, host, retailer_id, expected_id, verdict, http_status, final_url, note, scanned_at, checked_at, checked_via, next_check_at')
       .eq('site', site)
       .order('sku')
       .order('section')
@@ -40,17 +40,19 @@ export async function scanWhereToBuy(sites) {
     entityType: 'channel',
     entityId: 'where_to_buy',
     target: 'stylish',
-    summary: `Where to Buy scan: ${r.sites.map((s) => `${s.label} ${s.links} links, ${s.missing} missing, ${s.malformed} malformed`).join(' · ')}`,
+    summary: `Where to Buy scan: ${r.sites.map((s) => `${s.label} ${s.links} links, ${s.missing} links to add, ${s.broken} broken addresses`).join(' · ')}`,
     metadata: r,
   });
   return r;
 }
 
 /**
- * Probe pending links in paced batches until none remain (or `maxCalls`
- * batches ran). Reports progress after every batch.
+ * Check the links that are due, batch after batch (each call takes up to
+ * ~2 minutes: stores that block the PIM are opened through Bright Data or
+ * ScraperAPI), until none remain or `maxCalls` batches ran — the hourly
+ * pass picks up the rest. Reports progress after every batch.
  */
-export async function checkWhereToBuy({ onProgress, maxCalls = 40 } = {}) {
+export async function checkWhereToBuy({ onProgress, maxCalls = 10 } = {}) {
   let total = 0;
   for (let i = 0; i < maxCalls; i++) {
     const r = await invoke({ mode: 'check' });

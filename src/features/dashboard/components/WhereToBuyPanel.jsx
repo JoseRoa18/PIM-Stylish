@@ -1,20 +1,24 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, ChevronDown, ExternalLink, RefreshCw, Search } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Copy, ExternalLink, RefreshCw, Search } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy } from '@/features/dashboard/api/whereToBuy';
 import {
   WTB_SITES,
   WTB_RETAILERS,
   WTB_VERDICTS,
+  WTB_VIA,
   groupWhereToBuy,
+  linksToAdd,
   summarizeWhereToBuy,
   isProblem,
 } from '@/features/dashboard/lib/whereToBuy';
 
 // Listing Health → Stylish → Where to Buy. One row per product of the site,
 // one cell per retailer linked from its WHERE TO BUY section; the cell colour
-// is the link's verdict. Expanding a row lists every link with the reason.
+// is the link's verdict (OK / Broken — user, 2026-10-19). Expanding a row
+// lists every link with the reason and who checked it. The portals a page
+// does not link are a KPI of their own ("Links to add"), not a problem.
 
 const TONE = {
   ok: 'bg-success',
@@ -74,6 +78,8 @@ export default function WhereToBuyPanel() {
   const [search, setSearch] = useState('');
   const [onlyProblems, setOnlyProblems] = useState(true);
   const [retailerFilter, setRetailerFilter] = useState('all');
+  const [toAdd, setToAdd] = useState(null); // a portal of "Links to add": its products only
+  const [copied, setCopied] = useState(null);
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
 
@@ -82,10 +88,11 @@ export default function WhereToBuyPanel() {
     setError(null);
     try { setRows(await loadWhereToBuy(s)); } catch (e) { setError(e); } finally { setLoading(false); }
   };
-  useEffect(() => { reload(site); setPage(1); setExpanded(null); }, [site]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { reload(site); setPage(1); setExpanded(null); setToAdd(null); }, [site]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = useMemo(() => summarizeWhereToBuy(rows), [rows]);
   const groups = useMemo(() => groupWhereToBuy(rows), [rows]);
+  const toAddList = useMemo(() => linksToAdd(rows), [rows]);
   // Only retailers present on this site get a column.
   const columns = useMemo(() => {
     const seen = new Set(rows.filter((r) => r.section === 'where_to_buy' && r.url).map((r) => r.retailer));
@@ -94,15 +101,20 @@ export default function WhereToBuyPanel() {
 
   const filtered = useMemo(() => {
     let list = groups;
-    if (onlyProblems) list = list.filter((g) => g.problems > 0);
+    if (toAdd) list = list.filter((g) => g.missing.includes(toAdd));
+    else if (onlyProblems) list = list.filter((g) => g.problems > 0);
     if (retailerFilter !== 'all') list = list.filter((g) => g.links.some((l) => l.retailer === retailerFilter && (!onlyProblems || isProblem(l.verdict))));
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((g) => g.sku.toLowerCase().includes(q));
     return list;
-  }, [groups, onlyProblems, retailerFilter, search]);
+  }, [groups, onlyProblems, retailerFilter, search, toAdd]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [onlyProblems, retailerFilter, search]);
+  useEffect(() => { setPage(1); }, [onlyProblems, retailerFilter, search, toAdd]);
+
+  const copySkus = async (retailer, skus) => {
+    try { await navigator.clipboard.writeText(skus.join('\n')); setCopied(retailer); setTimeout(() => setCopied(null), 2000); } catch { /* clipboard blocked */ }
+  };
 
   const runScan = async () => {
     setBusy('scan');
@@ -137,7 +149,7 @@ export default function WhereToBuyPanel() {
               Every retailer link on the product pages, opened to confirm it reaches the product page.
             </p>
             <p className="text-body-sm text-on-surface-variant mt-1">
-              Scanned {fmtWhen(summary.lastScan)} · links checked {fmtWhen(summary.lastCheck)} · pending links are retried every hour
+              Scanned {fmtWhen(summary.lastScan)} · last check {fmtWhen(summary.lastCheck)} · OK links are checked again every 2 days, broken ones daily · stores that block the PIM are opened through Bright Data or ScraperAPI
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -174,7 +186,7 @@ export default function WhereToBuyPanel() {
                   disabled={busy != null}
                   aria-busy={busy === 'check'}
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-40"
-                  title="Probe the pending links now instead of waiting for the hourly pass"
+                  title="Check the links that are due now instead of waiting for the hourly pass"
                 >
                   {busy === 'check' ? `Checking · ${progress?.checked ?? 0}` : 'Check links'}
                 </button>
@@ -188,11 +200,47 @@ export default function WhereToBuyPanel() {
           {stat('Links', summary.links)}
           {stat('OK', counts.ok, 'text-success')}
           {stat('Broken', counts.broken, counts.broken ? 'text-error' : undefined)}
-          {stat('Missing link', counts.missing, counts.missing ? 'text-warning' : undefined)}
-          {stat('Pending', counts.pending)}
+          {stat('Not checked yet', counts.pending)}
+          {stat('Check by hand', counts.manual)}
           {stat('Dropbox docs', summary.dropbox, summary.dropbox ? 'text-warning' : undefined)}
         </div>
       </div>
+
+      {toAddList.length > 0 && (
+        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-title-sm font-semibold text-on-surface">Links to add · {counts.missing ?? 0}</h3>
+            <p className="text-body-sm text-on-surface-variant">Portals most products of the site link, missing on these pages. Pick one to list its products.</p>
+          </div>
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {toAddList.map((p) => {
+              const active = toAdd === p.retailer;
+              return (
+                <li key={p.retailer} className={`inline-flex items-center rounded-lg border ${active ? 'border-primary bg-primary-container' : 'border-outline-variant'}`}>
+                  <button
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setToAdd(active ? null : p.retailer)}
+                    className={`px-3 py-1.5 text-label-lg ${active ? 'text-on-primary-container font-semibold' : 'text-on-surface hover:bg-surface-container'} rounded-l-lg`}
+                  >
+                    {p.label} <span className="tabular-nums text-warning font-semibold ml-1">{p.skus.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => copySkus(p.retailer, p.skus)}
+                    aria-label={`Copy the ${p.skus.length} SKUs missing a ${p.label} link`}
+                    title={`Copy the ${p.skus.length} SKUs`}
+                    className="px-2 py-1.5 border-l border-outline-variant text-on-surface-variant hover:bg-surface-container rounded-r-lg"
+                  >
+                    {copied === p.retailer ? <Check className="w-4 h-4 text-success" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {copied && <p role="status" className="sr-only">SKUs copied</p>}
+        </div>
+      )}
 
       {error && (
         <div role="alert" className="rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
@@ -225,10 +273,17 @@ export default function WhereToBuyPanel() {
               <option value="all">All retailers</option>
               {columns.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
-            <label className="inline-flex items-center gap-2 text-body-sm text-on-surface cursor-pointer">
-              <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} className="accent-primary" />
-              Only problems
-            </label>
+            {toAdd ? (
+              <span className="inline-flex items-center gap-2 text-body-sm text-on-surface">
+                Missing a {WTB_RETAILERS.find((r) => r.key === toAdd)?.label ?? toAdd} link
+                <button type="button" onClick={() => setToAdd(null)} className="px-2 py-0.5 rounded-md text-primary hover:bg-surface-container">Clear</button>
+              </span>
+            ) : (
+              <label className="inline-flex items-center gap-2 text-body-sm text-on-surface cursor-pointer">
+                <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} className="accent-primary" />
+                Only broken links
+              </label>
+            )}
             <span className="text-body-sm text-on-surface-variant ml-auto">{filtered.length} of {groups.length} products</span>
           </div>
           <div className="overflow-x-auto">
@@ -284,6 +339,9 @@ export default function WhereToBuyPanel() {
                                     {l.section === 'documents' ? `Document · ${l.label || 'file'}` : (WTB_RETAILERS.find((r) => r.key === l.retailer)?.label ?? l.host ?? l.retailer)}
                                   </span>
                                   {l.note && <span className="text-on-surface-variant">{l.note}</span>}
+                                  {l.checked_via && (l.verdict === 'ok' || l.verdict === 'broken') && (
+                                    <span className="text-on-surface-variant/80">checked by {WTB_VIA[l.checked_via] ?? l.checked_via} · {fmtWhen(l.checked_at)}</span>
+                                  )}
                                   {l.url && (
                                     <a href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline truncate max-w-[32rem]" title={l.url}>
                                       <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
@@ -305,7 +363,7 @@ export default function WhereToBuyPanel() {
                 {pageRows.length === 0 && (
                   <tr className="border-t border-outline-variant">
                     <td colSpan={columns.length + 4} className="px-4 py-8 text-center text-on-surface-variant">
-                      {onlyProblems ? 'No problems on this site.' : 'No products match.'}
+                      {toAdd ? 'No product misses this link.' : onlyProblems ? 'No broken links on this site.' : 'No products match.'}
                     </td>
                   </tr>
                 )}

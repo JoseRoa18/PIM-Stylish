@@ -37,25 +37,44 @@ export const WTB_RETAILERS = [
   { key: 'other', label: 'Other link', short: 'Other', market: null },
 ];
 
-// Four verdicts only (user rule, 2026-09-15): a pure "does the link open the
-// product page" check, nothing compared with the PIM. `note` carries the reason.
+// A pure "does the link open the product page" check, nothing compared with
+// the PIM; `note` carries the reason. The list says OK or Broken (user,
+// 2026-10-19); a portal the page does not link is a KPI of links to add, and
+// the sites no service can open are checked by hand.
 export const WTB_VERDICTS = {
-  ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product.' },
-  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address.' },
-  missing: { label: 'Missing link', tone: 'warning', problem: true, hint: 'The page has no link to this portal, although most products of the site link it.' },
-  pending: { label: 'Pending', tone: 'muted', problem: false, hint: 'Not verified yet: the site blocks automated checks or did not answer. Retried every hour.' },
+  ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product. Checked again every 2 days.' },
+  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address. Checked again daily.' },
+  missing: { label: 'Link to add', tone: 'warning', problem: false, hint: 'The page has no link to this portal, although most products of the site link it.' },
+  pending: { label: 'Not checked yet', tone: 'muted', problem: false, hint: 'Waiting for its first answer: new links are opened within the hour, and a store that did not answer is tried again a few hours later.' },
+  manual: { label: 'Check by hand', tone: 'muted', problem: false, hint: 'This site turns every automatic check away (Faucetline, Loblaws, Fortinos, Provigo): open the link to check it.' },
 };
 
+export const WTB_VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperapi: 'ScraperAPI', price2spy: 'Price2Spy' };
+
 export const isProblem = (verdict) => Boolean(WTB_VERDICTS[verdict]?.problem);
+
+/** Missing links by portal: [{ retailer, label, skus[] }], most missing first. */
+export function linksToAdd(rows) {
+  const by = new Map();
+  for (const r of rows) {
+    if (r.verdict !== 'missing') continue;
+    if (!by.has(r.retailer)) by.set(r.retailer, new Set());
+    by.get(r.retailer).add(r.sku);
+  }
+  return [...by.entries()]
+    .map(([retailer, skus]) => ({ retailer, label: WTB_RETAILERS.find((x) => x.key === retailer)?.label ?? retailer, skus: [...skus].sort() }))
+    .sort((a, b) => b.skus.length - a.skus.length || a.label.localeCompare(b.label));
+}
 
 /** Group the flat rows by SKU: { sku, wix_product_id, links[], docs[], problems }. */
 export function groupWhereToBuy(rows) {
   const bySku = new Map();
   for (const r of rows) {
-    if (!bySku.has(r.sku)) bySku.set(r.sku, { sku: r.sku, wix_product_id: r.wix_product_id, links: [], docs: [], problems: 0, dropbox: 0 });
+    if (!bySku.has(r.sku)) bySku.set(r.sku, { sku: r.sku, wix_product_id: r.wix_product_id, links: [], docs: [], problems: 0, missing: [], dropbox: 0 });
     const g = bySku.get(r.sku);
     (r.section === 'documents' ? g.docs : g.links).push(r);
     if (isProblem(r.verdict)) g.problems += 1;
+    if (r.verdict === 'missing') g.missing.push(r.retailer);
     if (r.retailer === 'dropbox') g.dropbox += 1;
   }
   return [...bySku.values()].sort((a, b) => b.problems - a.problems || a.sku.localeCompare(b.sku));
