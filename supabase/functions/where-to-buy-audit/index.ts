@@ -504,6 +504,11 @@ const PAGE_NOT_FOUND_TITLE = /not found|introuvable|no longer available|isn.t av
 const PAGE_NOT_FOUND_BODY = /The product you are trying to view is not currently available|The page you are looking for can not be found|404 File Not Found/i;
 const PAGE_BLOCKED_TITLE = /access denied|pardon our interruption|are you a human|just a moment|attention required|robot check|captcha|security check|request unsuccessful/i;
 const skuPattern = (sku: string) => new RegExp(`\\b${sku.replace(/[-\s]/g, "").split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[-\\s]?")}\\b`, "i");
+// Stores whose answer to the server can be a bot page dressed as a normal
+// one (2026-10-19): their direct OK must show the product.
+const BOT_PRONE = new Set(["walmart_ca", "walmart_us", "amazon_ca", "amazon_us"]);
+// The page names the brand in its text (Amazon: "Visit the STYLISH Store", "Brand: STYLISH").
+const BRAND_IN_TEXT = /Visit the (?:stylish|azuni) Store|Brand:?\s*(?:<[^>]*>\s*)*(?:stylish|azuni)\b/i;
 // The product's data on the page names its brand (JSON-LD / microdata).
 const BRAND_IN_DATA = /"(?:brand|vendor)"\s*:\s*(?:\{[^{}]{0,200}?"name"\s*:\s*)?"\s*(?:stylish|azuni)\b/i;
 // A product page names the brand or the SKU in its title — or, when the
@@ -511,7 +516,7 @@ const BRAND_IN_DATA = /"(?:brand|vendor)"\s*:\s*(?:\{[^{}]{0,200}?"name"\s*:\s*)
 // in its product data or text. A short SKU (A-02) is only trusted in the title.
 function showsProduct(title: string, body: string, sku: string): boolean {
   if (/\b(stylish|azuni)\b/i.test(title) || skuPattern(sku).test(title)) return true;
-  if (BRAND_IN_DATA.test(body)) return true;
+  if (BRAND_IN_DATA.test(body) || BRAND_IN_TEXT.test(body)) return true;
   return sku.replace(/[-\s]/g, "").length >= 5 && skuPattern(sku).test(body);
 }
 
@@ -643,7 +648,9 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
       // Walmart and Amazon sometimes answer a bot check that looks like a
       // normal page ("Robot or human?", "Verify Your Identity", Amazon's
       // captcha titled "Amazon.ca") — then the next service of the route tries.
-      if (o.kind === "ok" && p.body !== undefined && !DOC_HOST.test(row.host ?? "") && !showsProduct(p.title ?? "", p.body, row.sku)) {
+      // Only there: a small store's page may not name the brand ("BAMBOO
+      // CUTTING BOARD – Cabinet Depot") and is not a bot page.
+      if (o.kind === "ok" && p.body !== undefined && BOT_PRONE.has(row.retailer) && !showsProduct(p.title ?? "", p.body, row.sku)) {
         o = { kind: "none", via: "direct", status: p.http_status, note: `the page does not show the product ("${(p.title ?? "").slice(0, 50)}")` };
       }
     } else if (m === "brightdata") o = await viaBrightData(row.url, row.sku, deadline);
