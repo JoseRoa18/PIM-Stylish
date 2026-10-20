@@ -45,6 +45,9 @@
 //                option a page lists, an id the PIM keeps) and opens each
 //                candidate before it is shown (where_to_buy_suggestions).
 //                Cron every 10 minutes; the candidates are looked for hourly.
+// mode "publish" — writes the next products of the publish queue to the
+//                Stylish pages (cron every 5 minutes; the check calls also
+//                drain it when they have time left).
 // mode "status"— count of rows due for a probe.
 //
 // Verdicts (user rules 2026-09-15 and 2026-10-19 — the list says OK or Broken):
@@ -2096,6 +2099,11 @@ Deno.serve(async (req) => {
     }
     if (mode === "promo-reread") return json({ ok: true, ...(await promoReread({ asOf: body.asOf, dryRun: body.dryRun === true })) });
     if (mode === "suggest") return json({ ok: true, ...(await suggest({ build: body.build === true, dryRun: body.dryRun === true })) });
+    // The publish queue on its own (cron every 5 minutes): a check call that
+    // spends its whole budget on pages leaves no time to write the Stylish
+    // pages (the queue barely moved on 2026-10-20 once the checks ran 20 pages
+    // at a time).
+    if (mode === "publish") return json({ ok: true, published: await drainPublishQueue(Date.now() + BATCH_MS) });
     if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
     if (mode === "p2s-file") {
       // body: { files: [{ name, base64 }] } (or a single { name, base64 })
