@@ -744,6 +744,12 @@ const METHOD_LABEL: Record<Method, string> = { direct: "Direct", brightdata: "Br
 const METHOD_MS: Record<Method, number> = { direct: 14000, brightdata: 67000, scraperapi: 72000, menards: 35000 };
 
 const pageTitle = (html: string) => decode((html.match(/<title[^>]*>([^<]*)/i)?.[1] ?? "").replace(/\s+/g, " ").trim());
+// An address as the services accept it: spaces and non-ASCII letters
+// percent-encoded. Bright Data refused Wayfair Canada addresses holding an
+// en dash or an "É" ("url must be a valid uri", 31 links on 2026-10-20).
+function asUri(url: string): string {
+  try { return new URL(url.replace(/ /g, "%20")).href; } catch { return url.replace(/ /g, "%20"); }
+}
 const PAGE_NOT_FOUND_TITLE = /not found|introuvable|no longer available|isn.t available|couldn.t find|\b404\b|page unavailable/i;
 // Not-found pages whose title says nothing (checked 2026-10-19):
 // Home Depot USA, Menards ("SORRY!"), Lowe's.
@@ -821,7 +827,7 @@ async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
     const r = await fetch("https://api.brightdata.com/request", {
       method: "POST",
       headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ zone: BRIGHTDATA_ZONE, url: url.replace(/ /g, "%20"), format: "json" }),
+      body: JSON.stringify({ zone: BRIGHTDATA_ZONE, url: asUri(url), format: "json" }),
       signal: AbortSignal.timeout(65000),
     });
     if (r.status === 429) { brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
@@ -855,7 +861,7 @@ async function viaScraperApi(row: DueRow): Promise<Outcome> {
   scraperApi.inFlight += 1;
   scraperApi.credits -= 10;
   try {
-    const r = await fetch(`https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(url.replace(/ /g, "%20"))}`, { signal: AbortSignal.timeout(70000) });
+    const r = await fetch(`https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(asUri(url))}`, { signal: AbortSignal.timeout(70000) });
     const body = await r.text();
     if (r.status === 404 || r.status === 410) return { kind: "broken", via: "scraperapi", status: r.status, note: `HTTP ${r.status}` };
     if (r.status >= 400) return { kind: "none", via: "scraperapi", status: r.status, note: r.status === 500 ? "could not open the page" : `HTTP ${r.status}` };
