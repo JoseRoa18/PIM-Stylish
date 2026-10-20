@@ -222,19 +222,19 @@ type LinkState = Pick<Row, "verdict" | "http_status" | "final_url" | "note" | "c
 const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,job_id,job_at";
 type Base = { site: string; sku: string; wix_product_id: string | null; scanned_at: string };
 type Link = { retailer: string; url: string };
-interface PimLinks { skus: Set<string>; links: Map<string, Link[]> }
+interface PimLinks { skus: Set<string>; brands: Map<string, string>; links: Map<string, Link[]> }
 
 // The PIM's own list (product_where_to_buy) — the source of every Stylish
 // page's WHERE TO BUY section since 2026-10-19.
 async function loadPimLinks(skus?: string[]): Promise<PimLinks> {
   const only = skus?.length ? `&sku=${inList(skus)}` : "";
-  const products = await restAll<{ sku: string }>(`products?select=sku${only}`);
+  const products = await restAll<{ sku: string; brand: string | null }>(`products?select=sku,brand${only}`);
   const links = new Map<string, Link[]>();
   for (const r of await restAll<{ sku: string } & Link>(`product_where_to_buy?select=sku,retailer,url${only}`)) {
     if (!links.has(r.sku)) links.set(r.sku, []);
     links.get(r.sku)!.push({ retailer: r.retailer, url: r.url });
   }
-  return { skus: new Set(products.map((p) => p.sku)), links };
+  return { skus: new Set(products.map((p) => p.sku)), brands: new Map(products.map((p) => [p.sku, p.brand ?? ""])), links };
 }
 
 // The checker's state of the links, by URL — from either site, as both
@@ -344,17 +344,33 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
     .filter((x): x is { p: WixProduct; sku: string } => Boolean(x.sku) && !isOpenBox(x.sku!, x.p.name ?? ""));
   const prior = await priorState();
 
+  // A SKU listed twice on Wix (B-122NG) counts once — its visible listing.
+  const bestBySku = new Map<string, { p: WixProduct; sku: string }>();
+  for (const x of withSku) {
+    const prev = bestBySku.get(x.sku);
+    if (!prev || (prev.p.visible === false && x.p.visible !== false)) bestBySku.set(x.sku, x);
+  }
+
+  // The PIM must know each page to write it (wix_links). A PIM product found
+  // on the site without that link gets it by its SKU (user, 2026-10-20: 52
+  // Stylish USA pages had none and kept their hand-made section) — never an
+  // Azuni product, and never a Wix product already linked to another SKU.
+  const known = await restAll<{ sku: string; wix_product_id: string }>(`wix_links?select=sku,wix_product_id&site=eq.${siteKey}`);
+  const linkedSku = new Set(known.map((k) => k.sku));
+  const linkedId = new Set(known.map((k) => k.wix_product_id));
+  const newLinks = [...bestBySku.values()]
+    .filter(({ p, sku }) => p.id && pim.skus.has(sku) && !linkedSku.has(sku) && !linkedId.has(p.id) && !/azuni/i.test(pim.brands.get(sku) ?? ""))
+    .map(({ p, sku }) => ({ site: siteKey, sku, wix_product_id: p.id! }));
+  for (const part of chunk(newLinks, 200)) await rest("wix_links", { method: "POST", body: JSON.stringify(part) });
+
   const rows: Row[] = [];
-  const counts = { products: 0, links: 0, broken: 0, missing: 0, notInPim: 0, differsFromPim: [] as string[], standardPortals: [] as string[] };
+  const counts = { products: 0, links: 0, broken: 0, missing: 0, notInPim: 0, newlyLinked: newLinks.map((l) => l.sku), differsFromPim: [] as string[], standardPortals: [] as string[] };
   const perProduct: Array<{ base: Base; links: Link[] }> = [];
-  const seenSku = new Set<string>();
-  for (const { p, sku } of withSku) {
+  for (const { p, sku } of bestBySku.values()) {
     // Only the PIM's products are audited (user, 2026-10-19): a Wix page
     // whose SKU the PIM does not have (spare parts like RSH-K107B, old
-    // listings) is left out. A SKU listed twice on Wix (B-122NG) counts once.
+    // listings) is left out.
     if (!pim.skus.has(sku)) { counts.notInPim += 1; continue; }
-    if (seenSku.has(sku)) continue;
-    seenSku.add(sku);
     counts.products += 1;
     const wtb = (p.additionalInfoSections ?? []).find((s) => /where\s*to\s*buy/i.test(s.title ?? ""));
     const live = liveLinks(wtb?.description ?? "");
@@ -581,6 +597,14 @@ async function drainPublishQueue(deadline: number) {
   const done = new Set(batch.filter((s) => !later.has(s)));
   const now = await readQueue(); // keep what other calls queued meanwhile
   await writeQueue(now.filter((s) => !done.has(s)));
+  // A page just written (or found equal) no longer differs from the PIM.
+  const settled = new Set(res.filter((r) => r.status === "published" || r.status === "up_to_date").map((r) => r.sku));
+  if (settled.size) {
+    const state = await readScanState();
+    if (state.differs) {
+      await writeScanState({ ...state, differs: Object.fromEntries(Object.entries(state.differs).map(([k, v]) => [k, v.filter((s) => !settled.has(s))])) });
+    }
+  }
   return {
     published: res.filter((r) => r.status === "published").length,
     errors: res.filter((r) => r.status === "error").map((r) => `${r.sku} ${r.site}: ${r.error}`),
@@ -747,42 +771,66 @@ async function viaScraperApi(url: string, sku: string): Promise<Outcome> {
   } finally { scraperApi.inFlight -= 1; }
 }
 
-// Menards (Imperva + hCaptcha) opens only through Bright Data's async mode
-// from a US exit, after several minutes. A live page comes back with the
-// product; a dead one makes the unlocker retry until it gives up — Menards
-// sends a missing product to its error page, which reads as a block — so
-// "gave up" is a soft sign (S-611W and B-101C, both "SORRY!" pages, did it).
-async function viaMenards(row: DueRow): Promise<Outcome> {
-  if (!BRIGHTDATA_API_TOKEN) return { kind: "none", via: "menards", note: "not configured" };
-  const auth = { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` };
-  try {
-    if (row.job_id) {
-      const g = await fetch(`https://api.brightdata.com/unblocker/get_result?response_id=${encodeURIComponent(row.job_id)}`, { headers: auth, signal: AbortSignal.timeout(30000) });
-      if (g.status === 202) {
-        const hours = (Date.now() - Date.parse(row.job_at ?? "")) / 3600e3;
-        return hours >= JOB_GIVEUP_HOURS
-          ? { kind: "soft", via: "menards", note: `Menards gave no answer in ${JOB_GIVEUP_HOURS} h` }
-          : { kind: "waiting", via: "menards" };
+// Menards (Imperva + hCaptcha) goes through Bright Data's ready-made Menards
+// scraper (Web Scraper API, dataset "Menards Products") — tested 2026-10-20 on
+// links of known answer: B-108G and S-613W live (title, brand, our SKU as
+// `mpn`), B-112N gone ("HTTP 404 — product page not found", error_code
+// dead_page), in one pass of ~2 minutes. The Web Unlocker gave up on some
+// live Menards pages (B-108G). Links go in batches: one call sends the due
+// ones as a snapshot job (`job_id`), a later call reads the snapshot.
+const MENARDS_DATASET = "gd_motp6b7s1n9zlq6lwj";
+const MENARDS_BATCH = 300;
+const MENARDS_GIVEUP_HOURS = 3;
+
+async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Outcome }>> {
+  const out: Array<{ row: DueRow; o: Outcome }> = [];
+  if (!leads.length) return out;
+  if (!BRIGHTDATA_API_TOKEN) return leads.map((row) => ({ row, o: { kind: "none", via: "menards", note: "not configured" } }));
+  const auth = { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" };
+  // Jobs in flight: read the ones that are done.
+  const byJob = new Map<string, DueRow[]>();
+  for (const r of leads) if (r.job_id) { if (!byJob.has(r.job_id)) byJob.set(r.job_id, []); byJob.get(r.job_id)!.push(r); }
+  for (const [job, rows] of byJob) {
+    try {
+      const p = await (await fetch(`https://api.brightdata.com/datasets/v3/progress/${encodeURIComponent(job)}`, { headers: auth, signal: AbortSignal.timeout(20000) })).json();
+      if (p.status !== "ready" && p.status !== "failed") {
+        const hours = (Date.now() - Date.parse(rows[0].job_at ?? "")) / 3600e3;
+        for (const row of rows) out.push({ row, o: hours >= MENARDS_GIVEUP_HOURS ? { kind: "none", via: "menards", note: "the Menards scraper gave no answer" } : { kind: "waiting", via: "menards" } });
+        continue;
       }
-      const body = await g.text();
-      if (g.status >= 400 && g.status !== 404) return { kind: "none", via: "menards", note: `HTTP ${g.status} from the service` };
-      if (g.status === 404 || /^\s*\{\s*"status_code"\s*:\s*5\d\d/.test(body)) {
-        return { kind: "soft", via: "menards", note: "Menards did not show the page (a missing product goes to Menards' error page)" };
+      const s = await fetch(`https://api.brightdata.com/datasets/v3/snapshot/${encodeURIComponent(job)}?format=json`, { headers: auth, signal: AbortSignal.timeout(60000) });
+      const records = s.ok ? await s.json().catch(() => []) : [];
+      const byUrl = new Map<string, Record<string, unknown>>();
+      for (const rec of Array.isArray(records) ? records : []) {
+        const u = (rec?.input as { url?: string } | undefined)?.url ?? (rec?.url as string | undefined);
+        if (u) byUrl.set(u, rec);
       }
-      return judgePage(Number(g.headers.get("x-brd-status-code") ?? g.status), body, row.sku, "menards");
+      for (const row of rows) {
+        const rec = byUrl.get(row.url) ?? byUrl.get(row.url.replace(/ /g, "%20"));
+        if (!rec) out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper returned nothing for it" } });
+        else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "broken", via: "menards", status: 404, note: "Menards: the product page is gone (404)" } });
+        else if (rec.error) out.push({ row, o: { kind: "none", via: "menards", note: `Menards scraper: ${String(rec.error).slice(0, 80)}` } });
+        else if (rec.title) out.push({ row, o: { kind: "ok", via: "menards", status: 200 } });
+        else out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper read no product" } });
+      }
+    } catch (e) {
+      for (const row of rows) out.push({ row, o: { kind: "none", via: "menards", note: (e as Error).message.slice(0, 80) } });
     }
-    const r = await fetch(`https://api.brightdata.com/unblocker/req?zone=${encodeURIComponent(BRIGHTDATA_ZONE)}`, {
-      method: "POST",
-      headers: { ...auth, "Content-Type": "application/json" },
-      body: JSON.stringify({ url: row.url.replace(/ /g, "%20"), country: "us" }),
-      signal: AbortSignal.timeout(30000),
-    });
-    const j = await r.json().catch(() => ({}));
-    const id = j.response_id ?? r.headers.get("x-response-id");
-    return id ? { kind: "submitted", via: "menards", jobId: id } : { kind: "none", via: "menards", note: `job not accepted (HTTP ${r.status})` };
-  } catch (e) {
-    return { kind: "none", via: "menards", note: (e as Error).message.slice(0, 80) };
   }
+  // New ones: one job for the batch.
+  const fresh = leads.filter((r) => !r.job_id).slice(0, MENARDS_BATCH);
+  if (fresh.length) {
+    try {
+      const r = await fetch(`https://api.brightdata.com/datasets/v3/trigger?dataset_id=${MENARDS_DATASET}&include_errors=true&format=json`, {
+        method: "POST", headers: auth, body: JSON.stringify(fresh.map((x) => ({ url: x.url }))), signal: AbortSignal.timeout(30000),
+      });
+      const j = await r.json().catch(() => ({}));
+      for (const row of fresh) out.push({ row, o: j.snapshot_id ? { kind: "submitted", via: "menards", jobId: j.snapshot_id } : { kind: "none", via: "menards", note: `job not accepted (HTTP ${r.status})` } });
+    } catch (e) {
+      for (const row of fresh) out.push({ row, o: { kind: "none", via: "menards", note: (e as Error).message.slice(0, 80) } });
+    }
+  }
+  return out;
 }
 
 // One link: its route's methods in order until one answers. The server's own
@@ -807,7 +855,7 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
       }
     } else if (m === "brightdata") o = await viaBrightData(row.url, row.sku, deadline);
     else if (m === "scraperapi") o = await viaScraperApi(row.url, row.sku);
-    else o = await viaMenards(row);
+    else o = { kind: "none", via: "menards", note: "Menards goes through its own batch" }; // never reached: checkMenards
     if (o.kind !== "none") return o;
     misses.push(`${METHOD_LABEL[m]}: ${o.note ?? "no answer"}`);
     last = o;
@@ -876,7 +924,8 @@ const dueFilter = () => `url=not.is.null&verdict=not.in.(missing,manual)&or=(nex
 // A batch takes two pools so neither starves the other: the links of the
 // stores read through an unlocker (one call opens ~20 of them; links never
 // verified first), and the links the server opens itself (fast, free).
-const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([, r]) => r[0] !== "direct").map(([k]) => k);
+const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([k, r]) => r[0] !== "direct" && k !== "menards").map(([k]) => k);
+const MENARDS_POOL = 400; // rows; Menards goes as one scraper job
 const UNLOCKER_BATCH = 48;
 const DIRECT_BATCH = 250;
 
@@ -887,7 +936,8 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
     : [
       ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(UNLOCKER_RETAILERS)}&order=verdict.desc,next_check_at.asc.nullsfirst&limit=${UNLOCKER_BATCH}`, { headers: { Prefer: "count=none" } }),
-      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=not.${inList(UNLOCKER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${opts.limit ?? DIRECT_BATCH}`, { headers: { Prefer: "count=none" } }),
+      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=not.${inList([...UNLOCKER_RETAILERS, "menards"])}&order=next_check_at.asc.nullsfirst&limit=${opts.limit ?? DIRECT_BATCH}`, { headers: { Prefer: "count=none" } }),
+      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=eq.menards&order=next_check_at.asc.nullsfirst&limit=${MENARDS_POOL}`, { headers: { Prefer: "count=none" } }),
     ];
   // Claim the batch so an overlapping call (cron chain + UI) skips it; every
   // outcome writes its own next_check_at, and a link this call never reaches
@@ -907,10 +957,17 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   // One queue per host. Sites read through an unlocker take 3 lanes (the
   // service spreads them over its own addresses); the server's own probe
   // keeps one paced lane per host.
+  // Menards goes as one batch to its scraper (checkMenards), the rest by host.
   const byHost = new Map<string, DueRow[]>();
-  for (const r of leads) { const h = (r.host ?? "").replace(/^www\./, ""); if (!byHost.has(h)) byHost.set(h, []); byHost.get(h)!.push(r); }
+  for (const r of leads) {
+    if (r.retailer === "menards") continue;
+    const h = (r.host ?? "").replace(/^www\./, "");
+    if (!byHost.has(h)) byHost.set(h, []);
+    byHost.get(h)!.push(r);
+  }
   const answers: Array<{ row: DueRow; o: Outcome }> = [];
-  await Promise.all([...byHost.entries()].map(async ([host, list]) => {
+  const menards = checkMenards(leads.filter((r) => r.retailer === "menards")).then((res) => { answers.push(...res); });
+  await Promise.all([menards, ...[...byHost.entries()].map(async ([host, list]) => {
     const unlocker = !routeFor(list[0].retailer, host).every((m) => m === "direct");
     const { pace, lanes } = unlocker ? { pace: 500, lanes: 2 } : laneConfig(host);
     let next = 0;
@@ -923,7 +980,7 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
       }
     };
     await Promise.all(Array.from({ length: lanes }, lane));
-  }));
+  })]);
   const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o })));
 
   const now = new Date().toISOString();
@@ -1191,7 +1248,7 @@ Deno.serve(async (req) => {
       for (const s of sites) out.push(await scanSite(s, now, pim));
       // The PIM owns the section: pages whose Sinks Direct link changed, and
       // pages that show something else than the PIM, are written again.
-      await enqueuePublish([...new Set([...sinksDirect.changed, ...out.flatMap((o) => o.differsFromPim)])]);
+      await enqueuePublish([...new Set([...sinksDirect.changed, ...out.flatMap((o) => [...o.differsFromPim, ...o.newlyLinked])])]);
       const prev = await readScanState();
       await writeScanState({
         scanned_at: now,
