@@ -821,12 +821,15 @@ function judgePage(status: number | null, body: string, row: DueRow, via: Method
   return { kind: "none", via, status, note: status ? `HTTP ${status}, empty page` : "no page" };
 }
 
-// Bright Data turns a burst away ("Your account exceeded the allowed rate
-// limits" on 611 links of the first full pass, 2026-10-19): at most 10 pages
-// at a time per call, and after a rate-limit answer every lane waits 20 s.
-// A link the limit turned away is tried again soon, not counted as a failure.
-const brightData = { inFlight: 0, coolUntil: 0 };
-const BD_MAX_IN_FLIGHT = 10;
+// Bright Data turned a burst away ("Your account exceeded the allowed rate
+// limits" on 611 links of the first full pass, 2026-10-19) until the account
+// was verified. On 2026-10-20 that answer no longer came, even 60 at once to
+// one store (only Bright Data's per-site "global adaptive rate limit" on 7 of
+// them): 20 pages at a time per call (each store at most 2), and after a
+// rate-limit answer every lane waits 20 s. A link the limit turned away is
+// tried again soon, not counted as a failure.
+const brightData = { inFlight: 0, coolUntil: 0, limited: 0 };
+const BD_MAX_IN_FLIGHT = 20;
 const RATE_LIMIT_RE = /rate limit/i;
 async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
   const url = row.url;
@@ -843,11 +846,11 @@ async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
       body: JSON.stringify({ zone: BRIGHTDATA_ZONE, url: asUri(url), format: "json" }),
       signal: AbortSignal.timeout(65000),
     });
-    if (r.status === 429) { brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
+    if (r.status === 429) { brightData.limited += 1; brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     if (!r.ok) return { kind: "none", via: "brightdata", note: `HTTP ${r.status} from the service` };
     const j = await r.json() as { status_code?: number; headers?: Record<string, string>; body?: string };
     const code = j.status_code ?? null;
-    if (RATE_LIMIT_RE.test(j.headers?.["x-brd-error"] ?? "")) { brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
+    if (RATE_LIMIT_RE.test(j.headers?.["x-brd-error"] ?? "")) { brightData.limited += 1; brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     // 5xx / 403 / 429 here are the store or the unlocker turning the page down.
     if (code === null || code >= 500 || code === 403 || code === 429) return { kind: "none", via: "brightdata", status: code, note: j.headers?.["x-brd-error"] ?? `HTTP ${code}` };
     return judgePage(code, j.body ?? "", row, "brightdata");
@@ -1162,11 +1165,12 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
 const dueFilter = () => `url=not.is.null&verdict=not.in.(missing,manual)&or=(next_check_at.is.null,next_check_at.lte.${new Date().toISOString()})`;
 
 // A batch takes two pools so neither starves the other: the links of the
-// stores read through an unlocker (one call opens ~20 of them; links never
-// verified first), and the links the server opens itself (fast, free).
+// stores read through an unlocker (one call opens ~40 of them since the
+// account's verification, 2026-10-20; links never verified first), and the
+// links the server opens itself (fast, free).
 const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([k, r]) => r[0] !== "direct" && k !== "menards").map(([k]) => k);
 const MENARDS_POOL = 400; // rows; Menards goes as one scraper job
-const UNLOCKER_BATCH = 48;
+const UNLOCKER_BATCH = 72;
 const DIRECT_BATCH = 250;
 
 async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean } = {}) {
@@ -1262,6 +1266,8 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   return {
     published,
     checked: results.filter((r) => r.o.kind !== "later").length, addresses: answers.length, morePending, byKind, byVia,
+    // Bright Data answers "rate limit" (each one pauses its lanes 20 s).
+    brightDataLimited: brightData.limited,
     scraperCredits: scraperApi.credits, ms: Date.now() - started,
     ...(opts.skus?.length ? {
       links: results.filter(({ row }) => opts.skus!.includes(row.sku)).filter(({ row }, i, all) => all.findIndex((x) => x.row.url === row.url && x.row.sku === row.sku) === i).map(({ row, o }) => ({
