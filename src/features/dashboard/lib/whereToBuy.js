@@ -36,19 +36,18 @@ export const WTB_VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperap
 export const isProblem = (verdict) => Boolean(WTB_VERDICTS[verdict]?.problem);
 
 // The check also reads the page's product (user, 2026-10-20: "que apunte al
-// producto correcto por SKU"): a link whose page shows another product is a
-// problem of its own, "Wrong product". Another PIM product: a second check two
-// days later makes it Broken ("Opens another product") and it leaves the
-// websites. Another option of the same product (another finish or size, or
-// the listing's default option): it stays on the websites and only the link
-// needs fixing.
+// producto correcto por SKU"): a link whose page shows another product, or
+// another option of it (another finish or size, or the listing's default
+// option), is a problem of its own, "Wrong product". It leaves the websites
+// until it is fixed (user, the same day: "solo dejar los OK" — isHiddenLink);
+// another PIM product also turns Broken on a second check two days later.
 export const WRONG_PRODUCT = {
   label: 'Wrong product', tone: 'warning', problem: true,
-  hint: 'The link opens another product. If the next check (two days later) finds the same, the link is Broken and leaves the websites — fix it in the product\'s Where to Buy tab.',
+  hint: 'The link opens another product. It is not shown on the Stylish websites until it is fixed — use the suggested link or edit it in the product\'s Where to Buy tab.',
 };
 export const WRONG_OPTION = {
   label: 'Wrong product', tone: 'warning', problem: true,
-  hint: 'The link opens another option of the same product (another finish or size). It stays on the websites — edit it so it opens this product\'s option.',
+  hint: 'The link opens another option of the same product (another finish or size). It is not shown on the Stylish websites until it opens this product\'s option — use the suggested link or edit it.',
 };
 export const isWrongProduct = (row) => row?.sku_check === 'other' || row?.sku_check === 'variant';
 // What a link's status chip says: its verdict, or "Wrong product" while the

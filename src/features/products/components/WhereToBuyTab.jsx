@@ -212,8 +212,8 @@ export default function WhereToBuyTab({ product }) {
                       const detail = saved ? [
                         check?.checked_at && (check.verdict === 'ok' || check.verdict === 'broken') ? `Checked by ${VIA[check.checked_via] ?? 'the PIM'} · ${fmt(check.checked_at)}` : null,
                         check?.verdict !== 'ok' ? check?.note : null,
-                        wrong && check.sku_check === 'variant' ? `The page shows ${check.page_model ?? 'another option'}, another option of the same product. The link stays on the websites — edit it so it opens ${product.sku}.` : null,
-                        wrong && check.sku_check === 'other' ? `The page shows ${check.page_model ?? 'another product'}, not ${product.sku}. If the next check (two days later) finds the same, the link is Broken and leaves the websites.` : null,
+                        wrong && check.sku_check === 'variant' ? `The page shows ${check.page_model ?? 'another option'}, another option of the same product. Not shown on the Stylish websites until the link opens ${product.sku} — use the suggested link or edit it.` : null,
+                        wrong && check.sku_check === 'other' ? `The page shows ${check.page_model ?? 'another product'}, not ${product.sku}. Not shown on the Stylish websites until the link is fixed.` : null,
                         check?.read_at && !isWrong(check) && check.page_model && check.sku_check === 'unknown' ? `The page shows model ${check.page_model} (not a PIM SKU) — check that it is ${product.sku}.` : null,
                         check?.page_note ? `On the page: ${check.page_note}.` : null,
                         price ? `Price on the page: ${price}${check.was_price != null ? ` (was ${check.currency === 'USD' ? '$' : 'C$'}${Number(check.was_price).toFixed(2)})` : ''}${check.in_stock === false ? ', sold out' : ''} · read ${fmt(check.read_at)}${PAGE_STORE_KEYS.has(r.key) ? ' — Pricing → Price Alignment compares it with the MAP' : ''}` : null,
@@ -332,7 +332,7 @@ export default function WhereToBuyTab({ product }) {
       )}
       {data && (
         <p className="px-6 sm:px-8 pb-5 -mt-2 text-label-md text-on-surface-variant">
-          Point at a status to see when and how the link was checked, why it is not OK and which product the page shows; the price under it is the one the page showed at that check. Only the stores with a working link show on the websites. A suggested link was found and opened by the PIM: its page shows this product.
+          Point at a status to see when and how the link was checked, why it is not OK and which product the page shows; the price under it is the one the page showed at that check. Only the links that work and open this product show on the websites (a link not checked yet shows too). A suggested link was found and opened by the PIM: its page shows this product.
         </p>
       )}
       {data?.sites.some((s) => !s.linked) && (

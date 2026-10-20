@@ -73,7 +73,7 @@
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
 
 import { resolveWixSite } from "../_shared/wixSites.ts";
-import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, withWhereToBuySection } from "../_shared/whereToBuy.js";
+import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, isHiddenLink, withWhereToBuySection } from "../_shared/whereToBuy.js";
 import { readProductPage, menardsRead, lowesRecordRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
 import { normSku } from "../_shared/pageReaders/common.js";
 import { PAGE_STORES } from "../_shared/pageStores.js";
@@ -434,8 +434,8 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
     // (a hand edit in Wix shows up as a difference).
     const links = pim.links.get(sku) ?? [];
     const lr = linkRows(base, links, prior);
-    // What the page should show: the list without its broken links.
-    const shown = lr.filter((r) => r.verdict !== "broken").map((r) => ({ retailer: r.retailer, url: r.url as string }));
+    // What the page should show: the list without its broken and wrong-product links.
+    const shown = lr.filter((r) => !isHiddenLink(r.verdict, r.sku_check)).map((r) => ({ retailer: r.retailer, url: r.url as string }));
     if (links.length && linkSet(live) !== linkSet(shown)) counts.differsFromPim.push(sku);
     counts.links += lr.length;
     counts.broken += lr.filter((r) => r.verdict === "broken").length;
@@ -576,12 +576,14 @@ async function probe(url: string): Promise<Probe> {
 
 // ---------------------------------------------------------------- publish
 // The PIM writes the WHERE TO BUY section of the Stylish pages itself, with
-// every link of the product's list but the broken ones (user, 2026-10-20: a
-// broken link stays in the PIM to be fixed but leaves the website, and comes
-// back when it answers again). Only that section changes — the rest of the
-// page is read from Wix and sent back as it is. Pages to (re)write wait in a
-// queue (app_settings.where_to_buy_publish_queue) that every check call
-// drains a little at a time: Wix lets ~30 changes through, then asks to wait.
+// every link of the product's list but the broken ones and the ones that open
+// another product or another option of it (user, 2026-10-20: "solo dejar los
+// OK" — such a link stays in the PIM to be fixed but leaves the website, and
+// comes back when it opens the product again; a link not verified yet is
+// shown). Only that section changes — the rest of the page is read from Wix
+// and sent back as it is. Pages to (re)write wait in a queue
+// (app_settings.where_to_buy_publish_queue) that every check call drains a
+// little at a time: Wix lets ~30 changes through, then asks to wait.
 const QUEUE_KEY = "where_to_buy_publish_queue";
 const WIX_BASE = "https://www.wixapis.com";
 const PUBLISH_MAX = 20; // product pages written per call
@@ -589,11 +591,14 @@ const PUBLISH_MAX = 20; // product pages written per call
 type PublishStatus = "published" | "up_to_date" | "no_links" | "not_linked" | "not_found" | "error" | "later";
 interface PublishResult { sku: string; site: string; status: PublishStatus; error?: string }
 
-// The broken addresses of each product. Kept per SKU: one address can be
-// Broken for one product ("Opens another product") and right for the next.
-async function brokenUrls(skus: string[]): Promise<Map<string, Set<string>>> {
+// The addresses each product's pages leave out (isHiddenLink: broken, or
+// opening another product / option). Kept per SKU: one address can be wrong
+// for one product (it opens A-801N) and right for the next (A-801N's own).
+async function hiddenUrls(skus: string[]): Promise<Map<string, Set<string>>> {
   const rows: Array<{ sku: string; url: string }> = [];
-  for (const part of chunk(skus, 100)) rows.push(...await restAll<{ sku: string; url: string }>(`where_to_buy_links?select=sku,url&verdict=eq.broken&url=not.is.null&sku=${inList(part)}`));
+  for (const part of chunk(skus, 100)) {
+    rows.push(...await restAll<{ sku: string; url: string }>(`where_to_buy_links?select=sku,url&url=not.is.null&or=(verdict.eq.broken,sku_check.in.(variant,other))&sku=${inList(part)}`));
+  }
   const out = new Map<string, Set<string>>();
   for (const r of rows) { if (!out.has(r.sku)) out.set(r.sku, new Set()); out.get(r.sku)!.add(r.url); }
   return out;
@@ -603,7 +608,7 @@ async function publishSkus(skus: string[], deadline: number, maxPushes = PUBLISH
   if (!skus.length) return [];
   const [pim, broken, wix, products] = await Promise.all([
     loadPimLinks(skus),
-    brokenUrls(skus),
+    hiddenUrls(skus),
     restAll<{ site: string; sku: string; wix_product_id: string }>(`wix_links?select=site,sku,wix_product_id&site=${inList(SITES)}&sku=${inList(skus)}`),
     restAll<{ sku: string; brand: string | null }>(`products?select=sku,brand&sku=${inList(skus)}`),
   ]);
@@ -1036,8 +1041,8 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
 }
 
 // ---------------------------------------------------------------- check
-interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; signal_at: string | null; job_id: string | null; job_at: string | null }
-const DUE_COLUMNS = "id,sku,url,host,retailer,verdict,note,fail_count,signal_count,signal_at,job_id,job_at";
+interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; signal_at: string | null; job_id: string | null; job_at: string | null; sku_check?: string | null }
+const DUE_COLUMNS = "id,sku,url,host,retailer,verdict,note,fail_count,signal_count,signal_at,job_id,job_at,sku_check";
 // The title of the page names the SKU: it is that product's page.
 const titleNamesSku = (o: Outcome, sku: string) => Boolean(o.title) && skuPattern(sku).test(o.title ?? "");
 
@@ -1259,7 +1264,11 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   for (const { row, o } of results) {
     const patch = patchFor(row, o, now);
     if (!patch) continue;
-    if (typeof patch.verdict === "string" && (patch.verdict === "broken") !== (row.verdict === "broken")) republish.add(row.sku);
+    // A link that leaves the pages (broken, or opening another product) or
+    // comes back to them: its product's pages are written again.
+    const hiddenBefore = isHiddenLink(row.verdict, row.sku_check);
+    const hiddenAfter = isHiddenLink(typeof patch.verdict === "string" ? patch.verdict : row.verdict, "sku_check" in patch ? patch.sku_check as string | null : row.sku_check);
+    if (hiddenBefore !== hiddenAfter) republish.add(row.sku);
     const key = JSON.stringify(patch);
     if (!groups.has(key)) groups.set(key, { patch, ids: [] });
     groups.get(key)!.ids.push(row.id);

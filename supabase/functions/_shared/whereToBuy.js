@@ -97,11 +97,17 @@ const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').
 const escText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
- * The links a page shows: the product's list minus the ones the audit found
- * broken (user, 2026-10-20) — a broken link stays in the PIM to be fixed and
- * comes back on the page once it answers again.
+ * Whether the pages leave a link out (user, 2026-10-20: "solo dejar los OK"):
+ * the audit found it broken, or its page shows another product or another
+ * option of it ("Wrong product"). It stays in the PIM to be fixed and comes
+ * back on the page once it opens the product again. A link not verified yet
+ * is shown (the user's choice the same day: BB&B / Overstock wait for
+ * ScraperAPI).
  */
-export const linksToShow = (links, brokenUrls) => (links ?? []).filter((l) => l?.url && !brokenUrls?.has(l.url));
+export const isHiddenLink = (verdict, skuCheck) => verdict === 'broken' || skuCheck === 'variant' || skuCheck === 'other';
+
+/** The links a page shows: the product's list minus its hidden addresses (isHiddenLink). */
+export const linksToShow = (links, hiddenUrls) => (links ?? []).filter((l) => l?.url && !hiddenUrls?.has(l.url));
 
 /**
  * The WHERE TO BUY section of one Stylish site from the product's links
