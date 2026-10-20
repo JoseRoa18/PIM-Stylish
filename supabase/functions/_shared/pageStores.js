@@ -30,7 +30,20 @@ export const PAGE_STORES = [
   { key: 'overstock_us', label: 'Overstock', short: 'Overstock', market: 'us', promoChannel: 'overstock', levelByKind: { flash: 'purple' } },
   { key: 'kbauthority', label: 'Kitchen & Bath Authority', short: 'KBA', market: 'us', promoChannel: null },
   { key: 'warehouse_usa', label: 'Warehouse-USA', short: 'Warehouse USA', market: 'us', promoChannel: null },
+  // Dealers that sell Stylish but are NOT on the Stylish pages' Where to Buy
+  // (user, 2026-10-20: cover what Price2Spy watched before it is cancelled).
+  // Their links are kept apart (where_to_buy_links site "dealers", section
+  // "price_watch" — scripts/import-dealer-links.mjs) and only read for price.
+  // From Price2Spy's Canada report of 2026-06-22; Aqualuxe and Amati Canada
+  // no longer carry Stylish (every link 404, nothing Stylish in their search)
+  // and Houzz's shop is closed (user: discontinued).
+  { key: 'aquarina', label: 'Aquarina', short: 'Aquarina', market: 'ca', promoChannel: null, dealer: true, host: /(^|\.)aquarina\.ca$/ },
+  { key: 'plumbing_market', label: 'Plumbing Market', short: 'Plumbing Market', market: 'ca', promoChannel: null, dealer: true, host: /(^|\.)plumbingmarket\.ca$/ },
+  { key: 'vatero', label: 'Vatero', short: 'Vatero', market: 'ca', promoChannel: null, dealer: true, host: /(^|\.)vatero\.com$/ },
 ];
+
+// The dealers watched for price only (not on the Stylish pages).
+export const DEALER_STORES = PAGE_STORES.filter((s) => s.dealer);
 
 export const PAGE_STORE_KEYS = new Set(PAGE_STORES.map((s) => s.key));
 

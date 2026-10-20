@@ -148,6 +148,9 @@ const ROUTES: Record<string, Method[]> = {
   // when Bright Data does not answer (~10 USD a month for both stores).
   amazon_ca: ["brightdata", "direct", "scraperapi"],
   amazon_us: ["brightdata", "direct", "scraperapi"],
+  // Aquarina (a dealer watched for price, pageStores.js) answers the server
+  // with Cloudflare's "Attention Required" (403); Bright Data opens it.
+  aquarina: ["brightdata", "scraperapi"],
 };
 const routeFor = (retailer: string, host: string): Method[] =>
   DOC_HOST.test(host) ? ["direct"] : ROUTES[retailer] ?? ["direct", "brightdata"];
@@ -1041,8 +1044,8 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
 }
 
 // ---------------------------------------------------------------- check
-interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; signal_at: string | null; job_id: string | null; job_at: string | null; sku_check?: string | null }
-const DUE_COLUMNS = "id,sku,url,host,retailer,verdict,note,fail_count,signal_count,signal_at,job_id,job_at,sku_check";
+interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; signal_at: string | null; job_id: string | null; job_at: string | null; sku_check?: string | null; site?: string }
+const DUE_COLUMNS = "id,site,sku,url,host,retailer,verdict,note,fail_count,signal_count,signal_at,job_id,job_at,sku_check";
 // The title of the page names the SKU: it is that product's page.
 const titleNamesSku = (o: Outcome, sku: string) => Boolean(o.title) && skuPattern(sku).test(o.title ?? "");
 
@@ -1199,15 +1202,42 @@ const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([, r]) => r[0] !== "di
 const SCRAPER_POOL = 900; // rows (both sites); each store goes as one scraper job
 const UNLOCKER_BATCH = 72;
 const DIRECT_BATCH = 250;
+// At most this many rows of one host in a batch (its lanes cannot open more
+// in one call): a store with a long backlog — a dealer's 640 new links, BB&B
+// and Overstock waiting for ScraperAPI — never fills a batch and holds the
+// other stores back. Each pool is read deeper than its batch for that.
+const UNLOCKER_PER_HOST = 10;
+const DIRECT_PER_HOST = 40;
+function capPerHost(rows: DueRow[], perHost: number, total: number): DueRow[] {
+  const taken = new Map<string, number>();
+  const out: DueRow[] = [];
+  for (const r of rows) {
+    const h = (r.host ?? "").replace(/^www\./, "");
+    const n = taken.get(h) ?? 0;
+    if (n >= perHost) continue;
+    taken.set(h, n + 1);
+    out.push(r);
+    if (out.length >= total) break;
+  }
+  return out;
+}
 
 async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean } = {}) {
   const started = Date.now();
   const deadline = started + BATCH_MS;
+  // Due rows beyond a batch (or a host's share of it) wait for the next call.
+  let leftDue = false;
+  const pool = async (filter: string, order: string, depth: number, perHost: number, total: number) => {
+    const due = await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&${filter}&order=${order}&limit=${depth}`, { headers: { Prefer: "count=none" } });
+    const taken = capPerHost(due, perHost, total);
+    if (taken.length < due.length) leftDue = true;
+    return taken;
+  };
   const rows = opts.skus?.length
     ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
     : [
-      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(UNLOCKER_RETAILERS)}&order=verdict.desc,next_check_at.asc.nullsfirst&limit=${UNLOCKER_BATCH}`, { headers: { Prefer: "count=none" } }),
-      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}&order=next_check_at.asc.nullsfirst&limit=${opts.limit ?? DIRECT_BATCH}`, { headers: { Prefer: "count=none" } }),
+      ...await pool(`retailer=${inList(UNLOCKER_RETAILERS)}`, "verdict.desc,next_check_at.asc.nullsfirst", UNLOCKER_BATCH * 5, UNLOCKER_PER_HOST, UNLOCKER_BATCH),
+      ...await pool(`retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}`, "next_check_at.asc.nullsfirst", (opts.limit ?? DIRECT_BATCH) * 3, DIRECT_PER_HOST, opts.limit ?? DIRECT_BATCH),
       ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(SCRAPER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${SCRAPER_POOL}`, { headers: { Prefer: "count=none" } }),
     ];
   // Claim the batch so an overlapping call (cron chain + UI) skips it; every
@@ -1265,10 +1295,11 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     const patch = patchFor(row, o, now);
     if (!patch) continue;
     // A link that leaves the pages (broken, or opening another product) or
-    // comes back to them: its product's pages are written again.
+    // comes back to them: its product's pages are written again. (A dealer's
+    // link, watched for price only, is on no page.)
     const hiddenBefore = isHiddenLink(row.verdict, row.sku_check);
     const hiddenAfter = isHiddenLink(typeof patch.verdict === "string" ? patch.verdict : row.verdict, "sku_check" in patch ? patch.sku_check as string | null : row.sku_check);
-    if (hiddenBefore !== hiddenAfter) republish.add(row.sku);
+    if (hiddenBefore !== hiddenAfter && SITES.includes(row.site ?? "")) republish.add(row.sku);
     const key = JSON.stringify(patch);
     if (!groups.has(key)) groups.set(key, { patch, ids: [] });
     groups.get(key)!.ids.push(row.id);
@@ -1294,7 +1325,7 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   // A link that turned broken leaves its pages; one that answers again comes back.
   await enqueuePublish([...republish]);
   const published = !opts.skus?.length && Date.now() + 20000 < deadline ? await drainPublishQueue(deadline) : null;
-  const morePending = !opts.skus?.length && (untouched.length > 0 || rows.length >= UNLOCKER_BATCH);
+  const morePending = !opts.skus?.length && (untouched.length > 0 || leftDue);
   return {
     published,
     checked: results.filter((r) => r.o.kind !== "later").length, addresses: answers.length, morePending, byKind, byVia,
@@ -1534,7 +1565,7 @@ interface SugProduct { sku: string; brand: string | null; color: string | null; 
 async function buildSuggestions(dryRun = false) {
   const now = new Date().toISOString();
   const [links, pimRows, products, ids, existing] = await Promise.all([
-    restAll<SugLink>("where_to_buy_links?select=sku,retailer,url,verdict,sku_check,page_model,page_note,page_options,read_at,price,currency,in_stock"),
+    restAll<SugLink>("where_to_buy_links?select=sku,retailer,url,verdict,sku_check,page_model,page_note,page_options,read_at,price,currency,in_stock&section=eq.where_to_buy"),
     restAll<{ sku: string; retailer: string; url: string }>("product_where_to_buy?select=sku,retailer,url"),
     restAll<SugProduct>("products?select=sku,brand,color,finish,finish_type:attributes->>finish_type,upc:attributes->>upc,family_number"),
     loadStoreIds(),

@@ -206,6 +206,10 @@ export const readers = {
   warehouse_usa: warehouseUsa,
   cabinet_depot: shopify,
   build_with_rise: shopify,
+  // Dealers watched for price only (pageStores.js DEALER_STORES). Aquarina is
+  // WooCommerce: the generic JSON-LD reader reads it (model as `sku`, price).
+  plumbing_market: shopify,
+  vatero: shopify,
   sinksdirect_ca: wix,
   sinksdirect_us: wix,
   ebay,
