@@ -703,9 +703,15 @@ function showsProduct(title: string, body: string, sku: string): boolean {
 function judgePage(status: number | null, body: string, sku: string, via: Method): Outcome {
   const title = pageTitle(body);
   if (status === 404 || status === 410) return { kind: "broken", via, status, note: `HTTP ${status}` };
-  if (PAGE_NOT_FOUND_TITLE.test(title) || PAGE_NOT_FOUND_BODY.test(body)) return { kind: "broken", via, status, note: "The page says the product was not found" };
+  if (PAGE_NOT_FOUND_TITLE.test(title)) return { kind: "broken", via, status, note: "The page says the product was not found" };
   if (PAGE_BLOCKED_TITLE.test(title)) return { kind: "none", via, status, note: `bot check page ("${title.slice(0, 40)}")` };
+  // A page that shows the product is OK even if a "not available" sentence
+  // sits in it: Home Depot USA's live E-120 page (new, regional stock) carried
+  // "The product you are trying to view is not currently available" and was
+  // marked Broken on 2026-10-20. Those sentences only count on a page that
+  // does not show the product (Home Depot's real not-found page has no title).
   if (status !== null && status >= 200 && status < 300 && title && showsProduct(title, body, sku)) return { kind: "ok", via, status, note: null };
+  if (PAGE_NOT_FOUND_BODY.test(body)) return { kind: "broken", via, status, note: "The page says the product was not found" };
   if (status !== null && status >= 200 && status < 300 && title) return { kind: "soft", via, status, note: `Opens a page without the product: "${title.slice(0, 80)}"` };
   return { kind: "none", via, status, note: status ? `HTTP ${status}, empty page` : "no page" };
 }
