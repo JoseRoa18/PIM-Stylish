@@ -1211,7 +1211,7 @@ const DIRECT_BATCH = 250;
 // other stores back. Each pool is read 1,000 rows deep for that (the API's
 // page): at 360 rows, 191 pending Aquarina links and two stores' re-checks
 // filled the window and Amazon.ca got no turn for 15 minutes (2026-10-20).
-const UNLOCKER_PER_HOST = 10;
+const UNLOCKER_PER_HOST = 12;
 const DIRECT_PER_HOST = 40;
 function capPerHost(rows: DueRow[], perHost: number, total: number): DueRow[] {
   const taken = new Map<string, number>();
@@ -1276,7 +1276,9 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   const scraped = checkScrapers(leads.filter((r) => SCRAPERS[r.retailer])).then((res) => { answers.push(...res); });
   await Promise.all([scraped, ...[...byHost.entries()].map(async ([host, list]) => {
     const unlocker = !routeFor(list[0].retailer, host).every((m) => m === "direct");
-    const { pace, lanes } = unlocker ? { pace: 500, lanes: 2 } : laneConfig(host);
+    // 3 lanes per store through an unlocker (slow stores — Home Depot Canada,
+    // Aquarina — take 30–60 s a page; 2 lanes left them at ~100 pages an hour).
+    const { pace, lanes } = unlocker ? { pace: 500, lanes: 3 } : laneConfig(host);
     let next = 0;
     const lane = async () => {
       while (next < list.length && Date.now() - started <= START_MS) {
