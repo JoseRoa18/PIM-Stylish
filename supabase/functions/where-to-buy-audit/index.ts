@@ -68,6 +68,8 @@
 import { resolveWixSite } from "../_shared/wixSites.ts";
 import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, withWhereToBuySection } from "../_shared/whereToBuy.js";
 import { readProductPage, menardsRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
+import { PAGE_STORES } from "../_shared/pageStores.js";
+import { etToday, periodOfDay, prevPeriod, promoWindow, shiftDay, PROMO_DATE_COLUMNS, type Market } from "../_shared/promoCalendar.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -1227,6 +1229,73 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   };
 }
 
+// ---------------------------------------------------------------- promotion days
+// The morning a promotion starts or ends for a market — a monthly promotion
+// for its members of that market, a flash deal / special event on each
+// marketplace it runs on — the store pages of its products are read again
+// (cron where-to-buy-promo-reread-daily, 13:10 UTC = 9:10 Eastern, once the
+// stores have switched their prices), so Price Alignment compares them with
+// the new expected price that same day instead of leaving them out until
+// their 3-day turn (user, 2026-10-20: "esto hay que hacerlo sí o sí"). Only
+// the stores Price Alignment reads from their pages (PAGE_STORES), only OK
+// or not-yet-verified links, and not a page read in the last 6 hours. The
+// checks themselves run in the usual batches (every 10 minutes).
+interface PromoRow {
+  name: string | null; kind: string | null; status: string | null; period: string; marketplaces: string[] | null;
+  starts_on: string | null; ends_on: string | null; ca_starts_on: string | null; ca_ends_on: string | null; us_starts_on: string | null; us_ends_on: string | null;
+  promotion_prices: Array<{ sku: string; in_ca: boolean | null; in_us: boolean | null; promo_price_cad: number | null; promo_price_usd: number | null }>;
+}
+const countRows = async (filter: string) => {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/where_to_buy_links?select=id&${filter}`, {
+    method: "HEAD", headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, Prefer: "count=exact" },
+  });
+  return Number(r.headers.get("content-range")?.split("/")[1] ?? 0);
+};
+
+async function promoReread(opts: { asOf?: string; dryRun?: boolean } = {}) {
+  const today = opts.asOf && /^\d{4}-\d{2}-\d{2}$/.test(opts.asOf) ? opts.asOf : etToday();
+  const since = prevPeriod(prevPeriod(periodOfDay(today)));
+  const promos = await rest<PromoRow[]>(`promotions?select=name,kind,status,period,marketplaces,${PROMO_DATE_COLUMNS},promotion_prices(sku,in_ca,in_us,promo_price_cad,promo_price_usd)&period=gte.${since}`);
+  const due = new Map<string, Set<string>>(); // retailer → SKUs
+  const changes: string[] = [];
+  for (const p of promos) {
+    const monthly = (p.kind ?? "monthly") === "monthly";
+    // A monthly promotion counts once activated (as its expected prices do);
+    // a flash deal or special event by its dates (it stays "draft" while the
+    // portal runs it).
+    if (monthly && p.status !== "active" && p.status !== "ended") continue;
+    for (const market of ["ca", "us"] as Market[]) {
+      const w = promoWindow(p, market);
+      const starts = w.start === today;
+      const ends = shiftDay(w.end, 1) === today;
+      if (!starts && !ends) continue;
+      const stores = PAGE_STORES.filter((s: { market: string; promoChannel: string | null }) => s.market === market
+        && (monthly || (s.promoChannel !== null && (p.marketplaces ?? []).includes(s.promoChannel))));
+      const members = (p.promotion_prices ?? []).filter((r) => (market === "us" ? r.in_us : r.in_ca) ?? ((market === "us" ? r.promo_price_usd : r.promo_price_cad) !== null)).map((r) => r.sku);
+      if (!stores.length || !members.length) continue;
+      changes.push(`${p.name ?? p.period} ${starts ? "starts" : "ended yesterday"} (${market === "ca" ? "Canada" : "USA"}, ${members.length} products, ${stores.map((s: { key: string }) => s.key).join(", ")})`);
+      for (const s of stores as Array<{ key: string }>) {
+        if (!due.has(s.key)) due.set(s.key, new Set());
+        for (const sku of members) due.get(s.key)!.add(sku);
+      }
+    }
+  }
+  const recent = new Date(Date.now() - 6 * 3600e3).toISOString();
+  const stores: Record<string, { products: number; rows: number }> = {};
+  for (const [retailer, skus] of due) {
+    let rows = 0;
+    for (const part of chunk([...skus], 100)) {
+      const filter = `retailer=eq.${retailer}&sku=${inList(part)}&url=not.is.null&verdict=in.(ok,pending)&or=(read_at.is.null,read_at.lt.${recent})`;
+      const n = await countRows(filter);
+      rows += n;
+      if (n && !opts.dryRun) await rest(`where_to_buy_links?${filter}`, { method: "PATCH", body: JSON.stringify({ next_check_at: new Date().toISOString() }) });
+    }
+    stores[retailer] = { products: skus.size, rows };
+  }
+  if (changes.length && !opts.dryRun) console.log(`[where-to-buy] promotion day ${today}: ${changes.join("; ")}`);
+  return { day: today, dryRun: Boolean(opts.dryRun), changes, stores, rows: Object.values(stores).reduce((a, s) => a + s.rows, 0) };
+}
+
 async function status() {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/where_to_buy_links?select=id&${dueFilter()}`, {
     method: "HEAD", headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, Prefer: "count=exact" },
@@ -1479,6 +1548,7 @@ Deno.serve(async (req) => {
       if (rt?.waitUntil) rt.waitUntil(p);
       return json({ ok: true, rebuilt, published });
     }
+    if (mode === "promo-reread") return json({ ok: true, ...(await promoReread({ asOf: body.asOf, dryRun: body.dryRun === true })) });
     if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
     if (mode === "p2s-file") {
       // body: { files: [{ name, base64 }] } (or a single { name, base64 })

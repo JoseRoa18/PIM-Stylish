@@ -51,3 +51,15 @@ select distinct on (retailer, sku)
  order by retailer, sku, read_at desc nulls last;
 
 grant select on public.where_to_buy_readings to authenticated;
+
+-- The morning a promotion starts or ends for a market (13:10 UTC = 9:10
+-- Eastern), the store pages of its products are read again so Price
+-- Alignment is right the same day (where-to-buy-audit mode "promo-reread";
+-- user 2026-10-20). The command is the check job's own — its headers carry
+-- the cron secret — with the promo-reread body. APPLIED 2026-10-20.
+select cron.schedule(
+  'where-to-buy-promo-reread-daily',
+  '10 13 * * *',
+  (select replace(replace(command, '{"mode":"check","chain":0}', '{"mode":"promo-reread"}'), 'timeout_milliseconds := 10000', 'timeout_milliseconds := 60000')
+     from cron.job where jobname = 'where-to-buy-check-hourly')
+);

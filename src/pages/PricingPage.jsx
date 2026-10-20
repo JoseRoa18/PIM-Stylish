@@ -573,7 +573,8 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
           <p className="text-body-sm text-on-surface-variant mt-0.5">
             {cfg.kind === 'page'
               ? `Compares the price each product's page on ${cfg.label} shows — read by the Where to Buy
-                 check when it opens the link, every 3 days — against its expected price: ${cfg.promoChannel
+                 check when it opens the link, every 3 days, and again the morning a promotion of the
+                 product starts or ends — against its expected price: ${cfg.promoChannel
                   ? `a flash deal or special event running on ${cfg.short}, else the active promo price for promo members`
                   : 'the active promo price for promo members'}, the regular ${cfg.priceShort} for everyone else.
                  Analysis only: the store sets its own price. A link that opens another product is left out
@@ -664,10 +665,10 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                   result.notOnStore ? `${result.notOnStore} broken link${result.notOnStore === 1 ? '' : 's'} left out` : null,
                   result.otherProduct ? `${result.otherProduct} link${result.otherProduct === 1 ? '' : 's'} opening another product left out` : null,
                   result.otherCurrency ? `${result.otherCurrency} shown in another currency left out` : null,
-                  result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again` : null,
+                  result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again (that morning, 9:10 Eastern)` : null,
                   result.soldOut ? `${result.soldOut} sold out without a price` : null,
                   result.noPrice ? `${result.noPrice} read without a price` : null,
-                  'each link is read again every 3 days',
+                  'each link is read again every 3 days and the morning a promotion starts or ends',
                 ].filter(Boolean).join(' · ')
               : `${result.total} products on the store · live prices pulled ${new Date(result.ranAt).toLocaleString()} · expected prices as the PIM has them now${result.notOnStore ? ` · ${result.notOnStore} not on the store, left out` : ''}`}
           </p>
