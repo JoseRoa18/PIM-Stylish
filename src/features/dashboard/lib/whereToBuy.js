@@ -24,8 +24,8 @@ export const WTB_RETAILERS = STORES.map((r) => ({ key: r.key, label: r.label, sh
 // 2026-10-19); a portal the page does not link is a KPI of links to add, and
 // the sites no service can open are checked by hand.
 export const WTB_VERDICTS = {
-  ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product. Checked again every 2 days.' },
-  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address. Checked again daily.' },
+  ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product. Checked again every 3 days.' },
+  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address. Checked again every 2 days.' },
   missing: { label: 'Link to add', tone: 'warning', problem: false, hint: 'The page has no link to this portal, although most products of the site link it.' },
   pending: { label: 'Not checked yet', tone: 'muted', problem: false, hint: 'Waiting for its first answer: new links are opened within the hour, and a store that did not answer is tried again a few hours later.' },
   manual: { label: 'Check by hand', tone: 'muted', problem: false, hint: 'This site turns every automatic check away (Faucetline): open the link to check it.' },

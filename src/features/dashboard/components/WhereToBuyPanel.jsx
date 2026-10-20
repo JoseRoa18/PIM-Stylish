@@ -170,7 +170,7 @@ export default function WhereToBuyPanel() {
               Every retailer link on the product pages, opened to confirm it reaches the product page.
             </p>
             <p className="text-body-sm text-on-surface-variant mt-1">
-              Scanned {fmtWhen(summary.lastScan)} · last check {fmtWhen(summary.lastCheck)} · OK links are checked again every 2 days, broken ones daily · stores that block the PIM are opened through Bright Data or ScraperAPI
+              Scanned {fmtWhen(summary.lastScan)} · last check {fmtWhen(summary.lastCheck)} · OK links are checked again every 3 days, broken ones every 2 days · stores that block the PIM are opened through Bright Data or ScraperAPI
             </p>
           </div>
           <div className="flex items-center gap-2">

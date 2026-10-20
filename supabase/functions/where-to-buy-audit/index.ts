@@ -22,8 +22,8 @@
 //                2026-10-19. Menards only opens through Bright Data's ASYNC
 //                mode from a US exit (minutes per page), so its links are
 //                submitted as jobs and collected on a later pass. Rhythm
-//                (user, 2026-10-19): an OK link every 2 days, a broken one
-//                daily, a link without an answer after a few hours
+//                (user, 2026-10-20): an OK link every 3 days, a broken one
+//                every 2 days, a link without an answer after a few hours
 //                (`next_check_at`). Called by cron every 10 minutes (each call chains
 //                the next batch until nothing is due) and from the UI;
 //                `skus: [...]` re-checks those products' links now.
@@ -81,8 +81,8 @@ const SCRAPERAPI_KEY = Deno.env.get("SCRAPERAPI_KEY") ?? "";
 
 const SITES = ["stylish_ca", "stylish_us"];
 const KEEP_DAYS = 7;        // a scan carries ok / broken results younger than a week
-const OK_HOURS = 48;        // an OK link is re-checked every 2 days (user, 2026-10-19)
-const BROKEN_HOURS = 20;    // a broken one daily — also the gap between two soft signals
+const OK_HOURS = 72;        // an OK link is re-checked every 3 days (user, 2026-10-20: ~55 USD/month)
+const BROKEN_HOURS = 48;    // a broken one every 2 days — also the gap between two soft signals
 const RETRY_HOURS = 3;      // no answer: again after 3 h, 6 h, … at most a day
 const JOB_POLL_MIN = 10;    // Menards async job: first look after 10 minutes
 const JOB_GIVEUP_HOURS = 6; // … still running after 6 h counts as a soft signal
