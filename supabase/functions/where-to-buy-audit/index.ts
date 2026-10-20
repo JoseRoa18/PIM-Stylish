@@ -115,7 +115,6 @@ const ROUTES: Record<string, Method[]> = {
   homedepot_us: ["brightdata", "scraperapi"],
   bestbuy_ca: ["brightdata", "scraperapi"],
   lowes_us: ["brightdata", "scraperapi"],
-  lowes_ca: ["brightdata", "scraperapi"],
   rona: ["brightdata"],
   menards: ["menards"],
   bbb_us: ["scraperapi", "brightdata"],
