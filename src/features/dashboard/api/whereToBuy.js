@@ -12,7 +12,7 @@ export async function loadWhereToBuy(site) {
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from('where_to_buy_links')
-      .select('id, site, sku, wix_product_id, section, market, retailer, label, url, host, retailer_id, expected_id, verdict, http_status, final_url, note, scanned_at, checked_at, checked_via, next_check_at')
+      .select('id, site, sku, wix_product_id, section, market, retailer, label, url, host, retailer_id, expected_id, verdict, http_status, final_url, note, scanned_at, checked_at, checked_via, next_check_at, page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at')
       .eq('site', site)
       .order('sku')
       .order('section')

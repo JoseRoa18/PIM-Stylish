@@ -14,6 +14,7 @@ import {
   X,
   Search,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import FilterDropdown from '@/features/products/components/FilterDropdown';
 import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
@@ -358,6 +359,9 @@ function alignTiles(cfg) {
   ];
 }
 
+// "Oct 20" — when a store page was read.
+const fmtDay = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+
 const STATUS_TEXT = {
   promo_missing: 'still at the regular price',
   misaligned: 'unexpected price',
@@ -382,46 +386,57 @@ function AlignmentOverview({ overview, site, onSelect }) {
           ))}
         </div>
       </div>
-      <div className="space-y-1">
-        {ALIGN_TARGET_KEYS.map((key) => {
-          const t = ALIGN_TARGETS[key];
-          const { counts, parts, total, comparable, aligned, pct } = alignmentSummary(overview?.[key]);
-          const tooltip = counts
-            ? `${t.label} — ${parts.filter((p) => p.n > 0).map((p) => `${p.label}: ${p.n}`).join(' · ')}`
-            : `${t.label} — no saved report yet`;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onSelect(key)}
-              aria-pressed={site === key}
-              title={tooltip}
-              className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left transition-colors ${
-                site === key ? 'bg-primary-container/25' : 'hover:bg-surface-container-low'
-              }`}
-            >
-              <span className={`w-40 flex-shrink-0 truncate text-label-lg ${site === key ? 'text-on-surface font-semibold' : 'text-on-surface'}`}>
-                {t.short}
-                <span className="block text-label-md text-on-surface-variant font-normal">{t.priceShort}</span>
-              </span>
-              <span className="flex-1 flex h-2.5 rounded-full overflow-hidden bg-surface-container gap-[2px]" aria-hidden>
-                {total > 0
-                  ? parts.filter((p) => p.n > 0).map((p) => (
-                      <span key={p.key} className={`${p.cls} h-full`} style={{ width: `${(p.n / total) * 100}%` }} />
-                    ))
-                  : <span className="h-full w-full bg-surface-container" />}
-              </span>
-              <span className="sr-only">{tooltip}</span>
-              <span className="w-24 flex-shrink-0 text-right tabular-nums text-label-lg text-on-surface">
-                {pct != null ? `${pct}%` : '—'}
-                <span className="block text-label-md text-on-surface-variant font-normal">
-                  {counts ? `${aligned}/${comparable}` : 'no report'}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* The channels the PIM reads through their API (or sells on itself),
+          then the stores read from their own product pages by the Where to
+          Buy check (user, 2026-10-20). */}
+      {[
+        { key: 'api', heading: null, keys: ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind !== 'page') },
+        { key: 'page', heading: 'Read from the store pages · every 3 days', keys: ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page') },
+      ].map((group) => (
+        <div key={group.key} role="group" aria-label={group.heading ?? 'Our stores and API channels'} className={group.heading ? 'mt-3 pt-3 border-t border-outline-variant/60' : ''}>
+          {group.heading && <p className="px-2.5 pb-1 text-label-md text-on-surface-variant">{group.heading}</p>}
+          <div className="space-y-1">
+            {group.keys.map((key) => {
+              const t = ALIGN_TARGETS[key];
+              const { counts, parts, total, comparable, aligned, pct } = alignmentSummary(overview?.[key]);
+              const tooltip = counts
+                ? `${t.label} — ${parts.filter((p) => p.n > 0).map((p) => `${p.label}: ${p.n}`).join(' · ')}`
+                : `${t.label} — ${t.kind === 'page' ? 'no prices read yet' : 'no saved report yet'}`;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onSelect(key)}
+                  aria-pressed={site === key}
+                  title={tooltip}
+                  className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left transition-colors ${
+                    site === key ? 'bg-primary-container/25' : 'hover:bg-surface-container-low'
+                  }`}
+                >
+                  <span className={`w-40 flex-shrink-0 truncate text-label-lg ${site === key ? 'text-on-surface font-semibold' : 'text-on-surface'}`}>
+                    {t.short}
+                    <span className="block text-label-md text-on-surface-variant font-normal">{t.priceShort}</span>
+                  </span>
+                  <span className="flex-1 flex h-2.5 rounded-full overflow-hidden bg-surface-container gap-[2px]" aria-hidden>
+                    {total > 0
+                      ? parts.filter((p) => p.n > 0).map((p) => (
+                          <span key={p.key} className={`${p.cls} h-full`} style={{ width: `${(p.n / total) * 100}%` }} />
+                        ))
+                      : <span className="h-full w-full bg-surface-container" />}
+                  </span>
+                  <span className="sr-only">{tooltip}</span>
+                  <span className="w-24 flex-shrink-0 text-right tabular-nums text-label-lg text-on-surface">
+                    {pct != null ? `${pct}%` : '—'}
+                    <span className="block text-label-md text-on-surface-variant font-normal">
+                      {counts ? (total > 0 ? `${aligned}/${comparable}` : 'nothing to compare') : !(overview && key in overview) ? 'loading…' : t.kind === 'page' ? 'not read yet' : 'no report'}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -441,11 +456,14 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
 
   useEffect(() => {
     let active = true;
-    Promise.all(ALIGN_TARGET_KEYS.map((k) => loadLatestAlignment(k).catch(() => null)))
+    // The channels' own reports show first; the stores read from their pages
+    // (one larger read) join when they arrive.
+    const load = (keys) => Promise.all(keys.map((k) => loadLatestAlignment(k).catch(() => null)))
       .then((reports) => {
-        if (!active) return;
-        setOverview(Object.fromEntries(ALIGN_TARGET_KEYS.map((k, i) => [k, reports[i]])));
+        if (active) setOverview((prev) => ({ ...(prev ?? {}), ...Object.fromEntries(keys.map((k, i) => [k, reports[i]])) }));
       });
+    load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind !== 'page'))
+      .then(() => load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page')));
     return () => { active = false; };
   }, []);
 
@@ -553,7 +571,14 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
         <div>
           <h2 className="text-title-md text-on-surface font-semibold">Price Alignment — {cfg.label}</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5">
-            {cfg.kind === 'bestbuy'
+            {cfg.kind === 'page'
+              ? `Compares the price each product's page on ${cfg.label} shows — read by the Where to Buy
+                 check when it opens the link, every 3 days — against its expected price: ${cfg.promoChannel
+                  ? `a flash deal or special event running on ${cfg.short}, else the active promo price for promo members`
+                  : 'the active promo price for promo members'}, the regular ${cfg.priceShort} for everyone else.
+                 Analysis only: the store sets its own price. A link that opens another product is left out
+                 (Listing Health → Where to Buy).`
+              : cfg.kind === 'bestbuy'
               ? `Compares every Best Buy offer against its expected price — a flash deal or special
                  event running on Best Buy, else the active promo price for promo members, the regular
                  ${cfg.priceShort} for everyone else. Fixes update ONLY
@@ -571,7 +596,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                    promo members, the regular ${cfg.priceShort} for everyone else.`
                 : `Compares every linked product's base price against its ${cfg.priceShort} — this store
                    runs its own storefront sales, so percent-off discounts are not counted as drift.`}
-            {' '}Reports save automatically twice a day; run a fresh one anytime.
+            {cfg.kind !== 'page' && ' Reports save automatically twice a day; run a fresh one anytime.'}
           </p>
         </div>
         <button
@@ -579,10 +604,11 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
           onClick={analyze}
           disabled={running}
           aria-busy={running}
+          title={cfg.kind === 'page' ? 'Read the latest prices the Where to Buy check found (nothing is opened again)' : undefined}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
-          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? 'Analyzing…' : 'Run fresh analysis'}
+          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : cfg.kind === 'page' ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          {running ? 'Analyzing…' : cfg.kind === 'page' ? 'Reload' : 'Run fresh analysis'}
         </button>
       </div>
 
@@ -590,7 +616,11 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
         <p className="text-body-sm text-on-surface-variant"><Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading last report…</p>
       )}
       {!loading && !result && !msg && (
-        <p className="text-body-sm text-on-surface-variant">No saved report yet — run the first analysis.</p>
+        <p className="text-body-sm text-on-surface-variant">
+          {cfg.kind === 'page'
+            ? `No prices read on ${cfg.label} yet — the Where to Buy check reads them as it opens the links (each one within 3 days).`
+            : 'No saved report yet — run the first analysis.'}
+        </p>
       )}
       {result?.legacy && (
         <p className="text-body-sm rounded-lg px-3 py-2 bg-surface-container text-on-surface-variant">
@@ -626,10 +656,29 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
             })}
           </div>
           <p className="text-body-sm text-on-surface-variant">
-            {result.total} products on the store · live prices pulled {new Date(result.ranAt).toLocaleString()} · expected prices as the PIM has them now{result.notOnStore ? ` · ${result.notOnStore} not on the store, left out` : ''}
+            {cfg.kind === 'page'
+              ? [
+                  `${result.total} products with a price read on the store's pages`,
+                  result.readFrom ? `read ${fmtDay(result.readFrom)}${fmtDay(result.readFrom) !== fmtDay(result.readTo) ? ` – ${fmtDay(result.readTo)}` : ''}` : null,
+                  'expected prices as the PIM has them now',
+                  result.notOnStore ? `${result.notOnStore} broken link${result.notOnStore === 1 ? '' : 's'} left out` : null,
+                  result.otherProduct ? `${result.otherProduct} link${result.otherProduct === 1 ? '' : 's'} opening another product left out` : null,
+                  result.otherCurrency ? `${result.otherCurrency} shown in another currency left out` : null,
+                  result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again` : null,
+                  result.soldOut ? `${result.soldOut} sold out without a price` : null,
+                  result.noPrice ? `${result.noPrice} read without a price` : null,
+                  'each link is read again every 3 days',
+                ].filter(Boolean).join(' · ')
+              : `${result.total} products on the store · live prices pulled ${new Date(result.ranAt).toLocaleString()} · expected prices as the PIM has them now${result.notOnStore ? ` · ${result.notOnStore} not on the store, left out` : ''}`}
           </p>
 
-          {result.problems.length === 0 ? (
+          {result.total === 0 ? (
+            <p className="text-body-md text-on-surface-variant">
+              {cfg.kind === 'page'
+                ? `No price on ${cfg.label} could be compared yet — see what was left out above.`
+                : 'No product to compare yet.'}
+            </p>
+          ) : result.problems.length === 0 ? (
             <p className="text-body-md text-on-surface inline-flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-primary" />
               Everything aligned — all {result.total} products are at their expected price.
@@ -663,7 +712,8 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Expected</th>
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">Source</th>
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Δ</th>
-                      {canEdit && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-4 py-2.5"><span className="sr-only">Actions</span></th>}
+                      {cfg.kind === 'page' && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">Page</th>}
+                      {canEdit && cfg.canFix && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-4 py-2.5"><span className="sr-only">Actions</span></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -688,7 +738,30 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                         <td className="px-4 py-2 text-right tabular-nums text-on-surface-variant">
                           {p.live != null && p.expected != null ? `${p.live > p.expected ? '+' : '−'}${money(Math.abs(p.live - p.expected))}` : '—'}
                         </td>
-                        {canEdit && (
+                        {cfg.kind === 'page' && (
+                          <td className="px-4 py-2 whitespace-nowrap">
+                            {p.url ? (
+                              <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline" title={`Read ${p.read_at ? new Date(p.read_at).toLocaleString() : ''}`}>
+                                <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                                {p.read_at ? fmtDay(p.read_at) : 'Open'}
+                                <span className="sr-only"> — open the {cfg.short} page of {p.sku}</span>
+                              </a>
+                            ) : '—'}
+                            {p.unconfirmed && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded text-label-md bg-surface-container text-on-surface-variant" title="The page names no model the PIM can match to this SKU">SKU not confirmed</span>
+                            )}
+                            {p.in_stock === false && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded text-label-md bg-surface-container text-on-surface-variant">Sold out</span>
+                            )}
+                            {p.page_note && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded text-label-md bg-tertiary-container/60 text-on-tertiary-container" title={p.page_note}>
+                                {/coupon|cart/i.test(p.page_note) ? 'Lower in cart' : /open box|used|refurbished/i.test(p.page_note) ? 'Not new' : 'Note'}
+                                <span className="sr-only">: {p.page_note}</span>
+                              </span>
+                            )}
+                          </td>
+                        )}
+                        {canEdit && cfg.canFix && (
                           <td className="px-4 py-2 text-right">
                             {cfg.canFix && p.expected != null && (
                               <button

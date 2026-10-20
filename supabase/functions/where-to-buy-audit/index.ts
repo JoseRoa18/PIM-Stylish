@@ -55,11 +55,19 @@
 //            checked by hand
 // The `note` column carries the reason, `checked_via` who answered.
 //
+// The page a check opens is also READ (user, 2026-10-20 — _shared/pageProduct.js):
+// the model it shows (`page_model`, `sku_check`: match / variant / other /
+// unknown) and its price (`price`, `was_price`, `currency`, `in_stock`,
+// `read_at`) for Price Alignment. A page on ANOTHER PIM product is a soft
+// sign: twice in a row (two days apart) and the link is Broken — "Opens
+// another product".
+//
 // Auth: `x-cron-secret` (cron) or a signed-in user's JWT. Deployed with
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
 
 import { resolveWixSite } from "../_shared/wixSites.ts";
 import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, withWhereToBuySection } from "../_shared/whereToBuy.js";
+import { readProductPage, menardsRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -105,7 +113,8 @@ const retailerFor = (host: string): { key: string; market: string; label: string
 //   Bright Data opens Wayfair, Home Depot CA / USA, Best Buy, Amazon.ca,
 //   Lowe's (7/8) and Rona (ScraperAPI never does); Menards only in async
 //   mode from a US exit. ScraperAPI opens BB&B and Overstock (Akamai turns
-//   Bright Data away, 1-2 of 5) and eBay. Amazon usually lets the server in.
+//   Bright Data away, 1-2 of 5) and eBay. Amazon lets the server in, but
+//   without its prices (see below).
 // Anything not listed: the server's probe, then one Bright Data try.
 type Method = "direct" | "brightdata" | "scraperapi" | "menards";
 const ROUTES: Record<string, Method[]> = {
@@ -120,8 +129,13 @@ const ROUTES: Record<string, Method[]> = {
   bbb_us: ["scraperapi", "brightdata"],
   overstock_us: ["scraperapi", "brightdata"],
   ebay: ["scraperapi", "brightdata"],
-  amazon_ca: ["direct", "brightdata", "scraperapi"],
-  amazon_us: ["direct", "brightdata", "scraperapi"],
+  // Amazon hides the price from the server's own probe (Amazon.ca: a US
+  // address, "Deliver to United States", no buy box; Amazon.com: the coupon
+  // but no price — 2026-10-20), so its pages go through Bright Data first
+  // (it exits in the store's country) and the probe only settles the link
+  // when Bright Data does not answer (~10 USD a month for both stores).
+  amazon_ca: ["brightdata", "direct", "scraperapi"],
+  amazon_us: ["brightdata", "direct", "scraperapi"],
 };
 const routeFor = (retailer: string, host: string): Method[] =>
   DOC_HOST.test(host) ? ["direct"] : ROUTES[retailer] ?? ["direct", "brightdata"];
@@ -208,18 +222,24 @@ async function wixCatalog(siteKey: string): Promise<WixProduct[]> {
 const skuOf = (p: WixProduct) => (p.sku?.trim() || p.variants?.[0]?.variant?.sku?.trim() || null);
 
 // ---------------------------------------------------------------- scan
-interface Row {
+// What the page last said about its product (see pageProduct.js).
+interface Reading {
+  page_model: string | null; page_item_id: string | null; sku_check: string | null; page_note: string | null;
+  price: number | null; was_price: number | null; currency: string | null; in_stock: boolean | null; read_at: string | null;
+}
+const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null };
+interface Row extends Reading {
   site: string; sku: string; wix_product_id: string | null; section: string; market: string | null;
   retailer: string; label: string | null; url: string | null; host: string | null;
   retailer_id: string | null; expected_id: string | null; verdict: string;
   http_status: number | null; final_url: string | null; note: string | null;
   scanned_at: string; checked_at: string | null;
-  next_check_at: string | null; checked_via: string | null; fail_count: number; signal_count: number;
+  next_check_at: string | null; checked_via: string | null; fail_count: number; signal_count: number; signal_at: string | null;
   job_id: string | null; job_at: string | null;
 }
 // The checker's state on a link, carried over by URL when a scan rebuilds the rows.
-type LinkState = Pick<Row, "verdict" | "http_status" | "final_url" | "note" | "checked_at" | "next_check_at" | "checked_via" | "fail_count" | "signal_count" | "job_id" | "job_at">;
-const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,job_id,job_at";
+type LinkState = Pick<Row, "verdict" | "http_status" | "final_url" | "note" | "checked_at" | "next_check_at" | "checked_via" | "fail_count" | "signal_count" | "signal_at" | "job_id" | "job_at" | keyof Reading>;
+const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,signal_at,job_id,job_at,page_model,page_item_id,sku_check,page_note,price,was_price,currency,in_stock,read_at";
 type Base = { site: string; sku: string; wix_product_id: string | null; scanned_at: string };
 type Link = { retailer: string; url: string };
 interface PimLinks { skus: Set<string>; brands: Map<string, string>; links: Map<string, Link[]> }
@@ -237,30 +257,52 @@ async function loadPimLinks(skus?: string[]): Promise<PimLinks> {
   return { skus: new Set(products.map((p) => p.sku)), brands: new Map(products.map((p) => [p.sku, p.brand ?? ""])), links };
 }
 
-// The checker's state of the links, by URL — from either site, as both
-// pages carry the same address: ok / broken verdicts it reached in the last
-// KEEP_DAYS, and every pending link's retries, soft signals and Menards job.
-async function priorState(skus?: string[]) {
+// The checker's state of the links — from either site, as both pages carry
+// the same address: ok / broken verdicts it reached in the last KEEP_DAYS,
+// and every pending link's retries, soft signals and Menards job. Kept by
+// SKU + address (whether the page shows THIS product is the SKU's own
+// answer) and by address alone for a SKU that just got an address another
+// product already has.
+interface Prior { bySkuUrl: Map<string, LinkState>; byUrl: Map<string, LinkState> }
+async function priorState(skus?: string[]): Promise<Prior> {
   const since = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
-  const prior = new Map<string, LinkState>();
-  const only = skus?.length ? `&sku=${inList(skus)}` : "";
-  for (const r of await restAll<{ url: string } & LinkState>(
-    `where_to_buy_links?select=${STATE_COLUMNS}&url=not.is.null${only}&or=(verdict.eq.pending,and(verdict.in.(ok,broken),checked_via.not.is.null,checked_at.gte.${since}))`,
+  const prior: Prior = { bySkuUrl: new Map(), byUrl: new Map() };
+  const filter = skus?.length ? `&sku=${inList(skus)}` : "";
+  // A verdict beats "pending"; between two of a kind, the newer answer.
+  const better = (prev: LinkState | undefined, r: LinkState) => !prev || (prev.verdict === "pending" && r.verdict !== "pending")
+    || ((prev.verdict === "pending") === (r.verdict === "pending") && (r.checked_at ?? "") > (prev.checked_at ?? ""));
+  for (const r of await restAll<{ url: string; sku: string } & LinkState>(
+    `where_to_buy_links?select=sku,${STATE_COLUMNS}&url=not.is.null${filter}&or=(verdict.eq.pending,and(verdict.in.(ok,broken),checked_via.not.is.null,checked_at.gte.${since}))`,
   )) {
-    // A verdict beats "pending"; between two of a kind, the newer answer.
-    const prev = prior.get(r.url);
-    const better = !prev || (prev.verdict === "pending" && r.verdict !== "pending")
-      || ((prev.verdict === "pending") === (r.verdict === "pending") && (r.checked_at ?? "") > (prev.checked_at ?? ""));
-    if (better) prior.set(r.url, r);
+    const k = `${r.sku}|${r.url}`;
+    if (better(prior.bySkuUrl.get(k), r)) prior.bySkuUrl.set(k, r);
+    if (better(prior.byUrl.get(r.url), r)) prior.byUrl.set(r.url, r);
   }
   return prior;
+}
+
+// The state a SKU's link carries: its own, else the address's — only what
+// holds for the address itself (it opens, or it is dead); what the page said
+// about ITS product (the reading, the SKU check, its signs) was another SKU's,
+// so the link is read for this one at once. A Broken that came from such a
+// sign is checked again.
+function carriedState(prior: Prior, sku: string, url: string): LinkState | undefined {
+  const own = prior.bySkuUrl.get(`${sku}|${url}`);
+  if (own) return own;
+  const shared = prior.byUrl.get(url);
+  if (!shared) return undefined;
+  const fresh = { ...shared, ...NO_READING, signal_count: 0, signal_at: null, next_check_at: null };
+  if (shared.verdict === "broken" && /^Opens (another product|a page without the product)/.test(shared.note ?? "")) {
+    return { ...fresh, verdict: "pending", note: null, checked_at: null, checked_via: null, fail_count: 0 };
+  }
+  return fresh;
 }
 
 // One row per store link of a page. Decided without opening it: an address
 // that is not a URL, or a Wayfair link cut before the sku, cannot open; a
 // site no service opens is checked by hand. Everything else starts pending
 // (or carries the checker's state) and the checker decides.
-function linkRows(base: Base, links: Link[], prior: Map<string, LinkState>): Row[] {
+function linkRows(base: Base, links: Link[], prior: Prior): Row[] {
   const rows: Row[] = [];
   const seen = new Set<string>();
   for (const l of links) {
@@ -276,13 +318,13 @@ function linkRows(base: Base, links: Link[], prior: Map<string, LinkState>): Row
     if (!parsed || !/^https?:$/.test(parsed.protocol) || !host) { verdict = "broken"; note = "Not a valid web address"; }
     else if ((r.key === "wayfair_ca" || r.key === "wayfair_us") && !WAYFAIR_SKU_RE.test(l.url)) { verdict = "broken"; note = "Cut address: Wayfair links need the product sku at the end"; }
     else if (MANUAL_HOST.test(host)) { verdict = "manual"; note = "Check by hand: this site turns every automatic check away"; }
-    const carried = verdict === "pending" ? prior.get(l.url) : undefined;
+    const carried = verdict === "pending" ? carriedState(prior, base.sku, l.url) : undefined;
     const fresh: LinkState = {
       verdict, http_status: null, final_url: null, note, checked_at: null,
       next_check_at: verdict === "pending" ? null : NEVER, checked_via: null,
-      fail_count: 0, signal_count: 0, job_id: null, job_at: null,
+      fail_count: 0, signal_count: 0, signal_at: null, job_id: null, job_at: null, ...NO_READING,
     };
-    const { url: _u, ...state } = (carried ?? fresh) as LinkState & { url?: string };
+    const { url: _u, sku: _s, ...state } = (carried ?? fresh) as LinkState & { url?: string; sku?: string };
     rows.push({ ...base, section: "where_to_buy", market: r.market, retailer: r.key, label: r.label, url: l.url, host, retailer_id: null, expected_id: null, ...state });
   }
   return rows;
@@ -304,7 +346,7 @@ function missingRows(base: Base, links: Link[], standard: string[]): Row[] {
     rows.push({
       ...base, section: "where_to_buy", market, retailer: k, label: null, url: null, host: null, retailer_id: null, expected_id: null,
       verdict: "missing", http_status: null, final_url: null, note: links.length ? "No link to this store yet (most products have one)" : "No Where to Buy links yet", checked_at: null,
-      next_check_at: null, checked_via: null, fail_count: 0, signal_count: 0, job_id: null, job_at: null,
+      next_check_at: null, checked_via: null, fail_count: 0, signal_count: 0, signal_at: null, job_id: null, job_at: null, ...NO_READING,
     });
   }
   return rows;
@@ -456,6 +498,22 @@ async function syncSkus(skus: string[]) {
 
 // ---------------------------------------------------------------- check
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36";
+// A browser's request headers: the Shopify dealers (Cabinet Depot, Build with
+// Rise) answer 429 "Too many requests" to a request without the sec-ch-ua /
+// Sec-Fetch-* headers (2026-10-20), which sent them to Bright Data.
+const BROWSER_HEADERS: Record<string, string> = {
+  "User-Agent": UA,
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "sec-ch-ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+  "Upgrade-Insecure-Requests": "1",
+};
 const NOT_FOUND_RE = /<title[^>]*>[^<]*(?:not found|page not found|no longer available|isn.t available|couldn.t find|404)[^<]*<\/title>|"pageType"\s*:\s*"(?:404|notFound)"/i;
 const BOT_RE = /<title[^>]*>[^<]*(?:pardon our interruption|access denied|are you a human|robot or human|verify your identity|just a moment|attention required|robot check)[^<]*<\/title>/i;
 // Amazon's captcha page is titled just "Amazon.ca" (seen 2026-10-19).
@@ -473,12 +531,13 @@ async function probe(url: string): Promise<Probe> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const r = await fetch(url.replace(/ /g, "%20"), { headers: { "User-Agent": UA, Accept: "text/html,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9" }, redirect: "follow", signal: ctrl.signal });
+    const r = await fetch(url.replace(/ /g, "%20"), { headers: BROWSER_HEADERS, redirect: "follow", signal: ctrl.signal });
     const status = r.status;
     const finalUrl = r.url || url;
     let body = "";
+    // Amazon pages run up to 2 MB, their "Product details" rows past the first 1.2 MB (2026-10-20).
     if (DOC_HOST.test(new URL(finalUrl).hostname)) { try { await r.body?.cancel(); } catch { /* ignore */ } }
-    else { try { body = (await r.text()).slice(0, 1500000); } catch { body = ""; } }
+    else { try { body = (await r.text()).slice(0, 3000000); } catch { body = ""; } }
     if (status === 404 || status === 410) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `HTTP ${status}` };
     // 401/403/429 and 5xx from retailers are robot blocks (Amazon answers
     // 500/503 to datacenter traffic) — the link is not verified, try later.
@@ -515,10 +574,14 @@ const PUBLISH_MAX = 20; // product pages written per call
 type PublishStatus = "published" | "up_to_date" | "no_links" | "not_linked" | "not_found" | "error" | "later";
 interface PublishResult { sku: string; site: string; status: PublishStatus; error?: string }
 
-async function brokenUrls(skus: string[]): Promise<Set<string>> {
-  const rows: Array<{ url: string }> = [];
-  for (const part of chunk(skus, 100)) rows.push(...await restAll<{ url: string }>(`where_to_buy_links?select=url&verdict=eq.broken&url=not.is.null&sku=${inList(part)}`));
-  return new Set(rows.map((r) => r.url));
+// The broken addresses of each product. Kept per SKU: one address can be
+// Broken for one product ("Opens another product") and right for the next.
+async function brokenUrls(skus: string[]): Promise<Map<string, Set<string>>> {
+  const rows: Array<{ sku: string; url: string }> = [];
+  for (const part of chunk(skus, 100)) rows.push(...await restAll<{ sku: string; url: string }>(`where_to_buy_links?select=sku,url&verdict=eq.broken&url=not.is.null&sku=${inList(part)}`));
+  const out = new Map<string, Set<string>>();
+  for (const r of rows) { if (!out.has(r.sku)) out.set(r.sku, new Set()); out.get(r.sku)!.add(r.url); }
+  return out;
 }
 
 async function publishSkus(skus: string[], deadline: number, maxPushes = PUBLISH_MAX): Promise<PublishResult[]> {
@@ -549,7 +612,7 @@ async function publishSkus(skus: string[], deadline: number, maxPushes = PUBLISH
         if (!g.ok) throw new Error(`Wix read ${g.status}`);
         const sections = (await g.json()).product?.additionalInfoSections ?? [];
         const all = pim.links.get(sku) ?? [];
-        const next = withWhereToBuySection(sections, linksToShow(all, broken), siteKey, { owned: all.length > 0 });
+        const next = withWhereToBuySection(sections, linksToShow(all, broken.get(sku) ?? new Set()), siteKey, { owned: all.length > 0 });
         if (!next) { out.push({ sku, site: siteKey, status: all.length ? "up_to_date" : "no_links" }); continue; }
         const p = await fetch(`${WIX_BASE}/stores/v1/products/${id}`, {
           method: "PATCH", headers, body: JSON.stringify({ product: { additionalInfoSections: next } }), signal: AbortSignal.timeout(25000),
@@ -667,7 +730,12 @@ async function refreshSinksDirect(pim: PimLinks, now: string) {
 //   waiting      a Menards job still running; submitted: one was just sent
 //   later        not tried: the call ran out of time
 type Kind = "ok" | "broken" | "soft" | "none" | "waiting" | "submitted" | "later";
-interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string }
+// What an OK page says about its product (pageProduct.js).
+interface PageRead {
+  ids: string[]; options: string[]; gtins: string[]; price: number | null; wasPrice: number | null; currency: string | null;
+  inStock: boolean | null; itemId: string | null; source: string | null; optionDefaulted: boolean; gone: boolean; note: string | null;
+}
+interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string }
 
 const METHOD_LABEL: Record<Method, string> = { direct: "Direct", brightdata: "Bright Data", scraperapi: "ScraperAPI", menards: "Bright Data (Menards)" };
 // Time an attempt may take, so a call never starts one it cannot finish.
@@ -678,7 +746,11 @@ const PAGE_NOT_FOUND_TITLE = /not found|introuvable|no longer available|isn.t av
 // Not-found pages whose title says nothing (checked 2026-10-19):
 // Home Depot USA, Menards ("SORRY!"), Lowe's.
 const PAGE_NOT_FOUND_BODY = /The product you are trying to view is not currently available|The page you are looking for can not be found|404 File Not Found/i;
-const PAGE_BLOCKED_TITLE = /access denied|pardon our interruption|are you a human|just a moment|attention required|robot check|captcha|security check|request unsuccessful/i;
+const PAGE_BLOCKED_TITLE = /access denied|pardon our interruption|are you a human|robot or human|verify your identity|just a moment|attention required|robot check|captcha|security check|request unsuccessful/i;
+// Denial and challenge pages whose title says nothing: Chrome's own "Access
+// to www.lowes.com was denied" (Akamai), Akamai's "You don't have
+// authorization", Imperva's challenge, PerimeterX's press-and-hold.
+const BLOCK_BODY_RE = /Access to [^<]{1,80} was denied|You don't have authorization to view this page|_Incapsula_Resource|px-captcha|Press &amp; Hold|Press & Hold to confirm/i;
 const skuPattern = (sku: string) => new RegExp(`\\b${sku.replace(/[-\s]/g, "").split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[-\\s]?")}\\b`, "i");
 // Stores whose answer to the server can be a bot page dressed as a normal
 // one (2026-10-19): their direct OK must show the product.
@@ -699,18 +771,30 @@ function showsProduct(title: string, body: string, sku: string): boolean {
 // A page read through an unlocker: it shows the product when its title names
 // the brand or the SKU (every product page seen on 2026-10-19 does: "STYLISH
 // 30 inch…", "Stylish® Versa… at Menards®", "Azuni…"). A store's home or
-// category page instead is a soft sign; a bot page is no answer at all.
-function judgePage(status: number | null, body: string, sku: string, via: Method): Outcome {
+// category page instead is a soft sign; a bot page is no answer at all. An
+// OK page is read for its product's model and price.
+function judgePage(status: number | null, body: string, row: DueRow, via: Method): Outcome {
   const title = pageTitle(body);
   if (status === 404 || status === 410) return { kind: "broken", via, status, note: `HTTP ${status}` };
   if (PAGE_NOT_FOUND_TITLE.test(title)) return { kind: "broken", via, status, note: "The page says the product was not found" };
   if (PAGE_BLOCKED_TITLE.test(title)) return { kind: "none", via, status, note: `bot check page ("${title.slice(0, 40)}")` };
+  // A bot or denial page dressed as a normal one — Amazon's captcha titled
+  // just "Amazon.ca", Walmart's "Robot or human?", Lowe's Akamai page titled
+  // "www.lowes.com" ("Access to www.lowes.com was denied … HTTP ERROR 403",
+  // which made five Lowe's links look dead on 2026-10-20) — is no answer.
+  if (BOT_RE.test(body) || BOT_BODY_RE.test(body) || BLOCK_BODY_RE.test(body)) return { kind: "none", via, status, note: "bot check page" };
   // A page that shows the product is OK even if a "not available" sentence
   // sits in it: Home Depot USA's live E-120 page (new, regional stock) carried
   // "The product you are trying to view is not currently available" and was
   // marked Broken on 2026-10-20. Those sentences only count on a page that
   // does not show the product (Home Depot's real not-found page has no title).
-  if (status !== null && status >= 200 && status < 300 && title && showsProduct(title, body, sku)) return { kind: "ok", via, status, note: null };
+  // The store's reader finding a product counts too: Wayfair keeps its home
+  // page's title on a listing moved to a new id (TKJS1142 → C003260802).
+  const page = status !== null && status >= 200 && status < 300 ? readProductPage(body, row.retailer, row.url) : null;
+  if (page && !page.gone && (page.ids.length || page.price !== null)) return { kind: "ok", via, status, note: null, page, title };
+  if (status !== null && status >= 200 && status < 300 && title && showsProduct(title, body, row.sku)) {
+    return { kind: "ok", via, status, note: null, page, title };
+  }
   if (PAGE_NOT_FOUND_BODY.test(body)) return { kind: "broken", via, status, note: "The page says the product was not found" };
   if (status !== null && status >= 200 && status < 300 && title) return { kind: "soft", via, status, note: `Opens a page without the product: "${title.slice(0, 80)}"` };
   return { kind: "none", via, status, note: status ? `HTTP ${status}, empty page` : "no page" };
@@ -723,7 +807,8 @@ function judgePage(status: number | null, body: string, sku: string, via: Method
 const brightData = { inFlight: 0, coolUntil: 0 };
 const BD_MAX_IN_FLIGHT = 10;
 const RATE_LIMIT_RE = /rate limit/i;
-async function viaBrightData(url: string, sku: string, deadline: number): Promise<Outcome> {
+async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
+  const url = row.url;
   if (!BRIGHTDATA_API_TOKEN) return { kind: "none", via: "brightdata", note: "not configured" };
   while (brightData.inFlight >= BD_MAX_IN_FLIGHT || Date.now() < brightData.coolUntil) {
     if (Date.now() + METHOD_MS.brightdata > deadline) return { kind: "later", via: "brightdata" };
@@ -744,7 +829,7 @@ async function viaBrightData(url: string, sku: string, deadline: number): Promis
     if (RATE_LIMIT_RE.test(j.headers?.["x-brd-error"] ?? "")) { brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     // 5xx / 403 / 429 here are the store or the unlocker turning the page down.
     if (code === null || code >= 500 || code === 403 || code === 429) return { kind: "none", via: "brightdata", status: code, note: j.headers?.["x-brd-error"] ?? `HTTP ${code}` };
-    return judgePage(code, j.body ?? "", sku, "brightdata");
+    return judgePage(code, j.body ?? "", row, "brightdata");
   } catch (e) {
     return { kind: "none", via: "brightdata", note: (e as Error).name === "TimeoutError" ? "no answer in 60 s" : (e as Error).message.slice(0, 80) };
   } finally { brightData.inFlight -= 1; }
@@ -761,7 +846,8 @@ async function refreshScraperCredits() {
     if (r.ok) scraperApi.credits = Number((await r.json()).creditsLeft ?? 0);
   } catch { /* leave 0: ScraperAPI is skipped this call */ }
 }
-async function viaScraperApi(url: string, sku: string): Promise<Outcome> {
+async function viaScraperApi(row: DueRow): Promise<Outcome> {
+  const url = row.url;
   if (scraperApi.credits < 25) return { kind: "none", via: "scraperapi", note: SCRAPERAPI_KEY ? "no credits left this month" : "not configured" };
   while (scraperApi.inFlight >= 4) await new Promise((ok) => setTimeout(ok, 500));
   scraperApi.inFlight += 1;
@@ -771,7 +857,7 @@ async function viaScraperApi(url: string, sku: string): Promise<Outcome> {
     const body = await r.text();
     if (r.status === 404 || r.status === 410) return { kind: "broken", via: "scraperapi", status: r.status, note: `HTTP ${r.status}` };
     if (r.status >= 400) return { kind: "none", via: "scraperapi", status: r.status, note: r.status === 500 ? "could not open the page" : `HTTP ${r.status}` };
-    return judgePage(r.status, body, sku, "scraperapi");
+    return judgePage(r.status, body, row, "scraperapi");
   } catch (e) {
     return { kind: "none", via: "scraperapi", note: (e as Error).name === "TimeoutError" ? "no answer in 70 s" : (e as Error).message.slice(0, 80) };
   } finally { scraperApi.inFlight -= 1; }
@@ -816,7 +902,7 @@ async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Ou
         if (!rec) out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper returned nothing for it" } });
         else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "broken", via: "menards", status: 404, note: "Menards: the product page is gone (404)" } });
         else if (rec.error) out.push({ row, o: { kind: "none", via: "menards", note: `Menards scraper: ${String(rec.error).slice(0, 80)}` } });
-        else if (rec.title) out.push({ row, o: { kind: "ok", via: "menards", status: 200 } });
+        else if (rec.title) out.push({ row, o: { kind: "ok", via: "menards", status: 200, page: menardsRead(rec) } });
         else out.push({ row, o: { kind: "none", via: "menards", note: "the Menards scraper read no product" } });
       }
     } catch (e) {
@@ -839,17 +925,25 @@ async function checkMenards(leads: DueRow[]): Promise<Array<{ row: DueRow; o: Ou
   return out;
 }
 
+// The server's own probe reads these stores' pages without their price
+// (Amazon: no buy box for a US address — 2026-10-20): its reading keeps the
+// model check but leaves the last price as it was.
+const PRICE_BLIND = new Set(["amazon_ca", "amazon_us"]);
+
 // One link: its route's methods in order until one answers. The server's own
-// probe keeps its finer rules (redirects to home / login pages).
+// probe keeps its finer rules (redirects to home / login pages). An
+// unlocker's "page without the product" is kept for last: the next method may
+// still open the product (a store can answer one service a page of its own).
 async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
   const misses: string[] = [];
   let last: Outcome = { kind: "none", note: "not tried" };
+  let provisional: Outcome | null = null;
   for (const m of routeFor(row.retailer, row.host ?? "")) {
-    if (Date.now() + METHOD_MS[m] > deadline) return misses.length ? { kind: "none", note: misses.join(" · ") } : { kind: "later" };
+    if (Date.now() + METHOD_MS[m] > deadline) return provisional ?? (misses.length ? { kind: "none", note: misses.join(" · ") } : { kind: "later" });
     let o: Outcome;
     if (m === "direct") {
       const p = await probe(row.url);
-      o = { kind: p.verdict === "pending" ? "none" : p.verdict, via: "direct", status: p.http_status, finalUrl: p.final_url, note: p.note };
+      o = { kind: p.verdict === "pending" ? "none" : p.verdict, via: "direct", status: p.http_status, finalUrl: p.final_url, note: p.note, title: p.title };
       // An open page counts only when it shows the product (user, 2026-10-19):
       // Walmart and Amazon sometimes answer a bot check that looks like a
       // normal page ("Robot or human?", "Verify Your Identity", Amazon's
@@ -859,50 +953,145 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
       if (o.kind === "ok" && p.body !== undefined && BOT_PRONE.has(row.retailer) && !showsProduct(p.title ?? "", p.body, row.sku)) {
         o = { kind: "none", via: "direct", status: p.http_status, note: `the page does not show the product ("${(p.title ?? "").slice(0, 50)}")` };
       }
-    } else if (m === "brightdata") o = await viaBrightData(row.url, row.sku, deadline);
-    else if (m === "scraperapi") o = await viaScraperApi(row.url, row.sku);
+      if (o.kind === "ok" && p.body !== undefined) {
+        o.page = readProductPage(p.body, row.retailer, row.url);
+        if (PRICE_BLIND.has(row.retailer)) o.priceBlind = true;
+      }
+    } else if (m === "brightdata") o = await viaBrightData(row, deadline);
+    else if (m === "scraperapi") o = await viaScraperApi(row);
     else o = { kind: "none", via: "menards", note: "Menards goes through its own batch" }; // never reached: checkMenards
+    if (o.kind === "soft") { provisional ??= o; misses.push(`${METHOD_LABEL[m]}: ${o.note ?? "no product"}`); continue; }
     if (o.kind !== "none") return o;
     misses.push(`${METHOD_LABEL[m]}: ${o.note ?? "no answer"}`);
     last = o;
   }
-  return { ...last, note: misses.join(" · ") };
+  return provisional ?? { ...last, note: misses.join(" · ") };
 }
 
 // ---------------------------------------------------------------- check
-interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; job_id: string | null; job_at: string | null }
-const DUE_COLUMNS = "id,sku,url,host,retailer,verdict,note,fail_count,signal_count,job_id,job_at";
+interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; signal_at: string | null; job_id: string | null; job_at: string | null }
+const DUE_COLUMNS = "id,sku,url,host,retailer,verdict,note,fail_count,signal_count,signal_at,job_id,job_at";
+// The title of the page names the SKU: it is that product's page.
+const titleNamesSku = (o: Outcome, sku: string) => Boolean(o.title) && skuPattern(sku).test(o.title ?? "");
 
 const at = (ms: number) => new Date(Date.now() + ms).toISOString();
 
 // How many soft signs make a link Broken, and how far apart. Menards needs
 // 4 tries 6 h apart: its unlocker also gives up on some LIVE pages (B-108G
 // opened in the user's browser on 2026-10-20 after a "gave up"), while a dead
-// one fails every time.
+// one fails every time. A sign counts only that far from the previous one
+// (`signal_at`: a check run again sooner — a product's links rechecked from
+// the PIM — changes nothing), and the count starts over after a week.
 const SOFT_RULE: Record<string, { strikes: number; everyHours: number }> = {
   menards: { strikes: 4, everyHours: 6 },
   default: { strikes: 2, everyHours: BROKEN_HOURS },
 };
+const SIGN_FORGOTTEN_MS = 7 * 86400e3;
+
+// One answer, judged for one row: the same page can be the right product for
+// one SKU and another product for the next (a listing several SKUs link).
+//   - the store says it no longer sells the product (Lowe's "no longer sold")
+//     → Broken at once;
+//   - a page on ANOTHER PIM product (another family: KB Authority's links of
+//     2026-10-20 opened B-122G for B-108G, a faucet combo for a drain) → a soft
+//     sign: twice, two days apart, and the link is Broken ("Opens another
+//     product") — a store can show a sibling for a while. Another option of
+//     the same family stays OK, flagged "variant" for the link to be fixed;
+//   - an open page whose store reader finds no product on it (a brand,
+//     category or search page the link was sent to: Wayfair's STYLISH brand
+//     page for A-908, KB Authority's sink category for S-306TG) → the same
+//     soft sign. `unreadable` lists the stores where most pages of this call
+//     read as nothing — a store that changed its pages — where it is not
+//     counted.
+type Judged = Outcome & { check?: { check: string; model: string | null } | null };
+function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalog>, unreadable: Set<string>): Judged {
+  if (o.kind !== "ok" || o.page === undefined) return o;
+  if (o.page === null) {
+    // Not when the page's own title names the SKU (a product page the reader
+    // did not understand), nor on a page the server's probe reads in part.
+    return SURE_READERS.has(row.retailer) && !unreadable.has(row.retailer) && !o.priceBlind && !titleNamesSku(o, row.sku)
+      ? { ...o, kind: "soft", note: "Opens a page without the product (a brand, category or search page)" }
+      : o;
+  }
+  if (o.page.gone) return { ...o, kind: "broken", note: o.page.note ?? "The store no longer sells it" };
+  const check = skuCheck(o.page, row.sku, catalog);
+  if (check?.check === "other") return { ...o, kind: "soft", check, note: `Opens another product: ${check.model}` };
+  return { ...o, check };
+}
+
+// The stores whose reader cannot be trusted to call a page "not a product
+// page" right now: a page that reads as nothing counts as a sign only when
+// the same store's reader read most of its pages of the last 3 days (this
+// call included) — a store that changed its pages reads as nothing
+// everywhere, and its links must not turn Broken for it.
+async function unreadableStores(answers: Array<{ row: DueRow; o: Outcome }>): Promise<Set<string>> {
+  const tally = new Map<string, { read: number; blank: number }>();
+  for (const { row, o } of answers) {
+    if (o.kind !== "ok" || o.page === undefined) continue;
+    const t = tally.get(row.retailer) ?? { read: 0, blank: 0 };
+    if (o.page === null) t.blank += 1; else t.read += 1;
+    tally.set(row.retailer, t);
+  }
+  const out = new Set<string>();
+  const since = new Date(Date.now() - 72 * 3600e3).toISOString();
+  const count = async (filter: string) => {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/where_to_buy_links?select=id&${filter}`, {
+      method: "HEAD", headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, Prefer: "count=exact" },
+    });
+    return Number(r.headers.get("content-range")?.split("/")[1] ?? 0);
+  };
+  for (const [retailer, t] of tally) {
+    if (!t.blank) continue;
+    // Rows (both sites carry each address) read lately with data, and blank.
+    const [read, blank] = await Promise.all([
+      count(`retailer=eq.${retailer}&read_at=gte.${since}&or=(price.not.is.null,page_model.not.is.null)`),
+      count(`retailer=eq.${retailer}&read_at=gte.${since}&price=is.null&page_model=is.null`),
+    ]);
+    const good = read / 2 + t.read;
+    const bad = blank / 2 + t.blank;
+    if (good < 3 || bad >= good) { out.add(retailer); console.warn(`[where-to-buy] ${retailer}: ${t.blank} page(s) read as nothing, the reader read ${good} of ${good + bad} lately — not counted as signs`); }
+  }
+  return out;
+}
+
+// What the page said about its product, as columns (pageProduct.js). An OK
+// page whose product data the reader could not find leaves an empty reading;
+// a dead page drops the last one.
+function readingFor(o: Judged, now: string): Partial<Reading> {
+  if (o.page === undefined) return o.kind === "broken" ? NO_READING : {};
+  if (!o.page) return o.priceBlind ? {} : { ...NO_READING, read_at: now };
+  const model = { page_model: o.check?.model ?? o.page.ids[0] ?? null, page_item_id: o.page.itemId, sku_check: o.check?.check ?? null, page_note: o.page.note };
+  if (o.priceBlind) return model; // the last price read stays as it was
+  return { ...model, price: o.page.price, was_price: o.page.wasPrice, currency: o.page.currency, in_stock: o.page.inStock, read_at: now };
+}
 
 // What an outcome writes on the row.
-function patchFor(row: DueRow, o: Outcome, now: string): Record<string, unknown> | null {
+function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> | null {
   const clearJob = { job_id: null, job_at: null };
+  const reading = readingFor(o, now);
   const verdictPatch = (verdict: "ok" | "broken", note: string | null, signals: number) => ({
     verdict, note, http_status: o.status ?? null, final_url: verdict === "broken" ? o.finalUrl ?? null : null,
     checked_at: now, checked_via: o.via === "menards" ? "brightdata" : o.via ?? null,
-    fail_count: 0, signal_count: signals, ...clearJob,
+    fail_count: 0, signal_count: signals, signal_at: null, ...clearJob,
     next_check_at: at((verdict === "ok" ? OK_HOURS : BROKEN_HOURS) * 3600e3),
+    ...reading,
   });
   switch (o.kind) {
     case "ok": return verdictPatch("ok", null, 0);
     case "broken": return verdictPatch("broken", o.note ?? null, 0);
     case "soft": {
-      const signals = row.signal_count + 1;
-      const rule = SOFT_RULE[row.retailer] ?? SOFT_RULE.default;
-      if (signals >= rule.strikes) return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks over a day`, signals);
+      const rule = o.check ? SOFT_RULE.default : SOFT_RULE[row.retailer] ?? SOFT_RULE.default;
+      const last = row.signal_at ? Date.parse(row.signal_at) : null;
+      const since = last === null ? Infinity : Date.now() - last;
+      // A first sign (or one after a week), a sign far enough from the last
+      // one, or a sign too soon that changes nothing.
+      const counts = last === null || since > SIGN_FORGOTTEN_MS || since >= rule.everyHours * 3600e3 - 10 * 60e3;
+      const signals = last === null || since > SIGN_FORGOTTEN_MS ? 1 : counts ? row.signal_count + 1 : row.signal_count;
+      if (signals >= rule.strikes) return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks ${rule.everyHours} h apart`, signals);
       // Not enough yet: keep the verdict, look again later.
       return {
-        signal_count: signals, fail_count: 0, ...clearJob, next_check_at: at(rule.everyHours * 3600e3),
+        signal_count: signals, signal_at: counts ? now : row.signal_at, fail_count: 0, ...clearJob,
+        next_check_at: counts ? at(rule.everyHours * 3600e3) : new Date(last! + rule.everyHours * 3600e3).toISOString(), ...reading,
         ...(row.verdict === "pending" ? { note: `${o.note} (${signals} of ${rule.strikes} checks before calling it broken)`, checked_at: now } : {}),
       };
     }
@@ -987,7 +1176,10 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     };
     await Promise.all(Array.from({ length: lanes }, lane));
   })]);
-  const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o })));
+  // Each row of an address gets the answer judged for its own SKU.
+  const catalog = pimCatalog(answers.some(({ o }) => o.page) ? await restAll<{ sku: string; upc: string | null; family_number: number | null }>("products?select=sku,upc:attributes->>upc,family_number") : []);
+  const unreadable = await unreadableStores(answers);
+  const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o: judgedFor(r, o, catalog, unreadable) })));
 
   const now = new Date().toISOString();
   const groups = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
@@ -1000,8 +1192,12 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     if (!groups.has(key)) groups.set(key, { patch, ids: [] });
     groups.get(key)!.ids.push(row.id);
   }
-  for (const g of groups.values()) {
-    for (const ids of chunk(g.ids, 200)) await rest(`where_to_buy_links?id=in.(${ids.join(",")})`, { method: "PATCH", body: JSON.stringify(g.patch) });
+  // A reading makes nearly every patch its own (one per address read), so the
+  // writes go six at a time: a call reading 300 pages must finish before the
+  // runtime's ~150 s cut.
+  const writes = [...groups.values()].flatMap((g) => chunk(g.ids, 200).map((ids) => ({ ids, patch: g.patch })));
+  for (const part of chunk(writes, 6)) {
+    await Promise.all(part.map((w) => rest(`where_to_buy_links?id=in.(${w.ids.join(",")})`, { method: "PATCH", body: JSON.stringify(w.patch) })));
   }
   // Links of the batch this call never started go back to due now.
   const touched = new Set(results.map((r) => r.row.id));
@@ -1022,7 +1218,12 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     published,
     checked: results.filter((r) => r.o.kind !== "later").length, addresses: answers.length, morePending, byKind, byVia,
     scraperCredits: scraperApi.credits, ms: Date.now() - started,
-    ...(opts.skus?.length ? { links: answers.map(({ row, o }) => ({ sku: row.sku, retailer: row.retailer, url: row.url, kind: o.kind, via: o.via ?? null, note: o.note ?? null })) } : {}),
+    ...(opts.skus?.length ? {
+      links: results.filter(({ row }) => opts.skus!.includes(row.sku)).filter(({ row }, i, all) => all.findIndex((x) => x.row.url === row.url && x.row.sku === row.sku) === i).map(({ row, o }) => ({
+        sku: row.sku, retailer: row.retailer, url: row.url, kind: o.kind, via: o.via ?? null, note: o.note ?? null,
+        page: o.page ? { model: o.check?.model ?? o.page.ids[0] ?? null, check: o.check?.check ?? null, price: o.page.price, wasPrice: o.page.wasPrice, currency: o.page.currency, inStock: o.page.inStock, note: o.page.note, gone: o.page.gone, source: o.page.source } : o.page,
+      })),
+    } : {}),
   };
 }
 

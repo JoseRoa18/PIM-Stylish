@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import { etToday, promoWindow } from '../lib/promoCalendar';
-import { sharedLoad, loadExpectedPrices, dropShared } from './expectedPrices';
+import { sharedLoad, loadExpectedPrices, loadPriceChangeDays, dropShared } from './expectedPrices';
+import { PAGE_STORES } from '../lib/pageStores';
+import { NLP_MIN_DISCOUNT, NLP_CATEGORIES, nlpDiscount } from '../lib/homeDepotCaNlp';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers, pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
@@ -22,7 +24,10 @@ function latestChannelSnapshot(channel) {
 }
 
 /**
- * Price Alignment Analyzer — the four Wix sites plus Best Buy.
+ * Price Alignment Analyzer — the Wix sites, Best Buy, the two Walmarts and,
+ * since 2026-10-20, the stores read from their own product pages (Wayfair,
+ * Amazon, Home Depot, Rona, Lowe's, Menards, BB&B, Overstock and the dealers —
+ * PAGE_STORES below).
  *
  * Expected price per site: SinksDirect sites follow the monthly promo (a SKU
  * in an ACTIVE promotion is expected at its market's promo price, everything
@@ -60,7 +65,8 @@ function latestChannelSnapshot(channel) {
  */
 
 // Everything the alignment tab can point at: the four Wix sites (fixable
-// with one click) plus Best Buy (analysis only until its push is built).
+// with one click), Best Buy, the two Walmarts and the stores read from their
+// pages (analysis only — PAGE_STORES in lib/pageStores.js).
 export const ALIGN_TARGETS = {
   ...Object.fromEntries(
     Object.entries(WIX_SITES).map(([key, cfg]) => [key, { ...cfg, kind: 'wix', canFix: true, promoChannel: `wix_${key}` }]),
@@ -110,6 +116,16 @@ export const ALIGN_TARGETS = {
     market: 'ca',
     promoChannel: 'walmart_ca',
   },
+  ...Object.fromEntries(PAGE_STORES.map((s) => [s.key, {
+    ...s,
+    kind: 'page',
+    canFix: false,
+    retailer: s.key,
+    symbol: s.market === 'us' ? '$' : 'C$',
+    priceField: s.market === 'us' ? 'map_usd' : 'map_cad',
+    priceShort: s.market === 'us' ? 'MAP (USD)' : 'MAP (CAD)',
+    promoAware: true,
+  }])),
 };
 export const ALIGN_TARGET_KEYS = Object.keys(ALIGN_TARGETS);
 
@@ -131,18 +147,20 @@ function classifySnapshot(snapshot, outOfScope = null) {
     total += 1;
     // Snapshots older than the expected-price rollout can't be classified.
     if (!('expected' in r)) { legacy = true; continue; }
+    // A price read from the store's page carries where and when it was read.
+    const page = r.url ? { url: r.url, read_at: r.read_at ?? null, unconfirmed: r.sku_check !== 'match', in_stock: r.in_stock ?? null, page_note: r.page_note ?? null } : {};
 
     if (r.expected == null) {
       counts.no_map += 1;
-      problems.push({ sku: r.sku, status: 'no_map', live: r.price ?? null, expected: null, source: null });
+      problems.push({ sku: r.sku, status: 'no_map', live: r.price ?? null, expected: null, source: null, ...page });
     } else if (!r.price_diff) {
       counts[r.expected_source === 'promo' ? 'promo_ok' : 'map_ok'] += 1;
     } else if (r.expected_source === 'promo' && (r.no_promo || eq(r.price, r.map))) {
       counts.promo_missing += 1;
-      problems.push({ sku: r.sku, status: 'promo_missing', live: r.price ?? null, expected: r.expected, source: 'promo', map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null });
+      problems.push({ sku: r.sku, status: 'promo_missing', live: r.price ?? null, expected: r.expected, source: 'promo', map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null, ...page });
     } else {
       counts.misaligned += 1;
-      problems.push({ sku: r.sku, status: 'misaligned', live: r.price, expected: r.expected, source: r.expected_source, map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null });
+      problems.push({ sku: r.sku, status: 'misaligned', live: r.price, expected: r.expected, source: r.expected_source, map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null, ...page });
     }
   }
 
@@ -208,9 +226,119 @@ async function loadOfferAlignment(cfg) {
   return classifySnapshot({ run_at: snapshot.run_at, results });
 }
 
+// Every store link's last reading, read ONCE for all the page targets of a
+// view and kept 5 minutes (a reading changes every few hours at most; the
+// database is small — a Dashboard visit must not fire one read per store):
+// the view where_to_buy_readings gives one row per store and product, the
+// links already read and the broken ones (not on the store). The pages past
+// the first 1,000 rows are read at the same time.
+const PAGE_RETAILERS = PAGE_STORES.map((s) => s.key);
+const READINGS_TTL_MS = 5 * 60 * 1000;
+let readings = null; // { at, promise }
+const dropPageReadings = () => { readings = null; };
+function pageReadings() {
+  if (readings && Date.now() - readings.at < READINGS_TTL_MS) return readings.promise;
+  const query = () => supabase
+    .from('where_to_buy_readings')
+    .select('sku, retailer, url, verdict, sku_check, page_model, page_note, price, currency, in_stock, read_at', { count: 'exact' })
+    .in('retailer', PAGE_RETAILERS)
+    .order('retailer')
+    .order('sku');
+  const promise = (async () => {
+    const first = await query().range(0, 999);
+    if (first.error) throw first.error;
+    const rest = [];
+    for (let from = 1000; from < (first.count ?? 0); from += 1000) rest.push(query().range(from, from + 999));
+    const pages = await Promise.all(rest);
+    for (const p of pages) if (p.error) throw p.error;
+    return [first, ...pages].flatMap((p) => p.data ?? []);
+  })();
+  readings = { at: Date.now(), promise };
+  promise.catch(() => { if (readings?.promise === promise) readings = null; });
+  return promise;
+}
+
+// Every product's category, shared (Home Depot Canada's NLP rule).
+function productCategories() {
+  return sharedLoad('products:category', async () => {
+    const { data, error } = await supabase.from('products').select('sku, category').range(0, 4999);
+    if (error) throw error;
+    return new Map((data ?? []).map((p) => [p.sku, p.category]));
+  });
+}
+
+// The Eastern-time day a page was read ('YYYY-MM-DD').
+const etDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Toronto' });
+
+/**
+ * A store read from its own product pages: the last price the Where to Buy
+ * check read on each product's link (both Stylish sites carry the same
+ * link — the newest reading counts). Left out of the comparison: a broken
+ * link (the product is not on the store), a page on another product or
+ * option — or naming a model that is not this SKU —, a page read before the
+ * product's expected price last changed (a promotion started or ended since:
+ * it is read again within 3 days), a page that showed no price, and a price
+ * in the other market's currency. A page that names no model at all is
+ * compared but marked unconfirmed. Home Depot Canada keeps a kitchen sink at
+ * MAP when its promo is under the 5% NLP minimum (the PIM's NLP workbook
+ * leaves it out).
+ */
+async function loadPageAlignment(cfg) {
+  const rows = (await pageReadings()).filter((r) => r.retailer === cfg.retailer);
+  if (!rows.some((r) => r.read_at)) return null;
+  const [{ baseBySku, promoBySku }, changedOn, categories] = await Promise.all([
+    loadExpectedPrices(cfg),
+    loadPriceChangeDays(cfg),
+    cfg.nlpMinimum ? productCategories() : null,
+  ]);
+  const currency = cfg.market === 'us' ? 'USD' : 'CAD';
+  const bySku = new Map();
+  for (const r of rows) {
+    const prev = bySku.get(r.sku);
+    if (!prev || (r.read_at ?? '') > (prev.read_at ?? '')) bySku.set(r.sku, r);
+  }
+  const results = [];
+  const left = { noPrice: 0, soldOut: 0, otherProduct: 0, otherCurrency: 0, readBeforeChange: 0 };
+  let readFrom = null;
+  let readTo = null;
+  for (const [sku, r] of bySku) {
+    if (!baseBySku.has(sku)) continue; // not a PIM product
+    if (r.verdict === 'broken' && r.sku_check !== 'other') { results.push({ sku, state: 'missing' }); continue; }
+    if (r.sku_check === 'other' || r.sku_check === 'variant' || (r.sku_check === 'unknown' && r.page_model)) { left.otherProduct += 1; continue; }
+    if (r.price == null || !r.read_at) { left[r.in_stock === false ? 'soldOut' : 'noPrice'] += 1; continue; }
+    if (r.currency && r.currency !== currency) { left.otherCurrency += 1; continue; }
+    if (changedOn.has(sku) && etDay(r.read_at) < changedOn.get(sku)) { left.readBeforeChange += 1; continue; }
+    if (!readFrom || r.read_at < readFrom) readFrom = r.read_at;
+    if (!readTo || r.read_at > readTo) readTo = r.read_at;
+    const base = baseBySku.get(sku) ?? null;
+    let promo = promoBySku.get(sku);
+    if (promo && categories && base != null && NLP_CATEGORIES.has(categories.get(sku)) && nlpDiscount(base, promo.price) < NLP_MIN_DISCOUNT) promo = undefined;
+    const expected = promo?.price ?? base;
+    results.push({
+      sku,
+      state: 'live',
+      price: r.price,
+      expected: expected ?? null,
+      expected_source: promo != null ? 'promo' : 'map',
+      map: base,
+      promo_period: promo?.period ?? null,
+      promo_kind: promo?.kind ?? null,
+      promo_window: promo ? { start: promo.windowStart, end: promo.windowEnd } : null,
+      price_diff: expected != null && Math.abs(r.price - expected) > 0.01,
+      url: r.url,
+      read_at: r.read_at,
+      sku_check: r.sku_check,
+      in_stock: r.in_stock,
+      page_note: r.page_note,
+    });
+  }
+  return { ...classifySnapshot({ run_at: readTo, results }), readFrom, readTo, ...left };
+}
+
 /** Latest saved report for a target (cron or manual) — instant, no live pull. */
 export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
   const cfg = ALIGN_TARGETS[target];
+  if (cfg.kind === 'page') return loadPageAlignment(cfg);
   if (cfg.kind === 'bestbuy' || cfg.kind === 'walmart') return loadOfferAlignment(cfg);
   const data = await latestChannelSnapshot(cfg.channel);
   if (!data?.length) return null;
@@ -247,9 +375,17 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
   return classifySnapshot({ run_at: data[0].run_at, results }, outOfScope);
 }
 
-/** Fresh live analysis — pulls the channel now and PERSISTS the snapshot. */
+/**
+ * Fresh live analysis — pulls the channel now and PERSISTS the snapshot. A
+ * store read from its pages is not pulled (each page read costs a paid
+ * unlocker request): its readings are read again as they are.
+ */
 export async function runPriceAlignment(target = DEFAULT_WIX_SITE) {
   const cfg = ALIGN_TARGETS[target];
+  if (cfg.kind === 'page') {
+    dropPageReadings();
+    return loadLatestAlignment(target);
+  }
   if (cfg.kind === 'bestbuy') await refreshBestBuyOffers();
   else if (cfg.kind === 'walmart') await refreshWalmartItems(cfg.market);
   else await refreshWixCatalog(target);

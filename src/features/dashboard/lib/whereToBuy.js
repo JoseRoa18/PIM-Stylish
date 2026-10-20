@@ -35,6 +35,42 @@ export const WTB_VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperap
 
 export const isProblem = (verdict) => Boolean(WTB_VERDICTS[verdict]?.problem);
 
+// The check also reads the page's product (user, 2026-10-20: "que apunte al
+// producto correcto por SKU"): a link whose page shows another product is a
+// problem of its own, "Wrong product". Another PIM product: a second check two
+// days later makes it Broken ("Opens another product") and it leaves the
+// websites. Another option of the same product (another finish or size, or
+// the listing's default option): it stays on the websites and only the link
+// needs fixing.
+export const WRONG_PRODUCT = {
+  label: 'Wrong product', tone: 'warning', problem: true,
+  hint: 'The link opens another product. If the next check (two days later) finds the same, the link is Broken and leaves the websites — fix it in the product\'s Where to Buy tab.',
+};
+export const WRONG_OPTION = {
+  label: 'Wrong product', tone: 'warning', problem: true,
+  hint: 'The link opens another option of the same product (another finish or size). It stays on the websites — edit it so it opens this product\'s option.',
+};
+export const isWrongProduct = (row) => row?.sku_check === 'other' || row?.sku_check === 'variant';
+// What a link's status chip says: its verdict, or "Wrong product" while the
+// link is not Broken (OK, or a new link waiting for its second check).
+export const linkStatus = (row) => ((row.verdict === 'ok' || row.verdict === 'pending') && isWrongProduct(row)
+  ? (row.sku_check === 'variant' ? WRONG_OPTION : WRONG_PRODUCT)
+  : WTB_VERDICTS[row.verdict] ?? { label: row.verdict, tone: 'muted' });
+export const isLinkProblem = (row) => isProblem(row.verdict) || isWrongProduct(row);
+
+// "S-611W · C$749.00" — what the page showed the last time it was read.
+export function pageReading(row) {
+  if (!row?.read_at) return null;
+  const symbol = row.currency === 'USD' ? '$' : row.currency === 'CAD' ? 'C$' : '';
+  const price = row.price != null ? `${symbol}${Number(row.price).toFixed(2)}` : null;
+  const was = row.was_price != null ? `was ${symbol}${Number(row.was_price).toFixed(2)}` : null;
+  return {
+    model: row.page_model ?? null,
+    price,
+    text: [row.page_model, price, was, row.in_stock === false ? 'sold out' : null, row.page_note].filter(Boolean).join(' · ') || 'No model or price on the page',
+  };
+}
+
 /** Missing links by portal: [{ retailer, label, skus[] }], most missing first. */
 export function linksToAdd(rows) {
   const by = new Map();
@@ -55,7 +91,7 @@ export function groupWhereToBuy(rows) {
     if (!bySku.has(r.sku)) bySku.set(r.sku, { sku: r.sku, wix_product_id: r.wix_product_id, links: [], docs: [], problems: 0, missing: [], dropbox: 0 });
     const g = bySku.get(r.sku);
     (r.section === 'documents' ? g.docs : g.links).push(r);
-    if (isProblem(r.verdict)) g.problems += 1;
+    if (isLinkProblem(r)) g.problems += 1;
     if (r.verdict === 'missing') g.missing.push(r.retailer);
     if (r.retailer === 'dropbox') g.dropbox += 1;
   }
@@ -63,13 +99,19 @@ export function groupWhereToBuy(rows) {
 }
 
 export function summarizeWhereToBuy(rows) {
-  const s = { products: new Set(), links: 0, docs: 0, byVerdict: {}, problems: 0, dropbox: 0, pending: 0, lastScan: null, lastCheck: null };
+  const s = { products: new Set(), links: 0, docs: 0, byVerdict: {}, problems: 0, wrongProduct: 0, dropbox: 0, pending: 0, lastScan: null, lastCheck: null };
   for (const r of rows) {
     s.products.add(r.sku);
     if (r.section === 'documents') s.docs += 1; else if (r.url) s.links += 1;
-    s.byVerdict[r.verdict] = (s.byVerdict[r.verdict] ?? 0) + 1;
-    if (isProblem(r.verdict)) s.problems += 1;
-    if (r.verdict === 'pending') s.pending += 1;
+    // Each link counts once, under what its chip says ("Wrong product" or its
+    // verdict — a Broken one that opens another product counts as Broken).
+    const status = linkStatus(r);
+    if (r.url && (status === WRONG_PRODUCT || status === WRONG_OPTION)) s.wrongProduct += 1;
+    else {
+      s.byVerdict[r.verdict] = (s.byVerdict[r.verdict] ?? 0) + 1;
+      if (r.verdict === 'pending') s.pending += 1;
+    }
+    if (isLinkProblem(r)) s.problems += 1;
     if (r.retailer === 'dropbox') s.dropbox += 1;
     if (!s.lastScan || r.scanned_at > s.lastScan) s.lastScan = r.scanned_at;
     if (r.checked_at && (!s.lastCheck || r.checked_at > s.lastCheck)) s.lastCheck = r.checked_at;

@@ -8,13 +8,30 @@ import {
 
 export { summarizeForDashboard };
 
+// One computation is shared for half a minute by every caller (Listing
+// Health, the Dashboard's stale re-score, Analytics, React's double effect in
+// development): each run reads the nine channel snapshots in full plus the
+// catalog, and on 2026-10-20 twenty-five runs in four minutes left the
+// database (then the smallest Supabase size) without memory — it froze until
+// restarted. Short, so a fix made on the product page shows on return.
+const SHARE_MS = 30 * 1000;
+let shared = null; // { at, promise }
+
 /**
  * Browser-side listing-health computation: fetch the catalog (with media)
  * and the latest channel snapshots, then run the shared scoring pipeline.
  * The scheduled `health-refresh` edge function runs the same pipeline
  * server-side twice a day.
  */
-export async function computeListingHealth() {
+export function computeListingHealth() {
+  if (shared && Date.now() - shared.at < SHARE_MS) return shared.promise;
+  const promise = computeListingHealthNow();
+  shared = { at: Date.now(), promise };
+  promise.catch(() => { if (shared?.promise === promise) shared = null; });
+  return promise;
+}
+
+async function computeListingHealthNow() {
   // The catalog load is shared with the PIM completeness panel (both run on
   // the Listing Health page), and the ten snapshots load at the same time.
   const catalog = loadCatalogWithMedia();

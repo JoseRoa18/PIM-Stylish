@@ -88,6 +88,7 @@ import { promotionMembersFor, promotionLevel, levelLabel, PROMOTION_KINDS } from
 import { getStockFor } from '@/features/pricing/api/inventory';
 import { channelCategory } from '@/features/products/lib/categories';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
+import { NLP_MIN_DISCOUNT, nlpDiscount, CATEGORY_FAMILY } from '@/features/pricing/lib/homeDepotCaNlp';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 const ALIAS_MARKETPLACE = 'Home Depot CA';
@@ -153,9 +154,6 @@ function columnStyles(xml) {
 
 const CATEGORY_LABELS = { kitchen_sink: 'Kitchen Sinks', bathroom_sink: 'Bath Sinks', kitchen_faucet: 'Kitchen Faucets', bathroom_faucet: 'Bath Faucets', accessory: 'Accessories', bar_prep_sink: 'Bar Sinks', laundry_sink: 'Laundry Sinks', outdoor_sink: 'Outdoor Sinks', colander_drying_rack: 'Colanders' };
 
-// Home Depot Canada files sinks by family: its "Kitchen Sinks" sheet also
-// takes the bar / prep, laundry and outdoor sinks (user rule 2026-09-28).
-const CATEGORY_FAMILY = { kitchen_sink: ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink'] };
 
 // Home Depot Canada's fiscal quarters start in February.
 function fiscalQuarter(day) {
@@ -190,12 +188,11 @@ function nlpLaunchWeek(day) {
 
 // Home Depot's NLP minimum: "Minimum discount for NLPs is 5%" (the NLP
 // workbook's own note). Below it a product stays out of that sheet (user,
-// 2026-10-16) — measured as its J formula does: ROUNDDOWN((WAS - NLP) / WAS, 4).
-const NLP_MIN_DISCOUNT = 0.05;
+// 2026-10-16) — measured as its J formula does: ROUNDDOWN((WAS - NLP) / WAS, 4)
+// (homeDepotCaNlp.js, shared with Price Alignment).
 // The forecast Home Depot gets when the stock gives 0 (user, 2026-10-16: "si
 // hay 0, que por default le coloque 5").
 const FORECAST_FLOOR = 5;
-const nlpDiscount = (was, nlp) => Math.floor(((was - nlp) / was) * 10000 + 1e-9) / 10000;
 
 const monthName = (day) => new Date(`${day}T12:00:00`).toLocaleDateString('en-CA', { month: 'long' });
 

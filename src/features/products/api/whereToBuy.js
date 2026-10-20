@@ -8,7 +8,8 @@ import { WIX_SITES, wixSiteSells } from '@/features/syndication/lib/wixSites';
 import { WTB_SITES, cleanWtbUrl, wtbUrlProblem } from '../lib/whereToBuy';
 
 /**
- * { links: { [retailer]: url }, checks: { [retailer]: { verdict, note, checked_at, checked_via } },
+ * { links: { [retailer]: url }, checks: { [retailer]: { verdict, note, checked_at, checked_via,
+ *   page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at } },
  *   sites: [{ key, label, linked }] } — `sites` are the Stylish sites the product's brand
  *   is sold on; `linked` = the PIM knows its Wix product there (it can be published).
  */
@@ -16,7 +17,7 @@ export async function loadProductWhereToBuy(product) {
   const sku = product.sku;
   const [{ data: rows, error }, { data: checks, error: e2 }, { data: wix, error: e3 }] = await Promise.all([
     supabase.from('product_where_to_buy').select('retailer, url, source, updated_at').eq('sku', sku),
-    supabase.from('where_to_buy_links').select('site, retailer, url, verdict, note, checked_at, checked_via').eq('sku', sku).not('url', 'is', null),
+    supabase.from('where_to_buy_links').select('site, retailer, url, verdict, note, checked_at, checked_via, page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at').eq('sku', sku).not('url', 'is', null),
     supabase.from('wix_links').select('site').eq('sku', sku).in('site', WTB_SITES.map((s) => s.key)),
   ]);
   if (error) throw error;

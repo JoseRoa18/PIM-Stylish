@@ -62,7 +62,13 @@ const bySku = new Map();
 for (const l of links) { if (!bySku.has(l.sku)) bySku.set(l.sku, []); bySku.get(l.sku).push({ retailer: l.retailer, url: l.url }); }
 const products = new Map((await getAll('products?select=sku,brand')).map((p) => [p.sku, p]));
 const wix = new Set((await getAll('wix_links?select=site,sku&site=in.(stylish_ca,stylish_us)')).map((w) => `${w.site}|${w.sku}`));
-const broken = new Set((await getAll('where_to_buy_links?select=url&verdict=eq.broken&url=not.is.null')).map((r) => r.url));
+// Broken addresses per product: one address can be Broken for one SKU ("Opens
+// another product") and right for another.
+const broken = new Map();
+for (const r of await getAll('where_to_buy_links?select=sku,url&verdict=eq.broken&url=not.is.null')) {
+  if (!broken.has(r.sku)) broken.set(r.sku, new Set());
+  broken.get(r.sku).add(r.url);
+}
 
 const jobs = [];
 for (const [sku, list] of bySku) {
@@ -81,7 +87,7 @@ for (const [i, job] of jobs.entries()) {
     const read = await call('wix-read-product', { sku: job.sku, site: job.site });
     if (read?.exists === false || !read?.snapshot) { t.notFound += 1; continue; }
     // Every link but the broken ones (user, 2026-10-20), as the audit publishes.
-    const next = withWhereToBuySection(read.snapshot.additional_info_sections ?? [], linksToShow(job.links, broken), job.site, { owned: job.links.length > 0 });
+    const next = withWhereToBuySection(read.snapshot.additional_info_sections ?? [], linksToShow(job.links, broken.get(job.sku) ?? new Set()), job.site, { owned: job.links.length > 0 });
     if (!next) { t.upToDate += 1; continue; }
     if (APPLY) await call('wix-push-product', { sku: job.sku, site: job.site, fields: { additional_info_sections: next }, only: ['additionalInfoSections'] });
     t.published += 1;

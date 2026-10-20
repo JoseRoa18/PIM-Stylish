@@ -20,15 +20,26 @@ export default function PriceAlignmentCard() {
     let active = true;
     import('@/features/pricing/api/priceAlignment')
       .then(async ({ ALIGN_TARGETS, ALIGN_TARGET_KEYS, loadLatestAlignment }) => {
-        const reports = await Promise.all(ALIGN_TARGET_KEYS.map((k) => loadLatestAlignment(k).catch(() => null)));
-        if (active) setState({ targets: ALIGN_TARGETS, keys: ALIGN_TARGET_KEYS, reports: Object.fromEntries(ALIGN_TARGET_KEYS.map((k, i) => [k, reports[i]])) });
+        // The channels' own reports show first; the stores read from their
+        // pages (one larger read) join when they arrive.
+        const load = async (keys) => Object.fromEntries(await Promise.all(keys.map(async (k) => [k, await loadLatestAlignment(k).catch(() => null)])));
+        const pageKeys = ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page');
+        const apiReports = await load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind !== 'page'));
+        if (!active) return;
+        setState({ targets: ALIGN_TARGETS, keys: ALIGN_TARGET_KEYS, reports: apiReports });
+        const pageReports = await load(pageKeys);
+        if (active) setState((s) => ({ ...s, reports: { ...s.reports, ...pageReports } }));
       })
       .catch((err) => { if (active) setError(err.message); });
     return () => { active = false; };
   }, []);
 
-  const rows = state ? state.keys.map((key) => ({ key, target: state.targets[key], report: state.reports[key], ...alignmentSummary(state.reports[key]) })) : [];
-  const withReport = rows.filter((r) => r.counts);
+  // The stores read from their own pages (Where to Buy check) show once they
+  // have prices read; the API channels always show.
+  const allRows = state ? state.keys.map((key) => ({ key, target: state.targets[key], report: state.reports[key], ...alignmentSummary(state.reports[key]) })) : [];
+  const rows = allRows.filter((r) => r.target.kind !== 'page');
+  const pageRows = allRows.filter((r) => r.target.kind === 'page' && r.counts && r.total > 0);
+  const withReport = [...rows, ...pageRows].filter((r) => r.counts);
   const aligned = withReport.reduce((n, r) => n + r.aligned, 0);
   const comparable = withReport.reduce((n, r) => n + r.comparable, 0);
   const toFix = withReport.reduce((n, r) => n + r.parts.filter((p) => p.key === 'promo_missing' || p.key === 'misaligned').reduce((a, p) => a + p.n, 0), 0);
@@ -91,45 +102,50 @@ export default function PriceAlignmentCard() {
             ))}
           </div>
 
-          <ul className="px-4 pb-4 flex-1 space-y-0.5">
-            {rows.map(({ key, target, report, counts, parts, total, comparable: rowComparable, aligned: rowAligned, pct }) => {
-              const breakdown = counts
-                ? parts.filter((p) => p.n > 0).map((p) => `${p.label}: ${p.n}`).join(' · ')
-                : 'no saved report yet';
-              const updated = report?.ranAt ? `updated ${formatTimeAgo(report.ranAt)}` : null;
-              return (
-                <li key={key}>
-                  <Link
-                    to="/pricing"
-                    state={{ pricingTab: 'alignment', alignSite: key }}
-                    title={`${target.label} — ${breakdown}${updated ? ` · ${updated}` : ''}`}
-                    className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-container-low transition-colors"
-                  >
-                    <span className="w-32 flex-shrink-0 truncate text-label-lg text-on-surface">
-                      {target.short}
-                      <span className="block text-label-md text-on-surface-variant font-normal">{target.priceShort}</span>
-                    </span>
-                    <span className="flex-1 flex h-2.5 rounded-full overflow-hidden bg-surface-container gap-[2px]" aria-hidden="true">
-                      {total > 0
-                        ? parts.filter((p) => p.n > 0).map((p) => (
-                            <span key={p.key} className={`${p.cls} h-full`} style={{ width: `${(p.n / total) * 100}%` }} />
-                          ))
-                        : <span className="h-full w-full bg-surface-container" />}
-                    </span>
-                    <span className="sr-only">{`${pct != null ? `${pct}% aligned. ` : ''}${breakdown}${updated ? `, ${updated}` : ''}`}</span>
-                    <span className="w-16 flex-shrink-0 text-right tabular-nums text-label-lg text-on-surface" aria-hidden="true">
-                      {pct != null ? `${pct}%` : '—'}
-                      <span className="block text-label-md text-on-surface-variant font-normal">
-                        {counts ? `${rowAligned}/${rowComparable}` : 'no report'}
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          {[{ key: 'api', heading: null, list: rows }, { key: 'page', heading: 'Read from the store pages', list: pageRows }].filter((g) => g.list.length).map((g) => (
+            <div key={g.key} className={g.heading ? 'border-t border-outline-variant/60 pt-2' : ''}>
+              {g.heading && <p className="px-6 pb-1 text-label-md text-on-surface-variant">{g.heading}</p>}
+              <ul className="px-4 pb-4 flex-1 space-y-0.5" aria-label={g.heading ?? 'Channels'}>
+                {g.list.map(({ key, target, report, counts, parts, total, comparable: rowComparable, aligned: rowAligned, pct }) => {
+                  const breakdown = counts
+                    ? parts.filter((p) => p.n > 0).map((p) => `${p.label}: ${p.n}`).join(' · ')
+                    : 'no saved report yet';
+                  const updated = report?.ranAt ? `${target.kind === 'page' ? 'read' : 'updated'} ${formatTimeAgo(report.ranAt)}` : null;
+                  return (
+                    <li key={key}>
+                      <Link
+                        to="/pricing"
+                        state={{ pricingTab: 'alignment', alignSite: key }}
+                        title={`${target.label} — ${breakdown}${updated ? ` · ${updated}` : ''}`}
+                        className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-container-low transition-colors"
+                      >
+                        <span className="w-32 flex-shrink-0 truncate text-label-lg text-on-surface">
+                          {target.short}
+                          <span className="block text-label-md text-on-surface-variant font-normal">{target.priceShort}</span>
+                        </span>
+                        <span className="flex-1 flex h-2.5 rounded-full overflow-hidden bg-surface-container gap-[2px]" aria-hidden="true">
+                          {total > 0
+                            ? parts.filter((p) => p.n > 0).map((p) => (
+                                <span key={p.key} className={`${p.cls} h-full`} style={{ width: `${(p.n / total) * 100}%` }} />
+                              ))
+                            : <span className="h-full w-full bg-surface-container" />}
+                        </span>
+                        <span className="sr-only">{`${pct != null ? `${pct}% aligned. ` : ''}${breakdown}${updated ? `, ${updated}` : ''}`}</span>
+                        <span className="w-16 flex-shrink-0 text-right tabular-nums text-label-lg text-on-surface" aria-hidden="true">
+                          {pct != null ? `${pct}%` : '—'}
+                          <span className="block text-label-md text-on-surface-variant font-normal">
+                            {counts ? `${rowAligned}/${rowComparable}` : 'no report'}
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
 
-          <p className="px-6 py-3 border-t border-outline-variant text-label-md text-on-surface-variant">
+          <p className="px-6 py-3 border-t border-outline-variant text-label-md text-on-surface-variant mt-auto">
             From each channel's last saved report — nothing is re-checked here.
           </p>
         </>

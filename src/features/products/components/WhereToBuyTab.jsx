@@ -3,19 +3,29 @@ import { AlertCircle, ExternalLink, Loader2, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { loadProductWhereToBuy, saveProductWhereToBuy, publishWhereToBuy } from '../api/whereToBuy';
 import { WTB_MARKETS, WTB_RETAILERS, wtbUrlProblem, cleanWtbUrl } from '../lib/whereToBuy';
+import { PAGE_STORE_KEYS, readingCounts } from '@/features/pricing/lib/pageStores';
 
 // Product page → Where to Buy. The store links of the Stylish websites, owned
 // by the PIM (user, 2026-10-19): ONE list for the product, and saving writes
 // the WHERE TO BUY section of both Stylish pages (Canada and USA) from it.
-// Each row shows what the Listing Health check last found on that address.
+// Each row shows what the Listing Health check last found on that address —
+// and what the page showed: its product's model (a link that opens another
+// product says so) and its price (2026-10-20).
 
 const inputCls = 'w-full px-3 py-1.5 rounded-lg border bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
 const STATUS = {
   ok: { label: 'OK', cls: 'bg-success-container text-on-success-container' },
   broken: { label: 'Broken', cls: 'bg-error-container text-on-error-container' },
+  wrong: { label: 'Wrong product', cls: 'bg-warning-container text-on-warning-container' },
   pending: { label: 'Checking', cls: 'bg-surface-container-high text-on-surface-variant' },
   manual: { label: 'Check by hand', cls: 'bg-surface-container-high text-on-surface-variant' },
+};
+const isWrong = (check) => check?.sku_check === 'other' || check?.sku_check === 'variant';
+const priceText = (check) => {
+  if (check?.price == null) return '';
+  const symbol = check.currency === 'USD' ? '$' : check.currency === 'CAD' ? 'C$' : '';
+  return `${symbol}${Number(check.price).toFixed(2)}`;
 };
 const PUBLISH_TEXT = {
   published: 'updated',
@@ -165,14 +175,24 @@ export default function WhereToBuyTab({ product }) {
                     {stores.map((r) => {
                       const saved = data.links[r.key] ?? '';
                       const check = data.checks[r.key];
-                      const status = saved ? STATUS[check?.verdict] ?? STATUS.pending : null;
+                      const wrong = isWrong(check) && check.verdict !== 'broken';
+                      const status = saved ? (wrong ? STATUS.wrong : STATUS[check?.verdict] ?? STATUS.pending) : null;
                       const problem = problems[r.key];
                       const id = `wtb-${r.key}`;
-                      // The reason and who checked it sit behind the status
-                      // (hover / screen reader), so every row keeps one line.
+                      // The price shows only when the page is this product's
+                      // (another product's price would mislead).
+                      const price = saved && check?.verdict !== 'broken' && readingCounts(check) ? priceText(check) : '';
+                      // The reason, who checked it and what the page showed sit
+                      // behind the status (hover / screen reader), so every row
+                      // keeps one line.
                       const detail = saved ? [
                         check?.checked_at && (check.verdict === 'ok' || check.verdict === 'broken') ? `Checked by ${VIA[check.checked_via] ?? 'the PIM'} · ${fmt(check.checked_at)}` : null,
                         check?.verdict !== 'ok' ? check?.note : null,
+                        wrong && check.sku_check === 'variant' ? `The page shows ${check.page_model ?? 'another option'}, another option of the same product. The link stays on the websites — edit it so it opens ${product.sku}.` : null,
+                        wrong && check.sku_check === 'other' ? `The page shows ${check.page_model ?? 'another product'}, not ${product.sku}. If the next check (two days later) finds the same, the link is Broken and leaves the websites.` : null,
+                        check?.read_at && !isWrong(check) && check.page_model && check.sku_check === 'unknown' ? `The page shows model ${check.page_model} (not a PIM SKU) — check that it is ${product.sku}.` : null,
+                        check?.page_note ? `On the page: ${check.page_note}.` : null,
+                        price ? `Price on the page: ${price}${check.was_price != null ? ` (was ${check.currency === 'USD' ? '$' : 'C$'}${Number(check.was_price).toFixed(2)})` : ''}${check.in_stock === false ? ', sold out' : ''} · read ${fmt(check.read_at)}${PAGE_STORE_KEYS.has(r.key) ? ' — Pricing → Price Alignment compares it with the MAP' : ''}` : null,
                         check?.verdict === 'broken' ? 'Not shown on the Stylish websites until it works again (fix the link or wait for the next check).' : null,
                       ].filter(Boolean).join('\n') : '';
                       return (
@@ -202,8 +222,11 @@ export default function WhereToBuyTab({ product }) {
                             {problem ? (
                               <span className="inline-block px-1.5 py-0.5 rounded text-label-md font-semibold bg-error-container text-on-error-container" title={problem}>Wrong store</span>
                             ) : status ? (
-                              <span className={`inline-block px-1.5 py-0.5 rounded text-label-md font-semibold cursor-default ${status.cls}`} title={detail || undefined}>
-                                {status.label}
+                              <span className="flex flex-col items-start cursor-default" title={detail || undefined}>
+                                <span className={`inline-block px-1.5 py-0.5 rounded text-label-md font-semibold whitespace-nowrap ${status.cls}`}>{status.label}</span>
+                                {/* The price the page showed, under the status (its date and
+                                    was-price are in the status' detail). */}
+                                {price && <span className={`mt-0.5 text-label-md tabular-nums ${check.in_stock === false ? 'text-on-surface-variant line-through' : 'text-on-surface-variant'}`} aria-hidden="true">{price}</span>}
                                 {detail && <span className="sr-only">. {detail}</span>}
                               </span>
                             ) : null}
@@ -227,7 +250,7 @@ export default function WhereToBuyTab({ product }) {
       )}
       {data && (
         <p className="px-6 sm:px-8 pb-5 -mt-2 text-label-md text-on-surface-variant">
-          Point at a status to see when and how the link was checked, and why it is not OK. Only the stores with a link show on the websites.
+          Point at a status to see when and how the link was checked, why it is not OK and which product the page shows; the price under it is the one the page showed at that check. Only the stores with a working link show on the websites.
         </p>
       )}
       {data?.sites.some((s) => !s.linked) && (

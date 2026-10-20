@@ -6,19 +6,23 @@ import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy, whereToBuyStatus, repu
 import {
   WTB_SITES,
   WTB_RETAILERS,
-  WTB_VERDICTS,
   WTB_VIA,
   groupWhereToBuy,
   linksToAdd,
   summarizeWhereToBuy,
-  isProblem,
+  linkStatus,
+  isLinkProblem,
+  isWrongProduct,
+  pageReading,
 } from '@/features/dashboard/lib/whereToBuy';
 
 // Listing Health → Stylish → Where to Buy. One row per product of the site,
 // one cell per retailer linked from its WHERE TO BUY section; the cell colour
-// is the link's verdict (OK / Broken — user, 2026-10-19). Expanding a row
-// lists every link with the reason and who checked it. The portals a page
-// does not link are a KPI of their own ("Links to add"), not a problem.
+// is the link's verdict (OK / Broken — user, 2026-10-19), or "Wrong product"
+// when its page shows another product (2026-10-20). Expanding a row lists
+// every link with the reason, who checked it and what the page showed (its
+// model and price). The portals a page does not link are a KPI of their own
+// ("Links to add"), not a problem.
 
 const TONE = {
   ok: 'bg-success',
@@ -43,8 +47,8 @@ const fmtWhen = (iso) => {
 
 // `detail` (the reason, who checked it and when) shows on hover and is read
 // by screen readers, so each link keeps one line.
-function VerdictChip({ verdict, detail }) {
-  const v = WTB_VERDICTS[verdict] ?? { label: verdict, tone: 'muted' };
+function StatusChip({ link, detail }) {
+  const v = linkStatus(link);
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-label-md font-semibold whitespace-nowrap cursor-default ${CHIP_TONE[v.tone]}`} title={detail || v.hint || ''}>
       {v.label}
@@ -58,10 +62,13 @@ const byStoreOrder = (a, b) => (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDE
 
 function Cell({ links }) {
   if (!links?.length) return <span className="text-on-surface-variant/50">·</span>;
-  // The worst verdict of the cell drives the colour (a retailer may appear twice).
-  const worst = links.reduce((acc, l) => (isProblem(l.verdict) ? l : acc), links[0]);
-  const v = WTB_VERDICTS[worst.verdict] ?? { tone: 'muted', label: worst.verdict };
-  const title = links.map((l) => `${WTB_VERDICTS[l.verdict]?.label ?? l.verdict}${l.note ? ` · ${l.note}` : ''}${l.url ? `\n${l.url}` : ''}`).join('\n');
+  // The worst link of the cell drives the colour (a retailer may appear twice).
+  const worst = links.reduce((acc, l) => (isLinkProblem(l) ? l : acc), links[0]);
+  const v = linkStatus(worst);
+  const title = links.map((l) => {
+    const read = pageReading(l);
+    return `${linkStatus(l).label}${l.note ? ` · ${l.note}` : ''}${read ? `\nOn the page: ${read.text}` : ''}${l.url ? `\n${l.url}` : ''}`;
+  }).join('\n');
   const dot = <span className={`inline-block w-2.5 h-2.5 rounded-full ${worst.verdict === 'missing' ? 'ring-2 ring-inset ring-warning bg-transparent' : TONE[v.tone]}`} />;
   return worst.url ? (
     <a href={worst.url} target="_blank" rel="noreferrer" title={title} className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-surface-container-high" onClick={(e) => e.stopPropagation()}>
@@ -115,7 +122,7 @@ export default function WhereToBuyPanel() {
     let list = groups;
     if (toAdd) list = list.filter((g) => g.missing.includes(toAdd));
     else if (onlyProblems) list = list.filter((g) => g.problems > 0);
-    if (retailerFilter !== 'all') list = list.filter((g) => g.links.some((l) => l.retailer === retailerFilter && (!onlyProblems || isProblem(l.verdict))));
+    if (retailerFilter !== 'all') list = list.filter((g) => g.links.some((l) => l.retailer === retailerFilter && (!onlyProblems || isLinkProblem(l))));
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((g) => g.sku.toLowerCase().includes(q));
     return list;
@@ -221,6 +228,7 @@ export default function WhereToBuyPanel() {
           {stat('Links', summary.links)}
           {stat('OK', counts.ok, 'text-success')}
           {stat('Broken', counts.broken, counts.broken ? 'text-error' : undefined)}
+          {stat('Wrong product', summary.wrongProduct, summary.wrongProduct ? 'text-warning' : undefined)}
           {stat('Not checked yet', counts.pending)}
           {stat('Check by hand', counts.manual)}
         </div>
@@ -321,7 +329,7 @@ export default function WhereToBuyPanel() {
             ) : (
               <label className="inline-flex items-center gap-2 text-body-sm text-on-surface cursor-pointer">
                 <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} className="accent-primary" />
-                Only broken links
+                Only broken or wrong links
               </label>
             )}
             <span className="text-body-sm text-on-surface-variant ml-auto">{filtered.length} of {groups.length} products</span>
@@ -364,22 +372,30 @@ export default function WhereToBuyPanel() {
                       {open && (
                         <tr className="border-t border-outline-variant bg-surface-container-low/60">
                           <td colSpan={columns.length + 3} className="px-4 py-3">
-                            <table className="w-full max-w-5xl table-fixed text-body-sm">
+                            <table className="w-full max-w-6xl table-fixed text-body-sm">
                               <caption className="sr-only">Where to Buy links of {g.sku}</caption>
                               <colgroup>
                                 <col className="w-[8.5rem]" />
                                 <col className="w-[12rem]" />
                                 <col />
-                                <col className="w-[14rem]" />
+                                <col className="w-[13rem]" />
+                                <col className="w-[13rem]" />
                               </colgroup>
                               <tbody className="divide-y divide-outline-variant/50">
                                 {[...g.links].sort(byStoreOrder).map((l) => {
                                   const checked = l.checked_via && (l.verdict === 'ok' || l.verdict === 'broken');
                                   const when = checked ? `${WTB_VIA[l.checked_via] ?? l.checked_via} · ${fmtWhen(l.checked_at)}` : '';
-                                  const detail = [l.verdict !== 'ok' ? l.note : null, when ? `Checked by ${when}` : null].filter(Boolean).join('\n');
+                                  const read = pageReading(l);
+                                  const wrong = isWrongProduct(l);
+                                  const detail = [
+                                    l.verdict !== 'ok' ? l.note : null,
+                                    wrong && l.page_model ? `The page shows ${l.page_model}, not ${g.sku}${l.sku_check === 'variant' ? ' (another option of the same product)' : ''}` : null,
+                                    wrong && l.verdict !== 'broken' ? linkStatus(l).hint : null,
+                                    when ? `Checked by ${when}` : null,
+                                  ].filter(Boolean).join('\n');
                                   return (
                                     <tr key={l.id} className="h-9 align-middle">
-                                      <td className="pr-3"><VerdictChip verdict={l.verdict} detail={detail} /></td>
+                                      <td className="pr-3"><StatusChip link={l} detail={detail} /></td>
                                       <th scope="row" className="pr-3 text-left font-semibold text-on-surface truncate">
                                         {WTB_RETAILERS.find((r) => r.key === l.retailer)?.label ?? l.retailer}
                                       </th>
@@ -392,6 +408,9 @@ export default function WhereToBuyPanel() {
                                         ) : (
                                           <span className="text-on-surface-variant">No link yet</span>
                                         )}
+                                      </td>
+                                      <td className={`pr-3 text-label-md truncate ${wrong ? 'text-warning font-semibold' : 'text-on-surface-variant'}`} title={read ? `On the page (${fmtWhen(l.read_at)}): ${read.text}` : undefined}>
+                                        {read ? read.text : ''}
                                       </td>
                                       <td className="text-label-md text-on-surface-variant truncate" title={detail || undefined}>
                                         {when || (l.verdict === 'pending' ? (l.note ? 'Trying again soon' : 'Waiting for its check') : '')}
@@ -413,7 +432,7 @@ export default function WhereToBuyPanel() {
                 {pageRows.length === 0 && (
                   <tr className="border-t border-outline-variant">
                     <td colSpan={columns.length + 3} className="px-4 py-8 text-center text-on-surface-variant">
-                      {toAdd ? 'No product misses this link.' : onlyProblems ? 'No broken links on this site.' : 'No products match.'}
+                      {toAdd ? 'No product misses this link.' : onlyProblems ? 'No broken or wrong links on this site.' : 'No products match.'}
                     </td>
                   </tr>
                 )}
