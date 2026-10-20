@@ -120,7 +120,6 @@ const ROUTES: Record<string, Method[]> = {
   menards: ["menards"],
   bbb_us: ["scraperapi", "brightdata"],
   overstock_us: ["scraperapi", "brightdata"],
-  overstock_ca: ["scraperapi", "brightdata"],
   ebay: ["scraperapi", "brightdata"],
   amazon_ca: ["direct", "brightdata", "scraperapi"],
   amazon_us: ["direct", "brightdata", "scraperapi"],

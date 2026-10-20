@@ -13,7 +13,7 @@ export const WTB_SITES = [
 // documents and unknown links are not checked, user 2026-10-19).
 const SHORT = {
   sinksdirect_ca: 'SD.ca', wayfair_ca: 'WF.ca', bestbuy_ca: 'BB.ca', homedepot_ca: 'HD.ca', walmart_ca: 'WM.ca', amazon_ca: 'AMZ.ca',
-  rona: 'Rona', lowes_ca: 'LW.ca', bbb_ca: 'BBB.ca', overstock_ca: 'OS.ca', cabinet_depot: 'CabDep', build_with_rise: 'Rise', ebay: 'eBay',
+  rona: 'Rona', lowes_ca: 'LW.ca', cabinet_depot: 'CabDep', build_with_rise: 'Rise', ebay: 'eBay',
   sinksdirect_us: 'SD.us', wayfair_us: 'WF.com', amazon_us: 'AMZ.com', homedepot_us: 'HD.com', lowes_us: 'LW.com', walmart_us: 'WM.com',
   bbb_us: 'BBB.com', overstock_us: 'OS.com', menards: 'Menards', kbauthority: 'KBA', warehouse_usa: 'WH USA', faucetline: 'Fline',
 };

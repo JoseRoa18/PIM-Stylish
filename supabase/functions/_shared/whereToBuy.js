@@ -11,7 +11,9 @@
  * "SinksDirect USA", "KBAuthority.com" / "Kitchen&Bath Authority"…) and each
  * retailer under its own country (Cabinet Depot and Build with Rise are
  * Canadian stores; they sat under "Online in USA"). The order of the list is
- * the order on the page.
+ * the order on the page. BedBathandBeyond.ca and Overstock.ca no longer exist
+ * (user, 2026-10-20): they are not stores of the list, so their links are
+ * neither kept, checked nor published.
  */
 
 export const WTB_RETAILERS = [
@@ -24,8 +26,6 @@ export const WTB_RETAILERS = [
   { key: 'amazon_ca', label: 'Amazon.ca', market: 'ca', host: /(^|\.)amazon\.ca$/ },
   { key: 'rona', label: 'Rona', market: 'ca', host: /(^|\.)rona\.ca$/ },
   { key: 'lowes_ca', label: 'Lowes.ca', market: 'ca', host: /(^|\.)lowes\.ca$/ },
-  { key: 'bbb_ca', label: 'BedBathandBeyond.ca', market: 'ca', host: /(^|\.)bedbathandbeyond\.ca$/ },
-  { key: 'overstock_ca', label: 'Overstock.ca', market: 'ca', host: /(^|\.)overstock\.ca$/ },
   { key: 'cabinet_depot', label: 'Cabinet Depot', market: 'ca', host: /(^|\.)cabinetdepotnewmarket\.com$/ },
   { key: 'build_with_rise', label: 'Build with Rise', market: 'ca', host: /(^|\.)buildwithrise\.com$/ },
   { key: 'ebay', label: 'eBay.ca', market: 'ca', host: /(^|\.)ebay\.(ca|com)$/ },
