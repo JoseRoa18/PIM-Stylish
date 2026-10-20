@@ -46,7 +46,8 @@
 //   broken   there is a link but it does not work: 404 / 410, a "not found"
 //            page, a redirect to a login / home page, or an invalid address.
 //            Weaker evidence — Menards' unlocker giving up, a page that opens
-//            without the product — needs two answers on different days.
+//            without the product — needs repeated answers (SOFT_RULE: two
+//            days; Menards four tries 6 h apart).
 //   missing  the page has no link to a portal that most products of the
 //            site (same market) do link — shown as a KPI of links to add
 //   pending  not verified yet (never checked, or no service answered yet)
@@ -669,6 +670,15 @@ const DUE_COLUMNS = "id,sku,url,host,retailer,verdict,note,fail_count,signal_cou
 
 const at = (ms: number) => new Date(Date.now() + ms).toISOString();
 
+// How many soft signs make a link Broken, and how far apart. Menards needs
+// 4 tries 6 h apart: its unlocker also gives up on some LIVE pages (B-108G
+// opened in the user's browser on 2026-10-20 after a "gave up"), while a dead
+// one fails every time.
+const SOFT_RULE: Record<string, { strikes: number; everyHours: number }> = {
+  menards: { strikes: 4, everyHours: 6 },
+  default: { strikes: 2, everyHours: BROKEN_HOURS },
+};
+
 // What an outcome writes on the row.
 function patchFor(row: DueRow, o: Outcome, now: string): Record<string, unknown> | null {
   const clearJob = { job_id: null, job_at: null };
@@ -683,11 +693,12 @@ function patchFor(row: DueRow, o: Outcome, now: string): Record<string, unknown>
     case "broken": return verdictPatch("broken", o.note ?? null, 0);
     case "soft": {
       const signals = row.signal_count + 1;
-      if (signals >= 2) return verdictPatch("broken", `${o.note} — on two checks, on different days`, signals);
-      // First sign: keep the verdict, look again tomorrow.
+      const rule = SOFT_RULE[row.retailer] ?? SOFT_RULE.default;
+      if (signals >= rule.strikes) return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks over a day`, signals);
+      // Not enough yet: keep the verdict, look again later.
       return {
-        signal_count: signals, fail_count: 0, ...clearJob, next_check_at: at(BROKEN_HOURS * 3600e3),
-        ...(row.verdict === "pending" ? { note: `${o.note}; checked again tomorrow before calling it broken`, checked_at: now } : {}),
+        signal_count: signals, fail_count: 0, ...clearJob, next_check_at: at(rule.everyHours * 3600e3),
+        ...(row.verdict === "pending" ? { note: `${o.note} (${signals} of ${rule.strikes} checks before calling it broken)`, checked_at: now } : {}),
       };
     }
     case "none": {
