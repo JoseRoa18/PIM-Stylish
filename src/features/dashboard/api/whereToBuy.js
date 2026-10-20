@@ -49,8 +49,8 @@ export async function scanWhereToBuy(sites) {
 /**
  * Check the links that are due, batch after batch (each call takes up to
  * ~2 minutes: stores that block the PIM are opened through Bright Data or
- * ScraperAPI), until none remain or `maxCalls` batches ran — the hourly
- * pass picks up the rest. Reports progress after every batch.
+ * ScraperAPI), until none remain or `maxCalls` batches ran — the automatic
+ * pass (every 10 minutes) picks up the rest. Reports progress after every batch.
  */
 export async function checkWhereToBuy({ onProgress, maxCalls = 10 } = {}) {
   let total = 0;
@@ -63,6 +63,29 @@ export async function checkWhereToBuy({ onProgress, maxCalls = 10 } = {}) {
   return { checked: total, done: false };
 }
 
+/** { due, scannedAt, differs: { [site]: skus whose live section is not the PIM's list } } */
 export async function whereToBuyStatus() {
   return invoke({ mode: 'status' });
+}
+
+/**
+ * Write the PIM's Where to Buy list to the Stylish pages of these products
+ * again, one after the other (a page edited by hand in Wix goes back to the
+ * PIM's links). Reports { done, total, errors } after each product.
+ */
+export async function republishWhereToBuy(skus, onProgress) {
+  const { publishWhereToBuy } = await import('@/features/products/api/whereToBuy');
+  const { data, error } = await supabase.from('products').select('sku, brand').in('sku', skus);
+  if (error) throw error;
+  let done = 0;
+  let errors = 0;
+  for (const product of data ?? []) {
+    try {
+      const r = await publishWhereToBuy(product);
+      if (r.some((x) => x.status === 'error')) errors += 1;
+    } catch { errors += 1; }
+    done += 1;
+    onProgress?.({ done, total: data.length, errors });
+  }
+  return { done, errors };
 }

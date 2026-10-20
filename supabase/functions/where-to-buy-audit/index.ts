@@ -1,12 +1,19 @@
 // "Where to Buy" audit for the Stylish brand sites (Stylish Canada / USA).
 //
-// mode "scan"  — reads every product of both sites through the Wix API,
-//                parses the WHERE TO BUY and DOCUMENTS TO DOWNLOAD sections
-//                into one row per link, flags the portals a page lacks
-//                (the ones most products of the site link), and replaces the
-//                site's rows (ok / broken results younger than 7 days carry
-//                over by URL). Nothing is compared with the PIM: this is a
-//                pure "does the link open the product page" check.
+// mode "scan"  — reads every product of both sites through the Wix API and
+//                writes one row per store link. Since 2026-10-19 the PIM owns
+//                the links (product_where_to_buy, one list per product that
+//                builds both pages' section — _shared/whereToBuy.js): a PIM
+//                product's rows come from that list and its live WHERE TO
+//                BUY section is compared with it (a hand edit in Wix shows up
+//                in `differs`); a page whose SKU the PIM lacks is left out
+//                (only PIM products are audited). Flags the portals a page lacks (the ones most products
+//                link), replaces the site's rows (the checker's state carries
+//                over by URL) and keeps standard portals + differences in
+//                app_settings.where_to_buy_scan. The store locator, document
+//                links and unknown sites are not checked (user, 2026-10-19).
+// mode "sync"  — { skus }: a product's links were saved in the PIM; rebuilds
+//                its rows on both sites and checks the new addresses at once.
 // mode "check" — opens a batch of due links (~110 s budget) and records the
 //                verdict. Each retailer has a ROUTE: the server's own probe
 //                ("direct") where the site lets it in; otherwise Bright
@@ -17,7 +24,7 @@
 //                submitted as jobs and collected on a later pass. Rhythm
 //                (user, 2026-10-19): an OK link every 2 days, a broken one
 //                daily, a link without an answer after a few hours
-//                (`next_check_at`). Called hourly by cron (each call chains
+//                (`next_check_at`). Called by cron every 10 minutes (each call chains
 //                the next batch until nothing is due) and from the UI;
 //                `skus: [...]` re-checks those products' links now.
 // mode "p2s"   — applies a Price2Spy matrix report (parsed in the browser:
@@ -35,7 +42,7 @@
 //
 // Verdicts (user rules 2026-09-15 and 2026-10-19 — the list says OK or Broken):
 //   ok       the link opens and shows the product (through an unlocker: the
-//            page title names Stylish / Azuni or the SKU)
+//            page names Stylish / Azuni or the SKU — title, product data or text)
 //   broken   there is a link but it does not work: 404 / 410, a "not found"
 //            page, a redirect to a login / home page, or an invalid address.
 //            Weaker evidence — Menards' unlocker giving up, a page that opens
@@ -51,6 +58,7 @@
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
 
 import { resolveWixSite } from "../_shared/wixSites.ts";
+import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl } from "../_shared/whereToBuy.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -80,45 +88,16 @@ const JOB_GIVEUP_HOURS = 6; // … still running after 6 h counts as a soft sign
 const LEASE_MIN = 15;       // a batch claims its links for 15 min (no double work)
 const BATCH_MS = 110000;    // one check call (the runtime cuts at ~150 s)
 const START_MS = 55000;     // no link starts after this point of the call
-const MAX_CHAIN = 30;       // cron chain: at most 30 batches per hour
+const MAX_CHAIN = 4;        // cron chain (every 10 min): at most 4 more batches per call
 const STANDARD_SHARE = 0.6; // a portal is "standard" when 60% of the pages link it
 const NEVER = "2999-01-01T00:00:00.000Z"; // scan-time verdicts are never probed
 
 // ---------------------------------------------------------------- retailers
-interface Retailer { key: string; market: "ca" | "us" | null; label: string }
-const RETAILERS: Array<{ host: RegExp } & Retailer> = [
-  { host: /(^|\.)sinksdirect\.ca$/, key: "sinksdirect_ca", market: "ca", label: "SinksDirect.ca" },
-  { host: /(^|\.)sinksdirectusa\.com$/, key: "sinksdirect_us", market: "us", label: "SinksDirect USA" },
-  { host: /(^|\.)wayfair\.ca$/, key: "wayfair_ca", market: "ca", label: "Wayfair.ca" },
-  { host: /(^|\.)wayfair\.com$/, key: "wayfair_us", market: "us", label: "Wayfair.com" },
-  { host: /(^|\.)bestbuy\.ca$/, key: "bestbuy_ca", market: "ca", label: "BestBuy.ca" },
-  { host: /(^|\.)homedepot\.ca$/, key: "homedepot_ca", market: "ca", label: "HomeDepot.ca" },
-  { host: /(^|\.)homedepot\.com$/, key: "homedepot_us", market: "us", label: "HomeDepot.com" },
-  { host: /(^|\.)walmart\.ca$/, key: "walmart_ca", market: "ca", label: "Walmart.ca" },
-  { host: /(^|\.)walmart\.com$/, key: "walmart_us", market: "us", label: "Walmart.com" },
-  { host: /(^|\.)amazon\.ca$/, key: "amazon_ca", market: "ca", label: "Amazon.ca" },
-  { host: /(^|\.)amazon\.com$/, key: "amazon_us", market: "us", label: "Amazon.com" },
-  { host: /(^|\.)bedbathandbeyond\.ca$/, key: "bbb_ca", market: "ca", label: "BedBathandBeyond.ca" },
-  { host: /(^|\.)bedbathandbeyond\.com$/, key: "bbb_us", market: "us", label: "BedBathandBeyond.com" },
-  { host: /(^|\.)rona\.ca$/, key: "rona", market: "ca", label: "Rona" },
-  { host: /(^|\.)lowes\.ca$/, key: "lowes_ca", market: "ca", label: "Lowes.ca" },
-  { host: /(^|\.)lowes\.com$/, key: "lowes_us", market: "us", label: "Lowes.com" },
-  { host: /(^|\.)menards\.com$/, key: "menards", market: "us", label: "Menards" },
-  { host: /(^|\.)kbauthority\.com$/, key: "kbauthority", market: "us", label: "KB Authority" },
-  { host: /(^|\.)warehouse-usa\.com$/, key: "warehouse_usa", market: "us", label: "Warehouse USA" },
-  { host: /(^|\.)overstock\.com$/, key: "overstock_us", market: "us", label: "Overstock.com" },
-  { host: /(^|\.)overstock\.ca$/, key: "overstock_ca", market: "ca", label: "Overstock.ca" },
-  { host: /(^|\.)cabinetdepotnewmarket\.com$/, key: "cabinet_depot", market: "ca", label: "Cabinet Depot" },
-  { host: /(^|\.)buildwithrise\.com$/, key: "build_with_rise", market: "ca", label: "Build with Rise" },
-  { host: /(^|\.)faucetline\.com$/, key: "faucetline", market: "us", label: "Faucetline" },
-  { host: /(^|\.)ebay\.(ca|com)$/, key: "ebay", market: null, label: "eBay" },
-  { host: /(^|\.)stylishkb\.com$/, key: "stylish_locator", market: null, label: "Store locator" },
-  { host: /(^|\.)dropbox\.com$/, key: "dropbox", market: null, label: "Dropbox" },
-  { host: /(^|\.)sharepoint\.com$/, key: "sharepoint", market: null, label: "SharePoint" },
-  { host: /(^|\.)supabase\.co$/, key: "pim_storage", market: null, label: "PIM storage" },
-];
-const retailerFor = (host: string): Retailer =>
-  RETAILERS.find((r) => r.host.test(host)) ?? { key: "other", market: null, label: host };
+// The stores the PIM keeps — one registry for the product page, this audit
+// and the push to Wix (supabase/functions/_shared/whereToBuy.js). The store
+// locator, document links and unknown sites are not checked (user, 2026-10-19).
+const retailerFor = (host: string): { key: string; market: string; label: string } | null =>
+  WTB_RETAILERS.find((r: { host: RegExp }) => r.host.test(host)) ?? null;
 
 // How each retailer's links are opened, in order — measured on 2026-10-19
 // with the same links through every service:
@@ -242,8 +221,110 @@ interface Row {
 // The checker's state on a link, carried over by URL when a scan rebuilds the rows.
 type LinkState = Pick<Row, "verdict" | "http_status" | "final_url" | "note" | "checked_at" | "next_check_at" | "checked_via" | "fail_count" | "signal_count" | "job_id" | "job_at">;
 const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,job_id,job_at";
+type Base = { site: string; sku: string; wix_product_id: string | null; scanned_at: string };
+type Link = { retailer: string; url: string };
+interface PimLinks { skus: Set<string>; links: Map<string, Link[]> }
 
-async function scanSite(siteKey: string, now: string) {
+// The PIM's own list (product_where_to_buy) — the source of every Stylish
+// page's WHERE TO BUY section since 2026-10-19.
+async function loadPimLinks(skus?: string[]): Promise<PimLinks> {
+  const only = skus?.length ? `&sku=${inList(skus)}` : "";
+  const products = await restAll<{ sku: string }>(`products?select=sku${only}`);
+  const links = new Map<string, Link[]>();
+  for (const r of await restAll<{ sku: string } & Link>(`product_where_to_buy?select=sku,retailer,url${only}`)) {
+    if (!links.has(r.sku)) links.set(r.sku, []);
+    links.get(r.sku)!.push({ retailer: r.retailer, url: r.url });
+  }
+  return { skus: new Set(products.map((p) => p.sku)), links };
+}
+
+// The checker's state of the links, by URL — from either site, as both
+// pages carry the same address: ok / broken verdicts it reached in the last
+// KEEP_DAYS, and every pending link's retries, soft signals and Menards job.
+async function priorState(skus?: string[]) {
+  const since = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
+  const prior = new Map<string, LinkState>();
+  const only = skus?.length ? `&sku=${inList(skus)}` : "";
+  for (const r of await restAll<{ url: string } & LinkState>(
+    `where_to_buy_links?select=${STATE_COLUMNS}&url=not.is.null${only}&or=(verdict.eq.pending,and(verdict.in.(ok,broken),checked_via.not.is.null,checked_at.gte.${since}))`,
+  )) {
+    // A verdict beats "pending"; between two of a kind, the newer answer.
+    const prev = prior.get(r.url);
+    const better = !prev || (prev.verdict === "pending" && r.verdict !== "pending")
+      || ((prev.verdict === "pending") === (r.verdict === "pending") && (r.checked_at ?? "") > (prev.checked_at ?? ""));
+    if (better) prior.set(r.url, r);
+  }
+  return prior;
+}
+
+// One row per store link of a page. Decided without opening it: an address
+// that is not a URL, or a Wayfair link cut before the sku, cannot open; a
+// site no service opens is checked by hand. Everything else starts pending
+// (or carries the checker's state) and the checker decides.
+function linkRows(base: Base, links: Link[], prior: Map<string, LinkState>): Row[] {
+  const rows: Row[] = [];
+  const seen = new Set<string>();
+  for (const l of links) {
+    const r = wtbRetailer(l.retailer);
+    const key = `${l.retailer}|${l.url}`;
+    if (!r || seen.has(key)) continue;
+    seen.add(key);
+    let host: string | null = null;
+    let parsed: URL | null = null;
+    try { parsed = new URL(l.url); host = parsed.hostname.toLowerCase(); } catch { parsed = null; }
+    let verdict = "pending";
+    let note: string | null = null;
+    if (!parsed || !/^https?:$/.test(parsed.protocol) || !host) { verdict = "broken"; note = "Not a valid web address"; }
+    else if ((r.key === "wayfair_ca" || r.key === "wayfair_us") && !WAYFAIR_SKU_RE.test(l.url)) { verdict = "broken"; note = "Cut address: Wayfair links need the product sku at the end"; }
+    else if (MANUAL_HOST.test(host)) { verdict = "manual"; note = "Check by hand: this site turns every automatic check away"; }
+    const carried = verdict === "pending" ? prior.get(l.url) : undefined;
+    const fresh: LinkState = {
+      verdict, http_status: null, final_url: null, note, checked_at: null,
+      next_check_at: verdict === "pending" ? null : NEVER, checked_via: null,
+      fail_count: 0, signal_count: 0, job_id: null, job_at: null,
+    };
+    const { url: _u, ...state } = (carried ?? fresh) as LinkState & { url?: string };
+    rows.push({ ...base, section: "where_to_buy", market: r.market, retailer: r.key, label: r.label, url: l.url, host, retailer_id: null, expected_id: null, ...state });
+  }
+  return rows;
+}
+
+// Links to add: the site's STANDARD portals are the retailers linked by at
+// least STANDARD_SHARE of the products that have links (2026-09-15:
+// SinksDirect, Amazon, Wayfair, Home Depot CA, Rona, Best Buy, Walmart CA on
+// both sites). A product without one of them (for a country it lists) gets a
+// "missing" row; a product with no link at all gets one per standard portal.
+function missingRows(base: Base, links: Link[], standard: string[]): Row[] {
+  const present = new Set(links.map((l) => l.retailer));
+  const markets = new Set(links.map((l) => wtbRetailer(l.retailer)?.market).filter(Boolean));
+  const rows: Row[] = [];
+  for (const k of standard) {
+    if (present.has(k)) continue;
+    const market = wtbRetailer(k)?.market ?? null;
+    if (links.length && market && !markets.has(market)) continue;
+    rows.push({
+      ...base, section: "where_to_buy", market, retailer: k, label: null, url: null, host: null, retailer_id: null, expected_id: null,
+      verdict: "missing", http_status: null, final_url: null, note: links.length ? "No link to this store yet (most products have one)" : "No Where to Buy links yet", checked_at: null,
+      next_check_at: null, checked_via: null, fail_count: 0, signal_count: 0, job_id: null, job_at: null,
+    });
+  }
+  return rows;
+}
+
+// The store links of a live WHERE TO BUY section.
+function liveLinks(html: string): Link[] {
+  const out: Link[] = [];
+  for (const a of anchors(html)) {
+    let host = "";
+    try { host = new URL(a.url).hostname.toLowerCase(); } catch { continue; }
+    const r = retailerFor(host);
+    if (r) out.push({ retailer: r.key, url: a.url });
+  }
+  return out;
+}
+const linkSet = (links: Link[]) => links.map((l) => `${l.retailer}|${cleanWtbUrl(l.url)}`).sort().join("\n");
+
+async function scanSite(siteKey: string, now: string, pim: PimLinks) {
   const site = resolveWixSite(siteKey);
   const catalog = await wixCatalog(siteKey);
   // Open Box listings (SKUs like A-802B-B-OB-A, or "Open Box" in the name)
@@ -252,109 +333,101 @@ async function scanSite(siteKey: string, now: string) {
   const withSku = catalog
     .map((p) => ({ p, sku: skuOf(p) }))
     .filter((x): x is { p: WixProduct; sku: string } => Boolean(x.sku) && !isOpenBox(x.sku!, x.p.name ?? ""));
-
-  // The checker's state carries over by URL: ok / broken verdicts it reached
-  // in the last KEEP_DAYS, and every pending link's retries, soft signals and
-  // Menards job in flight.
-  const since = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
-  const prior = new Map<string, LinkState>();
-  for (const r of await restAll<{ url: string } & LinkState>(
-    `where_to_buy_links?select=${STATE_COLUMNS}&site=eq.${siteKey}&url=not.is.null&or=(verdict.eq.pending,and(verdict.in.(ok,broken),checked_via.not.is.null,checked_at.gte.${since}))`,
-  )) prior.set(r.url, r);
+  const prior = await priorState();
 
   const rows: Row[] = [];
-  const counts = { products: withSku.length, links: 0, docs: 0, broken: 0, missing: 0, dropbox: 0, no_section: 0, standardPortals: [] as string[] };
-  // Per product: which portals its section links, per market.
-  const perProduct: Array<{ base: { site: string; sku: string; wix_product_id: string | null; scanned_at: string }; hasSection: boolean; present: Set<string>; markets: Set<string> }> = [];
+  const counts = { products: 0, links: 0, broken: 0, missing: 0, notInPim: 0, differsFromPim: [] as string[], standardPortals: [] as string[] };
+  const perProduct: Array<{ base: Base; links: Link[] }> = [];
   for (const { p, sku } of withSku) {
-    const sections = p.additionalInfoSections ?? [];
-    const wtb = sections.find((s) => /where\s*to\s*buy/i.test(s.title ?? ""));
-    const docs = sections.find((s) => /document/i.test(s.title ?? ""));
-    if (!wtb) counts.no_section += 1;
-    const base = { site: siteKey, sku, wix_product_id: p.id ?? null, scanned_at: now };
-    const present = new Set<string>();
-    const marketsSeen = new Set<string>();
-
-    const pushLink = (section: string, a: Anchor) => {
-      let host: string | null = null;
-      let parsed: URL | null = null;
-      try { parsed = new URL(a.url); host = parsed.hostname.toLowerCase(); } catch { parsed = null; }
-      const ret = host ? retailerFor(host) : { key: "other", market: null, label: "" };
-      const market = ret.market ?? (/canada/i.test(a.heading ?? "") ? "ca" : /usa|united states/i.test(a.heading ?? "") ? "us" : null);
-      // Decided at scan time (no HTTP needed): an address that is not a URL,
-      // or a Wayfair link cut before the sku, cannot open; a site no service
-      // opens is checked by hand. Everything else starts pending and the
-      // checker decides.
-      let verdict = "pending";
-      let note: string | null = null;
-      if (!parsed || !/^https?:$/.test(parsed.protocol) || !host) { verdict = "broken"; note = "Not a valid web address"; }
-      else if ((ret.key === "wayfair_ca" || ret.key === "wayfair_us") && !WAYFAIR_SKU_RE.test(a.url)) { verdict = "broken"; note = "Cut address: Wayfair links need the product sku at the end"; }
-      else if (MANUAL_HOST.test(host)) { verdict = "manual"; note = "Check by hand: this site turns every automatic check away"; }
-      if (ret.key === "dropbox") counts.dropbox += 1;
-      if (verdict === "broken") counts.broken += 1;
-      const carried = verdict === "pending" ? prior.get(a.url) : undefined;
-      const fresh: LinkState = {
-        verdict, http_status: null, final_url: null, note, checked_at: null,
-        next_check_at: verdict === "pending" ? null : NEVER, checked_via: null,
-        fail_count: 0, signal_count: 0, job_id: null, job_at: null,
-      };
-      const { url: _u, ...state } = (carried ?? fresh) as LinkState & { url?: string };
-      rows.push({ ...base, section, market, retailer: ret.key, label: a.label || null, url: a.url, host, retailer_id: null, expected_id: null, ...state });
-      if (section === "where_to_buy") { present.add(ret.key); if (market) marketsSeen.add(market); counts.links += 1; }
-      else counts.docs += 1;
-    };
-    if (wtb?.description) for (const a of anchors(wtb.description)) pushLink("where_to_buy", a);
-    if (docs?.description) for (const a of anchors(docs.description)) pushLink("documents", a);
-
-    perProduct.push({ base, hasSection: Boolean(wtb), present, markets: marketsSeen });
+    // Only the PIM's products are audited (user, 2026-10-19): a Wix page
+    // whose SKU the PIM does not have (spare parts like RSH-K107B, old
+    // listings) is left out.
+    if (!pim.skus.has(sku)) { counts.notInPim += 1; continue; }
+    counts.products += 1;
+    const wtb = (p.additionalInfoSections ?? []).find((s) => /where\s*to\s*buy/i.test(s.title ?? ""));
+    const live = liveLinks(wtb?.description ?? "");
+    const base: Base = { site: siteKey, sku, wix_product_id: p.id ?? null, scanned_at: now };
+    // Checked from the PIM's list; the live section is compared with it
+    // (a hand edit in Wix shows up as a difference).
+    const links = pim.links.get(sku) ?? [];
+    if (links.length && linkSet(live) !== linkSet(links)) counts.differsFromPim.push(sku);
+    const lr = linkRows(base, links, prior);
+    counts.links += lr.length;
+    counts.broken += lr.filter((r) => r.verdict === "broken").length;
+    rows.push(...lr);
+    perProduct.push({ base, links });
   }
 
-  // Missing links: the site's STANDARD portals are the retailers linked by
-  // at least STANDARD_SHARE of the products that have a WHERE TO BUY
-  // section (measured 2026-09-15: SinksDirect, Amazon, Wayfair, Home Depot
-  // CA, Rona, Best Buy, Walmart CA on both sites). A page without one of
-  // them (for a market it lists) gets a "missing" row; a page with no
-  // section at all gets one per standard portal.
-  const withSection = perProduct.filter((x) => x.hasSection);
+  const withLinks = perProduct.filter((x) => x.links.length);
   const tally = new Map<string, number>();
-  for (const x of withSection) for (const k of x.present) tally.set(k, (tally.get(k) ?? 0) + 1);
-  const standard = [...tally.entries()]
-    .filter(([k, n]) => k !== "other" && k !== "stylish_locator" && n >= withSection.length * STANDARD_SHARE)
-    .map(([k]) => k);
+  for (const x of withLinks) for (const k of new Set(x.links.map((l) => l.retailer))) tally.set(k, (tally.get(k) ?? 0) + 1);
+  const standard = [...tally.entries()].filter(([, n]) => n >= withLinks.length * STANDARD_SHARE).map(([k]) => k);
   counts.standardPortals = standard;
-  const marketOf = (k: string) => RETAILERS.find((r) => r.key === k)?.market ?? null;
   for (const x of perProduct) {
-    for (const k of standard) {
-      if (x.present.has(k)) continue;
-      const market = marketOf(k);
-      if (x.hasSection && market && !x.markets.has(market)) continue;
-      counts.missing += 1;
-      rows.push({
-        ...x.base, section: "where_to_buy", market, retailer: k, label: null, url: null, host: null, retailer_id: null, expected_id: null,
-        verdict: "missing", http_status: null, final_url: null, note: x.hasSection ? "No link to this portal (most products of the site have one)" : "The page has no WHERE TO BUY section", checked_at: null,
-        next_check_at: null, checked_via: null, fail_count: 0, signal_count: 0, job_id: null, job_at: null,
-      });
-    }
+    const mr = missingRows(x.base, x.links, standard);
+    counts.missing += mr.length;
+    rows.push(...mr);
   }
 
-  // Replace the site's rows. A page sometimes repeats the very same link
-  // (two anchors to one URL) — one row per (sku, section, retailer, url).
-  const seen = new Set<string>();
-  const unique = rows.filter((r) => {
-    const k = `${r.sku}|${r.section}|${r.retailer}|${r.url ?? ""}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
   await rest(`where_to_buy_links?site=eq.${siteKey}`, { method: "DELETE" });
-  for (const part of chunk(unique, 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
-  return { site: siteKey, label: site.label, rows: unique.length, duplicates: rows.length - unique.length, ...counts };
+  for (const part of chunk(rows, 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
+  return { site: siteKey, label: site.label, rows: rows.length, ...counts };
+}
+
+// What the last scan learned, kept for the panel and for "sync": each site's
+// standard portals and the products whose live section differs from the PIM.
+const SCAN_KEY = "where_to_buy_scan";
+type ScanState = { scanned_at?: string; standard?: Record<string, string[]>; differs?: Record<string, string[]> };
+async function readScanState(): Promise<ScanState> {
+  const r = await rest<Array<{ value: ScanState }>>(`app_settings?select=value&key=eq.${SCAN_KEY}`);
+  return r[0]?.value ?? {};
+}
+async function writeScanState(value: ScanState) {
+  await rest("app_settings?on_conflict=key", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key: SCAN_KEY, value, updated_at: new Date().toISOString() }),
+  });
+}
+
+// After a product's links are saved (and pushed to Wix) in the PIM: rebuild
+// its rows on both sites from the new list — keeping the checker's state of
+// the addresses that did not change; the new ones are due at once.
+async function syncSkus(skus: string[]) {
+  const now = new Date().toISOString();
+  const pim = await loadPimLinks(skus);
+  const state = await readScanState();
+  const out: Array<{ site: string; sku: string; links: number; missing: number }> = [];
+  for (const siteKey of SITES) {
+    const onSite = await rest<Array<{ sku: string; wix_product_id: string }>>(`wix_links?select=sku,wix_product_id&site=eq.${siteKey}&sku=${inList(skus)}`);
+    if (!onSite.length) continue;
+    const prior = await priorState(onSite.map((x) => x.sku));
+    const rows: Row[] = [];
+    for (const w of onSite) {
+      const base: Base = { site: siteKey, sku: w.sku, wix_product_id: w.wix_product_id, scanned_at: now };
+      const links = pim.links.get(w.sku) ?? [];
+      const lr = linkRows(base, links, prior);
+      const mr = missingRows(base, links, state.standard?.[siteKey] ?? []);
+      rows.push(...lr, ...mr);
+      out.push({ site: siteKey, sku: w.sku, links: lr.length, missing: mr.length });
+    }
+    await rest(`where_to_buy_links?site=eq.${siteKey}&sku=${inList(onSite.map((x) => x.sku))}`, { method: "DELETE" });
+    for (const part of chunk(rows, 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
+  }
+  // The pages were just pushed from the PIM: they no longer differ.
+  if (state.differs) {
+    const differs = Object.fromEntries(Object.entries(state.differs).map(([k, v]) => [k, v.filter((s) => !skus.includes(s))]));
+    await writeScanState({ ...state, differs });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- check
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36";
 const NOT_FOUND_RE = /<title[^>]*>[^<]*(?:not found|page not found|no longer available|isn.t available|couldn.t find|404)[^<]*<\/title>|"pageType"\s*:\s*"(?:404|notFound)"/i;
-const BOT_RE = /<title[^>]*>[^<]*(?:pardon our interruption|access denied|are you a human|just a moment|attention required|robot check)[^<]*<\/title>/i;
+const BOT_RE = /<title[^>]*>[^<]*(?:pardon our interruption|access denied|are you a human|robot or human|verify your identity|just a moment|attention required|robot check)[^<]*<\/title>/i;
+// Amazon's captcha page is titled just "Amazon.ca" (seen 2026-10-19).
+const BOT_BODY_RE = /validateCaptcha|Enter the characters you see below/i;
 
 // Document hosts (Dropbox, SharePoint, our own storage) answer with a
 // status code alone — no body to read, so they run faster and in parallel.
@@ -362,7 +435,7 @@ const DOC_HOST = /dropbox\.com|sharepoint\.com|supabase\.co/;
 const laneConfig = (host: string) =>
   /wayfair/.test(host) ? { pace: 3000, lanes: 1 } : DOC_HOST.test(host) ? { pace: 300, lanes: 3 } : { pace: 1200, lanes: 1 };
 
-interface Probe { verdict: "ok" | "broken" | "pending"; http_status: number | null; final_url: string | null; note: string | null }
+interface Probe { verdict: "ok" | "broken" | "pending"; http_status: number | null; final_url: string | null; note: string | null; title?: string; body?: string }
 
 async function probe(url: string): Promise<Probe> {
   const ctrl = new AbortController();
@@ -373,12 +446,12 @@ async function probe(url: string): Promise<Probe> {
     const finalUrl = r.url || url;
     let body = "";
     if (DOC_HOST.test(new URL(finalUrl).hostname)) { try { await r.body?.cancel(); } catch { /* ignore */ } }
-    else { try { body = (await r.text()).slice(0, 200000); } catch { body = ""; } }
+    else { try { body = (await r.text()).slice(0, 1500000); } catch { body = ""; } }
     if (status === 404 || status === 410) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `HTTP ${status}` };
     // 401/403/429 and 5xx from retailers are robot blocks (Amazon answers
     // 500/503 to datacenter traffic) — the link is not verified, try later.
     if (status === 401 || status === 403 || status === 429 || status >= 500) return { verdict: "pending", http_status: status, final_url: finalUrl, note: `Blocked by the site (HTTP ${status})` };
-    if (BOT_RE.test(body)) return { verdict: "pending", http_status: status, final_url: finalUrl, note: "Blocked by the site (bot check page)" };
+    if (BOT_RE.test(body) || BOT_BODY_RE.test(body)) return { verdict: "pending", http_status: status, final_url: finalUrl, note: "Blocked by the site (bot check page)" };
     if (NOT_FOUND_RE.test(body)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "The page says the product was not found" };
     try {
       const a = new URL(url); const b = new URL(finalUrl);
@@ -387,7 +460,7 @@ async function probe(url: string): Promise<Probe> {
       if (/password|login|signin/i.test(b.pathname)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "Redirects to a login / password page" };
       if ((b.pathname === "/" || b.pathname === "") && a.pathname.length > 1) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "Redirects to the home page" };
     } catch { /* keep ok */ }
-    if (status >= 200 && status < 400) return { verdict: "ok", http_status: status, final_url: finalUrl, note: null };
+    if (status >= 200 && status < 400) return { verdict: "ok", http_status: status, final_url: finalUrl, note: null, title: pageTitle(body), body };
     return { verdict: "pending", http_status: status, final_url: finalUrl, note: `HTTP ${status}` };
   } catch (e) {
     const msg = (e as Error).name === "AbortError" ? "No answer in 12 s" : /error sending request|connection|reset|refused/i.test((e as Error).message) ? "Connection dropped by the site" : (e as Error).message.slice(0, 120);
@@ -415,7 +488,17 @@ const PAGE_NOT_FOUND_TITLE = /not found|introuvable|no longer available|isn.t av
 // Home Depot USA, Menards ("SORRY!"), Lowe's.
 const PAGE_NOT_FOUND_BODY = /The product you are trying to view is not currently available|The page you are looking for can not be found|404 File Not Found/i;
 const PAGE_BLOCKED_TITLE = /access denied|pardon our interruption|are you a human|just a moment|attention required|robot check|captcha|security check|request unsuccessful/i;
-const skuPattern = (sku: string) => new RegExp(sku.replace(/[-\s]/g, "").split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[-\\s]?"), "i");
+const skuPattern = (sku: string) => new RegExp(`\\b${sku.replace(/[-\s]/g, "").split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[-\\s]?")}\\b`, "i");
+// The product's data on the page names its brand (JSON-LD / microdata).
+const BRAND_IN_DATA = /"(?:brand|vendor)"\s*:\s*(?:\{[^{}]{0,200}?"name"\s*:\s*)?"\s*(?:stylish|azuni)\b/i;
+// A product page names the brand or the SKU in its title — or, when the
+// title does not (Best Buy: "33"L x 18"W Double Basin… | Best Buy Canada"),
+// in its product data or text. A short SKU (A-02) is only trusted in the title.
+function showsProduct(title: string, body: string, sku: string): boolean {
+  if (/\b(stylish|azuni)\b/i.test(title) || skuPattern(sku).test(title)) return true;
+  if (BRAND_IN_DATA.test(body)) return true;
+  return sku.replace(/[-\s]/g, "").length >= 5 && skuPattern(sku).test(body);
+}
 
 // A page read through an unlocker: it shows the product when its title names
 // the brand or the SKU (every product page seen on 2026-10-19 does: "STYLISH
@@ -426,13 +509,25 @@ function judgePage(status: number | null, body: string, sku: string, via: Method
   if (status === 404 || status === 410) return { kind: "broken", via, status, note: `HTTP ${status}` };
   if (PAGE_NOT_FOUND_TITLE.test(title) || PAGE_NOT_FOUND_BODY.test(body)) return { kind: "broken", via, status, note: "The page says the product was not found" };
   if (PAGE_BLOCKED_TITLE.test(title)) return { kind: "none", via, status, note: `bot check page ("${title.slice(0, 40)}")` };
-  if (status !== null && status >= 200 && status < 300 && title && (/\b(stylish|azuni)\b/i.test(title) || skuPattern(sku).test(title))) return { kind: "ok", via, status, note: null };
+  if (status !== null && status >= 200 && status < 300 && title && showsProduct(title, body, sku)) return { kind: "ok", via, status, note: null };
   if (status !== null && status >= 200 && status < 300 && title) return { kind: "soft", via, status, note: `Opens a page without the product: "${title.slice(0, 80)}"` };
   return { kind: "none", via, status, note: status ? `HTTP ${status}, empty page` : "no page" };
 }
 
-async function viaBrightData(url: string, sku: string): Promise<Outcome> {
+// Bright Data turns a burst away ("Your account exceeded the allowed rate
+// limits" on 611 links of the first full pass, 2026-10-19): at most 10 pages
+// at a time per call, and after a rate-limit answer every lane waits 20 s.
+// A link the limit turned away is tried again soon, not counted as a failure.
+const brightData = { inFlight: 0, coolUntil: 0 };
+const BD_MAX_IN_FLIGHT = 10;
+const RATE_LIMIT_RE = /rate limit/i;
+async function viaBrightData(url: string, sku: string, deadline: number): Promise<Outcome> {
   if (!BRIGHTDATA_API_TOKEN) return { kind: "none", via: "brightdata", note: "not configured" };
+  while (brightData.inFlight >= BD_MAX_IN_FLIGHT || Date.now() < brightData.coolUntil) {
+    if (Date.now() + METHOD_MS.brightdata > deadline) return { kind: "later", via: "brightdata" };
+    await new Promise((ok) => setTimeout(ok, 500));
+  }
+  brightData.inFlight += 1;
   try {
     const r = await fetch("https://api.brightdata.com/request", {
       method: "POST",
@@ -440,15 +535,17 @@ async function viaBrightData(url: string, sku: string): Promise<Outcome> {
       body: JSON.stringify({ zone: BRIGHTDATA_ZONE, url: url.replace(/ /g, "%20"), format: "json" }),
       signal: AbortSignal.timeout(65000),
     });
+    if (r.status === 429) { brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     if (!r.ok) return { kind: "none", via: "brightdata", note: `HTTP ${r.status} from the service` };
     const j = await r.json() as { status_code?: number; headers?: Record<string, string>; body?: string };
     const code = j.status_code ?? null;
+    if (RATE_LIMIT_RE.test(j.headers?.["x-brd-error"] ?? "")) { brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     // 5xx / 403 / 429 here are the store or the unlocker turning the page down.
     if (code === null || code >= 500 || code === 403 || code === 429) return { kind: "none", via: "brightdata", status: code, note: j.headers?.["x-brd-error"] ?? `HTTP ${code}` };
     return judgePage(code, j.body ?? "", sku, "brightdata");
   } catch (e) {
     return { kind: "none", via: "brightdata", note: (e as Error).name === "TimeoutError" ? "no answer in 60 s" : (e as Error).message.slice(0, 80) };
-  }
+  } finally { brightData.inFlight -= 1; }
 }
 
 // ScraperAPI's free plan: ~1,000 credits a month, 5 requests at a time. The
@@ -527,7 +624,14 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
     if (m === "direct") {
       const p = await probe(row.url);
       o = { kind: p.verdict === "pending" ? "none" : p.verdict, via: "direct", status: p.http_status, finalUrl: p.final_url, note: p.note };
-    } else if (m === "brightdata") o = await viaBrightData(row.url, row.sku);
+      // An open page counts only when it shows the product (user, 2026-10-19):
+      // Walmart and Amazon sometimes answer a bot check that looks like a
+      // normal page ("Robot or human?", "Verify Your Identity", Amazon's
+      // captcha titled "Amazon.ca") — then the next service of the route tries.
+      if (o.kind === "ok" && p.body !== undefined && !DOC_HOST.test(row.host ?? "") && !showsProduct(p.title ?? "", p.body, row.sku)) {
+        o = { kind: "none", via: "direct", status: p.http_status, note: `the page does not show the product ("${(p.title ?? "").slice(0, 50)}")` };
+      }
+    } else if (m === "brightdata") o = await viaBrightData(row.url, row.sku, deadline);
     else if (m === "scraperapi") o = await viaScraperApi(row.url, row.sku);
     else o = await viaMenards(row);
     if (o.kind !== "none") return o;
@@ -576,7 +680,7 @@ function patchFor(row: DueRow, o: Outcome, now: string): Record<string, unknown>
       ...(row.verdict === "pending" ? { note: "Opening through Menards (takes a few minutes)" } : {}),
     };
     case "waiting": return { next_check_at: at(20 * 60e3) };
-    case "later": return { next_check_at: now };
+    case "later": return { next_check_at: o.via === "brightdata" ? at(5 * 60e3) : now };
   }
   return null;
 }
@@ -585,13 +689,22 @@ function patchFor(row: DueRow, o: Outcome, now: string): Record<string, unknown>
 // manual rows are never probed.
 const dueFilter = () => `url=not.is.null&verdict=not.in.(missing,manual)&or=(next_check_at.is.null,next_check_at.lte.${new Date().toISOString()})`;
 
-async function check(opts: { limit?: number; skus?: string[] } = {}) {
+// A batch takes two pools so neither starves the other: the links of the
+// stores read through an unlocker (one call opens ~20 of them; links never
+// verified first), and the links the server opens itself (fast, free).
+const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([, r]) => r[0] !== "direct").map(([k]) => k);
+const UNLOCKER_BATCH = 48;
+const DIRECT_BATCH = 250;
+
+async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean } = {}) {
   const started = Date.now();
   const deadline = started + BATCH_MS;
-  const limit = opts.limit ?? 300;
   const rows = opts.skus?.length
-    ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}&url=not.is.null&verdict=not.in.(missing,manual)`, { headers: { Prefer: "count=none" } })
-    : await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&order=next_check_at.asc.nullsfirst&limit=${limit}`, { headers: { Prefer: "count=none" } });
+    ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
+    : [
+      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(UNLOCKER_RETAILERS)}&order=verdict.desc,next_check_at.asc.nullsfirst&limit=${UNLOCKER_BATCH}`, { headers: { Prefer: "count=none" } }),
+      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=not.${inList(UNLOCKER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${opts.limit ?? DIRECT_BATCH}`, { headers: { Prefer: "count=none" } }),
+    ];
   // Claim the batch so an overlapping call (cron chain + UI) skips it; every
   // outcome writes its own next_check_at, and a link this call never reaches
   // is due again when the claim runs out.
@@ -615,7 +728,7 @@ async function check(opts: { limit?: number; skus?: string[] } = {}) {
   const answers: Array<{ row: DueRow; o: Outcome }> = [];
   await Promise.all([...byHost.entries()].map(async ([host, list]) => {
     const unlocker = !routeFor(list[0].retailer, host).every((m) => m === "direct");
-    const { pace, lanes } = unlocker ? { pace: 500, lanes: 3 } : laneConfig(host);
+    const { pace, lanes } = unlocker ? { pace: 500, lanes: 2 } : laneConfig(host);
     let next = 0;
     const lane = async () => {
       while (next < list.length && Date.now() - started <= START_MS) {
@@ -652,7 +765,7 @@ async function check(opts: { limit?: number; skus?: string[] } = {}) {
     byKind[o.kind] = (byKind[o.kind] ?? 0) + 1;
     if (o.via && (o.kind === "ok" || o.kind === "broken")) byVia[o.via] = (byVia[o.via] ?? 0) + 1;
   }
-  const morePending = !opts.skus?.length && (untouched.length > 0 || rows.length >= limit);
+  const morePending = !opts.skus?.length && (untouched.length > 0 || rows.length >= UNLOCKER_BATCH);
   return {
     checked: results.filter((r) => r.o.kind !== "later").length, addresses: answers.length, morePending, byKind, byVia,
     scraperCredits: scraperApi.credits, ms: Date.now() - started,
@@ -665,12 +778,14 @@ async function status() {
     method: "HEAD", headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, Prefer: "count=exact" },
   });
   const due = Number(r.headers.get("content-range")?.split("/")[1] ?? 0);
-  return { due };
+  const state = await readScanState();
+  return { due, scannedAt: state.scanned_at ?? null, differs: state.differs ?? {} };
 }
 
-// Cron chain: the hourly cron call passes chain: 0; each batch that still
-// has due links fires the next one (fire-and-forget) until nothing is due
-// or MAX_CHAIN batches ran. Overlapping chains skip each other's claimed links.
+// Cron chain: the cron call (every 10 minutes) passes chain: 0; each batch
+// that still has due links fires the next one (fire-and-forget) until
+// nothing is due or MAX_CHAIN batches ran — a chain cut short (a deploy, a
+// runtime limit) is picked up by the next cron call. Overlapping chains skip each other's claimed links.
 function chainNext(chain: number) {
   if (!CRON_SECRET || chain >= MAX_CHAIN) return;
   const p = fetch(`${SUPABASE_URL}/functions/v1/where-to-buy-audit`, {
@@ -880,9 +995,28 @@ Deno.serve(async (req) => {
     if (mode === "scan") {
       const now = new Date().toISOString();
       const sites = Array.isArray(body.sites) && body.sites.length ? body.sites.filter((s: string) => SITES.includes(s)) : SITES;
+      const pim = await loadPimLinks();
       const out = [];
-      for (const s of sites) out.push(await scanSite(s, now));
-      return json({ ok: true, scanned_at: now, sites: out });
+      for (const s of sites) out.push(await scanSite(s, now, pim));
+      const prev = await readScanState();
+      await writeScanState({
+        scanned_at: now,
+        standard: { ...(prev.standard ?? {}), ...Object.fromEntries(out.map((o) => [o.site, o.standardPortals])) },
+        differs: { ...(prev.differs ?? {}), ...Object.fromEntries(out.map((o) => [o.site, o.differsFromPim])) },
+      });
+      return json({ ok: true, scanned_at: now, sites: out.map(({ differsFromPim, ...o }) => ({ ...o, differsFromPim: differsFromPim.length })) });
+    }
+    if (mode === "sync") {
+      // body: { skus } — a product's links were saved in the PIM.
+      const skus = Array.isArray(body.skus) ? body.skus.map((s: unknown) => String(s).trim()).filter(Boolean).slice(0, 50) : [];
+      if (!skus.length) return json({ error: "skus[] is required" }, 400);
+      const rebuilt = await syncSkus(skus);
+      // Check the new addresses now, in the background.
+      const p = check({ skus, dueOnly: true }).catch((e) => console.warn("[where-to-buy] sync check failed:", (e as Error).message));
+      // deno-lint-ignore no-explicit-any
+      const rt = (globalThis as any).EdgeRuntime;
+      if (rt?.waitUntil) rt.waitUntil(p);
+      return json({ ok: true, rebuilt });
     }
     if (mode === "p2s") return json({ ok: true, ...(await applyPrice2Spy(body)) });
     if (mode === "p2s-file") {
@@ -905,7 +1039,7 @@ Deno.serve(async (req) => {
     }
     if (mode === "check") {
       const skus = Array.isArray(body.skus) ? body.skus.map((s: unknown) => String(s).trim()).filter(Boolean).slice(0, 20) : undefined;
-      const result = await check({ limit: body.limit ?? 300, skus });
+      const result = await check({ limit: body.limit, skus });
       if (typeof body.chain === "number" && result.morePending && result.checked > 0) chainNext(body.chain);
       return json({ ok: true, chain: body.chain ?? null, ...result });
     }

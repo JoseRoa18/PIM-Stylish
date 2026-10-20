@@ -1,41 +1,23 @@
-// "Where to Buy" audit registry — mirrors the retailer keys the
-// where-to-buy-audit edge function writes (supabase/functions/where-to-buy-audit).
+// "Where to Buy" audit registry — the retailer keys the where-to-buy-audit
+// edge function writes (supabase/functions/where-to-buy-audit).
+
+import { WTB_RETAILERS as STORES } from '@/features/products/lib/whereToBuy';
 
 export const WTB_SITES = [
   { key: 'stylish_ca', label: 'Stylish Canada', short: 'Canada' },
   { key: 'stylish_us', label: 'Stylish USA', short: 'USA' },
 ];
 
-// Column order on the grid: Canada retailers, then USA, then the extras.
-export const WTB_RETAILERS = [
-  { key: 'sinksdirect_ca', label: 'SinksDirect.ca', short: 'SD.ca', market: 'ca' },
-  { key: 'wayfair_ca', label: 'Wayfair.ca', short: 'WF.ca', market: 'ca' },
-  { key: 'bestbuy_ca', label: 'BestBuy.ca', short: 'BB.ca', market: 'ca' },
-  { key: 'homedepot_ca', label: 'HomeDepot.ca', short: 'HD.ca', market: 'ca' },
-  { key: 'walmart_ca', label: 'Walmart.ca', short: 'WM.ca', market: 'ca' },
-  { key: 'amazon_ca', label: 'Amazon.ca', short: 'AMZ.ca', market: 'ca' },
-  { key: 'bbb_ca', label: 'BedBathandBeyond.ca', short: 'BBB.ca', market: 'ca' },
-  { key: 'rona', label: 'Rona', short: 'Rona', market: 'ca' },
-  { key: 'lowes_ca', label: 'Lowes.ca', short: 'LW.ca', market: 'ca' },
-  { key: 'sinksdirect_us', label: 'SinksDirect USA', short: 'SD.us', market: 'us' },
-  { key: 'wayfair_us', label: 'Wayfair.com', short: 'WF.com', market: 'us' },
-  { key: 'amazon_us', label: 'Amazon.com', short: 'AMZ.com', market: 'us' },
-  { key: 'homedepot_us', label: 'HomeDepot.com', short: 'HD.com', market: 'us' },
-  { key: 'lowes_us', label: 'Lowes.com', short: 'LW.com', market: 'us' },
-  { key: 'walmart_us', label: 'Walmart.com', short: 'WM.com', market: 'us' },
-  { key: 'bbb_us', label: 'BedBathandBeyond.com', short: 'BBB.com', market: 'us' },
-  { key: 'menards', label: 'Menards', short: 'Menards', market: 'us' },
-  { key: 'kbauthority', label: 'KB Authority', short: 'KBA', market: 'us' },
-  { key: 'warehouse_usa', label: 'Warehouse USA', short: 'WH USA', market: 'us' },
-  { key: 'overstock_ca', label: 'Overstock.ca', short: 'OS.ca', market: 'ca' },
-  { key: 'cabinet_depot', label: 'Cabinet Depot', short: 'CabDep', market: 'ca' },
-  { key: 'build_with_rise', label: 'Build with Rise', short: 'Rise', market: 'ca' },
-  { key: 'overstock_us', label: 'Overstock.com', short: 'OS.com', market: 'us' },
-  { key: 'faucetline', label: 'Faucetline', short: 'Fline', market: 'us' },
-  { key: 'ebay', label: 'eBay', short: 'eBay', market: null },
-  { key: 'stylish_locator', label: 'Store locator', short: 'Locator', market: null },
-  { key: 'other', label: 'Other link', short: 'Other', market: null },
-];
+// Column order on the grid: the stores the PIM keeps, Canada then USA — the
+// same registry as the product page and the Wix push (the store locator,
+// documents and unknown links are not checked, user 2026-10-19).
+const SHORT = {
+  sinksdirect_ca: 'SD.ca', wayfair_ca: 'WF.ca', bestbuy_ca: 'BB.ca', homedepot_ca: 'HD.ca', walmart_ca: 'WM.ca', amazon_ca: 'AMZ.ca',
+  rona: 'Rona', lowes_ca: 'LW.ca', bbb_ca: 'BBB.ca', overstock_ca: 'OS.ca', cabinet_depot: 'CabDep', build_with_rise: 'Rise', ebay: 'eBay',
+  sinksdirect_us: 'SD.us', wayfair_us: 'WF.com', amazon_us: 'AMZ.com', homedepot_us: 'HD.com', lowes_us: 'LW.com', walmart_us: 'WM.com',
+  bbb_us: 'BBB.com', overstock_us: 'OS.com', menards: 'Menards', kbauthority: 'KBA', warehouse_usa: 'WH USA', faucetline: 'Fline',
+};
+export const WTB_RETAILERS = STORES.map((r) => ({ key: r.key, label: r.label, short: SHORT[r.key] ?? r.label, market: r.market }));
 
 // A pure "does the link open the product page" check, nothing compared with
 // the PIM; `note` carries the reason. The list says OK or Broken (user,
@@ -46,7 +28,7 @@ export const WTB_VERDICTS = {
   broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address. Checked again daily.' },
   missing: { label: 'Link to add', tone: 'warning', problem: false, hint: 'The page has no link to this portal, although most products of the site link it.' },
   pending: { label: 'Not checked yet', tone: 'muted', problem: false, hint: 'Waiting for its first answer: new links are opened within the hour, and a store that did not answer is tried again a few hours later.' },
-  manual: { label: 'Check by hand', tone: 'muted', problem: false, hint: 'This site turns every automatic check away (Faucetline, Loblaws, Fortinos, Provigo): open the link to check it.' },
+  manual: { label: 'Check by hand', tone: 'muted', problem: false, hint: 'This site turns every automatic check away (Faucetline): open the link to check it.' },
 };
 
 export const WTB_VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperapi: 'ScraperAPI', price2spy: 'Price2Spy' };

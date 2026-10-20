@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, Check, ChevronDown, Copy, ExternalLink, RefreshCw, Search } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Copy, ExternalLink, RefreshCw, Search, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
-import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy } from '@/features/dashboard/api/whereToBuy';
+import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy, whereToBuyStatus, republishWhereToBuy } from '@/features/dashboard/api/whereToBuy';
 import {
   WTB_SITES,
   WTB_RETAILERS,
@@ -80,13 +80,19 @@ export default function WhereToBuyPanel() {
   const [retailerFilter, setRetailerFilter] = useState('all');
   const [toAdd, setToAdd] = useState(null); // a portal of "Links to add": its products only
   const [copied, setCopied] = useState(null);
+  const [differs, setDiffers] = useState({}); // site → SKUs whose live section is not the PIM's list
+  const [republish, setRepublish] = useState(null); // { done, total, errors }
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
 
   const reload = async (s = site) => {
     setLoading(true);
     setError(null);
-    try { setRows(await loadWhereToBuy(s)); } catch (e) { setError(e); } finally { setLoading(false); }
+    try {
+      const [r, st] = await Promise.all([loadWhereToBuy(s), whereToBuyStatus().catch(() => null)]);
+      setRows(r);
+      setDiffers(st?.differs ?? {});
+    } catch (e) { setError(e); } finally { setLoading(false); }
   };
   useEffect(() => { reload(site); setPage(1); setExpanded(null); setToAdd(null); }, [site]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -114,6 +120,15 @@ export default function WhereToBuyPanel() {
 
   const copySkus = async (retailer, skus) => {
     try { await navigator.clipboard.writeText(skus.join('\n')); setCopied(retailer); setTimeout(() => setCopied(null), 2000); } catch { /* clipboard blocked */ }
+  };
+
+  const runRepublish = async (skus) => {
+    setRepublish({ done: 0, total: skus.length, errors: 0 });
+    setError(null);
+    try {
+      await republishWhereToBuy(skus, (p) => setRepublish(p));
+      await reload();
+    } catch (e) { setError(e); } finally { setRepublish(null); }
   };
 
   const runScan = async () => {
@@ -186,7 +201,7 @@ export default function WhereToBuyPanel() {
                   disabled={busy != null}
                   aria-busy={busy === 'check'}
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-40"
-                  title="Check the links that are due now instead of waiting for the hourly pass"
+                  title="Check the links that are due now instead of waiting for the automatic pass (every 10 minutes)"
                 >
                   {busy === 'check' ? `Checking · ${progress?.checked ?? 0}` : 'Check links'}
                 </button>
@@ -202,9 +217,28 @@ export default function WhereToBuyPanel() {
           {stat('Broken', counts.broken, counts.broken ? 'text-error' : undefined)}
           {stat('Not checked yet', counts.pending)}
           {stat('Check by hand', counts.manual)}
-          {stat('Dropbox docs', summary.dropbox, summary.dropbox ? 'text-warning' : undefined)}
         </div>
       </div>
+
+      {(differs[site]?.length ?? 0) > 0 && (
+        <div className="rounded-2xl border border-warning/40 bg-warning-container/40 px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-body-sm text-on-surface">
+            <span className="font-semibold">{differs[site].length} page{differs[site].length === 1 ? '' : 's'} on {WTB_SITES.find((s) => s.key === site)?.label}</span> show other links than the PIM (changed by hand in Wix, or not published yet): {differs[site].slice(0, 8).join(', ')}{differs[site].length > 8 ? '…' : ''}
+          </p>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => runRepublish(differs[site])}
+              disabled={republish != null || busy != null}
+              aria-busy={republish != null}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container disabled:opacity-40"
+            >
+              <Upload className="w-4 h-4" aria-hidden="true" />
+              {republish ? `Publishing ${republish.done} of ${republish.total}` : "Publish the PIM's links"}
+            </button>
+          )}
+        </div>
+      )}
 
       {toAddList.length > 0 && (
         <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-5">
@@ -294,7 +328,6 @@ export default function WhereToBuyPanel() {
                   {columns.map((c) => (
                     <th key={c.key} className="px-1 py-2 font-semibold text-center whitespace-nowrap" title={c.label}>{c.short}</th>
                   ))}
-                  <th className="px-2 py-2 font-semibold text-center">Docs</th>
                   <th className="px-3 py-2 font-semibold text-right">Issues</th>
                   <th className="w-8"><span className="sr-only">Actions</span></th>
                 </tr>
@@ -304,7 +337,6 @@ export default function WhereToBuyPanel() {
                   const byRetailer = new Map();
                   for (const l of g.links) { if (!byRetailer.has(l.retailer)) byRetailer.set(l.retailer, []); byRetailer.get(l.retailer).push(l); }
                   const open = expanded === g.sku;
-                  const docProblems = g.docs.filter((d) => isProblem(d.verdict)).length;
                   return (
                     <Fragment key={g.sku}>
                       <tr className="border-t border-outline-variant hover:bg-surface-container-low cursor-pointer" onClick={() => setExpanded(open ? null : g.sku)}>
@@ -314,11 +346,6 @@ export default function WhereToBuyPanel() {
                         {columns.map((c) => (
                           <td key={c.key} className="px-1 py-1.5 text-center"><Cell links={byRetailer.get(c.key)} /></td>
                         ))}
-                        <td className="px-2 py-1.5 text-center whitespace-nowrap">
-                          <span className={docProblems ? 'text-error font-semibold' : g.dropbox ? 'text-warning' : 'text-on-surface-variant'} title={g.dropbox ? `${g.dropbox} still on Dropbox` : ''}>
-                            {g.docs.length}{g.dropbox ? ' · Dropbox' : ''}
-                          </span>
-                        </td>
                         <td className={`px-3 py-1.5 text-right tabular-nums ${g.problems ? 'text-error font-semibold' : 'text-on-surface-variant'}`}>{g.problems}</td>
                         <td className="px-2 py-1.5 text-on-surface-variant">
                           {/* The row opens on click; this button lets the keyboard do it too
@@ -330,9 +357,9 @@ export default function WhereToBuyPanel() {
                       </tr>
                       {open && (
                         <tr className="border-t border-outline-variant bg-surface-container-low/60">
-                          <td colSpan={columns.length + 4} className="px-4 py-3">
+                          <td colSpan={columns.length + 3} className="px-4 py-3">
                             <ul className="space-y-1.5">
-                              {[...g.links, ...g.docs].map((l) => (
+                              {g.links.map((l) => (
                                 <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                   <VerdictChip verdict={l.verdict} />
                                   <span className="text-on-surface font-semibold min-w-[9rem]">
@@ -351,9 +378,9 @@ export default function WhereToBuyPanel() {
                                 </li>
                               ))}
                             </ul>
-                            {g.wix_product_id && (
-                              <p className="mt-2 text-body-sm text-on-surface-variant">Fix the section in the Wix dashboard of {WTB_SITES.find((s) => s.key === site)?.label}.</p>
-                            )}
+                            <p className="mt-2 text-body-sm text-on-surface-variant">
+                              Change the links in the product&apos;s <Link to={`/catalog/${encodeURIComponent(g.sku)}?tab=where_to_buy`} className="text-primary underline underline-offset-2">Where to Buy tab</Link> — the PIM writes both Stylish pages from it.
+                            </p>
                           </td>
                         </tr>
                       )}
@@ -362,7 +389,7 @@ export default function WhereToBuyPanel() {
                 })}
                 {pageRows.length === 0 && (
                   <tr className="border-t border-outline-variant">
-                    <td colSpan={columns.length + 4} className="px-4 py-8 text-center text-on-surface-variant">
+                    <td colSpan={columns.length + 3} className="px-4 py-8 text-center text-on-surface-variant">
                       {toAdd ? 'No product misses this link.' : onlyProblems ? 'No broken links on this site.' : 'No products match.'}
                     </td>
                   </tr>

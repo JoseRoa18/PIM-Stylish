@@ -38,3 +38,8 @@ update public.where_to_buy_links set next_check_at = case
     then case when note like 'Price2Spy%' then 'price2spy' else 'direct' end end;
 
 create index if not exists where_to_buy_links_due_idx on public.where_to_buy_links (next_check_at nulls first) where url is not null;
+
+-- The check runs every 10 minutes (it was hourly): a call chains at most 4
+-- more batches, so a chain cut short (a deploy, the runtime's limit) is
+-- picked up within minutes instead of the next hour. The job keeps its name.
+select cron.alter_job((select jobid from cron.job where jobname = 'where-to-buy-check-hourly'), schedule := '*/10 * * * *');

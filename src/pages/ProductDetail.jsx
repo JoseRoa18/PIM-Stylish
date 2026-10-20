@@ -29,6 +29,7 @@ import {
   Fingerprint,
   ExternalLink,
   Ban,
+  ShoppingBag,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
@@ -74,6 +75,7 @@ const WalmartProductCard = lazy(() => import('@/features/syndication/components/
 const WalmartAdditionCard = lazy(() => import('@/features/syndication/components/WalmartAdditionCard'));
 const ChannelExclusionsCard = lazy(() => import('@/features/syndication/components/ChannelExclusionsCard'));
 const AliasesTab = lazy(() => import('@/features/products/components/AliasesTab'));
+const WhereToBuyTab = lazy(() => import('@/features/products/components/WhereToBuyTab'));
 const ProductHistoryDialog = lazy(() => import('@/features/products/components/ProductHistoryDialog'));
 const CreateProductDialog = lazy(() => import('@/features/products/components/CreateProductDialog'));
 
@@ -136,6 +138,7 @@ const TABS = [
   { key: 'media', label: 'Media', icon: ImageIcon },
   { key: 'marketplaces', label: 'Marketplaces', icon: Store },
   { key: 'aliases', label: 'Aliases', icon: Fingerprint },
+  { key: 'where_to_buy', label: 'Where to Buy', icon: ShoppingBag },
 ];
 
 const WORKFLOW_OPTIONS = [
@@ -733,6 +736,7 @@ export default function ProductDetail() {
         )}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
         {activeTab === 'aliases' && <AliasesTab product={product} />}
+        {activeTab === 'where_to_buy' && <WhereToBuyTab product={product} />}
         </Suspense>
       </div>
 
