@@ -106,9 +106,15 @@ function readWayfair(html, url) {
       });
     }
   }
+  // 7. Did the link choose the option shown? Wayfair says isOptionIdMismatched when the URL's ?piid= is
+  //    not an option of the listing — or when there is no ?piid= at all: then its server preselects the
+  //    listing's DEFAULT option (h1 part #, photo, price, swatch: all the default's — checked on 16 pages
+  //    from Canadian exits, 2026-10-20). A link WITH a ?piid= the listing no longer has is stale.
+  const mismatched = ctx?.parsedParams?.isOptionIdMismatched === true;
   return {
     ids, options: [], price, wasPrice, currency: currency ? currency.toUpperCase() : null, inStock, itemId: listing,
-    piids: selected ? selected.split(',') : [], optionDefaulted: ctx?.parsedParams?.isOptionIdMismatched === true, choices,
+    piids: selected ? selected.split(',') : [], optionDefaulted: mismatched, optionStale: mismatched && piidsOf(url) !== '',
+    choices, choiceCount: choices.length,
     optionLinks: choices.filter((c) => !c.selected && c.url).map((c) => ({ name: c.name, itemId: c.piid, url: c.url })),
     source: fromBlock && price !== null ? 'rsc-flight+pricing-block' : 'rsc-flight',
   };

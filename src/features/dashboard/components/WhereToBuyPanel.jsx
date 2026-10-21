@@ -14,6 +14,7 @@ import {
   linkStatus,
   isLinkProblem,
   isWrongProduct,
+  isOtherFinish,
   pageReading,
 } from '@/features/dashboard/lib/whereToBuy';
 
@@ -234,6 +235,7 @@ export default function WhereToBuyPanel() {
           {stat('OK', counts.ok, 'text-success')}
           {stat('Broken', counts.broken, counts.broken ? 'text-error' : undefined)}
           {stat('Wrong product', summary.wrongProduct, summary.wrongProduct ? 'text-warning' : undefined)}
+          {stat('Other finish', summary.otherFinish)}
           {stat('Not checked yet', counts.pending)}
           {stat('Check by hand', counts.manual)}
         </div>
@@ -396,6 +398,7 @@ export default function WhereToBuyPanel() {
                                     l.verdict !== 'ok' ? l.note : null,
                                     wrong && l.page_model ? `The page shows ${l.page_model}, not ${g.sku}${l.sku_check === 'variant' ? ' (another option of the same product)' : ''}` : null,
                                     wrong && l.verdict !== 'broken' ? linkStatus(l).hint : null,
+                                    isOtherFinish(l) && l.verdict !== 'broken' ? `The page opens on ${l.page_model ?? 'another finish'}, the listing's default option. ${linkStatus(l).hint}` : null,
                                     when ? `Checked by ${when}` : null,
                                   ].filter(Boolean).join('\n');
                                   return (

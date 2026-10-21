@@ -304,7 +304,8 @@ async function loadPageAlignment(cfg) {
   for (const [sku, r] of bySku) {
     if (!baseBySku.has(sku)) continue; // not a PIM product
     if (r.verdict === 'broken' && r.sku_check !== 'other') { results.push({ sku, state: 'missing' }); continue; }
-    if (r.sku_check === 'other' || r.sku_check === 'variant' || (r.sku_check === 'unknown' && r.page_model)) { left.otherProduct += 1; continue; }
+    // 'listing' (the right listing on its default option): the price read is the default finish's.
+    if (r.sku_check === 'other' || r.sku_check === 'variant' || r.sku_check === 'listing' || (r.sku_check === 'unknown' && r.page_model)) { left.otherProduct += 1; continue; }
     if (r.price == null || !r.read_at) { left[r.in_stock === false ? 'soldOut' : 'noPrice'] += 1; continue; }
     if (r.currency && r.currency !== currency) { left.otherCurrency += 1; continue; }
     if (changedOn.has(sku) && etDay(r.read_at) < changedOn.get(sku)) { left.readBeforeChange += 1; continue; }

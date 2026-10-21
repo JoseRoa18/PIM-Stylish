@@ -135,7 +135,11 @@ function clean(read) {
     read.note,
     read.coupon ? `${read.coupon} coupon at checkout` : null,
     /price in cart/i.test(String(read.source ?? "")) ? "price shown only in the cart" : null,
-    read.optionDefaulted === true ? "the link selects no option: the store shows the listing's default one" : null,
+    read.optionDefaulted === true
+      ? (read.optionStale === true
+        ? "the link's option is not on the listing (any more): the store shows the listing's default one"
+        : "the link selects no option: the store shows the listing's default one")
+      : null,
   ]).join("; ").slice(0, 300) || null;
   return {
     ids,
@@ -148,6 +152,8 @@ function clean(read) {
     canonical: /^https?:\/\//i.test(String(read.canonical ?? "")) ? String(read.canonical).slice(0, 500) : null,
     source: read.source ? String(read.source).slice(0, 120) : null,
     optionDefaulted: read.optionDefaulted === true,
+    optionStale: read.optionStale === true,
+    choiceCount: Number.isInteger(read.choiceCount) ? read.choiceCount : null,
     gone,
     note,
   };
@@ -238,10 +244,20 @@ function oneFamily(code, ourFamily, catalog) {
 //            (Lowe's "S-310G1"), as its family model without the finish (a
 //            dealer's "A-801" for A-801B, when only that family starts so),
 //            or by its UPC
+//   listing  the link opens the RIGHT multi-option listing, but chooses no
+//            option, so the store preselects its default one — another
+//            finish of the family (Wayfair: a bare link without ?piid=;
+//            A-801B's link opens TKJS1134 on A-801N Matte Black, Brushed
+//            Nickel one click away). The user counts it as fine (2026-10-20:
+//            "realmente están bien"): shown on the websites, flagged "Other
+//            finish" to be improved with the option's own address; its price
+//            is the default's, so Price Alignment leaves it out
 //   variant  the page is on another option of the same product: a PIM product
 //            of the same family (A-801N for A-801B, P-205-2 for P-205), a
 //            listing that names ours among its options, or a listing the link
-//            opens on its default option (no option selected)
+//            opens on its default option when that is not a plain "no option
+//            chosen" (a stale ?piid= the listing no longer has, a listing with
+//            a single option, a default of a known other family)
 //   other    the page is on ANOTHER PIM product (by its model or its UPC)
 //   unknown  the page names no model the PIM can place (or one it cannot
 //            tell from the link's SKU: the Azuni twin's spelling)
@@ -250,10 +266,19 @@ export function skuCheck(read, sku, catalog) {
   const want = normSku(sku);
   const ids = uniq(read.ids).map((id) => ({ id, n: normSku(id) })).filter((x) => x.n.length >= 3 && !/^\d+$/.test(x.n));
   const options = new Set(uniq(read.options).map(normSku));
-  const ourFamily = catalog?.family?.get(sku) ?? null;
+  const famOf = (s) => catalog?.family?.get(s) ?? null;
+  const ourFamily = famOf(sku);
   const sibling = (owner) => options.has(want) || read.optionDefaulted === true
-    || (ourFamily !== null && catalog?.family?.get(owner) === ourFamily);
-  const judge = (owner, model) => (owner === sku ? { check: "match", model } : { check: sibling(owner) ? "variant" : "other", model: owner });
+    || (ourFamily !== null && famOf(owner) === ourFamily);
+  // The listing's default of a product the PIM knows to be another family
+  // (both families set and different: K-152 on K-151 Alba's listing) is not
+  // "the right listing".
+  const knownOther = (owner) => ourFamily !== null && famOf(owner) !== null && famOf(owner) !== ourFamily;
+  const rightListing = (owner) => read.optionDefaulted === true && read.optionStale !== true
+    && (read.choiceCount ?? 0) >= 2 && !knownOther(owner);
+  const judge = (owner, model) => (owner === sku ? { check: "match", model }
+    : rightListing(owner) ? { check: "listing", model: owner }
+    : { check: sibling(owner) ? "variant" : "other", model: owner });
   const gtinOwner = () => (read.gtins ?? []).map((g) => catalog?.byUpc?.get(upcKey(g))).find(Boolean) ?? null;
   // A Stylish SKU and its Azuni twin differ only by the dash: the UPC tells
   // them apart, else only the exact spelling counts.

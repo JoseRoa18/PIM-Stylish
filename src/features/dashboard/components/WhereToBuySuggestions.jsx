@@ -20,6 +20,7 @@ const WHY = {
   wrong_link: { label: 'Wrong product', cls: 'bg-warning-container text-on-warning-container', hint: 'The current link opens another product or option' },
   broken_link: { label: 'Broken', cls: 'bg-error-container text-on-error-container', hint: 'The current link does not open' },
   missing: { label: 'Link to add', cls: 'bg-surface-container-high text-on-surface-variant', hint: 'No link to this store yet' },
+  other_finish: { label: 'Other finish', cls: 'bg-surface-container-high text-on-surface-variant', hint: 'The current link opens the right listing on another finish (the store default option)' },
 };
 const STORE_ORDER = new Map(WTB_RETAILERS.map((r, i) => [r.key, i]));
 const storeLabel = (k) => WTB_RETAILERS.find((r) => r.key === k)?.label ?? k;

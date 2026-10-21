@@ -49,11 +49,22 @@ export const WRONG_OPTION = {
   label: 'Wrong product', tone: 'warning', problem: true,
   hint: 'The link opens another option of the same product (another finish or size). It is not shown on the Stylish websites until it opens this product\'s option — use the suggested link or edit it.',
 };
+// A link that opens the right listing on its default option (sku_check
+// 'listing' — Wayfair without ?piid=): the user counts it as fine (2026-10-20),
+// so it stays on the websites and is no problem; only a hint to give it the
+// product's own option.
+export const OTHER_FINISH = {
+  label: 'Other finish', tone: 'muted', problem: false,
+  hint: 'Opens the right listing, but the store preselects another finish (with its price); this product\'s finish is one click away. It stays on the websites — use the suggested link so it opens this product\'s own option.',
+};
 export const isWrongProduct = (row) => row?.sku_check === 'other' || row?.sku_check === 'variant';
-// What a link's status chip says: its verdict, or "Wrong product" while the
-// link is not Broken (OK, or a new link waiting for its second check).
+export const isOtherFinish = (row) => row?.sku_check === 'listing';
+// What a link's status chip says: its verdict, or "Wrong product" / "Other
+// finish" while the link is not Broken (OK, or a new link waiting for its
+// second check).
 export const linkStatus = (row) => ((row.verdict === 'ok' || row.verdict === 'pending') && isWrongProduct(row)
   ? (row.sku_check === 'variant' ? WRONG_OPTION : WRONG_PRODUCT)
+  : (row.verdict === 'ok' || row.verdict === 'pending') && isOtherFinish(row) ? OTHER_FINISH
   : WTB_VERDICTS[row.verdict] ?? { label: row.verdict, tone: 'muted' });
 export const isLinkProblem = (row) => isProblem(row.verdict) || isWrongProduct(row);
 
@@ -98,14 +109,16 @@ export function groupWhereToBuy(rows) {
 }
 
 export function summarizeWhereToBuy(rows) {
-  const s = { products: new Set(), links: 0, docs: 0, byVerdict: {}, problems: 0, wrongProduct: 0, dropbox: 0, pending: 0, lastScan: null, lastCheck: null };
+  const s = { products: new Set(), links: 0, docs: 0, byVerdict: {}, problems: 0, wrongProduct: 0, otherFinish: 0, dropbox: 0, pending: 0, lastScan: null, lastCheck: null };
   for (const r of rows) {
     s.products.add(r.sku);
     if (r.section === 'documents') s.docs += 1; else if (r.url) s.links += 1;
-    // Each link counts once, under what its chip says ("Wrong product" or its
-    // verdict — a Broken one that opens another product counts as Broken).
+    // Each link counts once, under what its chip says ("Wrong product",
+    // "Other finish" or its verdict — a Broken one that opens another product
+    // counts as Broken).
     const status = linkStatus(r);
     if (r.url && (status === WRONG_PRODUCT || status === WRONG_OPTION)) s.wrongProduct += 1;
+    else if (r.url && status === OTHER_FINISH) s.otherFinish += 1;
     else {
       s.byVerdict[r.verdict] = (s.byVerdict[r.verdict] ?? 0) + 1;
       if (r.verdict === 'pending') s.pending += 1;

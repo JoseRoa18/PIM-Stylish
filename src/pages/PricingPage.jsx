@@ -663,7 +663,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                   result.readFrom ? `read ${fmtDay(result.readFrom)}${fmtDay(result.readFrom) !== fmtDay(result.readTo) ? ` – ${fmtDay(result.readTo)}` : ''}` : null,
                   'expected prices as the PIM has them now',
                   result.notOnStore ? `${result.notOnStore} broken link${result.notOnStore === 1 ? '' : 's'} left out` : null,
-                  result.otherProduct ? `${result.otherProduct} link${result.otherProduct === 1 ? '' : 's'} opening another product left out` : null,
+                  result.otherProduct ? `${result.otherProduct} link${result.otherProduct === 1 ? '' : 's'} opening another product or finish left out` : null,
                   result.otherCurrency ? `${result.otherCurrency} shown in another currency left out` : null,
                   result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again (that morning, 9:10 Eastern)` : null,
                   result.soldOut ? `${result.soldOut} sold out without a price` : null,

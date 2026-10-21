@@ -761,7 +761,7 @@ interface OptionLink { model: string | null; name: string | null; subSku: string
 interface PageRead {
   ids: string[]; options: string[]; gtins: string[]; price: number | null; wasPrice: number | null; currency: string | null;
   inStock: boolean | null; itemId: string | null; source: string | null; optionDefaulted: boolean; gone: boolean; note: string | null;
-  subSku: string | null; optionLinks: OptionLink[]; canonical: string | null;
+  subSku: string | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
 }
 interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string }
 
@@ -1426,7 +1426,9 @@ async function promoReread(opts: { asOf?: string; dryRun?: boolean } = {}) {
 // product's list is saved and published as usual); a dismissed one never
 // comes back. Mode "suggest" (cron every 10 minutes): the candidates are
 // looked for once an hour, the waiting ones opened on every call.
-type SuggestReason = "wrong_link" | "broken_link" | "missing";
+// other_finish: the link opens the right listing on its default option (sku_check "listing", shown on
+// the websites) — the suggestion is the address of the product's own option.
+type SuggestReason = "wrong_link" | "broken_link" | "missing" | "other_finish";
 type SuggestSource = "other_link" | "page_option" | "store_id";
 interface Suggestion {
   id?: string; sku: string; retailer: string; url: string; found_url: string | null; reason: SuggestReason; source: SuggestSource;
@@ -1600,7 +1602,7 @@ async function buildSuggestions(dryRun = false) {
   for (const l of links) {
     if (!l.url || !fresh(l) || l.verdict === "broken") continue;
     if (l.sku_check === "match") note(l.retailer, l.sku, l);
-    else if ((l.sku_check === "variant" || l.sku_check === "other") && l.page_model && productBySku.has(l.page_model) && !/selects no option/.test(l.page_note ?? "")) note(l.retailer, l.page_model, l);
+    else if ((l.sku_check === "variant" || l.sku_check === "other") && l.page_model && productBySku.has(l.page_model) && !/listing's default one/.test(l.page_note ?? "")) note(l.retailer, l.page_model, l);
     for (const o of l.page_options ?? []) {
       const owner = optionOwner(o, l.retailer, ctx);
       const url = cleanSuggestionUrl(o.url);
@@ -1632,7 +1634,8 @@ async function buildSuggestions(dryRun = false) {
       const state = cur ? current.get(`${sku}|${r}`) : undefined;
       const reason: SuggestReason | null = !cur ? "missing"
         : state?.verdict === "broken" ? "broken_link"
-        : state && (state.sku_check === "variant" || state.sku_check === "other") ? "wrong_link" : null;
+        : state && (state.sku_check === "variant" || state.sku_check === "other") ? "wrong_link"
+        : state?.sku_check === "listing" ? "other_finish" : null;
       if (!reason) continue;
       const found: Suggestion[] = [];
       const add = (url: string | null, source: SuggestSource, detail: string, ready?: SugLink) => {
@@ -1656,7 +1659,7 @@ async function buildSuggestions(dryRun = false) {
       const byId = id ? idAddress(r, id) : null;
       if (byId && !(cur && cur.includes(id!.split("-")[0]))) add(byId, "store_id", r === "bestbuy_ca" ? `Best Buy's offers API: product ${id}` : r === "homedepot_us" ? `Home Depot USA id ${id} (Aliases)` : `BB&B / Overstock id ${id} (Aliases)`);
       // 4. The listing the wrong link opens: its option named like this product's finish.
-      if (reason === "wrong_link" && state?.page_options?.length) {
+      if ((reason === "wrong_link" || reason === "other_finish") && state?.page_options?.length) {
         const unowned = state.page_options.filter((o) => !optionOwner(o, r, ctx));
         for (const o of optionsByName(unowned, product)) add(o.url, "page_option", `The page of the link names an option "${o.name}" (${[product.color, product.finish].filter(Boolean).join(" / ")})`);
       }
