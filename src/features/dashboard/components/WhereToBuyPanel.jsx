@@ -4,6 +4,7 @@ import { AlertCircle, Check, ChevronDown, Copy, ExternalLink, RefreshCw, Search,
 import { useAuth } from '@/features/auth/AuthContext';
 import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy, whereToBuyStatus, republishWhereToBuy } from '@/features/dashboard/api/whereToBuy';
 import WhereToBuySuggestions from './WhereToBuySuggestions';
+import WhereToBuyExcel from './WhereToBuyExcel';
 import {
   WTB_SITES,
   WTB_RETAILERS,
@@ -201,6 +202,7 @@ export default function WhereToBuyPanel() {
               ))}
             </div>
             {rows.length > 0 && <WhereToBuySuggestions skus={siteSkus} onApplied={() => reload()} />}
+            <WhereToBuyExcel onImported={() => reload()} />
             {canEdit && (
               <>
                 <button

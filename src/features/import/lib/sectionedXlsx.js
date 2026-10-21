@@ -11,6 +11,13 @@
 // (optional, one per column) shows a column as 'money' (#,##0.00), 'percent'
 // (a fraction shown 0%) or 'link' (a clickable URL).
 //
+// `widths` (optional, one per column, null = by its content) sets column
+// widths; `emptyText` (column indexes) writes an empty cell there as empty
+// text, so a long value in the cell to its left does not spill over it.
+// `cellColor(values, column)` (optional) colors single cells: it returns
+// { fill: 'E6F4EA', bold? } (or a bare hex) for a cell to tint, else null —
+// the Where to Buy export tints each link's status and the column to fill in.
+//
 // A sheet with `blocks` instead is a report page (the full PIM report's
 // Summary and Notes): { name, title, subtitle, widths: [B, C…], blocks: [{
 // title, note?, headers, rows, total?, formats: ['text' | 'center' | 'count' |
@@ -91,9 +98,17 @@ const EXTRA_STYLES = [
 ];
 const extraStyle = (colors, name) => 2 + 2 * colors.length + EXTRA_STYLES.findIndex(([n]) => n === name);
 
-function stylesXml(colors) {
+// A tinted data cell's key ("E6F4EA|b" = that fill, bold), from cellColor's answer.
+const cellKey = (c) => {
+  if (!c) return null;
+  const fill = typeof c === 'string' ? c : c.fill;
+  return fill ? `${String(fill).toUpperCase()}|${typeof c === 'object' && c.bold ? 'b' : ''}` : null;
+};
+
+// `cellKeys`: the tinted cells' styles, after EXTRA_STYLES (one fill each).
+function stylesXml(colors, cellKeys = []) {
   // fills 0/1 are Excel's reserved none / gray125; then dark + light per
-  // section, then the report tables' header and total fills
+  // section, then the report tables' header and total fills, then the tinted cells'
   const fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>'];
   for (const c of colors) {
     fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`);
@@ -113,6 +128,11 @@ function stylesXml(colors) {
     xfs.push(`<xf numFmtId="0" fontId="2" fillId="${3 + 2 * i}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>`);
   });
   for (const [, xf] of EXTRA_STYLES) xfs.push(xf(fixedFills));
+  for (const key of cellKeys) {
+    const [fill, bold] = key.split('|');
+    xfs.push(`<xf numFmtId="0" fontId="${bold ? 7 : 0}" fillId="${fills.length}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>`);
+    fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${fill}"/><bgColor indexed="64"/></patternFill></fill>`);
+  }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="10">
@@ -180,7 +200,7 @@ function validationsXml(validations, untilRow) {
 // A column's data style: its format's, else the plain data cell.
 const formatStyles = (sheet, colors) => (sheet.formats ?? []).map((f) => (f ? extraStyle(colors, f) : 1));
 
-function sheetXml(sheet, styleOf, validations = [], colors = []) {
+function sheetXml(sheet, styleOf, validations = [], colors = [], cellStyle = () => null) {
   const headers = sheet.sections.flatMap((s) => s.headers);
   const styles = formatStyles(sheet, colors);
   const links = []; // { ref, url } — written as the sheet's hyperlinks
@@ -205,12 +225,15 @@ function sheetXml(sheet, styleOf, validations = [], colors = []) {
     const cells = headers.map((_, c) => {
       const ref = `${colLetter(c)}${n}`;
       if (sheet.formats?.[c] === 'link' && /^https?:\/\//i.test(String(values[c] ?? ''))) links.push({ ref, url: String(values[c]) });
-      return cellXml(ref, values[c], styles[c] ?? 1);
+      const style = cellStyle(values, c) ?? styles[c] ?? 1;
+      // an empty text in a column to fill in: the long link left of it stays in its own cell
+      if (sheet.emptyText?.includes(c) && (values[c] === '' || values[c] == null)) return `<c r="${ref}" s="${style}" t="inlineStr"><is><t></t></is></c>`;
+      return cellXml(ref, values[c], style);
     }).join('');
     return `<row r="${n}">${cells}</row>`;
   });
   const sample = sheet.rows.slice(0, 200);
-  const cols = headers.map((h, i) => `<col min="${i + 1}" max="${i + 1}" width="${columnWidth(h, sample.map((r) => r[i]))}" customWidth="1"/>`).join('');
+  const cols = headers.map((h, i) => `<col min="${i + 1}" max="${i + 1}" width="${sheet.widths?.[i] ?? columnWidth(h, sample.map((r) => r[i]))}" customWidth="1"/>`).join('');
   const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <dimension ref="A1:${last}${lastRow}"/>
@@ -343,15 +366,25 @@ export async function buildSectionedWorkbook(sheets, { validationFor = null } = 
     return [...byRule.values()];
   });
 
+  // the tinted cells' distinct styles (cellColor), after the named ones
+  const cellKeys = [...new Set(sheets.filter((s) => s.cellColor && !s.blocks).flatMap((s) => {
+    const width = s.sections.reduce((n, x) => n + x.headers.length, 0);
+    return s.rows.flatMap((values) => Array.from({ length: width }, (_, c) => cellKey(s.cellColor(values, c)))).filter(Boolean);
+  }))];
+  const cellBase = 2 + 2 * colors.length + EXTRA_STYLES.length;
+  const cellStyleOf = (sheet) => (sheet.cellColor
+    ? (values, c) => { const k = cellKey(sheet.cellColor(values, c)); return k ? cellBase + cellKeys.indexOf(k) : null; }
+    : () => null);
+
   sheets.forEach((sheet, i) => {
     if (sheet.blocks) return put(`xl/worksheets/sheet${i + 1}.xml`, reportSheetXml(sheet, colors));
-    const { xml, links } = sheetXml(sheet, styleOf, perSheet[i], colors);
+    const { xml, links } = sheetXml(sheet, styleOf, perSheet[i], colors, cellStyleOf(sheet));
     put(`xl/worksheets/sheet${i + 1}.xml`, xml);
     if (links.length) put(`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, linksRelsXml(links));
   });
   const allNames = lists.length ? [...names, LISTS_SHEET] : names;
   if (lists.length) put(`xl/worksheets/sheet${allNames.length}.xml`, listsSheetXml(lists));
-  put('xl/styles.xml', stylesXml(colors));
+  put('xl/styles.xml', stylesXml(colors, cellKeys));
   const filterNames = sheets.flatMap((sheet, i) => {
     if (sheet.blocks) return []; // a report page has no filter
     const count = sheet.sections.reduce((n, s) => n + s.headers.length, 0);

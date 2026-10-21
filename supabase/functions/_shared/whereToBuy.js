@@ -70,11 +70,12 @@ export function retailerForUrl(url) {
 
 /**
  * Tidy an address before it is stored: trim, spaces as %20, and Amazon's
- * long tracking links cut to …/dp/<ASIN> (the same page).
+ * long tracking links (…/dp/<ASIN>/ref=…, /gp/product/<ASIN>, /gp/aw/d/<ASIN>)
+ * cut to …/dp/<ASIN> (the same page).
  */
 export function cleanWtbUrl(url) {
   let u = String(url ?? '').trim().replace(/ /g, '%20');
-  const asin = u.match(/^https?:\/\/(?:www\.)?(amazon\.(?:ca|com))\/(?:[^?#]*\/)?dp\/([A-Z0-9]{10})(?:[/?#]|$)/i);
+  const asin = u.match(/^https?:\/\/(?:www\.)?(amazon\.(?:ca|com))\/(?:[^?#]*\/)?(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})(?:[/?#]|$)/i);
   if (asin) u = `https://www.${asin[1].toLowerCase()}/dp/${asin[2].toUpperCase()}`;
   return u;
 }
