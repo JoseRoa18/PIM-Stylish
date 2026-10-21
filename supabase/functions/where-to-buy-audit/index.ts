@@ -1012,7 +1012,24 @@ const PRICE_BLIND = new Set(["amazon_ca", "amazon_us"]);
 // probe keeps its finer rules (redirects to home / login pages). An
 // unlocker's "page without the product" is kept for last: the next method may
 // still open the product (a store can answer one service a page of its own).
+// Vatero's Shopify store converts its prices to the visitor's currency: from
+// the server (a US address) it answered USD 90 for a CAD 115 sink, so 161 of
+// its 167 readings were in USD and Price Alignment left them out (2026-10-21).
+// Asking for Canada (?country=CA) gives the Canadian page. Only the request
+// changes: the link kept and published stays as it is.
+const ASK_PARAMS: Record<string, Record<string, string>> = { vatero: { country: "CA" } };
+function requestUrl(retailer: string, url: string): string {
+  const params = ASK_PARAMS[retailer];
+  if (!params) return url;
+  try {
+    const u = new URL(url);
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    return u.href;
+  } catch { return url; }
+}
+
 async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
+  row = { ...row, url: requestUrl(row.retailer, row.url) };
   const misses: string[] = [];
   let last: Outcome = { kind: "none", note: "not tried" };
   let provisional: Outcome | null = null;
