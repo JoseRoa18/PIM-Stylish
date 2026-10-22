@@ -110,7 +110,7 @@ const JOB_GIVEUP_HOURS = 6; // … still running after 6 h counts as a soft sign
 const LEASE_MIN = 15;       // a batch claims its links for 15 min (no double work)
 const BATCH_MS = 110000;    // one check call (the runtime cuts at ~150 s)
 const START_MS = 55000;     // no link starts after this point of the call
-const MAX_CHAIN = 4;        // cron chain (every 10 min): at most 4 more batches per call
+const MAX_CHAIN = 5;        // cron chain (every 10 min): at most 5 more batches per call
 const STANDARD_SHARE = 0.6; // a portal is "standard" when 60% of the pages link it
 const NEVER = "2999-01-01T00:00:00.000Z"; // scan-time verdicts are never probed
 
@@ -548,6 +548,32 @@ const laneConfig = (host: string) =>
 
 interface Probe { verdict: "ok" | "broken" | "pending"; http_status: number | null; final_url: string | null; note: string | null; title?: string; body?: string }
 
+// Only the head of a page is downloaded: the readers find the product in its
+// first ~300 KB (Sinks Direct's Wix pages are 3 MB, the title and product at
+// ~235 KB). Reading whole pages ran every check call out of resources
+// (WORKER_RESOURCE_LIMIT, 2026-10-21 20:41 → 10-22 10:00 ET) once Sinks
+// Direct's ~850 links came due together. Amazon pages run up to 2 MB, their
+// "Product details" rows past the first 1.2 MB (2026-10-20).
+const bodyLimit = (host: string) => (/(^|\.)amazon\./.test(host) ? 3_000_000 : 600_000);
+async function readHead(r: Response, max: number): Promise<string> {
+  if (!r.body) return "";
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  try {
+    while (bytes < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    try { await reader.cancel(); } catch { /* already closed */ }
+  }
+  return text;
+}
+
 async function probe(url: string): Promise<Probe> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000);
@@ -556,9 +582,9 @@ async function probe(url: string): Promise<Probe> {
     const status = r.status;
     const finalUrl = r.url || url;
     let body = "";
-    // Amazon pages run up to 2 MB, their "Product details" rows past the first 1.2 MB (2026-10-20).
-    if (DOC_HOST.test(new URL(finalUrl).hostname)) { try { await r.body?.cancel(); } catch { /* ignore */ } }
-    else { try { body = (await r.text()).slice(0, 3000000); } catch { body = ""; } }
+    const host = new URL(finalUrl).hostname;
+    if (DOC_HOST.test(host)) { try { await r.body?.cancel(); } catch { /* ignore */ } }
+    else { try { body = await readHead(r, bodyLimit(host)); } catch { body = ""; } }
     if (status === 404 || status === 410) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `HTTP ${status}` };
     // 401/403/429 and 5xx from retailers are robot blocks (Amazon answers
     // 500/503 to datacenter traffic) — the link is not verified, try later.
@@ -1221,7 +1247,12 @@ const dueFilter = () => `url=not.is.null&verdict=not.in.(missing,manual)&or=(nex
 const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([, r]) => r[0] !== "direct" && r[0] !== "scraper").map(([k]) => k);
 const SCRAPER_POOL = 900; // rows (both sites); each store goes as one scraper job
 const UNLOCKER_BATCH = 72;
-const DIRECT_BATCH = 250;
+// The server's own probe: 50 rows a call (2026-10-22). A call has a fixed
+// share of compute, and 250 rows of heavy pages (Sinks Direct's Wix pages,
+// Walmart through Bright Data) ran every call out of it once those links
+// came due together — WORKER_RESOURCE_LIMIT from 10-21 20:41 to 10-22 10:00
+// ET; a batch of 30 went through. Smaller calls, more of them (MAX_CHAIN).
+const DIRECT_BATCH = 50;
 // At most this many rows of one host in a batch (its lanes cannot open more
 // in one call): a store with a long backlog — a dealer's 640 new links, BB&B
 // and Overstock waiting for ScraperAPI — never fills a batch and holds the
@@ -1229,7 +1260,7 @@ const DIRECT_BATCH = 250;
 // page): at 360 rows, 191 pending Aquarina links and two stores' re-checks
 // filled the window and Amazon.ca got no turn for 15 minutes (2026-10-20).
 const UNLOCKER_PER_HOST = 12;
-const DIRECT_PER_HOST = 40;
+const DIRECT_PER_HOST = 20;
 function capPerHost(rows: DueRow[], perHost: number, total: number): DueRow[] {
   const taken = new Map<string, number>();
   const out: DueRow[] = [];
