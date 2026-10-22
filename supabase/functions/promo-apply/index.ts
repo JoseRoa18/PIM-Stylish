@@ -28,10 +28,11 @@
 //     promotion. Stylish brand sites sell at MSRP and are never touched.
 //   - Day before the first Thursday (prep pass): submits the Best Buy
 //     scheduled discounts for the Canada window (start date is in the
-//     future, which Mirakl requires) and Walmart Canada's promotional
-//     prices; the day before the 1st, Walmart USA's (walmart-push-promo,
-//     Settings switches walmart_ca / walmart_us). Both boundary passes carry
-//     a safety net for a promotion not scheduled the day before.
+//     future, which Mirakl requires). Walmart Canada / USA promotional
+//     prices (walmart-push-promo, Settings switches walmart_ca / walmart_us)
+//     go in on the boundary day itself, once the ending promotion is over:
+//     created the day before, Walmart kept them as BASE prices with no
+//     strikethrough (2026-10-22).
 //   Manual "Run now" (body {sync:true}) RECONCILES: re-applies whatever
 //   should be live today on both markets, dates aside.
 //
@@ -621,8 +622,8 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
       });
     }
   }
-  // Walmart USA safety net: the day-before prep normally schedules it; if it
-  // did not (promo loaded late / toggle off), schedule for the rest of the
+  // Walmart USA: scheduled on the window's first day, once the ending
+  // promotion is over (see the note at the prep pass), for the rest of the
   // window (the function starts a window already open in a few minutes).
   if (chain === 0 && doUS && settings.walmart_us !== false && usTarget && !usTarget.wm_us_scheduled_at) {
     try {
@@ -737,7 +738,8 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
         errors.push(`bestbuy: ${(err as Error).message}`);
       }
     }
-    // Same safety net for Walmart Canada.
+    // Walmart Canada: scheduled here, on the window's first day, once the
+    // ending promotion is over (see the note at the prep pass).
     if (chain === 0 && settings.walmart_ca !== false && caTarget && cadRows.length && !caTarget.wm_ca_scheduled_at) {
       try {
         report.walmart_ca = await scheduleWalmart("ca", caTarget.id, dryRun);
@@ -777,23 +779,13 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
       errors.push(`bestbuy prep: ${(err as Error).message}`);
     }
   }
-  // Walmart: the day before each market's window opens, its promotional
-  // prices go in (Walmart starts them on the window's first minute). Once
-  // per promotion — the stamp says it is done.
-  if (prepTarget && settings.walmart_ca !== false && !prepTarget.wm_ca_scheduled_at) {
-    try {
-      report.walmart_ca_prep = await scheduleWalmart("ca", prepTarget.id, dryRun);
-    } catch (err) {
-      errors.push(`walmart ca prep: ${(err as Error).message}`);
-    }
-  }
-  if (prepUsTarget && settings.walmart_us !== false && !prepUsTarget.wm_us_scheduled_at) {
-    try {
-      report.walmart_us_prep = await scheduleWalmart("us", prepUsTarget.id, dryRun);
-    } catch (err) {
-      errors.push(`walmart us prep: ${(err as Error).message}`);
-    }
-  }
+  // Walmart is NOT scheduled the day before any more (2026-10-22): a promo
+  // created while the ending promotion still sells the product at the same
+  // price is kept by Walmart as a BASE price — no strikethrough, no "was"
+  // price (all of November's, sent Oct 21; Jessica saw it). Created once the
+  // old one is over, at the regular price, it is REDUCED with the
+  // strikethrough. The boundary-day passes above schedule it at 00:05 ET
+  // (the window then starts a few minutes later).
 
   // -- 6. Wix changes still owed: the next run of the chain finishes them ----
   if (!dryRun && !lockedByOther && (doUS || doCA)) {
@@ -839,8 +831,6 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
     else if (report.wix_owed) parts.push(`Wix: ${report.wix_owed} changes left${report.wix_continuing ? ", continuing" : ""}`);
     if (doPrep && prepTarget && settings.bestbuy !== false) parts.push(`Best Buy scheduled for "${prepTarget.name}" (starts tomorrow)`);
     const sent = (r: unknown) => r && !(r as Record<string, unknown>).skipped;
-    if (sent(report.walmart_ca_prep)) parts.push(`Walmart Canada scheduled for "${prepTarget?.name}" (starts tomorrow)`);
-    if (sent(report.walmart_us_prep)) parts.push(`Walmart USA scheduled for "${prepUsTarget?.name}" (starts tomorrow)`);
     if (sent(report.walmart_ca)) parts.push(`Walmart Canada scheduled for "${caTarget?.name}"`);
     if (sent(report.walmart_us)) parts.push(`Walmart USA scheduled for "${usTarget?.name}"`);
     try {

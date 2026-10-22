@@ -181,6 +181,9 @@ Deno.serve(async (req) => {
       const near = (ms: number, target: number) => Math.abs(ms - target) <= 24 * 3600_000;
       const { data: aliasRows } = await admin.from("product_aliases").select("alias, sku").eq("marketplace", cfg.alias).in("sku", skusIn);
       const walmartSku = new Map<string, string>((aliasRows ?? []).map((r: { alias: string; sku: string }) => [r.sku, r.alias]));
+      // The regular price a Delete line carries when Walmart kept no comparison price.
+      const { data: mapRows } = await admin.from("products").select(`sku, ${cfg.mapField}`).in("sku", skusIn);
+      const mapOf = new Map<string, number>(((mapRows ?? []) as Record<string, unknown>[]).map((p) => [String(p.sku), Number(p[cfg.mapField])]));
       const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
       const lines: Record<string, unknown>[] = [];
       const noPromo: string[] = [];
@@ -188,14 +191,17 @@ Deno.serve(async (req) => {
         const wsku = walmartSku.get(sku) ?? sku;
         const r = await wmGet(`/v3/promo/sku/${encodeURIComponent(wsku)}`);
         const pricing = ((((r.data as Record<string, unknown>)?.payload as Record<string, unknown>)?.pricingList as Record<string, unknown>)?.pricing ?? []) as Record<string, unknown>[];
-        const hits = pricing.filter((p) => p.currentPriceType === "REDUCED" && near(Number(p.effectiveDate), startMs) && near(Number(p.expirationDate), endMs));
+        // Walmart keeps some of our "Reduced" promos as BASE, with no
+        // comparison price (November 2026's, seen 2026-10-22): those count too.
+        const hits = pricing.filter((p) => (p.currentPriceType === "REDUCED" || p.currentPriceType === "BASE") && near(Number(p.effectiveDate), startMs) && near(Number(p.expirationDate), endMs));
         if (!hits.length) { noPromo.push(sku); continue; }
         for (const hit of hits) {
           const amount = (k: string) => Number(((hit[k] as Record<string, unknown>)?.value as Record<string, unknown>)?.amount);
+          const regular = Number.isFinite(amount("comparisonPrice")) ? amount("comparisonPrice") : mapOf.get(sku);
           lines.push({
             Price: {
               sku: wsku,
-              price: amount("comparisonPrice"),
+              price: regular,
               promotionInformation: {
                 promotionSettingAction: "Delete", promotionType: "Reduced", promotionPrice: amount("currentPrice"),
                 promotionPriceStartDateTime: iso(Number(hit.effectiveDate)), promotionPriceEndDateTime: iso(Number(hit.expirationDate)),
