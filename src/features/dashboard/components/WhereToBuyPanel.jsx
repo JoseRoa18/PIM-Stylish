@@ -188,7 +188,7 @@ export default function WhereToBuyPanel() {
               Every retailer link on the product pages, opened to confirm it reaches the product page.
             </p>
             <p className="text-body-sm text-on-surface-variant mt-1">
-              Scanned {fmtWhen(summary.lastScan)} · last check {fmtWhen(summary.lastCheck)} · OK links are checked again every 3 days, broken ones every 2 days · stores that block the PIM are opened through Bright Data or ScraperAPI
+              Scanned {fmtWhen(summary.lastScan)} · last check {fmtWhen(summary.lastCheck)} · links are checked every Monday, Wednesday and Friday from 1 AM (Cambridge time), new ones right away · stores that block the PIM are opened through Bright Data or ScraperAPI
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -227,7 +227,7 @@ export default function WhereToBuyPanel() {
                   disabled={busy != null}
                   aria-busy={busy === 'check'}
                   className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-40"
-                  title="Check the links that are due now instead of waiting for the automatic pass (every 10 minutes)"
+                  title="Check the links that are due now. The automatic checks run every Monday, Wednesday and Friday from 1 AM (Cambridge time); new links are checked right away."
                 >
                   {busy === 'check' ? `Checking · ${progress?.checked ?? 0}` : 'Check links'}
                 </button>

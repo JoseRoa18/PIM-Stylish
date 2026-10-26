@@ -22,9 +22,10 @@
 //                2026-10-19. Menards only opens through Bright Data's ASYNC
 //                mode from a US exit (minutes per page), so its links are
 //                submitted as jobs and collected on a later pass. Rhythm
-//                (user, 2026-10-20): an OK link every 3 days, a broken one
-//                every 2 days, a link without an answer after a few hours
-//                (`next_check_at`). Called by cron every 10 minutes (each call chains
+//                (user, 2026-10-26): every link on Monday, Wednesday and
+//                Friday from 1 AM Eastern, a new one right away, a link
+//                without an answer again after a few hours that day
+//                (`next_check_at`, see "check days"). Called by cron every 10 minutes (each call chains
 //                the next batch until nothing is due) and from the UI;
 //                `skus: [...]` re-checks those products' links now.
 // mode "p2s"   — applies a Price2Spy matrix report (parsed in the browser:
@@ -44,7 +45,8 @@
 //                own page at that store (another link that opens it, an
 //                option a page lists, an id the PIM keeps) and opens each
 //                candidate before it is shown (where_to_buy_suggestions).
-//                Cron every 10 minutes; the candidates are looked for hourly.
+//                Cron every 10 minutes; the candidates are looked for hourly
+//                and opened on the check days.
 // mode "publish" — writes the next products of the publish queue to the
 //                Stylish pages (cron every 5 minutes; the check calls also
 //                drain it when they have time left).
@@ -74,8 +76,8 @@
 //
 // A page that says the product is sold out stays OK, with `in_stock` false:
 // the link leaves the Stylish pages until the store has it again (user,
-// 2026-10-26: "Ocultar hasta que vuelva" — isHiddenLink) and is read every
-// day meanwhile. Best Buy takes the product page down (404) while our offer
+// 2026-10-26: "Ocultar hasta que vuelva" — isHiddenLink) and is read again
+// on every pass meanwhile. Best Buy takes the product page down (404) while our offer
 // has no stock: such a 404 on the offer's own page is "sold out" too, from
 // the latest Best Buy snapshot (channel_health 'bestbuy', twice a day).
 //
@@ -109,10 +111,8 @@ const SCRAPERAPI_KEY = Deno.env.get("SCRAPERAPI_KEY") ?? "";
 
 const SITES = ["stylish_ca", "stylish_us"];
 const KEEP_DAYS = 7;        // a scan carries ok / broken results younger than a week
-const OK_HOURS = 72;        // an OK link is re-checked every 3 days (user, 2026-10-20: ~55 USD/month)
-const BROKEN_HOURS = 48;    // a broken one every 2 days — also the gap between two soft signals
-const SOLD_OUT_HOURS = 24;  // a sold-out one off the pages every day, so it comes back the day the store has it
-const RETRY_HOURS = 3;      // no answer: again after 3 h, 6 h, … at most a day
+const SIGN_HOURS = 48;      // the gap between two soft signals
+const RETRY_HOURS = 3;      // no answer: again after 3 h, 6 h, … at most a day (within the pass day)
 const JOB_POLL_MIN = 10;    // Menards async job: first look after 10 minutes
 const JOB_GIVEUP_HOURS = 6; // … still running after 6 h counts as a soft signal
 const LEASE_MIN = 15;       // a batch claims its links for 15 min (no double work)
@@ -121,6 +121,51 @@ const START_MS = 55000;     // no link starts after this point of the call
 const MAX_CHAIN = 5;        // cron chain (every 10 min): at most 5 more batches per call
 const STANDARD_SHARE = 0.6; // a portal is "standard" when 60% of the pages link it
 const NEVER = "2999-01-01T00:00:00.000Z"; // scan-time verdicts are never probed
+
+// ---------------------------------------------------------------- check days
+// The links are checked three times a week (user, 2026-10-26: "todos los días
+// lunes, miércoles y viernes a partir de la 1am hora Canadá Cambridge"): a
+// link with an answer is due again at 1:00 AM Eastern on the next Monday,
+// Wednesday or Friday, and the check calls (every 10 minutes) work through
+// them that day; one that got no answer is tried again later the same day,
+// else at the next pass. A link never verified yet (new or changed — checked
+// right away) and the promotion-day re-read (promoReread) go on any day
+// (user's choice the same day). Before: OK every 3 days, broken every 2.
+const PASS_TZ = "America/Toronto"; // Cambridge, Ontario
+const PASS_WEEKDAYS = [1, 3, 5];   // Monday, Wednesday, Friday
+const PASS_HOUR = 1;               // from 1:00 AM
+const WEEKDAY: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+// The local day ("2026-10-26"), weekday and hour of an instant in Eastern time.
+function eastern(t: Date): { day: string; weekday: number; hour: number } {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: PASS_TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short",
+  }).formatToParts(t).map((x) => [x.type, x.value]));
+  return { day: `${p.year}-${p.month}-${p.day}`, weekday: WEEKDAY[p.weekday], hour: Number(p.hour) };
+}
+// The instant of that hour on that Eastern day (EDT or EST).
+function easternAt(day: string, hour: number): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  for (const offset of [4, 5]) {
+    const t = new Date(Date.UTC(y, m - 1, d, hour + offset));
+    const e = eastern(t);
+    if (e.day === day && e.hour === hour) return t;
+  }
+  return new Date(Date.UTC(y, m - 1, d, hour + 5));
+}
+// Whether an instant falls on a check day, from 1 AM to midnight.
+const inPass = (t: Date) => { const e = eastern(t); return PASS_WEEKDAYS.includes(e.weekday) && e.hour >= PASS_HOUR; };
+// The start of the next pass after an instant.
+function nextPassAt(t: Date = new Date()): string {
+  const today = eastern(t).day;
+  for (let i = 0; i <= 7; i++) {
+    const day = shiftDay(today, i);
+    const start = easternAt(day, PASS_HOUR);
+    if (PASS_WEEKDAYS.includes(new Date(`${day}T12:00:00Z`).getUTCDay()) && start > t) return start.toISOString();
+  }
+  return new Date(t.getTime() + 86400e3).toISOString();
+}
+// The instant itself when it falls within a pass, else the next pass.
+const onPass = (t: Date) => (inPass(t) ? t.toISOString() : nextPassAt(t));
 
 // ---------------------------------------------------------------- retailers
 // The stores the PIM keeps — one registry for the product page, this audit
@@ -1120,7 +1165,7 @@ const at = (ms: number) => new Date(Date.now() + ms).toISOString();
 // the PIM — changes nothing), and the count starts over after a week.
 const SOFT_RULE: Record<string, { strikes: number; everyHours: number }> = {
   menards: { strikes: 4, everyHours: 6 },
-  default: { strikes: 2, everyHours: BROKEN_HOURS },
+  default: { strikes: 2, everyHours: SIGN_HOURS },
 };
 const SIGN_FORGOTTEN_MS = 7 * 86400e3;
 
@@ -1238,16 +1283,14 @@ function readingFor(o: Judged, now: string): Partial<Reading> {
 function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> | null {
   const clearJob = { job_id: null, job_at: null };
   const reading = readingFor(o, now);
-  // A link off the pages for being sold out is read every day, so it comes
-  // back the day the store has the product again (a wrong one waits for its fix).
-  const skuCheck = "sku_check" in reading ? reading.sku_check : row.sku_check;
-  const inStock = "in_stock" in reading ? reading.in_stock : row.in_stock;
-  const soldOut = SITES.includes(row.site ?? "") && inStock === false && !["listing", "variant", "other"].includes(skuCheck ?? "");
+  // An answered link is due again at the next pass (Monday, Wednesday or
+  // Friday from 1 AM Eastern) — a sold-out one too, so it comes back on the
+  // first pass that finds the product in stock.
   const verdictPatch = (verdict: "ok" | "broken", note: string | null, signals: number) => ({
     verdict, note, http_status: o.status ?? null, final_url: verdict === "broken" ? o.finalUrl ?? null : null,
     checked_at: now, checked_via: o.via === "scraper" ? "brightdata" : o.via ?? null,
     fail_count: 0, signal_count: signals, signal_at: null, ...clearJob,
-    next_check_at: at((verdict !== "ok" ? BROKEN_HOURS : soldOut ? SOLD_OUT_HOURS : OK_HOURS) * 3600e3),
+    next_check_at: nextPassAt(),
     ...reading,
   });
   switch (o.kind) {
@@ -1262,17 +1305,20 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
       const counts = last === null || since > SIGN_FORGOTTEN_MS || since >= rule.everyHours * 3600e3 - 10 * 60e3;
       const signals = last === null || since > SIGN_FORGOTTEN_MS ? 1 : counts ? row.signal_count + 1 : row.signal_count;
       if (signals >= rule.strikes) return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks ${rule.everyHours} h apart`, signals);
-      // Not enough yet: keep the verdict, look again later.
+      // Not enough yet: keep the verdict, look again later (on a pass day).
       return {
         signal_count: signals, signal_at: counts ? now : row.signal_at, fail_count: 0, ...clearJob,
-        next_check_at: counts ? at(rule.everyHours * 3600e3) : new Date(last! + rule.everyHours * 3600e3).toISOString(), ...reading,
+        next_check_at: onPass(new Date((counts ? Date.now() : last!) + rule.everyHours * 3600e3)), ...reading,
         ...(row.verdict === "pending" ? { note: `${o.note} (${signals} of ${rule.strikes} checks before calling it broken)`, checked_at: now } : {}),
       };
     }
     case "none": {
       const fails = row.fail_count + 1;
+      // A link never verified yet is tried again on any day; one with an
+      // answer later the same pass day, else at the next pass.
+      const retry = new Date(Date.now() + Math.min(RETRY_HOURS * fails, 24) * 3600e3);
       return {
-        fail_count: fails, ...clearJob, next_check_at: at(Math.min(RETRY_HOURS * fails, 24) * 3600e3),
+        fail_count: fails, ...clearJob, next_check_at: row.verdict === "pending" ? retry.toISOString() : onPass(retry),
         ...(row.verdict === "pending" ? { note: `Not verified yet — ${o.note ?? "no answer"}`, checked_at: now } : {}),
       };
     }
@@ -1940,7 +1986,9 @@ async function suggest(opts: { build?: boolean; dryRun?: boolean } = {}) {
   if (build) {
     await rest("app_settings?on_conflict=key", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ key: SUGGEST_KEY, value: { built_at: new Date().toISOString(), last: built }, updated_at: new Date().toISOString() }) });
   }
-  const verified = await verifySuggestions(deadline);
+  // Candidates are opened on the check days (Monday, Wednesday, Friday from
+  // 1 AM Eastern), as the links themselves.
+  const verified = inPass(new Date()) ? await verifySuggestions(deadline) : null;
   return { built, verified, ms: Date.now() - started };
 }
 
@@ -2039,7 +2087,7 @@ async function applyPrice2Spy(body: { rows: Array<{ sku: string; site: string; u
     else if (hit.status === "price") { verdict = "ok"; note = `Price2Spy ${reportDate}: price seen ${hit.price}`; }
     else continue;
     counts[verdict] += 1;
-    const next = new Date(Date.parse(checkedAt) + (verdict === "ok" ? OK_HOURS : BROKEN_HOURS) * 3600e3).toISOString();
+    const next = nextPassAt();
     const patch = { verdict, note, http_status: null, final_url: null, checked_at: checkedAt, checked_via: "price2spy", fail_count: 0, signal_count: 0, job_id: null, job_at: null, next_check_at: next };
     const key = JSON.stringify(patch);
     if (!updates.has(key)) updates.set(key, { patch, ids: [] });
@@ -2206,7 +2254,12 @@ Deno.serve(async (req) => {
       if (rt?.waitUntil) rt.waitUntil(p);
       return json({ ok: true, rebuilt, published });
     }
-    if (mode === "promo-reread") return json({ ok: true, ...(await promoReread({ asOf: body.asOf, dryRun: body.dryRun === true })) });
+    if (mode === "promo-reread") {
+      // The cron fires at 13:10 and 14:10 UTC; the one at 9:10 AM Eastern
+      // (EDT or EST) runs.
+      if (kind === "cron" && !body.asOf && eastern(new Date()).hour !== 9) return json({ ok: true, skipped: "runs at 9:10 AM Eastern" });
+      return json({ ok: true, ...(await promoReread({ asOf: body.asOf, dryRun: body.dryRun === true })) });
+    }
     if (mode === "suggest") return json({ ok: true, ...(await suggest({ build: body.build === true, dryRun: body.dryRun === true })) });
     // The publish queue on its own (cron every 5 minutes): a check call that
     // spends its whole budget on pages leaves no time to write the Stylish

@@ -224,7 +224,7 @@ export default function WhereToBuyTab({ product }) {
                         check?.verdict !== 'ok' ? check?.note : null,
                         wrong && check.sku_check === 'variant' ? `The page shows ${check.page_model ?? 'another option'}, another option of the same product. Not shown on the Stylish websites until the link opens ${product.sku} — use the suggested link or edit it.` : null,
                         wrong && check.sku_check === 'other' ? `The page shows ${check.page_model ?? 'another product'}, not ${product.sku}. Not shown on the Stylish websites until the link is fixed.` : null,
-                        soldOut ? `${check.verdict === 'ok' && check.note ? `${check.note}. ` : ''}The store shows ${product.sku} as sold out: not shown on the Stylish websites until the store has it again (read every day).` : null,
+                        soldOut ? `${check.verdict === 'ok' && check.note ? `${check.note}. ` : ''}The store shows ${product.sku} as sold out: not shown on the Stylish websites until the store has it again (read again every Monday, Wednesday and Friday).` : null,
                         otherFinish ? `The link opens the right listing, but the store preselects ${check.page_model ?? 'another finish'} (its default option, with its own price); ${product.sku} is one click away. Shown on the websites — use the suggested link so it opens ${product.sku}'s own option.` : null,
                         check?.read_at && !isWrong(check) && check.page_model && check.sku_check === 'unknown' ? `The page shows model ${check.page_model} (not a PIM SKU) — check that it is ${product.sku}.` : null,
                         check?.page_note ? `On the page: ${check.page_note}.` : null,
