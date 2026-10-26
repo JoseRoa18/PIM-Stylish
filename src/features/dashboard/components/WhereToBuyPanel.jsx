@@ -17,12 +17,14 @@ import {
   isWrongProduct,
   isOtherFinish,
   pageReading,
+  OUT_OF_STOCK,
 } from '@/features/dashboard/lib/whereToBuy';
 
 // Listing Health → Stylish → Where to Buy. One row per product of the site,
 // one cell per retailer linked from its WHERE TO BUY section; the cell colour
 // is the link's verdict (OK / Broken — user, 2026-10-19), or "Wrong product"
-// when its page shows another product (2026-10-20). Expanding a row lists
+// when its page shows another product (2026-10-20), or "Out of stock" when
+// the store shows it sold out (2026-10-26, a hollow ring). Expanding a row lists
 // every link with the reason, who checked it and what the page showed (its
 // model and price). The portals a page does not link are a KPI of their own
 // ("Links to add"), not a problem. "Suggested links" lists the right
@@ -34,12 +36,15 @@ const TONE = {
   muted: 'bg-outline',
   warning: 'bg-warning',
   error: 'bg-error',
+  // Out of stock: a hollow ring, the link is fine but off the websites for now.
+  stock: 'ring-2 ring-inset ring-on-surface-variant bg-transparent',
 };
 const CHIP_TONE = {
   ok: 'bg-success-container text-on-success-container',
   muted: 'bg-surface-container-high text-on-surface-variant',
   warning: 'bg-warning-container text-on-warning-container',
   error: 'bg-error-container text-on-error-container',
+  stock: 'bg-tertiary-container text-on-tertiary-container',
 };
 
 const PAGE_SIZE = 50;
@@ -237,6 +242,7 @@ export default function WhereToBuyPanel() {
           {stat('OK', counts.ok, 'text-success')}
           {stat('Broken', counts.broken, counts.broken ? 'text-error' : undefined)}
           {stat('Wrong product', summary.wrongProduct, summary.wrongProduct ? 'text-warning' : undefined)}
+          {stat('Out of stock', summary.outOfStock)}
           {stat('Other finish', summary.otherFinish)}
           {stat('Not checked yet', counts.pending)}
           {stat('Check by hand', counts.manual)}
@@ -401,6 +407,7 @@ export default function WhereToBuyPanel() {
                                     wrong && l.page_model ? `The page shows ${l.page_model}, not ${g.sku}${l.sku_check === 'variant' ? ' (another option of the same product)' : ''}` : null,
                                     wrong && l.verdict !== 'broken' ? linkStatus(l).hint : null,
                                     isOtherFinish(l) && l.verdict !== 'broken' ? `The page opens on ${l.page_model ?? 'another finish'}, the listing's default option. ${linkStatus(l).hint}` : null,
+                                    linkStatus(l) === OUT_OF_STOCK ? [l.verdict === 'ok' ? l.note : null, OUT_OF_STOCK.hint].filter(Boolean).join('. ') : null,
                                     when ? `Checked by ${when}` : null,
                                   ].filter(Boolean).join('\n');
                                   return (

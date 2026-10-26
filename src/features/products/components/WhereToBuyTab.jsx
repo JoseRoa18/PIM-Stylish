@@ -21,6 +21,8 @@ const STATUS = {
   ok: { label: 'OK', cls: 'bg-success-container text-on-success-container' },
   broken: { label: 'Broken', cls: 'bg-error-container text-on-error-container' },
   wrong: { label: 'Wrong product', cls: 'bg-warning-container text-on-warning-container' },
+  // Sold out on the store (2026-10-26): off the websites until the store has it again.
+  outOfStock: { label: 'Out of stock', cls: 'bg-tertiary-container text-on-tertiary-container' },
   // The right listing on its default option (Wayfair without ?piid=): shown on the websites.
   otherFinish: { label: 'Other finish', cls: 'bg-surface-container-high text-on-surface-variant' },
   pending: { label: 'Checking', cls: 'bg-surface-container-high text-on-surface-variant' },
@@ -28,6 +30,8 @@ const STATUS = {
 };
 const isWrong = (check) => check?.sku_check === 'other' || check?.sku_check === 'variant';
 const isOtherFinish = (check) => check?.sku_check === 'listing';
+// The stock of an "Other finish" page is the store's default option's.
+const isSoldOut = (check) => check?.in_stock === false && !isOtherFinish(check);
 const priceText = (check) => {
   if (check?.price == null) return '';
   const symbol = check.currency === 'USD' ? '$' : check.currency === 'CAD' ? 'C$' : '';
@@ -205,7 +209,8 @@ export default function WhereToBuyTab({ product }) {
                       const check = data.checks[r.key];
                       const wrong = isWrong(check) && check.verdict !== 'broken';
                       const otherFinish = isOtherFinish(check) && check.verdict !== 'broken';
-                      const status = saved ? (wrong ? STATUS.wrong : otherFinish ? STATUS.otherFinish : STATUS[check?.verdict] ?? STATUS.pending) : null;
+                      const soldOut = !wrong && isSoldOut(check) && check.verdict !== 'broken';
+                      const status = saved ? (wrong ? STATUS.wrong : soldOut ? STATUS.outOfStock : otherFinish ? STATUS.otherFinish : STATUS[check?.verdict] ?? STATUS.pending) : null;
                       const problem = problems[r.key];
                       const id = `wtb-${r.key}`;
                       // The price shows only when the page is this product's
@@ -219,6 +224,7 @@ export default function WhereToBuyTab({ product }) {
                         check?.verdict !== 'ok' ? check?.note : null,
                         wrong && check.sku_check === 'variant' ? `The page shows ${check.page_model ?? 'another option'}, another option of the same product. Not shown on the Stylish websites until the link opens ${product.sku} — use the suggested link or edit it.` : null,
                         wrong && check.sku_check === 'other' ? `The page shows ${check.page_model ?? 'another product'}, not ${product.sku}. Not shown on the Stylish websites until the link is fixed.` : null,
+                        soldOut ? `${check.verdict === 'ok' && check.note ? `${check.note}. ` : ''}The store shows ${product.sku} as sold out: not shown on the Stylish websites until the store has it again (read every day).` : null,
                         otherFinish ? `The link opens the right listing, but the store preselects ${check.page_model ?? 'another finish'} (its default option, with its own price); ${product.sku} is one click away. Shown on the websites — use the suggested link so it opens ${product.sku}'s own option.` : null,
                         check?.read_at && !isWrong(check) && check.page_model && check.sku_check === 'unknown' ? `The page shows model ${check.page_model} (not a PIM SKU) — check that it is ${product.sku}.` : null,
                         check?.page_note ? `On the page: ${check.page_note}.` : null,

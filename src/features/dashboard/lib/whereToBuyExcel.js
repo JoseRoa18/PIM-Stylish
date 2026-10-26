@@ -17,7 +17,7 @@
 
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { WTB_RETAILERS, cleanWtbUrl, wtbUrlProblem } from '@/features/products/lib/whereToBuy';
-import { WTB_VERDICTS, WRONG_PRODUCT, OTHER_FINISH, WTB_VIA, linkStatus } from './whereToBuy';
+import { WTB_VERDICTS, WRONG_PRODUCT, OUT_OF_STOCK, OTHER_FINISH, WTB_VIA, linkStatus } from './whereToBuy';
 
 const CATEGORY = new Map(CATEGORY_OPTIONS.map((c) => [c.value, c.label]));
 const STORE_ORDER = new Map(WTB_RETAILERS.map((r, i) => [r.key, i]));
@@ -30,6 +30,7 @@ export const STATUS_ORDER = [
   { label: WTB_VERDICTS.ok.label, fill: 'E6F4EA', hint: WTB_VERDICTS.ok.hint },
   { label: WTB_VERDICTS.broken.label, fill: 'FCE8E6', hint: `${WTB_VERDICTS.broken.hint} Not shown on the Stylish websites.` },
   { label: WRONG_PRODUCT.label, fill: 'FEF3C7', hint: 'The link opens another product, or another option of it (finish, size). Not shown on the Stylish websites until it is fixed.' },
+  { label: OUT_OF_STOCK.label, fill: 'F5EFE8', hint: `${OUT_OF_STOCK.hint} Nothing to fix (Best Buy takes the page down while our offer has no stock: that counts here too, not as Broken).` },
   { label: OTHER_FINISH.label, fill: 'E8EEF7', hint: OTHER_FINISH.hint },
   { label: NOT_CHECKED, fill: 'F1F3F4', hint: WTB_VERDICTS.pending.hint },
   { label: WTB_VERDICTS.manual.label, fill: 'F1F3F4', hint: WTB_VERDICTS.manual.hint },
@@ -68,6 +69,7 @@ function whyOf(status, check) {
     return [`The page shows ${check.page_model ?? 'another product'}${check.sku_check === 'variant' ? ' (another option of the same product)' : ''}`, check.page_note].filter(Boolean).join(' · ');
   }
   if (status === OTHER_FINISH.label) return `The store preselects ${check.page_model ?? 'another finish'}; use the option's own address`;
+  if (status === OUT_OF_STOCK.label) return [check.note ?? 'Sold out on the store', 'off the Stylish websites until it is back', check.page_note].filter(Boolean).join(' · ');
   return [check.note, check.page_note].filter(Boolean).join(' · ');
 }
 
@@ -162,7 +164,7 @@ export function whereToBuySheets(rows, date) {
     name: 'Summary',
     title: 'Stylish — Where to Buy links',
     subtitle: `${products} products, ${links} links · exported ${date}. Both Stylish websites (Canada and USA) are built from one list per product, so each row holds for both.`,
-    widths: [26, 11, 11, 11, 11, 13, 11, 13, 12, 12],
+    widths: [26, 11, 9, 10, 15, 13, 13, 16, 15, 12],
     blocks: [
       {
         title: 'By status',

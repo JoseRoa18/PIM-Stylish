@@ -104,8 +104,12 @@ const escText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').re
  * back on the page once it opens the product again. A link not verified yet
  * is shown (the user's choice the same day: BB&B / Overstock wait for
  * ScraperAPI).
+ * A link whose page says the product is sold out leaves the pages too, until
+ * the store has it again (user, 2026-10-26: "Ocultar hasta que vuelva") — not
+ * on an "Other finish" page, whose stock is the default option's.
  */
-export const isHiddenLink = (verdict, skuCheck) => verdict === 'broken' || skuCheck === 'variant' || skuCheck === 'other';
+export const isHiddenLink = (verdict, skuCheck, inStock) => verdict === 'broken' || skuCheck === 'variant' || skuCheck === 'other'
+  || (inStock === false && skuCheck !== 'listing');
 
 /** The links a page shows: the product's list minus its hidden addresses (isHiddenLink). */
 export const linksToShow = (links, hiddenUrls) => (links ?? []).filter((l) => l?.url && !hiddenUrls?.has(l.url));

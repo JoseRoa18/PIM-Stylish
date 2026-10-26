@@ -72,6 +72,13 @@
 // sign: twice in a row (two days apart) and the link is Broken — "Opens
 // another product".
 //
+// A page that says the product is sold out stays OK, with `in_stock` false:
+// the link leaves the Stylish pages until the store has it again (user,
+// 2026-10-26: "Ocultar hasta que vuelva" — isHiddenLink) and is read every
+// day meanwhile. Best Buy takes the product page down (404) while our offer
+// has no stock: such a 404 on the offer's own page is "sold out" too, from
+// the latest Best Buy snapshot (channel_health 'bestbuy', twice a day).
+//
 // Auth: `x-cron-secret` (cron) or a signed-in user's JWT. Deployed with
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
 
@@ -104,6 +111,7 @@ const SITES = ["stylish_ca", "stylish_us"];
 const KEEP_DAYS = 7;        // a scan carries ok / broken results younger than a week
 const OK_HOURS = 72;        // an OK link is re-checked every 3 days (user, 2026-10-20: ~55 USD/month)
 const BROKEN_HOURS = 48;    // a broken one every 2 days — also the gap between two soft signals
+const SOLD_OUT_HOURS = 24;  // a sold-out one off the pages every day, so it comes back the day the store has it
 const RETRY_HOURS = 3;      // no answer: again after 3 h, 6 h, … at most a day
 const JOB_POLL_MIN = 10;    // Menards async job: first look after 10 minutes
 const JOB_GIVEUP_HOURS = 6; // … still running after 6 h counts as a soft signal
@@ -440,8 +448,8 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
     // (a hand edit in Wix shows up as a difference).
     const links = pim.links.get(sku) ?? [];
     const lr = linkRows(base, links, prior);
-    // What the page should show: the list without its broken and wrong-product links.
-    const shown = lr.filter((r) => !isHiddenLink(r.verdict, r.sku_check)).map((r) => ({ retailer: r.retailer, url: r.url as string }));
+    // What the page should show: the list without its broken, wrong-product and sold-out links.
+    const shown = lr.filter((r) => !isHiddenLink(r.verdict, r.sku_check, r.in_stock)).map((r) => ({ retailer: r.retailer, url: r.url as string }));
     if (links.length && linkSet(live) !== linkSet(shown)) counts.differsFromPim.push(sku);
     counts.links += lr.length;
     counts.broken += lr.filter((r) => r.verdict === "broken").length;
@@ -612,7 +620,8 @@ async function probe(url: string): Promise<Probe> {
 // another product or another option of it (user, 2026-10-20: "solo dejar los
 // OK" — such a link stays in the PIM to be fixed but leaves the website, and
 // comes back when it opens the product again; a link not verified yet is
-// shown). Only that section changes — the rest of the page is read from Wix
+// shown), nor the ones whose page says sold out (2026-10-26, until the store
+// has it again). Only that section changes — the rest of the page is read from Wix
 // and sent back as it is. Pages to (re)write wait in a queue
 // (app_settings.where_to_buy_publish_queue) that every check call drains a
 // little at a time: Wix lets ~30 changes through, then asks to wait.
@@ -623,16 +632,22 @@ const PUBLISH_MAX = 20; // product pages written per call
 type PublishStatus = "published" | "up_to_date" | "no_links" | "not_linked" | "not_found" | "error" | "later";
 interface PublishResult { sku: string; site: string; status: PublishStatus; error?: string }
 
-// The addresses each product's pages leave out (isHiddenLink: broken, or
-// opening another product / option). Kept per SKU: one address can be wrong
-// for one product (it opens A-801N) and right for the next (A-801N's own).
+// The addresses each product's pages leave out (isHiddenLink: broken,
+// opening another product / option, or sold out). Kept per SKU: one address
+// can be wrong for one product (it opens A-801N) and right for the next
+// (A-801N's own).
 async function hiddenUrls(skus: string[]): Promise<Map<string, Set<string>>> {
-  const rows: Array<{ sku: string; url: string }> = [];
+  type Hidden = { sku: string; url: string; verdict: string; sku_check: string | null; in_stock: boolean | null };
+  const rows: Hidden[] = [];
   for (const part of chunk(skus, 100)) {
-    rows.push(...await restAll<{ sku: string; url: string }>(`where_to_buy_links?select=sku,url&url=not.is.null&or=(verdict.eq.broken,sku_check.in.(variant,other))&sku=${inList(part)}`));
+    rows.push(...await restAll<Hidden>(`where_to_buy_links?select=sku,url,verdict,sku_check,in_stock&url=not.is.null&or=(verdict.eq.broken,sku_check.in.(variant,other),in_stock.is.false)&sku=${inList(part)}`));
   }
   const out = new Map<string, Set<string>>();
-  for (const r of rows) { if (!out.has(r.sku)) out.set(r.sku, new Set()); out.get(r.sku)!.add(r.url); }
+  for (const r of rows) {
+    if (!isHiddenLink(r.verdict, r.sku_check, r.in_stock)) continue; // a sold-out "Other finish" page stays
+    if (!out.has(r.sku)) out.set(r.sku, new Set());
+    out.get(r.sku)!.add(r.url);
+  }
   return out;
 }
 
@@ -789,7 +804,7 @@ interface PageRead {
   inStock: boolean | null; itemId: string | null; source: string | null; optionDefaulted: boolean; gone: boolean; note: string | null;
   subSku: string | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
 }
-interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string }
+interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string; soldOut?: string }
 
 const METHOD_LABEL: Record<Method, string> = { direct: "Direct", brightdata: "Bright Data", scraperapi: "ScraperAPI", scraper: "Bright Data scraper" };
 // Time an attempt may take, so a call never starts one it cannot finish.
@@ -1090,8 +1105,8 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
 }
 
 // ---------------------------------------------------------------- check
-interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; signal_at: string | null; job_id: string | null; job_at: string | null; sku_check?: string | null; site?: string }
-const DUE_COLUMNS = "id,site,sku,url,host,retailer,verdict,note,fail_count,signal_count,signal_at,job_id,job_at,sku_check";
+interface DueRow { id: string; sku: string; url: string; host: string | null; retailer: string; verdict: string; note: string | null; fail_count: number; signal_count: number; signal_at: string | null; job_id: string | null; job_at: string | null; sku_check?: string | null; in_stock?: boolean | null; site?: string }
+const DUE_COLUMNS = "id,site,sku,url,host,retailer,verdict,note,fail_count,signal_count,signal_at,job_id,job_at,sku_check,in_stock";
 // The title of the page names the SKU: it is that product's page.
 const titleNamesSku = (o: Outcome, sku: string) => Boolean(o.title) && skuPattern(sku).test(o.title ?? "");
 
@@ -1125,7 +1140,13 @@ const SIGN_FORGOTTEN_MS = 7 * 86400e3;
 //     read as nothing — a store that changed its pages — where it is not
 //     counted.
 type Judged = Outcome & { check?: { check: string; model: string | null } | null };
-function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalog>, unreadable: Set<string>): Judged {
+function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalog>, unreadable: Set<string>, bestBuy: BestBuySoldOut): Judged {
+  if (o.kind === "broken" && row.retailer === "bestbuy_ca") {
+    const off = bestBuy.get(row.sku);
+    if (off && new RegExp(`(^|\\D)${off.productId}(\\D|$)`).test(row.url)) {
+      return { ...o, kind: "ok", page: undefined, soldOut: `Best Buy takes the page down while our offer has no stock (${off.why})` };
+    }
+  }
   if (o.kind !== "ok" || o.page === undefined) return o;
   if (o.page === null) {
     // Not when the page's own title names the SKU (a product page the reader
@@ -1138,6 +1159,29 @@ function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalo
   const check = skuCheck(o.page, row.sku, catalog);
   if (check?.check === "other") return { ...o, kind: "soft", check, note: `Opens another product: ${check.model}` };
   return { ...o, check };
+}
+
+// Our Best Buy offers, from the latest Best Buy snapshot (health-refresh,
+// twice a day).
+interface BestBuyOffer { sku?: string; bb_product_id?: string | null; active?: boolean; quantity?: number | null }
+async function bestBuyOffers(): Promise<BestBuyOffer[]> {
+  const snap = await rest<Array<{ results: BestBuyOffer[] | null }>>("channel_health?select=results&channel=eq.bestbuy&order=run_at.desc&limit=1");
+  return snap[0]?.results ?? [];
+}
+
+// Best Buy takes a product's page down (404) while our offer has no stock —
+// inactive, or 0 units (B-102N, S-406T… on 2026-10-26): such a dead page at
+// the offer's own product id is sold out, not a broken link (judgedFor). An
+// address with another id (an old listing) stays Broken. SKU → offer.
+type BestBuySoldOut = Map<string, { productId: string; why: string }>;
+async function bestBuySoldOut(): Promise<BestBuySoldOut> {
+  const out: BestBuySoldOut = new Map();
+  for (const o of await bestBuyOffers()) {
+    if (!o?.sku || !/^\d+$/.test(String(o.bb_product_id ?? ""))) continue;
+    const why = [o.active === false ? "offer inactive" : null, Number(o.quantity ?? NaN) === 0 ? "0 units" : null].filter(Boolean).join(" · ");
+    if (why) out.set(o.sku, { productId: String(o.bb_product_id), why });
+  }
+  return out;
 }
 
 // The stores whose reader cannot be trusted to call a page "not a product
@@ -1179,6 +1223,7 @@ async function unreadableStores(answers: Array<{ row: DueRow; o: Outcome }>): Pr
 // page whose product data the reader could not find leaves an empty reading;
 // a dead page drops the last one.
 function readingFor(o: Judged, now: string): Partial<Reading> {
+  if (o.soldOut) return { ...NO_READING, in_stock: false, read_at: now };
   if (o.page === undefined) return o.kind === "broken" ? NO_READING : {};
   if (!o.page) return o.priceBlind ? {} : { ...NO_READING, read_at: now };
   const model = {
@@ -1193,15 +1238,20 @@ function readingFor(o: Judged, now: string): Partial<Reading> {
 function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> | null {
   const clearJob = { job_id: null, job_at: null };
   const reading = readingFor(o, now);
+  // A link off the pages for being sold out is read every day, so it comes
+  // back the day the store has the product again (a wrong one waits for its fix).
+  const skuCheck = "sku_check" in reading ? reading.sku_check : row.sku_check;
+  const inStock = "in_stock" in reading ? reading.in_stock : row.in_stock;
+  const soldOut = SITES.includes(row.site ?? "") && inStock === false && !["listing", "variant", "other"].includes(skuCheck ?? "");
   const verdictPatch = (verdict: "ok" | "broken", note: string | null, signals: number) => ({
     verdict, note, http_status: o.status ?? null, final_url: verdict === "broken" ? o.finalUrl ?? null : null,
     checked_at: now, checked_via: o.via === "scraper" ? "brightdata" : o.via ?? null,
     fail_count: 0, signal_count: signals, signal_at: null, ...clearJob,
-    next_check_at: at((verdict === "ok" ? OK_HOURS : BROKEN_HOURS) * 3600e3),
+    next_check_at: at((verdict !== "ok" ? BROKEN_HOURS : soldOut ? SOLD_OUT_HOURS : OK_HOURS) * 3600e3),
     ...reading,
   });
   switch (o.kind) {
-    case "ok": return verdictPatch("ok", null, 0);
+    case "ok": return verdictPatch("ok", o.soldOut ?? null, 0);
     case "broken": return verdictPatch("broken", o.note ?? null, 0);
     case "soft": {
       const rule = o.check ? SOFT_RULE.default : SOFT_RULE[row.retailer] ?? SOFT_RULE.default;
@@ -1341,7 +1391,8 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   // Each row of an address gets the answer judged for its own SKU.
   const catalog = pimCatalog(answers.some(({ o }) => o.page) ? await restAll<{ sku: string; upc: string | null; family_number: number | null }>("products?select=sku,upc:attributes->>upc,family_number") : []);
   const unreadable = await unreadableStores(answers);
-  const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o: judgedFor(r, o, catalog, unreadable) })));
+  const bestBuy: BestBuySoldOut = answers.some(({ row, o }) => row.retailer === "bestbuy_ca" && o.kind === "broken") ? await bestBuySoldOut() : new Map();
+  const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o: judgedFor(r, o, catalog, unreadable, bestBuy) })));
 
   const now = new Date().toISOString();
   const groups = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
@@ -1349,11 +1400,15 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   for (const { row, o } of results) {
     const patch = patchFor(row, o, now);
     if (!patch) continue;
-    // A link that leaves the pages (broken, or opening another product) or
-    // comes back to them: its product's pages are written again. (A dealer's
-    // link, watched for price only, is on no page.)
-    const hiddenBefore = isHiddenLink(row.verdict, row.sku_check);
-    const hiddenAfter = isHiddenLink(typeof patch.verdict === "string" ? patch.verdict : row.verdict, "sku_check" in patch ? patch.sku_check as string | null : row.sku_check);
+    // A link that leaves the pages (broken, opening another product, sold
+    // out) or comes back to them: its product's pages are written again. (A
+    // dealer's link, watched for price only, is on no page.)
+    const hiddenBefore = isHiddenLink(row.verdict, row.sku_check, row.in_stock);
+    const hiddenAfter = isHiddenLink(
+      typeof patch.verdict === "string" ? patch.verdict : row.verdict,
+      "sku_check" in patch ? patch.sku_check as string | null : row.sku_check,
+      "in_stock" in patch ? patch.in_stock as boolean | null : row.in_stock,
+    );
     if (hiddenBefore !== hiddenAfter && SITES.includes(row.site ?? "")) republish.add(row.sku);
     const key = JSON.stringify(patch);
     if (!groups.has(key)) groups.set(key, { patch, ids: [] });
@@ -1389,7 +1444,7 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     scraperCredits: scraperApi.credits, ms: Date.now() - started,
     ...(opts.skus?.length ? {
       links: results.filter(({ row }) => opts.skus!.includes(row.sku)).filter(({ row }, i, all) => all.findIndex((x) => x.row.url === row.url && x.row.sku === row.sku) === i).map(({ row, o }) => ({
-        sku: row.sku, retailer: row.retailer, url: row.url, kind: o.kind, via: o.via ?? null, note: o.note ?? null,
+        sku: row.sku, retailer: row.retailer, url: row.url, kind: o.kind, via: o.via ?? null, note: o.soldOut ?? o.note ?? null,
         page: o.page ? { model: o.check?.model ?? o.page.ids[0] ?? null, check: o.check?.check ?? null, price: o.page.price, wasPrice: o.page.wasPrice, currency: o.page.currency, inStock: o.page.inStock, note: o.page.note, gone: o.page.gone, source: o.page.source } : o.page,
       })),
     } : {}),
@@ -1527,8 +1582,7 @@ async function loadStoreIds(): Promise<StoreIds> {
     for (const retailer of ALIAS_STORES[a.marketplace] ?? []) put(retailer, a.sku, a.alias);
   }
   for (const l of await restAll<{ sku: string; asin: string }>("amazon_links?select=sku,asin&marketplace=eq.ca&asin=not.is.null")) put("amazon_ca", l.sku, l.asin);
-  const snap = await rest<Array<{ results: Array<{ sku?: string; bb_product_id?: string | null; active?: boolean }> | null }>>("channel_health?select=results&channel=eq.bestbuy&order=run_at.desc&limit=1");
-  for (const o of snap[0]?.results ?? []) if (o?.sku && o.bb_product_id && o.active === true) put("bestbuy_ca", o.sku, o.bb_product_id);
+  for (const o of await bestBuyOffers()) if (o?.sku && o.bb_product_id && o.active === true) put("bestbuy_ca", o.sku, o.bb_product_id);
   return ids;
 }
 const idOwner = (ids: StoreIds, retailer: string, id: string | null | undefined) => (id ? ids.owner.get(retailer)?.get(String(id)) || null : null);

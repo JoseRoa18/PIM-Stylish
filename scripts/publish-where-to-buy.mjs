@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WTB_SITES, withWhereToBuySection, linksToShow } from '../supabase/functions/_shared/whereToBuy.js';
+import { WTB_SITES, withWhereToBuySection, linksToShow, isHiddenLink } from '../supabase/functions/_shared/whereToBuy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = Object.fromEntries(['.env.local', '.env.secrets.local']
@@ -62,11 +62,12 @@ const bySku = new Map();
 for (const l of links) { if (!bySku.has(l.sku)) bySku.set(l.sku, []); bySku.get(l.sku).push({ retailer: l.retailer, url: l.url }); }
 const products = new Map((await getAll('products?select=sku,brand')).map((p) => [p.sku, p]));
 const wix = new Set((await getAll('wix_links?select=site,sku&site=in.(stylish_ca,stylish_us)')).map((w) => `${w.site}|${w.sku}`));
-// Addresses each product's pages leave out (isHiddenLink: broken, or opening
-// another product / option — "Wrong product"), per product: one address can be
-// wrong for one SKU and right for another.
+// Addresses each product's pages leave out (isHiddenLink: broken, opening
+// another product / option — "Wrong product" — or sold out), per product: one
+// address can be wrong for one SKU and right for another.
 const broken = new Map();
-for (const r of await getAll('where_to_buy_links?select=sku,url&url=not.is.null&or=(verdict.eq.broken,sku_check.in.(variant,other))')) {
+for (const r of await getAll('where_to_buy_links?select=sku,url,verdict,sku_check,in_stock&url=not.is.null&or=(verdict.eq.broken,sku_check.in.(variant,other),in_stock.is.false)')) {
+  if (!isHiddenLink(r.verdict, r.sku_check, r.in_stock)) continue; // a sold-out "Other finish" page stays
   if (!broken.has(r.sku)) broken.set(r.sku, new Set());
   broken.get(r.sku).add(r.url);
 }
@@ -87,7 +88,7 @@ for (const [i, job] of jobs.entries()) {
   try {
     const read = await call('wix-read-product', { sku: job.sku, site: job.site });
     if (read?.exists === false || !read?.snapshot) { t.notFound += 1; continue; }
-    // Every link but the broken and wrong-product ones (user, 2026-10-20), as the audit publishes.
+    // Every link but the broken, wrong-product and sold-out ones (user, 2026-10-20 / 10-26), as the audit publishes.
     const next = withWhereToBuySection(read.snapshot.additional_info_sections ?? [], linksToShow(job.links, broken.get(job.sku) ?? new Set()), job.site, { owned: job.links.length > 0 });
     if (!next) { t.upToDate += 1; continue; }
     if (APPLY) await call('wix-push-product', { sku: job.sku, site: job.site, fields: { additional_info_sections: next }, only: ['additionalInfoSections'] });
