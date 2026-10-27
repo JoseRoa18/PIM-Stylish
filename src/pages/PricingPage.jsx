@@ -306,7 +306,7 @@ export default function PricingPage() {
           </div>
           <p className="text-title-md text-on-surface font-medium">No {PROMOTION_KINDS[tab].toLowerCase()}s yet</p>
           <p className="text-body-md text-on-surface-variant mt-1 max-w-md mx-auto">
-            {tab === 'monthly' ? "Create the month's promotion from its SKU list — every price comes from the products' Orange level in Pricing." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates, its SKUs and the portal it goes to. Prices come from the ${levelLabel(KIND_LEVEL[tab])} level${tab === 'flash' ? ' (Purple for Bed Bath & Beyond and Overstock)' : ''}.`}
+            {tab === 'monthly' ? "Create the month's promotion from its SKU list — every price comes from the products' Orange level in Pricing." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates, its SKUs and the portal it goes to. Prices come from the ${levelLabel(KIND_LEVEL[tab])} level.`}
           </p>
         </div>
       ) : (
@@ -1131,7 +1131,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             placeholder={'S-822H\nK-131NR\n…'}
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
-          <span className="block mt-1 text-body-sm text-on-surface-variant">{`Prices come from each product's ${levelLabel(KIND_LEVEL[kind])} level (MAP and WC of that marketplace)${kind === 'flash' ? '; Bed Bath & Beyond and Overstock take flash deals at Purple' : ''}. Once created, generate its file or schedule it from the card.`}</span>
+          <span className="block mt-1 text-body-sm text-on-surface-variant">{`Prices come from each product's ${levelLabel(KIND_LEVEL[kind])} level (MAP and WC of that marketplace). Once created, generate its file or schedule it from the card.`}</span>
         </label>
       ) : mode === 'file' ? (
         <div className="grid sm:grid-cols-2 gap-4">
