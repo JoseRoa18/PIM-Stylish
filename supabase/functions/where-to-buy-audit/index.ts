@@ -18,7 +18,7 @@
 //                verdict. Each retailer has a ROUTE: the server's own probe
 //                ("direct") where the site lets it in; otherwise Bright
 //                Data's Web Unlocker (primary, pay per success) and
-//                ScraperAPI (backup, free plan) — tested store by store on
+//                ScraperAPI (backup, Hobby plan) — tested store by store on
 //                2026-10-19. Menards only opens through Bright Data's ASYNC
 //                mode from a US exit (minutes per page), so its links are
 //                submitted as jobs and collected on a later pass. Rhythm
@@ -63,7 +63,7 @@
 //   missing  the page has no link to a portal that most products of the
 //            site (same market) do link — shown as a KPI of links to add
 //   pending  not verified yet (never checked, or no service answered yet)
-//   manual   a site no service can open (Faucetline, the Loblaw banners):
+//   manual   a site no service can open (the Loblaw banners):
 //            checked by hand
 // The `note` column carries the reason, `checked_via` who answered.
 //
@@ -177,8 +177,12 @@ const retailerFor = (host: string): { key: string; market: string; label: string
 // How each retailer's links are opened, in order — measured on 2026-10-19
 // with the same links through every service:
 //   Bright Data opens Wayfair, Home Depot CA / USA, Best Buy, Amazon.ca and
-//   Rona (ScraperAPI never does). ScraperAPI opens BB&B and Overstock
-//   (Akamai turns Bright Data away, 1-2 of 5) and eBay. Amazon lets the
+//   Rona (ScraperAPI never does). ScraperAPI opens Overstock (Akamai turns
+//   Bright Data away, 1-2 of 5) and eBay. BB&B (2026-10-29): ScraperAPI's
+//   standard proxies no longer open it (500 on every link) and its ultra
+//   premium ones do (2 of 3, 30 credits a page, a failure costs nothing),
+//   while Bright Data opened 272 BB&B pages on 10-27 — Bright Data first,
+//   ScraperAPI's ultra premium behind it (SCRAPERAPI_OPTIONS). Amazon lets the
 //   server in, but without its prices (see below). Menards and Lowe's go
 //   through Bright Data's ready-made scrapers ("scraper", see SCRAPERS):
 //   Lowe's opened 7 of 8 links on 2026-10-19 and put a captcha in front of
@@ -194,7 +198,7 @@ const ROUTES: Record<string, Method[]> = {
   lowes_us: ["scraper"],
   rona: ["brightdata"],
   menards: ["scraper"],
-  bbb_us: ["scraperapi", "brightdata"],
+  bbb_us: ["brightdata", "scraperapi"],
   overstock_us: ["scraperapi", "brightdata"],
   ebay: ["scraperapi", "brightdata"],
   // Amazon hides the price from the server's own probe (Amazon.ca: a US
@@ -211,7 +215,7 @@ const ROUTES: Record<string, Method[]> = {
 const routeFor = (retailer: string, host: string): Method[] =>
   DOC_HOST.test(host) ? ["direct"] : ROUTES[retailer] ?? ["direct", "brightdata"];
 // Sites neither service opens (2026-10-19): checked by hand.
-const MANUAL_HOST = /(^|\.)(faucetline\.com|loblaws\.ca|fortinos\.ca|provigo\.ca)$/;
+const MANUAL_HOST = /(^|\.)(loblaws\.ca|fortinos\.ca|provigo\.ca)$/;
 
 // Wayfair addresses need the product sku ("…-tkjs1238.html"); a cut link
 // without it lands on a 404 (verified 2026-09-15). Wayfair blocks robots, so
@@ -958,8 +962,15 @@ async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
   } finally { brightData.inFlight -= 1; }
 }
 
-// ScraperAPI's free plan: ~1,000 credits a month, 5 requests at a time. The
-// balance is read once per call and spent conservatively (10 per page).
+// ScraperAPI's Hobby plan (user, 2026-10-29 — it was the free plan's 1,000
+// credits): 100,000 credits a month, 20 requests at a time; up to 10 are used
+// so the backup leaves room. The balance is read once per call and spent
+// conservatively (10 per page).
+const SCRAPERAPI_MAX_IN_FLIGHT = 10;
+// Per store: the extra request parameters and what a page costs.
+const SCRAPERAPI_OPTIONS: Record<string, { params: string; credits: number }> = {
+  bbb_us: { params: "&ultra_premium=true", credits: 30 },
+};
 const scraperApi = { credits: 0, inFlight: 0 };
 async function refreshScraperCredits() {
   scraperApi.credits = 0;
@@ -971,12 +982,13 @@ async function refreshScraperCredits() {
 }
 async function viaScraperApi(row: DueRow): Promise<Outcome> {
   const url = row.url;
-  if (scraperApi.credits < 25) return { kind: "none", via: "scraperapi", note: SCRAPERAPI_KEY ? "no credits left this month" : "not configured" };
-  while (scraperApi.inFlight >= 4) await new Promise((ok) => setTimeout(ok, 500));
+  const opt = SCRAPERAPI_OPTIONS[row.retailer] ?? { params: "", credits: 10 };
+  if (scraperApi.credits < opt.credits + 15) return { kind: "none", via: "scraperapi", note: SCRAPERAPI_KEY ? "no credits left this month" : "not configured" };
+  while (scraperApi.inFlight >= SCRAPERAPI_MAX_IN_FLIGHT) await new Promise((ok) => setTimeout(ok, 500));
   scraperApi.inFlight += 1;
-  scraperApi.credits -= 10;
+  scraperApi.credits -= opt.credits;
   try {
-    const r = await fetch(`https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(asUri(url))}`, { signal: AbortSignal.timeout(70000) });
+    const r = await fetch(`https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(asUri(url))}${opt.params}`, { signal: AbortSignal.timeout(70000) });
     const body = await r.text();
     if (r.status === 404 || r.status === 410) return { kind: "broken", via: "scraperapi", status: r.status, note: `HTTP ${r.status}` };
     if (r.status >= 400) return { kind: "none", via: "scraperapi", status: r.status, note: r.status === 500 ? "could not open the page" : `HTTP ${r.status}` };
@@ -1114,12 +1126,23 @@ function requestUrl(retailer: string, url: string): string {
   } catch { return url; }
 }
 
+// A link that got no answer on its last try starts the next one with the
+// route's next method, in turn. A call has room for about one unlocker try
+// (BATCH_MS against METHOD_MS), so after Bright Data's 30–60 s failure the
+// backup was almost never reached and the link went back to Bright Data on
+// every retry (2026-10-29: S-408T on Best Buy, S-718WNK on Home Depot CA,
+// with ScraperAPI's credits unused).
+function triesInOrder(route: Method[], fails: number): Method[] {
+  const k = route.length > 1 && fails > 0 ? fails % route.length : 0;
+  return k ? [...route.slice(k), ...route.slice(0, k)] : route;
+}
+
 async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
   row = { ...row, url: requestUrl(row.retailer, row.url) };
   const misses: string[] = [];
   let last: Outcome = { kind: "none", note: "not tried" };
   let provisional: Outcome | null = null;
-  for (const m of routeFor(row.retailer, row.host ?? "")) {
+  for (const m of triesInOrder(routeFor(row.retailer, row.host ?? ""), row.fail_count ?? 0)) {
     if (Date.now() + METHOD_MS[m] > deadline) return provisional ?? (misses.length ? { kind: "none", note: misses.join(" · ") } : { kind: "later" });
     let o: Outcome;
     if (m === "direct") {
@@ -1585,9 +1608,9 @@ interface Suggestion {
   page_model: string | null; price: number | null; currency: string | null; in_stock: boolean | null;
   checked_at: string | null; next_check_at: string | null; decided_at?: string | null; updated_at?: string;
 }
-// Sinks Direct links follow the stores themselves, Faucetline is checked by
-// hand, an eBay listing is one seller's offer of the day.
-const SUGGEST_SKIP = new Set(["sinksdirect_ca", "sinksdirect_us", "faucetline", "ebay"]);
+// Sinks Direct links follow the stores themselves, an eBay listing is one
+// seller's offer of the day.
+const SUGGEST_SKIP = new Set(["sinksdirect_ca", "sinksdirect_us", "ebay"]);
 const SUGGEST_FRESH_MS = 14 * 86400e3; // readings used to find candidates
 const SUGGEST_BUILD_MS = 55 * 60e3;    // candidates are looked for once an hour
 // Per call: the stores the server opens itself (fast, free) and the ones

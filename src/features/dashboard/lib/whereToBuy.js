@@ -15,7 +15,7 @@ const SHORT = {
   sinksdirect_ca: 'SD.ca', wayfair_ca: 'WF.ca', bestbuy_ca: 'BB.ca', homedepot_ca: 'HD.ca', walmart_ca: 'WM.ca', amazon_ca: 'AMZ.ca',
   rona: 'Rona', cabinet_depot: 'CabDep', build_with_rise: 'Rise', ebay: 'eBay',
   sinksdirect_us: 'SD.us', wayfair_us: 'WF.com', amazon_us: 'AMZ.com', homedepot_us: 'HD.com', lowes_us: 'LW.com', walmart_us: 'WM.com',
-  bbb_us: 'BBB.com', overstock_us: 'OS.com', menards: 'Menards', kbauthority: 'KBA', warehouse_usa: 'WH USA', faucetline: 'Fline',
+  bbb_us: 'BBB.com', overstock_us: 'OS.com', menards: 'Menards', kbauthority: 'KBA', warehouse_usa: 'WH USA',
 };
 export const WTB_RETAILERS = STORES.map((r) => ({ key: r.key, label: r.label, short: SHORT[r.key] ?? r.label, market: r.market }));
 
@@ -28,7 +28,7 @@ export const WTB_VERDICTS = {
   broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address. Checked again every Monday, Wednesday and Friday.' },
   missing: { label: 'Link to add', tone: 'warning', problem: false, hint: 'The page has no link to this portal, although most products of the site link it.' },
   pending: { label: 'Not checked yet', tone: 'muted', problem: false, hint: 'Waiting for its first answer: new links are opened within the hour, and a store that did not answer is tried again a few hours later.' },
-  manual: { label: 'Check by hand', tone: 'muted', problem: false, hint: 'This site turns every automatic check away (Faucetline): open the link to check it.' },
+  manual: { label: 'Check by hand', tone: 'muted', problem: false, hint: 'This site turns every automatic check away: open the link to check it.' },
 };
 
 export const WTB_VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperapi: 'ScraperAPI', price2spy: 'Price2Spy' };

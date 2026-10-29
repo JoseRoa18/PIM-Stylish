@@ -13,7 +13,9 @@
  * Canadian stores; they sat under "Online in USA"). The order of the list is
  * the order on the page. BedBathandBeyond.ca, Overstock.ca and Lowes.ca no
  * longer exist (user, 2026-10-20): they are not stores of the list, so their links are
- * neither kept, checked nor published.
+ * neither kept, checked nor published. Nor is Faucetline.com (2026-10-29): the
+ * store is gone and its domain is parked — every address, even a made-up one,
+ * sends the visitor on to unrelated sites (an adult one among them).
  */
 
 export const WTB_RETAILERS = [
@@ -40,7 +42,6 @@ export const WTB_RETAILERS = [
   { key: 'menards', label: 'Menards.com', market: 'us', host: /(^|\.)menards\.com$/ },
   { key: 'kbauthority', label: 'Kitchen & Bath Authority', market: 'us', host: /(^|\.)kbauthority\.com$/ },
   { key: 'warehouse_usa', label: 'Warehouse-USA.com', market: 'us', host: /(^|\.)warehouse-usa\.com$/ },
-  { key: 'faucetline', label: 'Faucetline.com', market: 'us', host: /(^|\.)faucetline\.com$/ },
 ];
 
 export const WTB_MARKETS = [
