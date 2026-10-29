@@ -5,7 +5,7 @@
 // audit last found on it, or a store most products link and this one does
 // not ("Link to add"):
 //   Summary       counts by status and by store
-//   To fix        Broken and Wrong product links
+//   To fix        Broken and Wrong product links, by priority
 //   Links to add  the stores a product's pages do not link yet
 //   All links     every row
 //   How to use    the statuses and the upload steps
@@ -14,16 +14,25 @@
 // back through Listing Health → Where to Buy → Import links
 // (planWhereToBuyImport). Both Stylish pages are built from one list per
 // product, so a row holds for both sites.
+//
+// A person works through the links (user, 2026-10-29: "vamos a poner a una
+// persona dedicada a los links"), so each row to fix or add says what to do
+// and how urgent it is, from OUR stock in the store's country: a product we
+// have no stock of may have been taken down by the store and will not be
+// found, so it comes last (sold-out pages are Out of stock, never in the
+// list). Walmart USA is not covered yet (user, the same day: "seguimos
+// trabajando en ello"): its links stay off To fix and Links to add.
 
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { WTB_RETAILERS, cleanWtbUrl, wtbUrlProblem } from '@/features/products/lib/whereToBuy';
-import { WTB_VERDICTS, WRONG_PRODUCT, OUT_OF_STOCK, OTHER_FINISH, WTB_VIA, linkStatus } from './whereToBuy';
+import { WTB_VERDICTS, WRONG_PRODUCT, OUT_OF_STOCK, OTHER_FINISH, WTB_VIA, NOT_COVERED, linkStatus } from './whereToBuy';
 
 const CATEGORY = new Map(CATEGORY_OPTIONS.map((c) => [c.value, c.label]));
 const STORE_ORDER = new Map(WTB_RETAILERS.map((r, i) => [r.key, i]));
 const COUNTRY = { ca: 'Canada', us: 'USA' };
 export const NOT_CHECKED = 'Not checked yet';
 export const LINK_TO_ADD = 'Link to add';
+export const NOT_TRACKED = 'Not tracked';
 
 // The statuses in the order they are counted and explained.
 export const STATUS_ORDER = [
@@ -41,11 +50,11 @@ const NEW_LINK_FILL = 'EAF5EC';
 
 // The link sheets' columns, by section. The import reads SKU, Store and New Link.
 const SECTIONS = [
-  { title: 'Product', color: '1F3864', headers: ['SKU', 'Model Name', 'Category'] },
-  { title: 'Store', color: '01579B', headers: ['Store', 'Country'] },
-  { title: 'Status', color: '455A64', headers: ['Status', 'Why'] },
+  { title: 'Product', color: '1F3864', headers: ['SKU', 'Model Name', 'Category', 'UPC'] },
+  { title: 'Store', color: '01579B', headers: ['Store', 'Store Code', 'Country', 'Our Stock'] },
+  { title: 'Status', color: '455A64', headers: ['Priority', 'Status', 'Why'] },
   { title: 'Link on the Stylish pages', color: '0B5394', headers: ['Current Link'] },
-  { title: 'Your change — fill in to upload', color: '1E5631', headers: ['New Link'] },
+  { title: 'Your change — fill in to upload', color: '1E5631', headers: ['What to Do', 'New Link'] },
   { title: 'What the store page showed', color: '4E342E', headers: ['Page Shows', 'Price', 'Was', 'Currency', 'In Stock', 'Read', 'Last Check', 'Checked Via'] },
   { title: 'Suggested by the PIM', color: '6A1B9A', headers: ['Suggested Link'] },
 ];
@@ -73,14 +82,75 @@ function whyOf(status, check) {
   return [check.note, check.page_note].filter(Boolean).join(' · ');
 }
 
+// The priorities of a link to fix or add, most urgent first.
+export const PRIORITIES = [
+  { n: 1, label: 'Suggested link ready' },
+  { n: 2, label: 'In stock with us' },
+  { n: 3, label: 'Our stock not tracked' },
+  { n: 4, label: 'No stock with us' },
+];
+
+// The product's own code on each store, to search the store with (user,
+// 2026-10-29: "además del UPC, el código o alias que tenga el producto en
+// dicha página"): the Aliases tab's ids (product_aliases — Home Depot's item
+// numbers, Lowe's item #, Rona's article #, the BB&B / Overstock product id),
+// the Amazon Canada ASIN or Seller SKU (amazon_links), Best Buy's product id
+// of our offer (the latest Best Buy snapshot) and the Wayfair part number one
+// of the product's Wayfair links carries (both Wayfair stores share it).
+// Walmart Canada's alias is our own SKU, so it adds nothing.
+const ALIAS_STORES = {
+  'BB&B / Overstock': ['bbb_us', 'overstock_us'],
+  'Home Depot CA': ['homedepot_ca'],
+  'Home Depot US': ['homedepot_us'],
+  "Lowe's US": ['lowes_us'],
+  Rona: ['rona'],
+};
+const WAYFAIR_PART = /-([a-z]{2,6}\d{3,7})\.html/i;
+
+export function storeCodes({ aliases = [], amazon = [], bestBuy = [], pim = [] }) {
+  const codes = new Map();
+  const put = (sku, retailer, code) => { if (code && !codes.has(`${sku}|${retailer}`)) codes.set(`${sku}|${retailer}`, String(code)); };
+  for (const a of aliases) for (const retailer of ALIAS_STORES[a.marketplace] ?? []) put(a.sku, retailer, a.alias);
+  for (const a of amazon) put(a.sku, a.marketplace === 'us' ? 'amazon_us' : 'amazon_ca', a.asin || a.seller_sku);
+  for (const o of bestBuy) put(o.sku, 'bestbuy_ca', o.bb_product_id);
+  for (const l of pim) {
+    if (l.retailer !== 'wayfair_ca' && l.retailer !== 'wayfair_us') continue;
+    const part = (l.url ?? '').match(WAYFAIR_PART)?.[1]?.toUpperCase();
+    if (part) { put(l.sku, 'wayfair_ca', part); put(l.sku, 'wayfair_us', part); }
+  }
+  return codes;
+}
+
+// How urgent a link to fix or add is and what to do with it: a link the PIM
+// already found first, then by our stock in the store's country.
+function triage(r) {
+  if (r.status !== WTB_VERDICTS.broken.label && r.status !== WRONG_PRODUCT.label && r.status !== LINK_TO_ADD) return { priority: '', todo: '' };
+  if (r.suggested) return { priority: 1, todo: 'Copy the Suggested Link into New Link: the PIM already opened it and found this product.' };
+  const find = r.status === WRONG_PRODUCT.label
+    ? `The link opens another product: find this product's own page (or its finish / size option) on ${r.store}`
+    : `Find the product on ${r.store}`;
+  const by = r.code ? 'the Store Code, the SKU, the UPC or the model name' : 'the SKU, the UPC or the model name';
+  const how = `${find} — search ${by} — and paste its page in New Link. If ${r.store} does not sell it, write REMOVE.`;
+  if (r.stock > 0) return { priority: 2, todo: how };
+  if (r.stock == null) return { priority: 3, todo: how };
+  return {
+    priority: 4,
+    todo: `${r.obsolete ? 'Obsolete, and we' : 'We'} have no stock in ${r.country}, so ${r.store} may have taken the product down. ${find} once (search ${by}); if it is not there, leave New Link empty — it can wait until we have stock.`,
+  };
+}
+
 /**
  * One row per product and store, from the PIM's lists and the audit's rows:
- * data = { products: [{ sku, model_name, category, brand }], pim: [{ sku, retailer, url }],
- *          audit: [where_to_buy_links rows of both Stylish sites], suggestions: [{ sku, retailer, url, checked_at }] }.
+ * data = { products: [{ sku, model_name, category, brand, upc, is_obsolete }], pim: [{ sku, retailer, url }],
+ *          audit: [where_to_buy_links rows of both Stylish sites], suggestions: [{ sku, retailer, url, checked_at }],
+ *          inventory: [{ market, sku, available }] — product_inventory; a missing row = not tracked,
+ *          aliases, amazon, bestBuy — the stores' own codes (storeCodes) }.
  * Azuni is never on the Stylish websites, so its products are left out.
  */
-export function whereToBuyRows({ products, pim, audit, suggestions }) {
+export function whereToBuyRows({ products, pim, audit, suggestions, inventory = [], aliases = [], amazon = [], bestBuy = [] }) {
   const product = new Map(products.map((p) => [p.sku, p]));
+  const codeOf = storeCodes({ aliases, amazon, bestBuy, pim });
+  const stockOf = new Map(inventory.map((i) => [`${i.market}|${i.sku}`, Number(i.available ?? 0)]));
   const stylish = (sku) => product.has(sku) && !/azuni/i.test(product.get(sku).brand ?? '');
   const linkOf = new Map(pim.map((l) => [`${l.sku}|${l.retailer}`, l.url]));
   // The audit's answer on the PIM's address (newest of the two sites), and
@@ -109,11 +179,13 @@ export function whereToBuyRows({ products, pim, audit, suggestions }) {
     const check = checkOf.get(k) ?? null;
     const status = !url ? LINK_TO_ADD : check ? linkStatus(check).label : NOT_CHECKED;
     const p = product.get(sku);
-    rows.push({
-      sku, retailer, store: store.label, country: COUNTRY[store.market] ?? store.market, status,
-      model: p.model_name ?? '', category: CATEGORY.get(p.category) ?? p.category ?? '', url,
+    const row = {
+      sku, retailer, store: store.label, code: codeOf.get(k) ?? '', country: COUNTRY[store.market] ?? store.market, status,
+      model: p.model_name ?? '', category: CATEGORY.get(p.category) ?? p.category ?? '', upc: p.upc ?? '', url,
       why: whyOf(status, check), check, suggested: suggestionOf.get(k) ?? '',
-    });
+      stock: stockOf.get(`${store.market}|${sku}`) ?? null, obsolete: Boolean(p.is_obsolete),
+    };
+    rows.push({ ...row, ...triage(row) });
   }
   return rows.sort((a, b) => a.sku.localeCompare(b.sku) || (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDER.get(b.retailer) ?? 99));
 }
@@ -122,7 +194,7 @@ const sheetRow = (r) => {
   const c = r.check;
   const read = c?.read_at ? c : null;
   return [
-    r.sku, r.model, r.category, r.store, r.country, r.status, r.why, r.url, '',
+    r.sku, r.model, r.category, r.upc, r.store, r.code, r.country, r.stock ?? NOT_TRACKED, r.priority, r.status, r.why, r.url, r.todo, '',
     read?.page_model ?? '', read?.price != null ? Number(read.price) : '', read?.was_price != null ? Number(read.was_price) : '',
     read?.currency ?? '', read ? ({ true: 'Yes', false: 'No' }[String(read.in_stock)] ?? '') : '', stamp(read?.read_at),
     stamp(c?.checked_at), c?.checked_via ? (WTB_VIA[c.checked_via] ?? c.checked_via) : '', r.suggested,
@@ -137,7 +209,8 @@ const cellColor = (values, c) => {
 };
 
 const WIDTHS = {
-  SKU: 13, 'Model Name': 30, Category: 16, Store: 20, Country: 9, Status: 15, Why: 40, 'Current Link': 46, 'New Link': 46,
+  SKU: 13, 'Model Name': 30, Category: 16, UPC: 15, Store: 20, 'Store Code': 18, Country: 9, 'Our Stock': 11, Priority: 9, Status: 15, Why: 40,
+  'Current Link': 46, 'What to Do': 60, 'New Link': 46,
   'Page Shows': 13, Price: 10, Was: 10, Currency: 9, 'In Stock': 8, Read: 16, 'Last Check': 16, 'Checked Via': 12, 'Suggested Link': 40,
 };
 
@@ -150,10 +223,12 @@ const linkSheet = (name, rows) => ({
 
 /** The workbook's sheets (buildSectionedWorkbook), from whereToBuyRows. */
 export function whereToBuySheets(rows, date) {
-  const toFix = rows.filter((r) => r.status === WTB_VERDICTS.broken.label || r.status === WRONG_PRODUCT.label)
-    .sort((a, b) => a.status.localeCompare(b.status) || a.sku.localeCompare(b.sku) || (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDER.get(b.retailer) ?? 99));
-  const toAdd = rows.filter((r) => r.status === LINK_TO_ADD)
-    .sort((a, b) => (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDER.get(b.retailer) ?? 99) || a.sku.localeCompare(b.sku));
+  const covered = rows.filter((r) => !NOT_COVERED.has(r.retailer));
+  const toFix = covered.filter((r) => r.status === WTB_VERDICTS.broken.label || r.status === WRONG_PRODUCT.label)
+    .sort((a, b) => a.priority - b.priority || a.status.localeCompare(b.status) || a.sku.localeCompare(b.sku) || (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDER.get(b.retailer) ?? 99));
+  const toAdd = covered.filter((r) => r.status === LINK_TO_ADD)
+    .sort((a, b) => a.priority - b.priority || (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDER.get(b.retailer) ?? 99) || a.sku.localeCompare(b.sku));
+  const left = rows.filter((r) => NOT_COVERED.has(r.retailer) && (r.status === WTB_VERDICTS.broken.label || r.status === WRONG_PRODUCT.label || r.status === LINK_TO_ADD)).length;
 
   const count = (list, label) => list.filter((r) => r.status === label).length;
   const products = new Set(rows.map((r) => r.sku)).size;
@@ -168,10 +243,11 @@ export function whereToBuySheets(rows, date) {
     blocks: [
       {
         title: 'By status',
+        note: left ? 'Walmart USA is not covered yet: its links are counted under "By store" only.' : undefined,
         headers: ['Status', 'Links'],
         formats: ['topic', 'count'],
-        rows: STATUS_ORDER.map((s) => [s.label, count(rows, s.label)]),
-        total: ['All', rows.length],
+        rows: STATUS_ORDER.map((s) => [s.label, count(covered, s.label)]),
+        total: ['All', covered.length],
       },
       {
         title: 'By store',
@@ -180,6 +256,14 @@ export function whereToBuySheets(rows, date) {
         formats: ['topic', 'center', ...statusCols.map(() => 'count')],
         rows: byStore.map(({ s, list }) => [s.label, COUNTRY[s.market], ...statusCols.map((l) => count(list, l))]),
         total: ['All stores', '', ...statusCols.map((l) => count(rows, l))],
+      },
+      {
+        title: 'To fix and to add, by priority',
+        note: `Our stock in the store's country decides the order: a product we have no stock of may have been taken down by the store.${left ? ` Walmart USA is not covered yet: its ${left} links to fix or add are only on "All links".` : ''}`,
+        headers: ['Priority', 'To fix', 'Links to add'],
+        formats: ['topic', 'count', 'count'],
+        rows: PRIORITIES.map((p) => [`${p.n}. ${p.label}`, toFix.filter((r) => r.priority === p.n).length, toAdd.filter((r) => r.priority === p.n).length]),
+        total: ['All', toFix.length, toAdd.length],
       },
     ],
   };
@@ -200,12 +284,14 @@ export function whereToBuySheets(rows, date) {
         headers: ['Step', 'What to do'],
         formats: ['topic', 'wrap'],
         rows: [
+          ['0. Where to start', '"To fix" and "Links to add" are sorted by Priority, and "What to Do" says what each row needs. 1 = the PIM already found the right link; 2 = we have the product in stock in that country; 3 = our stock is not tracked; 4 = we have no stock, so the store may have taken the product down — search once and move on. "Our Stock" is our own stock in the store\'s country. Out of stock links (the store shows the product sold out) are not in these lists: nothing to fix.'],
+          ['Store Code', 'The product\'s own code on that store, to search it with: Home Depot Canada / USA = the item number (homedepot.ca/product/<code>, homedepot.com/p/<code>), Lowe\'s = the item #, Rona = the article #, BB&B / Overstock = the product number (the part before the dashes: bedbathandbeyond.com/<number>/product.html), Amazon.ca = the ASIN or our Seller SKU, Best Buy = the product id of our offer (bestbuy.ca/en-ca/product/<code>), Wayfair = the part number (TKJS…, the same on Wayfair.ca and Wayfair.com). It comes from the product\'s Aliases tab; empty where the PIM has none.'],
           ['1. Write the address', 'On "To fix", "Links to add" or "All links", write the store page of the product in the green "New Link" column. A "Suggested Link" is an address the PIM already opened and found right.'],
           ['2. Remove a link', 'Write REMOVE in "New Link": the link leaves the product\'s list and both Stylish pages.'],
           ['3. Keep a link', 'Leave "New Link" empty. Nothing else in the row is read, so the other columns can stay as they are.'],
           ['4. A store not listed', 'Add a row at the end of "All links" with the SKU, the Store (pick it from the list) and the New Link.'],
           ['5. Upload', 'Listing Health → Where to Buy → Import links, choose this file and review the changes. "Save and publish" writes them into each product\'s list and both Stylish pages; the new links are opened within minutes, and a broken one leaves the pages by itself.'],
-          ['Note', 'An address must be a page of that store (a Wayfair.ca link on the Wayfair.ca row). Azuni products are never on the Stylish websites and are not in this file.'],
+          ['Note', 'An address must be a page of that store (a Wayfair.ca link on the Wayfair.ca row). Azuni products are never on the Stylish websites and are not in this file. Walmart USA is not covered yet: its links are only on "All links".'],
         ],
       },
     ],

@@ -1394,6 +1394,24 @@ function capPerHost(rows: DueRow[], perHost: number, total: number): DueRow[] {
   return out;
 }
 
+// The other rows of the batch's addresses — the same link on the other
+// Stylish site — that are not due go with them, so one answer settles every
+// copy. Otherwise the copies drifted apart: the USA row OK and the Canada row
+// still "Not checked yet" after its own tries failed (2026-10-29: seven
+// Overstock and BB&B links). The scraper stores' batches already take every
+// due row of the store.
+async function siblingsOf(rows: DueRow[]): Promise<DueRow[]> {
+  const own = rows.filter((r) => !SCRAPER_RETAILERS.includes(r.retailer));
+  const ids = new Set(rows.map((r) => r.id));
+  const want = new Set(own.map((r) => `${r.retailer}|${r.url}`));
+  const out: DueRow[] = [];
+  for (const skus of chunk([...new Set(own.map((r) => r.sku))], 100)) {
+    const found = await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(skus)}&retailer=${inList([...new Set(own.map((r) => r.retailer))])}&url=not.is.null&verdict=not.in.(missing,manual)`, { headers: { Prefer: "count=none" } });
+    for (const r of found) if (!ids.has(r.id) && want.has(`${r.retailer}|${r.url}`)) { ids.add(r.id); out.push(r); }
+  }
+  return out;
+}
+
 async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean } = {}) {
   const started = Date.now();
   const deadline = started + BATCH_MS;
@@ -1412,6 +1430,7 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
       ...await pool(`retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}`, "next_check_at.asc.nullsfirst", 1000, DIRECT_PER_HOST, opts.limit ?? DIRECT_BATCH),
       ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(SCRAPER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${SCRAPER_POOL}`, { headers: { Prefer: "count=none" } }),
     ];
+  if (!opts.skus?.length) rows.push(...await siblingsOf(rows));
   // Claim the batch so an overlapping call (cron chain + UI) skips it; every
   // outcome writes its own next_check_at, and a link this call never reaches
   // is due again when the claim runs out.

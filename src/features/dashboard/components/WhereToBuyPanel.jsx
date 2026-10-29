@@ -247,6 +247,11 @@ export default function WhereToBuyPanel() {
           {stat('Not checked yet', counts.pending)}
           {stat('Check by hand', counts.manual)}
         </div>
+        {summary.notCovered > 0 && (
+          <p className="mt-3 text-body-sm text-on-surface-variant">
+            Walmart USA is not covered yet: its {summary.notCovered} broken or wrong links are not counted above (they stay off the websites).
+          </p>
+        )}
       </div>
 
       {(differs[site]?.length ?? 0) > 0 && (

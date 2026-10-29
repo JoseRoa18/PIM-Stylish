@@ -35,6 +35,11 @@ export const WTB_VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperap
 
 export const isProblem = (verdict) => Boolean(WTB_VERDICTS[verdict]?.problem);
 
+// Stores not covered yet (user, 2026-10-29: Walmart USA — "seguimos
+// trabajando en ello"): their links are still checked and a broken one still
+// leaves the websites, but they count as no problem and are not links to add.
+export const NOT_COVERED = new Set(['walmart_us']);
+
 // The check also reads the page's product (user, 2026-10-20: "que apunte al
 // producto correcto por SKU"): a link whose page shows another product, or
 // another option of it (another finish or size, or the listing's default
@@ -81,7 +86,7 @@ export const linkStatus = (row) => {
   if (open && isOtherFinish(row)) return OTHER_FINISH;
   return WTB_VERDICTS[row.verdict] ?? { label: row.verdict, tone: 'muted' };
 };
-export const isLinkProblem = (row) => isProblem(row.verdict) || isWrongProduct(row);
+export const isLinkProblem = (row) => !NOT_COVERED.has(row.retailer) && (isProblem(row.verdict) || isWrongProduct(row));
 
 // "S-611W · C$749.00" — what the page showed the last time it was read.
 export function pageReading(row) {
@@ -100,7 +105,7 @@ export function pageReading(row) {
 export function linksToAdd(rows) {
   const by = new Map();
   for (const r of rows) {
-    if (r.verdict !== 'missing') continue;
+    if (r.verdict !== 'missing' || NOT_COVERED.has(r.retailer)) continue;
     if (!by.has(r.retailer)) by.set(r.retailer, new Set());
     by.get(r.retailer).add(r.sku);
   }
@@ -124,15 +129,19 @@ export function groupWhereToBuy(rows) {
 }
 
 export function summarizeWhereToBuy(rows) {
-  const s = { products: new Set(), links: 0, docs: 0, byVerdict: {}, problems: 0, wrongProduct: 0, outOfStock: 0, otherFinish: 0, dropbox: 0, pending: 0, lastScan: null, lastCheck: null };
+  const s = { products: new Set(), links: 0, docs: 0, byVerdict: {}, problems: 0, wrongProduct: 0, outOfStock: 0, otherFinish: 0, notCovered: 0, dropbox: 0, pending: 0, lastScan: null, lastCheck: null };
   for (const r of rows) {
     s.products.add(r.sku);
     if (r.section === 'documents') s.docs += 1; else if (r.url) s.links += 1;
     // Each link counts once, under what its chip says ("Wrong product", "Out
     // of stock", "Other finish" or its verdict — a Broken one that opens
-    // another product counts as Broken).
+    // another product counts as Broken). A store not covered yet counts its
+    // broken and wrong links apart, and no link to add.
     const status = linkStatus(r);
-    if (r.url && (status === WRONG_PRODUCT || status === WRONG_OPTION)) s.wrongProduct += 1;
+    const uncovered = NOT_COVERED.has(r.retailer);
+    if (uncovered && (r.verdict === 'missing' || (r.url && (r.verdict === 'broken' || status === WRONG_PRODUCT || status === WRONG_OPTION)))) {
+      if (r.url) s.notCovered += 1;
+    } else if (r.url && (status === WRONG_PRODUCT || status === WRONG_OPTION)) s.wrongProduct += 1;
     else if (r.url && status === OUT_OF_STOCK) s.outOfStock += 1;
     else if (r.url && status === OTHER_FINISH) s.otherFinish += 1;
     else {

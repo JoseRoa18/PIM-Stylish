@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
+import { latestSnapshot } from '@/features/syndication/lib/channels';
 import { whereToBuyRows, whereToBuySheets, whereToBuyValidation, scoreWhereToBuyHeader, planWhereToBuyImport } from '../lib/whereToBuyExcel';
 
 const PAGE = 1000;
@@ -27,11 +28,11 @@ async function readAll(table, columns, { filter = (q) => q, order }) {
   return out;
 }
 
-const loadProducts = () => readAll('products', 'sku, model_name, category, brand', { order: ['sku'] });
+const loadProducts = () => readAll('products', 'sku, model_name, category, brand, is_obsolete, upc:attributes->>upc', { order: ['sku'] });
 const loadLinks = () => readAll('product_where_to_buy', 'sku, retailer, url', { order: ['sku', 'retailer'] });
 
 async function loadExportData() {
-  const [products, pim, audit, suggestions] = await Promise.all([
+  const [products, pim, audit, suggestions, inventory, aliases, amazon, bestBuy] = await Promise.all([
     loadProducts(),
     loadLinks(),
     readAll('where_to_buy_links', 'id, sku, retailer, url, verdict, note, checked_at, checked_via, page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at', {
@@ -39,8 +40,12 @@ async function loadExportData() {
       order: ['id'],
     }),
     readAll('where_to_buy_suggestions', 'id, sku, retailer, url, checked_at', { filter: (q) => q.eq('status', 'ready'), order: ['id'] }),
+    readAll('product_inventory', 'market, sku, available', { order: ['market', 'sku'] }),
+    readAll('product_aliases', 'sku, marketplace, alias', { order: ['sku', 'marketplace'] }),
+    readAll('amazon_links', 'marketplace, sku, seller_sku, asin', { order: ['marketplace', 'sku'] }),
+    latestSnapshot('bestbuy').then((s) => s?.results ?? []),
   ]);
-  return { products, pim, audit, suggestions };
+  return { products, pim, audit, suggestions, inventory, aliases, amazon, bestBuy };
 }
 
 function downloadBlob(blob, fileName) {
