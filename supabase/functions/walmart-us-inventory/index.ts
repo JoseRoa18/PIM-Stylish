@@ -21,9 +21,11 @@
 // "Send now"); it first reads how the previous feed went, so the page shows
 // Walmart's answer.
 //
-// Body: { mode?: "push" | "status" | "switch", dryRun?: boolean, all?: boolean, enabled?: boolean }
-//   push    (default) — dryRun returns the lines without sending; all sends
-//           every SKU, not only the changed ones.
+// Body: { mode: "push" | "status" | "switch" | "read", dryRun?: boolean, all?: boolean, enabled?: boolean }
+//   push    — dryRun returns the lines without sending; all sends every SKU,
+//           not only the changed ones. Only an explicit "push" sends: a body
+//           that could not be read used to default to push (four extra
+//           feeds from a diagnostic script, 2026-10-30), it is status now.
 //   status  — the switch, the last feed and its outcome; nothing is sent.
 //   switch  — turns the hourly sync on or off (enabled), with an Activity Log entry.
 // Caller: cron (x-cron-secret), the service-role key, or an admin / editor.
@@ -129,7 +131,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const mode: string = body.mode ?? "push";
+    const mode: string = body.mode ?? "status";
     const dryRun = body.dryRun === true;
     const { data: row } = await admin.from("app_settings").select("value").eq("key", SETTINGS_KEY).maybeSingle();
     const settings: Settings = (row?.value as Settings) ?? {};
