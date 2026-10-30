@@ -359,7 +359,9 @@ async function fetchSpec(base: string, wm: string, productTypes: string[], feedT
   return (await res.json()).schema;
 }
 function validateFeed(schema: unknown, feed: unknown): { valid: boolean; errors: { path: string; message: string }[] } {
-  const ajv = new Ajv({ allErrors: true, strict: false, allowUnionTypes: true });
+  // multipleOfPrecision: the spec's "multiple of 0.0001" checked in binary
+  // floating point failed on 3-decimal inches like 21.26 (lot 2, 2026-10-30).
+  const ajv = new Ajv({ allErrors: true, strict: false, allowUnionTypes: true, multipleOfPrecision: 8 });
   const check = ajv.compile(schema as object);
   const valid = check(feed) as boolean;
   const errors = (check.errors ?? []).map((e: { instancePath: string; message?: string; params?: Record<string, unknown> }) => ({
