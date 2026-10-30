@@ -116,7 +116,12 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
             </button>
           </div>
         )}
-        {preview && (
+        {preview && !previewLines.length && (
+          <p role="status" className="text-body-sm text-success">
+            All {preview.listed} product{preview.listed === 1 ? '' : 's'} on {sync.channel} already carry our quantity — nothing to send.
+          </p>
+        )}
+        {preview && previewLines.length > 0 && (
           <div className="space-y-2">
           <div className="rounded-lg border border-outline-variant overflow-x-auto">
             <table className="w-full text-body-sm">
