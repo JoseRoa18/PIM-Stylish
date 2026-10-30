@@ -21,7 +21,16 @@
 // "Send now"); it first reads how the previous feed went, so the page shows
 // Walmart's answer.
 //
-// Body: { mode: "push" | "status" | "switch" | "read", dryRun?: boolean, all?: boolean, enabled?: boolean }
+// Our Walmart.com pages (user, 2026-10-30: "hazlo"): every run also points
+// each Stylish product's Walmart.com link (product_where_to_buy walmart_us)
+// at OUR published listing, https://www.walmart.com/ip/<itemId> — the links
+// the Stylish pages carried were other sellers' listings, most of them gone
+// (235 broken). A changed link is saved (source "auto") and its product
+// queued for the Stylish pages (where_to_buy_publish_queue); the Where to Buy
+// check opens it like any new link. Not tied to the stock switch.
+//
+// Body: { mode: "push" | "status" | "switch" | "read" | "links", dryRun?: boolean, all?: boolean, enabled?: boolean }
+//   links   — only the Walmart.com links (dryRun lists them), no stock.
 //   push    — dryRun returns the lines without sending; all sends every SKU,
 //           not only the changed ones. Only an explicit "push" sends: a body
 //           that could not be read used to default to push (four extra
@@ -70,8 +79,9 @@ interface Settings { enabled?: boolean; sent?: Record<string, number>; all_at?: 
 
 // The SKUs on Walmart USA (any state but retired). A seller with nothing
 // listed gets 404 CONTENT_NOT_FOUND, not an empty page (walmart-pull-items).
-async function listedSkus(wm: string): Promise<string[]> {
-  const out: string[] = [];
+interface Listed { sku: string; itemId: string | null; published: boolean }
+async function listedItems(wm: string): Promise<Listed[]> {
+  const out: Listed[] = [];
   let total = 0;
   for (let offset = 0; offset < 10000; offset += 200) {
     const res = await fetch(`${BASE}/v3/items?limit=200&offset=${offset}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm }) });
@@ -83,10 +93,45 @@ async function listedSkus(wm: string): Promise<string[]> {
     const data = await res.json();
     total = data.totalItems ?? 0;
     const page = (data.ItemResponse ?? []) as Record<string, unknown>[];
-    for (const it of page) if (it.sku && String(it.lifecycleStatus ?? "") !== "RETIRED") out.push(String(it.sku));
+    for (const it of page) {
+      if (!it.sku || String(it.lifecycleStatus ?? "") === "RETIRED") continue;
+      out.push({ sku: String(it.sku), itemId: it.itemId ? String(it.itemId) : null, published: String(it.publishedStatus ?? "") === "PUBLISHED" });
+    }
     if (!page.length || offset + 200 >= total) break;
   }
-  return [...new Set(out)];
+  return [...new Map(out.map((i) => [i.sku, i])).values()];
+}
+
+// Point each published Stylish product's Walmart.com link at our listing.
+// Azuni is never on the Stylish pages, so its products are left alone.
+async function syncLinks(admin: ReturnType<typeof createClient>, items: Listed[], dryRun: boolean, caller: { id: string | null; email: string | null }) {
+  const want = new Map(items.filter((i) => i.published && i.itemId).map((i) => [i.sku, `https://www.walmart.com/ip/${i.itemId}`]));
+  if (!want.size) return { changed: [] as string[] };
+  const skus = [...want.keys()];
+  const brand = new Map<string, string>();
+  const current = new Map<string, string>();
+  for (let i = 0; i < skus.length; i += 200) {
+    const part = skus.slice(i, i + 200);
+    const { data: prods } = await admin.from("products").select("sku, brand").in("sku", part);
+    for (const r of prods ?? []) brand.set(String(r.sku), String(r.brand ?? ""));
+    const { data: links } = await admin.from("product_where_to_buy").select("sku, url").eq("retailer", "walmart_us").in("sku", part);
+    for (const r of links ?? []) current.set(String(r.sku), String(r.url ?? ""));
+  }
+  const changed = skus.filter((s) => brand.has(s) && !/azuni/i.test(brand.get(s)!) && current.get(s) !== want.get(s));
+  if (dryRun || !changed.length) return { changed };
+  const now = new Date().toISOString();
+  const { error } = await admin.from("product_where_to_buy").upsert(changed.map((sku) => ({ sku, retailer: "walmart_us", url: want.get(sku), source: "auto", updated_at: now })), { onConflict: "sku,retailer" });
+  if (error) throw new Error(`Walmart.com links: ${error.message}`);
+  const { data: q } = await admin.from("app_settings").select("value").eq("key", "where_to_buy_publish_queue").maybeSingle();
+  const queued = new Set<string>(((q?.value as { skus?: string[] })?.skus ?? []).map(String));
+  for (const s of changed) queued.add(s);
+  await admin.from("app_settings").upsert({ key: "where_to_buy_publish_queue", value: { ...(q?.value as Record<string, unknown> ?? {}), skus: [...queued] } }, { onConflict: "key" });
+  await admin.from("audit_log").insert({
+    actor_id: caller.id, actor_email: caller.email, actor_name: caller.id ? null : "PIM automation", action: "update", entity_type: "channel", entity_id: "walmart_us", target: "pim",
+    summary: `Where to Buy: ${changed.length} Walmart.com link${changed.length === 1 ? "" : "s"} now open our own Walmart USA listing`,
+    metadata: { links: changed.map((sku) => ({ sku, from: current.get(sku) ?? null, to: want.get(sku) })) },
+  }).then(() => {}, () => {});
+  return { changed };
 }
 
 // How the previous feed went: its counts and the first errors per SKU.
@@ -176,14 +221,17 @@ Deno.serve(async (req) => {
       if (last !== settings.last) await save({ ...settings, last });
       return json({ ok: true, enabled: Boolean(settings.enabled), safetyUnits: SAFETY_UNITS, last, allAt: settings.all_at ?? null, checkedAt: settings.checked_at ?? null, skusSent: Object.keys(settings.sent ?? {}).length });
     }
-    if (mode !== "push") return json({ error: `unknown mode "${mode}"` }, 400);
+    if (mode !== "push" && mode !== "links") return json({ error: `unknown mode "${mode}"` }, 400);
+    const items = await listedItems(wm);
+    const links = await syncLinks(admin, items, dryRun, caller);
+    if (mode === "links") return json({ ok: true, dryRun, listed: items.length, linksChanged: links.changed });
     if (!settings.enabled && !dryRun) {
       if (last !== settings.last) await save({ ...settings, last });
-      return json({ ok: true, skipped: "Stock sync is off (Walmart USA page)." });
+      return json({ ok: true, skipped: "Stock sync is off (Walmart USA page).", linksChanged: links.changed.length });
     }
 
     // --- what each listed SKU should carry ------------------------------------
-    const skus = await listedSkus(wm);
+    const skus = items.map((i) => i.sku);
     const stock = new Map<string, number>();
     for (let from = 0; ; from += 1000) {
       const { data, error } = await admin.from("product_inventory").select("sku, available").eq("market", "us").order("sku").range(from, from + 999);
@@ -202,11 +250,11 @@ Deno.serve(async (req) => {
     const now = new Date().toISOString();
 
     if (dryRun) {
-      return json({ ok: true, dryRun: true, enabled: Boolean(settings.enabled), listed: skus.length, sending: lines.length, all: sendAll, safetyUnits: SAFETY_UNITS, lines, last });
+      return json({ ok: true, dryRun: true, enabled: Boolean(settings.enabled), listed: skus.length, sending: lines.length, all: sendAll, safetyUnits: SAFETY_UNITS, lines, last, linksToChange: links.changed });
     }
     if (!lines.length) {
       await save({ ...settings, last, checked_at: now });
-      return json({ ok: true, listed: skus.length, sending: 0, note: "No quantity changed since the last feed.", last });
+      return json({ ok: true, listed: skus.length, sending: 0, note: "No quantity changed since the last feed.", last, linksChanged: links.changed.length });
     }
 
     // --- the feed ---------------------------------------------------------------
@@ -230,7 +278,7 @@ Deno.serve(async (req) => {
       summary: `Walmart USA stock: ${lines.length} SKU${lines.length === 1 ? "" : "s"} sent${sendAll ? " (all listed products)" : " (changed quantities)"} — feed ${feedId ?? "?"}`,
       metadata: { feedId, all: sendAll, safetyUnits: SAFETY_UNITS, lines: lines.slice(0, 400) },
     }).then(() => {}, () => {});
-    return json({ ok: true, listed: skus.length, sending: lines.length, all: sendAll, feedId, previous: last });
+    return json({ ok: true, listed: skus.length, sending: lines.length, all: sendAll, feedId, previous: last, linksChanged: links.changed.length });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[walmart-us-inventory] FAILED:", message);
