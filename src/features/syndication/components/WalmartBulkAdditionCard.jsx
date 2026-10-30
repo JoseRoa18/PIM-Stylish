@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, AlertCircle, CheckCircle2, ListChecks, Send, RefreshCw, Search } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, ListChecks, Send, RefreshCw, Search, PlusCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -35,10 +35,18 @@ async function readAll(table, columns, build) {
   return rows;
 }
 
-// Walmart's answer for one SKU of a feed, in a few words.
-const itemOutcome = (it) => (it.ingestionStatus === 'SUCCESS'
-  ? { ok: true, text: 'Added' }
-  : { ok: false, text: (it.ingestionErrors?.ingestionError ?? []).map((e) => e.description).filter(Boolean).join(' · ') || it.ingestionStatus || 'Not processed' });
+// Walmart's answer for one SKU of a feed, in a few words. A UPC Walmart's
+// catalog does not have ("We couldn't find an available listing for the
+// provided GTIN", lot 1, 2026-10-30: S-127W, C132, S-601WK, S-628WK) has no
+// listing to join: that product is created as a NEW item with the PIM's
+// content (`notListed`).
+const NOT_LISTED_RE = /couldn.t find an available listing/i;
+function itemOutcome(it) {
+  if (it.ingestionStatus === 'SUCCESS') return { ok: true, text: 'Added' };
+  if (it.ingestionStatus === 'INPROGRESS') return { ok: null, text: 'Processing at Walmart' };
+  const text = (it.ingestionErrors?.ingestionError ?? []).map((e) => e.description).filter(Boolean).join(' · ') || it.ingestionStatus || 'Not processed';
+  return { ok: false, text, notListed: NOT_LISTED_RE.test(text) };
+}
 
 export default function WalmartBulkAdditionCard() {
   const { canEdit } = useAuth();
@@ -53,7 +61,7 @@ export default function WalmartBulkAdditionCard() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [firstN, setFirstN] = useState(30);
-  const [busy, setBusy] = useState(null); // 'check' | 'send' | 'status'
+  const [busy, setBusy] = useState(null); // 'check' | 'send' | 'status' | 'new'
   const [check, setCheck] = useState(null); // the last preview
   const [sent, setSent] = useState(null); // the last submit
   const [outcome, setOutcome] = useState(new Map()); // sku → { ok, text }
@@ -96,6 +104,18 @@ export default function WalmartBulkAdditionCard() {
   const picked = [...selected];
   const ready = picked.filter((s) => checked.get(s)?.ready);
   const checkedAll = picked.length > 0 && picked.every((s) => checked.has(s) || (check?.skipped ?? []).some((x) => x.sku === s));
+  const notListed = [...outcome].filter(([, o]) => o.notListed).map(([sku]) => sku);
+  // What "Create as new items" takes: the products a lot just found missing
+  // from Walmart's catalog, else the selection (after a reload the lot's
+  // answers are gone — select those products again).
+  const newItems = notListed.length ? notListed : picked;
+  // The last lot's tally, from each product's own answer (Walmart's feed
+  // counters lag behind its items).
+  const tally = (sent?.submitted ?? []).reduce((acc, sku) => {
+    const o = outcome.get(sku);
+    acc[o?.ok === true ? 'added' : o?.ok === false ? 'failed' : 'processing'] += 1;
+    return acc;
+  }, { added: 0, failed: 0, processing: 0 });
 
   function toggle(sku) {
     setSelected((s) => {
@@ -147,6 +167,41 @@ export default function WalmartBulkAdditionCard() {
       setOutcome(next);
       setSelected(new Set());
       setCheck(null);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+
+  // The products Walmart's catalog does not have: created as new items with
+  // the PIM's content (MP_ITEM; sinks have the agreed mapping), after a check
+  // against Walmart's own item spec.
+  async function runNewItems() {
+    if (!newItems.length) return;
+    setBusy('new'); setError(null);
+    try {
+      const pre = await previewWalmartItems(newItems, { validate: true, enableChannel: true });
+      const next = new Map(outcome);
+      for (const s of pre.skipped ?? []) next.set(s.sku, { ok: false, text: s.reason });
+      for (const r of pre.products ?? []) {
+        if (!r.ready) next.set(r.sku, { ok: false, text: `New item: missing ${r.missing.join(', ')}` });
+        else if (r.specErrors?.length) next.set(r.sku, { ok: false, text: `New item: ${r.specErrors.map((e) => `${e.path} ${e.message}`).join(' · ')}` });
+      }
+      const good = (pre.products ?? []).filter((r) => r.ready && !r.specErrors?.length).map((r) => r.sku);
+      setOutcome(next);
+      if (!good.length) return;
+      const ok = await confirm({
+        title: `Create ${good.length} new item${good.length === 1 ? '' : 's'} on Walmart USA?`,
+        message: `Walmart's catalog has no listing for ${good.length === 1 ? 'its UPC' : 'their UPCs'}, so ${good.length === 1 ? 'it is' : 'they are'} created with the PIM's content (title, description, images, specifications, model = our SKU) at MAP Blue USD. ${good.join(', ')}. It cannot be undone from the PIM.`,
+        confirmLabel: 'Create items',
+      });
+      if (!ok) return;
+      const data = await submitWalmartItems(good, { sandbox: false, confirm: 'CREATE', enableChannel: true });
+      setSent(data);
+      setOutcome((o) => {
+        const n = new Map(o);
+        for (const sku of data.submitted ?? []) n.set(sku, { ok: null, text: 'Sent as a new item — waiting for Walmart' });
+        for (const it of data.items ?? []) n.set(it.sku, itemOutcome(it));
+        return n;
+      });
     } catch (e) { setError(e.message); }
     finally { setBusy(null); }
   }
@@ -219,6 +274,12 @@ export default function WalmartBulkAdditionCard() {
               {busy === 'send' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
               Send lot{checkedAll && ready.length ? ` (${ready.length})` : ''}
             </button>
+            {newItems.length > 0 && (
+              <button type="button" onClick={runNewItems} disabled={!!busy} className={btn} title="Only for products whose UPC Walmart's catalog does not have (a lot answered &quot;We couldn't find an available listing&quot;): checks them against Walmart's item spec and creates them with the PIM's content. Sinks only for now.">
+                {busy === 'new' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <PlusCircle className="w-4 h-4" aria-hidden="true" />}
+                Create {notListed.length ? newItems.length : 'selected'} as new item{newItems.length === 1 ? '' : 's'}
+              </button>
+            )}
             {sent?.feedId && (
               <button type="button" onClick={refreshStatus} disabled={!!busy} className={btn}>
                 {busy === 'status' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
@@ -236,7 +297,7 @@ export default function WalmartBulkAdditionCard() {
         {sent?.feedId && (
           <p role="status" className="text-body-sm text-on-surface-variant">
             Lot sent: {sent.submitted?.length ?? 0} product{(sent.submitted?.length ?? 0) === 1 ? '' : 's'}{sent.feedStatus ? ` · Walmart: ${sent.feedStatus}` : ''}
-            {sent.itemsReceived != null ? ` · added ${sent.itemsSucceeded ?? 0} · failed ${sent.itemsFailed ?? 0} · processing ${sent.itemsProcessing ?? 0}` : ''}
+            {` · added ${tally.added} · failed ${tally.failed} · processing ${tally.processing}`}
             {' '}— they show on Walmart USA's list above at its next refresh.
           </p>
         )}
@@ -273,7 +334,7 @@ export default function WalmartBulkAdditionCard() {
                   return (
                     <tr key={p.sku} className={selected.has(p.sku) ? 'bg-primary-container/15' : ''}>
                       <td className="px-3 py-1.5"><input type="checkbox" checked={selected.has(p.sku)} onChange={() => toggle(p.sku)} disabled={!selected.has(p.sku) && selected.size >= LOT_MAX} aria-label={`Add ${p.sku} to the lot`} className="accent-primary" /></td>
-                      <td className="px-3 py-1.5 font-mono"><Link to={`/catalog/${encodeURIComponent(p.sku)}?tab=marketplaces`} className="text-primary hover:underline">{p.sku}</Link></td>
+                      <td className="px-3 py-1.5 font-mono whitespace-nowrap"><Link to={`/catalog/${encodeURIComponent(p.sku)}?tab=marketplaces`} className="text-primary hover:underline">{p.sku}</Link></td>
                       <td className="px-3 py-1.5 text-on-surface">{p.model_name}</td>
                       <td className="px-3 py-1.5 text-on-surface-variant">{CATEGORY.get(p.category) ?? p.category}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{p.stock == null ? <span className="text-on-surface-variant">Not tracked</span> : p.stock}</td>
