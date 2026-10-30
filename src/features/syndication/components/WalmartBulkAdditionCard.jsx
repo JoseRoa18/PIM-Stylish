@@ -4,6 +4,7 @@ import { Loader2, AlertCircle, CheckCircle2, ListChecks, Send, RefreshCw, Search
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import Pagination from '@/components/ui/Pagination';
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { latestSnapshot } from '../lib/channels';
 import { previewWalmartItems, submitWalmartItems, walmartFeedStatus } from '../api/walmartAdd';
@@ -16,7 +17,9 @@ import { previewWalmartItems, submitWalmartItems, walmartFeedStatus } from '../a
 // setup "match"). Sending a lot switches Walmart USA on for its products; their
 // stock follows by the hourly sync (WalmartUsStockCard). The content stays
 // Walmart's until the brand is approved on Walmart's Brand Portal.
-// Products with USA stock come first; a lot is at most LOT_MAX products.
+// Products with USA stock come first; a lot is at most LOT_MAX products. The
+// list is paged (it holds every product not listed yet), and "Select first N"
+// takes the first N of the filter across pages.
 const PAGE = 1000;
 const LOT_MAX = 100;
 const CATEGORY = new Map(CATEGORY_OPTIONS.map((c) => [c.value, c.label]));
@@ -47,6 +50,9 @@ export default function WalmartBulkAdditionCard() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [stockOnly, setStockOnly] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [firstN, setFirstN] = useState(30);
   const [busy, setBusy] = useState(null); // 'check' | 'send' | 'status'
   const [check, setCheck] = useState(null); // the last preview
   const [sent, setSent] = useState(null); // the last submit
@@ -83,6 +89,9 @@ export default function WalmartBulkAdditionCard() {
       && (!stockOnly || (p.stock ?? 0) > 0)
       && (!q || p.sku.toLowerCase().includes(q) || (p.model_name ?? '').toLowerCase().includes(q)));
   }, [candidates, category, stockOnly, search]);
+  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
+  const current = Math.min(page, pageCount);
+  const pageRows = shown.slice((current - 1) * pageSize, current * pageSize);
   const checked = useMemo(() => new Map((check?.products ?? []).map((r) => [r.sku, r])), [check]);
   const picked = [...selected];
   const ready = picked.filter((s) => checked.get(s)?.ready);
@@ -95,14 +104,22 @@ export default function WalmartBulkAdditionCard() {
       return n;
     });
   }
+  // The header box selects (or clears) the page on show.
   function toggleAll() {
     setSelected((s) => {
-      if (shown.length && shown.every((p) => s.has(p.sku))) return new Set([...s].filter((x) => !shown.some((p) => p.sku === x)));
+      if (pageRows.length && pageRows.every((p) => s.has(p.sku))) return new Set([...s].filter((x) => !pageRows.some((p) => p.sku === x)));
       const n = new Set(s);
-      for (const p of shown) { if (n.size >= LOT_MAX) break; n.add(p.sku); }
+      for (const p of pageRows) { if (n.size >= LOT_MAX) break; n.add(p.sku); }
       return n;
     });
   }
+  // The lot = the first N products of the filter, in its order.
+  function selectFirst() {
+    const n = Math.max(1, Math.min(LOT_MAX, Math.floor(Number(firstN) || 0)));
+    setSelected(new Set(shown.slice(0, n).map((p) => p.sku)));
+    setCheck(null);
+  }
+  const filterBy = (set) => (e) => { set(e.target.type === 'checkbox' ? e.target.checked : e.target.value); setPage(1); };
 
   async function runCheck() {
     if (!picked.length) return;
@@ -159,7 +176,7 @@ export default function WalmartBulkAdditionCard() {
         </div>
         <label className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" aria-hidden="true" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="SKU or name" aria-label="Search products by SKU or name" className="pl-9 pr-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm w-56" />
+          <input value={search} onChange={filterBy(setSearch)} placeholder="SKU or name" aria-label="Search products by SKU or name" className="pl-9 pr-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm w-56" />
         </label>
       </div>
 
@@ -167,13 +184,13 @@ export default function WalmartBulkAdditionCard() {
         <div className="flex items-center gap-3 flex-wrap">
           <label className="inline-flex items-center gap-2 text-body-sm text-on-surface">
             Category
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className="px-2 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm">
+            <select value={category} onChange={filterBy(setCategory)} className="px-2 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm">
               <option value="all">All</option>
               {categories.map((c) => <option key={c} value={c}>{CATEGORY.get(c) ?? c}</option>)}
             </select>
           </label>
           <label className="inline-flex items-center gap-2 text-body-sm text-on-surface">
-            <input type="checkbox" checked={stockOnly} onChange={(e) => setStockOnly(e.target.checked)} className="accent-primary" />
+            <input type="checkbox" checked={stockOnly} onChange={filterBy(setStockOnly)} className="accent-primary" />
             Only with USA stock
           </label>
           <span className="text-body-sm text-on-surface-variant">{shown.length} shown · {candidates.length} not on Walmart USA</span>
@@ -181,6 +198,12 @@ export default function WalmartBulkAdditionCard() {
 
         {canEdit && (
           <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 text-body-sm text-on-surface">
+              <label htmlFor="wm-lot-first" className="sr-only">How many products to select</label>
+              <input id="wm-lot-first" type="number" min={1} max={LOT_MAX} value={firstN} onChange={(e) => setFirstN(e.target.value)} className="w-16 px-2 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm tabular-nums" />
+              <button type="button" onClick={selectFirst} disabled={!!busy || !shown.length} className={btn} title="Selects the first products of the list as it is filtered, across pages">Select first {Math.max(1, Math.min(LOT_MAX, Math.floor(Number(firstN) || 0)))}</button>
+            </span>
+            {picked.length > 0 && <button type="button" onClick={() => { setSelected(new Set()); setCheck(null); }} disabled={!!busy} className="text-label-md text-primary hover:underline px-1">Clear</button>}
             <span className="text-body-sm text-on-surface-variant">{picked.length} in the lot{picked.length >= LOT_MAX ? ` (the most a lot takes)` : ''}{check ? ` · ${ready.length} ready` : ''}</span>
             <button type="button" onClick={runCheck} disabled={!!busy || !picked.length} className={btn} title="Checks UPC, price and shipping weight of every product of the lot. Nothing is sent.">
               {busy === 'check' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <ListChecks className="w-4 h-4" aria-hidden="true" />}
@@ -228,11 +251,13 @@ export default function WalmartBulkAdditionCard() {
         ) : candidates.length === 0 ? (
           <p className="text-body-sm text-on-surface-variant">Every product is already on Walmart USA.</p>
         ) : (
+          <div className="space-y-2">
+          <Pagination compact label="Products not on Walmart USA, top" page={current} pageSize={pageSize} total={shown.length} onPageChange={setPage} />
           <div className="rounded-lg border border-outline-variant overflow-x-auto">
             <table className="w-full text-body-sm">
               <thead className="bg-surface-container-low text-label-sm text-on-surface-variant">
                 <tr>
-                  <th scope="col" className="px-3 py-2 text-left w-8"><input type="checkbox" checked={shown.length > 0 && shown.every((p) => selected.has(p.sku))} onChange={toggleAll} aria-label={`Select the shown products (up to ${LOT_MAX})`} className="accent-primary" /></th>
+                  <th scope="col" className="px-3 py-2 text-left w-8"><input type="checkbox" checked={pageRows.length > 0 && pageRows.every((p) => selected.has(p.sku))} onChange={toggleAll} aria-label="Select the products of this page" className="accent-primary" /></th>
                   <th scope="col" className="px-3 py-2 text-left">SKU</th>
                   <th scope="col" className="px-3 py-2 text-left">Product</th>
                   <th scope="col" className="px-3 py-2 text-left">Category</th>
@@ -242,7 +267,7 @@ export default function WalmartBulkAdditionCard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/60">
-                {shown.map((p) => {
+                {pageRows.map((p) => {
                   const r = checked.get(p.sku);
                   const out = outcome.get(p.sku);
                   return (
@@ -269,6 +294,8 @@ export default function WalmartBulkAdditionCard() {
               </tbody>
             </table>
             {shown.length === 0 && <p className="px-3 py-3 text-body-sm text-on-surface-variant">No product matches.</p>}
+          </div>
+          <Pagination label="Products not on Walmart USA, bottom" page={current} pageSize={pageSize} total={shown.length} onPageChange={setPage} onPageSizeChange={(n) => { setPageSize(n); setPage(1); }} />
           </div>
         )}
       </div>

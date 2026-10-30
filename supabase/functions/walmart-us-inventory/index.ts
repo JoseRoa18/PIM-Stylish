@@ -152,6 +152,24 @@ Deno.serve(async (req) => {
     let last = settings.last ?? null;
     if (last) last = await feedOutcome(wm, last);
 
+    // read: what Walmart holds for some SKUs, by both inventory APIs (the
+    // default node and per ship node) — read-only, to check a feed landed.
+    if (mode === "read") {
+      const skus: string[] = (Array.isArray(body.skus) ? body.skus : []).map(String).slice(0, 10);
+      const out: Record<string, unknown> = {};
+      for (const sku of skus) {
+        const get = async (path: string) => {
+          const r = await fetch(`${BASE}${path}`, { headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm }) });
+          const text = await r.text();
+          try { return { status: r.status, body: JSON.parse(text) }; } catch { return { status: r.status, body: text.slice(0, 500) }; }
+        };
+        out[sku] = {
+          inventory: await get(`/v3/inventory?sku=${encodeURIComponent(sku)}`),
+          byNode: await get(`/v3/inventories/${encodeURIComponent(sku)}`),
+        };
+      }
+      return json({ ok: true, read: out });
+    }
     if (mode === "status") {
       if (last !== settings.last) await save({ ...settings, last });
       return json({ ok: true, enabled: Boolean(settings.enabled), safetyUnits: SAFETY_UNITS, last, allAt: settings.all_at ?? null, checkedAt: settings.checked_at ?? null, skusSent: Object.keys(settings.sent ?? {}).length });
