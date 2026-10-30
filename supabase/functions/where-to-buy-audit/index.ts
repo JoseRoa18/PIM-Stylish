@@ -110,7 +110,6 @@ const BRIGHTDATA_ZONE = Deno.env.get("BRIGHTDATA_ZONE") ?? "web_unlocker1";
 const SCRAPERAPI_KEY = Deno.env.get("SCRAPERAPI_KEY") ?? "";
 
 const SITES = ["stylish_ca", "stylish_us"];
-const KEEP_DAYS = 7;        // a scan carries ok / broken results younger than a week
 const SIGN_HOURS = 48;      // the gap between two soft signals
 const RETRY_HOURS = 3;      // no answer: again after 3 h, 6 h, … at most a day (within the pass day)
 const JOB_POLL_MIN = 10;    // Menards async job: first look after 10 minutes
@@ -334,21 +333,24 @@ async function loadPimLinks(skus?: string[]): Promise<PimLinks> {
 }
 
 // The checker's state of the links — from either site, as both pages carry
-// the same address: ok / broken verdicts it reached in the last KEEP_DAYS,
-// and every pending link's retries, soft signals and Menards job. Kept by
+// the same address: every ok / broken verdict it reached, however old, and
+// every pending link's retries, soft signals and Menards job. A verdict is
+// kept until a new answer replaces it: it used to be dropped after a week,
+// so links a store kept turning away for that long (BB&B behind its captcha,
+// 48 of them on 2026-10-30) went back to "Not checked yet" and lost their
+// readings. Kept by
 // SKU + address (whether the page shows THIS product is the SKU's own
 // answer) and by address alone for a SKU that just got an address another
 // product already has.
 interface Prior { bySkuUrl: Map<string, LinkState>; byUrl: Map<string, LinkState> }
 async function priorState(skus?: string[]): Promise<Prior> {
-  const since = new Date(Date.now() - KEEP_DAYS * 86400e3).toISOString();
   const prior: Prior = { bySkuUrl: new Map(), byUrl: new Map() };
   const filter = skus?.length ? `&sku=${inList(skus)}` : "";
   // A verdict beats "pending"; between two of a kind, the newer answer.
   const better = (prev: LinkState | undefined, r: LinkState) => !prev || (prev.verdict === "pending" && r.verdict !== "pending")
     || ((prev.verdict === "pending") === (r.verdict === "pending") && (r.checked_at ?? "") > (prev.checked_at ?? ""));
   for (const r of await restAll<{ url: string; sku: string } & LinkState>(
-    `where_to_buy_links?select=sku,${STATE_COLUMNS}&url=not.is.null${filter}&or=(verdict.eq.pending,and(verdict.in.(ok,broken),checked_via.not.is.null,checked_at.gte.${since}))`,
+    `where_to_buy_links?select=sku,${STATE_COLUMNS}&url=not.is.null${filter}&or=(verdict.eq.pending,and(verdict.in.(ok,broken),checked_via.not.is.null))`,
   )) {
     const k = `${r.sku}|${r.url}`;
     if (better(prior.bySkuUrl.get(k), r)) prior.bySkuUrl.set(k, r);
