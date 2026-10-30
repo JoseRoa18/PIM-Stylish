@@ -5,6 +5,7 @@ import WayfairConnectorCard from '@/features/syndication/components/WayfairConne
 import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import ReadOnlyChannelCard from '@/features/syndication/components/ReadOnlyChannelCard';
 import WalmartBulkAdditionCard from '@/features/syndication/components/WalmartBulkAdditionCard';
+import WalmartUsStockCard from '@/features/syndication/components/WalmartUsStockCard';
 import BestBuyCatalogAuditCard from '@/features/syndication/components/BestBuyCatalogAuditCard';
 import BestBuyContentPushCard from '@/features/syndication/components/BestBuyContentPushCard';
 import { LIVE_CHANNELS } from '@/features/syndication/lib/channels';
@@ -35,6 +36,7 @@ const WORKSPACES = {
   walmart_us: () => (
     <>
       <ReadOnlyChannelCard channel="walmart_us" />
+      <WalmartUsStockCard />
       <WalmartBulkAdditionCard />
     </>
   ),

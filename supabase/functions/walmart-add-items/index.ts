@@ -42,6 +42,11 @@
 //                                              have (feed MP_MAINTENANCE) — model = the PIM SKU,
 //                                              title, description, images, attributes
 //   path?: string,                             get: the Walmart GET path
+//   enableChannel?: boolean,                   preview: check products switched off for
+//                                              Walmart USA too; submit: switch Walmart USA on
+//                                              for the products sent (the lots of the Walmart
+//                                              USA page, user 2026-10-30: "queremos todos, pero
+//                                              podemos empezar por lotes")
 // }
 // Caller: authenticated admin/editor.
 // Secrets: WALMART_US_PROD_CLIENT_ID/SECRET, WALMART_US_SANDBOX_CLIENT_ID/SECRET.
@@ -488,11 +493,14 @@ Deno.serve(async (req) => {
     // 2026-09-30) and this replaces it with the PIM's (model "S-307XG").
     const matchSetup = body.setup === "match";
     const maintenance = body.setup === "maintenance";
+    // A lot switches Walmart USA on for its products: the exclusion is not a
+    // reason to leave one out, and a submit lifts it (below).
+    const enableChannel = body.enableChannel === true;
     const setupName = matchSetup ? "match" : maintenance ? "maintenance" : "item";
     for (const sku of skus) {
       const p = ((products ?? []) as Product[]).find((x) => x.sku === sku);
       if (!p) { skipped.push({ sku, reason: "not in the PIM" }); continue; }
-      if (isExcluded(p, "walmart_us")) { skipped.push({ sku, reason: excludedMessage(sku, "walmart_us") }); continue; }
+      if (!enableChannel && isExcluded(p, "walmart_us")) { skipped.push({ sku, reason: excludedMessage(sku, "walmart_us") }); continue; }
       if (matchSetup) {
         const built = buildMatch(p);
         report.push({ sku, productType: "Offer by match", ready: built.missing.length === 0, missing: built.missing, warnings: built.warnings, rows: built.rows, fields: built.rows.length });
@@ -610,12 +618,24 @@ Deno.serve(async (req) => {
       }
     }
     const submitted = (report as { sku: string; ready: boolean }[]).filter((r) => r.ready).map((r) => r.sku);
+    // The products of a lot are switched on for Walmart USA once Walmart has
+    // the feed, so promotions, stock and Listing Health take them in.
+    let enabled: string[] = [];
+    if (enableChannel && feedId) {
+      for (const sku of submitted) {
+        const p = ((products ?? []) as Product[]).find((x) => x.sku === sku);
+        const keys = Array.isArray(p?.channel_exclusions) ? (p!.channel_exclusions as string[]) : [];
+        if (!keys.includes("walmart_us")) continue;
+        const { error } = await admin.from("products").update({ channel_exclusions: keys.filter((k) => k !== "walmart_us") }).eq("sku", sku);
+        if (!error) enabled.push(sku);
+      }
+    }
     await admin.from("audit_log").insert({
       actor_id: caller.id, actor_email: caller.email ?? null, actor_name: null, action: "push", entity_type: "channel", entity_id: "walmart_us", target: "walmart",
       summary: `${sandbox ? "Sandbox test:" : "Submitted"} ${submitted.length} Walmart US ${matchSetup ? "offer(s) by match" : maintenance ? "content update(s)" : "item(s)"}${trimmed ? " (required fields only)" : ""}: ${submitted.slice(0, 8).join(", ")}${submitted.length > 8 ? "…" : ""} — feed ${feedId ?? "?"}${outcome.feedStatus ? `, ${outcome.feedStatus}` : ""}`,
-      metadata: { env, feedId, feedType, skus: submitted, trimmed, ...outcome, items: undefined },
+      metadata: { env, feedId, feedType, skus: submitted, trimmed, switchedOn: enabled, ...outcome, items: undefined },
     }).then(() => {}, () => {});
-    return json({ ok: true, env, feedId, feedType, setup: setupName, submitted, trimmed, products: report, skipped, ...outcome, sent: trimmed ? sendFeed : undefined });
+    return json({ ok: true, env, feedId, feedType, setup: setupName, submitted, switchedOn: enabled, trimmed, products: report, skipped, ...outcome, sent: trimmed ? sendFeed : undefined });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[walmart-add-items] FAILED:", message);
