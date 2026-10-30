@@ -8,6 +8,7 @@ import Pagination from '@/components/ui/Pagination';
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { latestSnapshot } from '../lib/channels';
 import { previewWalmartItems, submitWalmartItems, walmartFeedStatus } from '../api/walmartAdd';
+import { refreshWalmartItems } from '../api/walmartSync';
 
 // Walmart USA in lots (user, 2026-10-30: "queremos todos, pero podemos
 // empezar por lotes"). Almost every Stylish product already has a listing in
@@ -71,10 +72,15 @@ export default function WalmartBulkAdditionCard() {
     let active = true;
     (async () => {
       try {
+        // What is on Walmart USA now: its live item list (saved as the
+        // channel's snapshot too), not the twice-a-day snapshot — after a lot
+        // the products it added were still offered for the next one
+        // (2026-10-30). The saved snapshot only when Walmart does not answer.
+        const live = refreshWalmartItems('us').then(() => latestSnapshot('walmart_us'), () => latestSnapshot('walmart_us'));
         const [rows, stock, snap] = await Promise.all([
           readAll('products', 'sku, model_name, category, brand, map_usd', (q) => q.neq('workflow_status', 'archived').order('sku')),
           readAll('product_inventory', 'sku, available', (q) => q.eq('market', 'us').order('sku')),
-          latestSnapshot('walmart_us'),
+          live,
         ]);
         if (!active) return;
         const stockOf = new Map(stock.map((s) => [s.sku, Number(s.available ?? 0)]));
@@ -124,19 +130,23 @@ export default function WalmartBulkAdditionCard() {
       return n;
     });
   }
+  // A product sent in this visit stays on the list with Walmart's answer
+  // until the page is opened again, but no lot takes it twice.
+  const free = (p) => !outcome.has(p.sku);
   // The header box selects (or clears) the page on show.
   function toggleAll() {
+    const rows = pageRows.filter(free);
     setSelected((s) => {
-      if (pageRows.length && pageRows.every((p) => s.has(p.sku))) return new Set([...s].filter((x) => !pageRows.some((p) => p.sku === x)));
+      if (rows.length && rows.every((p) => s.has(p.sku))) return new Set([...s].filter((x) => !rows.some((p) => p.sku === x)));
       const n = new Set(s);
-      for (const p of pageRows) { if (n.size >= LOT_MAX) break; n.add(p.sku); }
+      for (const p of rows) { if (n.size >= LOT_MAX) break; n.add(p.sku); }
       return n;
     });
   }
-  // The lot = the first N products of the filter, in its order.
+  // The lot = the first N products of the filter not sent yet, in its order.
   function selectFirst() {
     const n = Math.max(1, Math.min(LOT_MAX, Math.floor(Number(firstN) || 0)));
-    setSelected(new Set(shown.slice(0, n).map((p) => p.sku)));
+    setSelected(new Set(shown.filter(free).slice(0, n).map((p) => p.sku)));
     setCheck(null);
   }
   const filterBy = (set) => (e) => { set(e.target.type === 'checkbox' ? e.target.checked : e.target.value); setPage(1); };
@@ -318,7 +328,7 @@ export default function WalmartBulkAdditionCard() {
             <table className="w-full text-body-sm">
               <thead className="bg-surface-container-low text-label-sm text-on-surface-variant">
                 <tr>
-                  <th scope="col" className="px-3 py-2 text-left w-8"><input type="checkbox" checked={pageRows.length > 0 && pageRows.every((p) => selected.has(p.sku))} onChange={toggleAll} aria-label="Select the products of this page" className="accent-primary" /></th>
+                  <th scope="col" className="px-3 py-2 text-left w-8"><input type="checkbox" checked={pageRows.some(free) && pageRows.filter(free).every((p) => selected.has(p.sku))} onChange={toggleAll} aria-label="Select the products of this page" className="accent-primary" /></th>
                   <th scope="col" className="px-3 py-2 text-left">SKU</th>
                   <th scope="col" className="px-3 py-2 text-left">Product</th>
                   <th scope="col" className="px-3 py-2 text-left">Category</th>
