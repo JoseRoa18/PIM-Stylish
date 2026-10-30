@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, Eye, Send } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import Pagination from '@/components/ui/Pagination';
 import { formatTimeAgo } from '@/lib/format';
 import { walmartUsStock, bestBuyStock } from '../api/walmartAdd';
 
@@ -29,6 +30,9 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
   const confirm = useConfirm();
   const [status, setStatus] = useState(null);
   const [preview, setPreview] = useState(null);
+  // The preview can hold every offer of the channel (Best Buy: 259): paged.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [busy, setBusy] = useState(null); // 'load' | 'switch' | 'preview' | 'send'
   const [error, setError] = useState(null);
 
@@ -48,7 +52,7 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
     }))) return;
     if (await run('switch', { mode: 'switch', enabled })) await load();
   };
-  const showPreview = async () => { const p = await run('preview', { mode: 'push', dryRun: true, all: true }); if (p) setPreview(p); };
+  const showPreview = async () => { const p = await run('preview', { mode: 'push', dryRun: true, all: true }); if (p) { setPreview(p); setPage(1); } };
   const sendNow = async () => {
     if (!(await confirm({ title: `Send the stock to ${sync.channel} now?`, message: 'Sends the quantities now, without waiting for the automatic run.', confirmLabel: 'Send now' }))) return;
     if (await run('send', { mode: 'push', all: true })) { setPreview(null); await load(); }
@@ -56,6 +60,8 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
 
   const last = status?.last;
   const hasCurrent = (preview?.lines ?? []).some((l) => l.current != null);
+  const previewLines = preview?.lines ?? [];
+  const pageLines = previewLines.slice((page - 1) * pageSize, page * pageSize);
   const on = Boolean(status?.enabled);
   const btn = 'inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50';
 
@@ -111,6 +117,7 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
           </div>
         )}
         {preview && (
+          <div className="space-y-2">
           <div className="rounded-lg border border-outline-variant overflow-x-auto">
             <table className="w-full text-body-sm">
               <caption className="text-left px-3 py-2 text-on-surface-variant">{preview.listed} product{preview.listed === 1 ? '' : 's'} on {sync.channel}{preview.lines?.length !== preview.listed ? ` · ${preview.lines?.length ?? 0} to change` : ''}</caption>
@@ -123,7 +130,7 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/60">
-                {(preview.lines ?? []).map((l) => (
+                {pageLines.map((l) => (
                   <tr key={l.sku}>
                     <td className="px-3 py-1.5 font-mono">{l.sku}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{l.ours == null ? <span className="text-on-surface-variant">Not tracked</span> : l.ours}</td>
@@ -133,6 +140,8 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
                 ))}
               </tbody>
             </table>
+          </div>
+          <Pagination label={`${sync.channel} stock preview`} page={page} pageSize={pageSize} total={previewLines.length} onPageChange={setPage} onPageSizeChange={(n) => { setPageSize(n); setPage(1); }} />
           </div>
         )}
       </div>
