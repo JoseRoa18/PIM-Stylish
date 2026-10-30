@@ -318,7 +318,7 @@ export default function WalmartBulkAdditionCard() {
               Send lot{checkedAll && ready.length ? ` (${ready.length})` : ''}
             </button>
             {newItems.length > 0 && (
-              <button type="button" onClick={runNewItems} disabled={!!busy} className={btn} title="Only for products whose UPC Walmart's catalog does not have (a lot answered &quot;We couldn't find an available listing&quot;): checks them against Walmart's item spec and creates them with the PIM's content. Sinks only for now.">
+              <button type="button" onClick={runNewItems} disabled={!!busy} className={btn} title="Only for products whose UPC Walmart's catalog does not have (a lot answered &quot;We couldn't find an available listing&quot;): checks them against Walmart's item spec and creates them with the PIM's content. Sinks and faucets for now.">
                 {busy === 'new' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <PlusCircle className="w-4 h-4" aria-hidden="true" />}
                 Create {notListed.length ? newItems.length : 'selected'} as new item{newItems.length === 1 ? '' : 's'}
               </button>

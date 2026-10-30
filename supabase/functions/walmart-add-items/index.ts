@@ -5,7 +5,8 @@
 // How it works:
 //   1. Reads the products (+ media) from the PIM and maps each one to its
 //      Walmart product type. Only the types with agreed rules are built
-//      (Sinks today); the rest are reported as "mapping not defined".
+//      (Sinks, and Faucets since 2026-10-30); the rest are reported as
+//      "mapping not defined".
 //   2. mode "preview" returns, per SKU, every field that would be sent
 //      (Walmart's field name, section, value), the missing required fields
 //      and the warnings — nothing is sent.
@@ -105,10 +106,61 @@ const inches = (v: unknown) => { const n = num(v); return n == null ? null : Mat
 const fmtIn = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 
 const SINK_CATS = new Set(["kitchen_sink", "bathroom_sink", "bar_prep_sink", "outdoor_sink", "laundry_sink"]);
+// Faucets (user, 2026-10-30: lot 4's kitchen faucets K-150SM, K-150NM and
+// K-131NR have no listing in Walmart's catalog and are created as new items):
+// Walmart's one product type "Faucets" — its faucet_type tells the kinds apart.
+const FAUCET_TYPE: Record<string, string> = {
+  kitchen_faucet: "Kitchen Faucets", kitchen_faucet_combo: "Kitchen Faucets",
+  cold_water_tap: "Drinking Water Faucets", pot_filler: "Pot Fillers", bathroom_faucet: "Bathroom Sink Faucets",
+};
 function productTypeFor(p: Product): string | null {
   const c = text(p.category);
   if (SINK_CATS.has(c)) return "Sinks";
-  return null; // Faucets and accessories: rules not agreed yet
+  if (FAUCET_TYPE[c]) return "Faucets";
+  return null; // accessories: rules not agreed yet
+}
+
+// Walmart's spout_type (closed list) from the PIM's spout type and spray type
+// ("Gooseneck / High Arc" + "Pull Down" → Gooseneck, High Arc, Pull-Down).
+function spoutTypes(p: Product): string[] {
+  const a = attr(p);
+  const s = `${text(a.spout_type)} ${text(a.spray_type)}`.toLowerCase();
+  const out: string[] = [];
+  if (/gooseneck/.test(s)) out.push("Gooseneck");
+  if (/high arc/.test(s)) out.push("High Arc");
+  if (/low arc/.test(s)) out.push("Low Arc");
+  if (/waterfall/.test(s)) out.push("Waterfall");
+  if (/wall/.test(s)) out.push("Wall-Mounted");
+  if (/pull[ -]?down/.test(s)) out.push("Pull-Down");
+  if (/pull[ -]?out/.test(s)) out.push("Pull-Out");
+  if (yes(a.swivel_spout)) out.push("Swivel");
+  return out;
+}
+
+// Walmart's "features" for a faucet, only from what the PIM records.
+function faucetFeatures(p: Product): string[] {
+  const a = attr(p);
+  const out: string[] = [];
+  const rotation = num(a.spout_rotation_degrees);
+  if (yes(a.swivel_spout) && rotation === 360) out.push("360 Degree Swivel");
+  else if (yes(a.swivel_spout) && rotation === 180) out.push("180 Degree Swivel");
+  if (/ceramic/i.test(text(a.cartridge_type))) out.push("Ceramic Disc Valves");
+  if (/touchless|motion|sensor/i.test(text(a.sensor_activation))) out.push("Motion Sensing");
+  if (yes(a.lead_free)) out.push("Low Lead");
+  if (yes(a.supply_line_included)) out.push("Supply Lines Included");
+  if (/pull[ -]?out/i.test(text(a.spray_type))) out.push("Pull Out Sprayer");
+  return out;
+}
+
+// "Single Hole", "3 Hole", or the PIM's own Centerset / Widespread.
+function faucetDrillings(p: Product): string {
+  const a = attr(p);
+  const m = text(a.mounting_type);
+  if (/centerset/i.test(m)) return "Centerset";
+  if (/widespread/i.test(m)) return "Widespread";
+  const holes = num(a.number_of_installation_holes);
+  if (holes === 1 || /one hole|single hole/i.test(m)) return "Single Hole";
+  return holes ? `${holes} Hole` : m;
 }
 
 // Walmart's 18 colour categories. Rules agreed 2026-09-22.
@@ -214,9 +266,11 @@ function buildMatch(p: Product) {
   return { item: { Item: item }, rows, missing: [...new Set(missing)], warnings };
 }
 
-// Build one MPItem for a sink. Returns the item, the human-readable rows,
-// the missing required fields and the warnings.
-function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: boolean } | null) {
+// Build one MPItem of a product type (Sinks, Faucets): the selling data,
+// listing, content, media and compliance are the same for every type, the
+// specifications are the type's own. Returns the item, the human-readable
+// rows, the missing required fields and the warnings.
+function buildItem(type: string, p: Product, media: MediaRow[], group: { id: string; primary: boolean } | null) {
   const a = attr(p);
   const rows: Row[] = [];
   const missing: string[] = [];
@@ -305,6 +359,40 @@ function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: 
   set(vis, "netContent", { productNetContentUnit: "Each", productNetContentMeasure: 1 }, "Compliance", "1 Each", true);
 
   // ---- Visible: specifications
+  if (type === "Faucets") {
+    set(vis, "material", text(p.material) ? [text(p.material)] : [], "Specifications");
+    set(vis, "finish", text(p.finish), "Specifications");
+    set(vis, "color", text(p.color) || text(p.finish), "Specifications");
+    set(vis, "colorCategory", colorCategory(p), "Specifications");
+    set(vis, "faucet_type", [FAUCET_TYPE[text(p.category)]], "Specifications");
+    set(vis, "spout_type", spoutTypes(p), "Specifications");
+    const handles = num(a.number_of_handles);
+    if (handles) set(vis, "number_of_handles", Math.round(handles), "Specifications");
+    if (/lever/i.test(text(a.handle_style))) { set(vis, "handleType", "Lever", "Specifications"); set(vis, "faucetHandleDesign", ["Lever"], "Specifications"); }
+    else if (/knob/i.test(text(a.handle_style))) set(vis, "faucetHandleDesign", ["Knob"], "Specifications");
+    else if (/cross/i.test(text(a.handle_style))) set(vis, "faucetHandleDesign", ["Cross"], "Specifications");
+    set(vis, "faucetDrillings", faucetDrillings(p), "Specifications");
+    const hole = num(a.install_hole_diameter_in);
+    if (hole) set(vis, "hole_diameter", { unit: "in", measure: inches(hole) }, "Specifications", `${fmtIn(hole)} in`);
+    const height = num(a.faucet_height_in);
+    if (height) set(vis, "assembledProductHeight", { unit: "in", measure: inches(height) }, "Specifications", `${fmtIn(height)} in`);
+    const spoutH = num(a.spout_height_in), reach = num(a.spout_reach_in);
+    if (spoutH) set(vis, "spoutHeight", { unit: "in", measure: inches(spoutH) }, "Specifications", `${fmtIn(spoutH)} in`);
+    if (reach) set(vis, "spoutReach", { unit: "in", measure: inches(reach) }, "Specifications", `${fmtIn(reach)} in`);
+    const gpm = num(a.max_flow_rate);
+    if (gpm) set(vis, "gallonsPerMinute", { unit: "gpm", measure: gpm }, "Specifications", `${gpm} gpm`);
+    const weight = money(p.weight_lb) ?? money(a.product_weight_lb) ?? money(a.weight_lb);
+    if (weight) set(vis, "assembledProductWeight", { unit: "lb", measure: weight }, "Specifications", `${weight} lb`);
+    set(vis, "features", faucetFeatures(p), "Specifications");
+    const acc = listOf(p.included_components).length ? listOf(p.included_components) : listOf(a.accessories_included);
+    set(vis, "accessoriesIncluded", acc, "Specifications");
+    const pieces = num(a.number_of_pieces);
+    if (pieces) set(vis, "pieceCount", Math.round(pieces), "Specifications");
+    const bath = text(p.category) === "bathroom_faucet";
+    set(vis, "recommendedLocations", [bath ? "Bathroom" : "Kitchen"], "Specifications", undefined, true);
+    set(vis, "recommendedUses", [bath ? "Vanity" : "Kitchen Sink"], "Specifications");
+    return { item: { Visible: { Faucets: vis }, Orderable: ord }, rows, missing: [...new Set(missing)], warnings };
+  }
   set(vis, "material", text(p.material) ? [text(p.material)] : [], "Specifications", undefined, true);
   set(vis, "finish", text(p.finish), "Specifications");
   set(vis, "color", text(p.color) || text(p.finish), "Specifications");
@@ -334,15 +422,20 @@ function buildSink(p: Product, media: MediaRow[], group: { id: string; primary: 
   return { item: { Visible: { Sinks: vis }, Orderable: ord }, rows, missing: [...new Set(missing)], warnings };
 }
 
-// The fields the Sinks spec requires (Get Spec, 5.0.20260803): Orderable's
-// `required` list and Visible.Sinks' `required` list, plus warrantyText, which
-// has_written_warranty = "Yes - Warranty Text" makes conditional-required.
-type MPItem = { Visible: { Sinks: Record<string, unknown> }; Orderable: Record<string, unknown> };
+// The fields each product type's spec requires (Get Spec, 5.0.20260803):
+// Orderable's `required` list and the type's Visible `required` list, plus
+// warrantyText, which has_written_warranty = "Yes - Warranty Text" makes
+// conditional-required.
+type MPItem = { Visible: Record<string, Record<string, unknown>>; Orderable: Record<string, unknown> };
 const REQUIRED_ORDERABLE = ["sku", "productIdentifiers", "price", "ShippingWeight", "country_of_origin_substantial_transformation"];
-const REQUIRED_SINKS = ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "has_written_warranty", "warrantyText", "material", "netContent", "sink_type"];
+const REQUIRED_VISIBLE: Record<string, string[]> = {
+  Sinks: ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "has_written_warranty", "warrantyText", "material", "netContent", "sink_type"],
+  Faucets: ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "has_written_warranty", "warrantyText", "netContent", "recommendedLocations"],
+};
 const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
 function trimToRequired(item: MPItem): MPItem {
-  return { Visible: { Sinks: pick(item.Visible.Sinks, REQUIRED_SINKS) }, Orderable: pick(item.Orderable, REQUIRED_ORDERABLE) };
+  const [type, vis] = Object.entries(item.Visible)[0];
+  return { Visible: { [type]: pick(vis, REQUIRED_VISIBLE[type] ?? []) }, Orderable: pick(item.Orderable, REQUIRED_ORDERABLE) };
 }
 
 // ---------------------------------------------------------------- spec validation
@@ -510,7 +603,7 @@ Deno.serve(async (req) => {
         continue;
       }
       const type = productTypeFor(p);
-      if (!type) { skipped.push({ sku, reason: `no Walmart mapping yet for category "${text(p.category)}" (Sinks only for now)` }); continue; }
+      if (!type) { skipped.push({ sku, reason: `no Walmart mapping yet for category "${text(p.category)}" (sinks and faucets only for now)` }); continue; }
       let group: { id: string; primary: boolean } | null = null;
       if (p.family_number != null) {
         const fam = String(p.family_number);
@@ -518,7 +611,7 @@ Deno.serve(async (req) => {
         primarySeen.add(fam);
         group = { id: `STYLISH-FAM-${fam}`, primary };
       }
-      const built = buildSink(p, mediaBySku.get(sku) ?? [], group);
+      const built = buildItem(type, p, mediaBySku.get(sku) ?? [], group);
       report.push({ sku, productType: type, ready: built.missing.length === 0, missing: built.missing, warnings: built.warnings, rows: built.rows, fields: built.rows.length });
       if (!built.missing.length) items.push(built.item);
     }
