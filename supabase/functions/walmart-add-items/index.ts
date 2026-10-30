@@ -113,11 +113,25 @@ const FAUCET_TYPE: Record<string, string> = {
   kitchen_faucet: "Kitchen Faucets", kitchen_faucet_combo: "Kitchen Faucets",
   cold_water_tap: "Drinking Water Faucets", pot_filler: "Pot Fillers", bathroom_faucet: "Bathroom Sink Faucets",
 };
+// Accessories (lot 6, 2026-10-30: 17 of 23 had no listing in Walmart's
+// catalog): Walmart's product type by what the accessory is — basket
+// strainers and pop-up drain caps are Drain Stoppers, cutting boards Cutting
+// Boards & Butcher Blocks, drying racks / dish racks / organizers Dish Racks.
+// Nothing else is mapped yet (an overflow ring fits no Walmart type).
+const ACCESSORY_TYPES: [RegExp, string][] = [
+  [/strainer|pop[- ]?up drain/i, "Drain Stoppers"],
+  [/cutting board/i, "Cutting Boards & Butcher Blocks"],
+  [/drying rack|dish rack|dish organi[sz]er|over the sink basket/i, "Dish Racks"],
+];
 function productTypeFor(p: Product): string | null {
   const c = text(p.category);
   if (SINK_CATS.has(c)) return "Sinks";
   if (FAUCET_TYPE[c]) return "Faucets";
-  return null; // accessories: rules not agreed yet
+  if (c === "accessory" || c === "colander_drying_rack") {
+    const name = `${text(p.model_name)} ${text(attr(p).general_title_en)}`;
+    return ACCESSORY_TYPES.find(([re]) => re.test(name))?.[1] ?? null;
+  }
+  return null;
 }
 
 // Walmart's spout_type (closed list) from the PIM's spout type and spray type
@@ -368,6 +382,39 @@ function buildItem(type: string, p: Product, media: MediaRow[], group: { id: str
   }
 
   // ---- Visible: specifications
+  if (ACCESSORY_TYPES.some(([, t]) => t === type)) {
+    const ext = (a.external_dimensions_in ?? {}) as Record<string, unknown>;
+    // The PIM keeps an accessory's vertical size as height or as depth
+    // (a strainer's 7 in body, a board's 0.87 in thickness).
+    const L = num(ext.length), W = num(ext.width), H = num(ext.height) ?? num(ext.depth);
+    set(vis, "material", text(p.material) ? [text(p.material)] : [], "Specifications", undefined, true);
+    set(vis, "color", text(p.color) || text(p.finish), "Specifications", undefined, type !== "Cutting Boards & Butcher Blocks");
+    set(vis, "colorCategory", colorCategory(p), "Specifications");
+    if (L) set(vis, "assembledProductLength", { unit: "in", measure: inches(L) }, "Specifications", `${fmtIn(L)} in`);
+    if (W) set(vis, "assembledProductWidth", { unit: "in", measure: inches(W) }, "Specifications", `${fmtIn(W)} in`);
+    if (H) set(vis, "assembledProductHeight", { unit: "in", measure: inches(H) }, "Specifications", `${fmtIn(H)} in`);
+    else if (type !== "Cutting Boards & Butcher Blocks") missing.push("assembledProductHeight (the product's height or depth)");
+    const weight = money(p.weight_lb) ?? money(a.product_weight_lb) ?? money(a.weight_lb);
+    if (weight) set(vis, "assembledProductWeight", { unit: "lb", measure: weight }, "Specifications", `${weight} lb`);
+    const acc = listOf(p.included_components).length ? listOf(p.included_components) : listOf(a.accessories_included);
+    if (type === "Drain Stoppers") {
+      set(vis, "smallPartsWarnings", ["0 - No warning applicable"], "Compliance", undefined, true);
+      set(vis, "accessoriesIncluded", acc, "Specifications");
+      set(vis, "features", /basket/i.test(text(a.general_title_en)) ? ["Basket"] : /pop[- ]?up/i.test(text(a.general_title_en)) ? ["Pop Up"] : [], "Specifications");
+    } else {
+      // Kitchen goods: Walmart's state chemical disclosure — "None" when no
+      // warning applies (its own instruction).
+      set(vis, "state_chemical_disclosure", "None", "Compliance", undefined, true);
+      if (L && W) set(vis, "size", `${fmtIn(L)} inch x ${fmtIn(W)} inch`, "Specifications");
+      if (type === "Dish Racks") {
+        set(vis, "finish", text(p.finish), "Specifications");
+        if (/foldable|roll[- ]?up/i.test(text(a.general_title_en))) set(vis, "features", ["Foldable"], "Specifications");
+      } else set(vis, "cutting_board_and_butcher_block_type", "Cutting Boards", "Specifications");
+    }
+    const pieces = num(a.number_of_pieces);
+    if (pieces) set(vis, "pieceCount", Math.round(pieces), "Specifications");
+    return { item: { Visible: { [type]: vis }, Orderable: ord }, rows, missing: [...new Set(missing)], warnings };
+  }
   if (type === "Faucets") {
     set(vis, "material", text(p.material) ? [text(p.material)] : [], "Specifications");
     set(vis, "finish", text(p.finish), "Specifications");
@@ -440,6 +487,9 @@ const REQUIRED_ORDERABLE = ["sku", "productIdentifiers", "price", "ShippingWeigh
 const REQUIRED_VISIBLE: Record<string, string[]> = {
   Sinks: ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "has_written_warranty", "warrantyText", "material", "netContent", "sink_type"],
   Faucets: ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "has_written_warranty", "warrantyText", "netContent", "recommendedLocations"],
+  "Drain Stoppers": ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "assembledProductHeight", "color", "has_written_warranty", "warrantyText", "material", "netContent", "smallPartsWarnings"],
+  "Dish Racks": ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "assembledProductHeight", "color", "has_written_warranty", "warrantyText", "material", "netContent", "state_chemical_disclosure"],
+  "Cutting Boards & Butcher Blocks": ["productName", "brand", "condition", "shortDescription", "keyFeatures", "mainImageUrl", "isProp65WarningRequired", "has_written_warranty", "warrantyText", "material", "netContent", "state_chemical_disclosure"],
 };
 const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
 function trimToRequired(item: MPItem): MPItem {
@@ -612,7 +662,7 @@ Deno.serve(async (req) => {
         continue;
       }
       const type = productTypeFor(p);
-      if (!type) { skipped.push({ sku, reason: `no Walmart mapping yet for category "${text(p.category)}" (sinks and faucets only for now)` }); continue; }
+      if (!type) { skipped.push({ sku, reason: text(p.category) === "accessory" ? "no Walmart product type for this accessory yet (strainers, drain caps, cutting boards and dish racks are mapped)" : `no Walmart mapping yet for category "${text(p.category)}" (sinks, faucets and some accessories for now)` }); continue; }
       let group: { id: string; primary: boolean } | null = null;
       if (p.family_number != null) {
         const fam = String(p.family_number);
