@@ -356,7 +356,16 @@ function buildItem(type: string, p: Product, media: MediaRow[], group: { id: str
   set(vis, "warrantyText", text(a.warranty_text_us), "Compliance", text(a.warranty_text_us).slice(0, 80) + (text(a.warranty_text_us).length > 80 ? "…" : ""));
   if (!text(a.warranty_text_us)) missing.push("warrantyText (Warranty Text USA)");
   set(vis, "warrantyURL", text(a.warranty_url_us) || WARRANTY_URL_US, "Compliance");
-  set(vis, "netContent", { productNetContentUnit: "Each", productNetContentMeasure: 1 }, "Compliance", "1 Each", true);
+  // A set of N (a "-2" SKU, "Set of 2" in the title: P-201-2 is two sinks,
+  // each in its own box, at the pair's price) says so in Walmart's pack
+  // fields; everything else is one item.
+  const pack = Number(/-(\d)$/.exec(p.sku)?.[1] ?? /\bset of (\d+)\b/i.exec(text(a.general_title_en))?.[1] ?? 1) || 1;
+  set(vis, "netContent", { productNetContentUnit: "Each", productNetContentMeasure: pack }, "Compliance", `${pack} Each`, true);
+  if (pack > 1) {
+    set(vis, "multipackQuantity", pack, "Compliance");
+    set(vis, "countPerPack", 1, "Compliance");
+    set(vis, "count", pack, "Compliance");
+  }
 
   // ---- Visible: specifications
   if (type === "Faucets") {
