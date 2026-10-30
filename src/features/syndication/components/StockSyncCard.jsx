@@ -20,7 +20,7 @@ const SYNCS = {
   bestbuy: {
     invoke: bestBuyStock,
     channel: 'Best Buy',
-    describe: (m) => `When a new Canada stock file arrives (once a day), every Best Buy offer gets our Canada stock minus ${m} units of safety margin, keeping its price and discount; a product we do not track goes as 0. Open-box offers are left alone. Turn it on only once nobody else uploads Best Buy's stock.`,
+    describe: (m) => `When a new Canada stock file arrives (once a day), every Best Buy offer gets our Canada stock${m ? ` minus ${m} units of safety margin` : ''}, keeping its price and discount; a product we do not track goes as 0. Open-box offers are left alone. Only the offers whose quantity differs are sent.`,
   },
 };
 

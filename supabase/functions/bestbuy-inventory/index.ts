@@ -5,8 +5,8 @@
 //
 // What it sends: every Best Buy offer whose shop SKU is a PIM product gets
 // our Canada stock (product_inventory 'ca', the daily "Stylish Inventory"
-// Excel) MINUS 2 units of safety margin (as Walmart USA), never below 0; a
-// product we do not track goes as 0. Open-box offers ("…-B-OB-A") and
+// Excel) as it is — no safety margin (user, the same day: "quítale eso";
+// Walmart USA keeps its 2 units) — and a product we do not track goes as 0. Open-box offers ("…-B-OB-A") and
 // products switched off for Best Buy are left alone.
 //
 // When: the Canada stock arrives once a day, so a run sends only when a NEWER
@@ -41,7 +41,7 @@ const corsHeaders: Record<string, string> = {
 };
 const MIRAKL_BASE = "https://marketplace.bestbuy.ca";
 const SETTINGS_KEY = "bestbuy_inventory";
-const SAFETY_UNITS = 2;
+const SAFETY_UNITS = 0;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
