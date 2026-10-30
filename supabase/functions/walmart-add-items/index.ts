@@ -632,6 +632,14 @@ Deno.serve(async (req) => {
         if (!error) enabled.push(sku);
       }
     }
+    // The lots of the Walmart USA page are remembered (last 40 feeds), so the
+    // page knows what it already sent while Walmart's item list catches up —
+    // a product Walmart accepted can take an hour to show there (lot 2, 2026-10-30).
+    if (!sandbox && feedId) {
+      const { data: kept } = await admin.from("app_settings").select("value").eq("key", "walmart_us_lots").maybeSingle();
+      const lots = Array.isArray(kept?.value) ? kept.value as unknown[] : [];
+      await admin.from("app_settings").upsert({ key: "walmart_us_lots", value: [...lots, { feedId, feedType, at: new Date().toISOString(), skus: submitted }].slice(-40) }, { onConflict: "key" });
+    }
     await admin.from("audit_log").insert({
       actor_id: caller.id, actor_email: caller.email ?? null, actor_name: null, action: "push", entity_type: "channel", entity_id: "walmart_us", target: "walmart",
       summary: `${sandbox ? "Sandbox test:" : "Submitted"} ${submitted.length} Walmart US ${matchSetup ? "offer(s) by match" : maintenance ? "content update(s)" : "item(s)"}${trimmed ? " (required fields only)" : ""}: ${submitted.slice(0, 8).join(", ")}${submitted.length > 8 ? "…" : ""} — feed ${feedId ?? "?"}${outcome.feedStatus ? `, ${outcome.feedStatus}` : ""}`,

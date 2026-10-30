@@ -23,6 +23,7 @@ import { refreshWalmartItems } from '../api/walmartSync';
 // takes the first N of the filter across pages.
 const PAGE = 1000;
 const LOT_MAX = 100;
+const LOTS_KEPT_MS = 7 * 86400e3; // a lot's answers are shown for a week
 const CATEGORY = new Map(CATEGORY_OPTIONS.map((c) => [c.value, c.label]));
 
 async function readAll(table, columns, build) {
@@ -59,6 +60,7 @@ export default function WalmartBulkAdditionCard() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [stockOnly, setStockOnly] = useState(true);
+  const [hideSent, setHideSent] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [firstN, setFirstN] = useState(30);
@@ -89,6 +91,26 @@ export default function WalmartBulkAdditionCard() {
       } catch (e) {
         if (active) setLoadError(e.message);
       }
+      // The lots sent in the last week and Walmart's answer to each, oldest
+      // first (a later new-item feed overrides a lot's "not listed"): a
+      // product Walmart accepted takes up to an hour to show in its item
+      // list, and a reload must neither offer it again nor forget which ones
+      // need creating (walmart-add-items keeps app_settings.walmart_us_lots).
+      try {
+        const { data } = await supabase.from('app_settings').select('value').eq('key', 'walmart_us_lots').maybeSingle();
+        const since = Date.now() - LOTS_KEPT_MS;
+        const lots = (Array.isArray(data?.value) ? data.value : []).filter((l) => l?.feedId && Date.parse(l.at) > since);
+        const answers = await Promise.all(lots.map((l) => walmartFeedStatus(l.feedId, { sandbox: false }).catch(() => null)));
+        if (!active || !lots.length) return;
+        const next = new Map();
+        lots.forEach((l, i) => {
+          const items = new Map((answers[i]?.items ?? []).map((it) => [it.sku, it]));
+          for (const sku of l.skus ?? []) next.set(sku, items.has(sku) ? itemOutcome(items.get(sku)) : { ok: null, text: 'Sent — waiting for Walmart' });
+        });
+        setOutcome((o) => new Map([...next, ...o]));
+        const last = lots[lots.length - 1];
+        setSent((s) => s ?? { feedId: last.feedId, submitted: last.skus ?? [], feedStatus: answers[lots.length - 1]?.feedStatus });
+      } catch { /* the lots are a convenience: the list works without them */ }
     })();
     return () => { active = false; };
   }, []);
@@ -97,12 +119,17 @@ export default function WalmartBulkAdditionCard() {
     .filter((p) => !onWalmart.has(p.sku))
     .sort((a, b) => (b.stock ?? -1) - (a.stock ?? -1) || a.sku.localeCompare(b.sku)), [products, onWalmart]);
   const categories = useMemo(() => [...new Set(candidates.map((p) => p.category))].sort((a, b) => (CATEGORY.get(a) ?? a).localeCompare(CATEGORY.get(b) ?? b)), [candidates]);
+  // A product sent and accepted (or still processing) leaves the list until
+  // Walmart's item list shows it; one Walmart refused stays, to be fixed.
+  const isSent = (sku) => outcome.has(sku) && outcome.get(sku).ok !== false;
+  const sentCount = candidates.filter((p) => isSent(p.sku)).length;
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return candidates.filter((p) => (category === 'all' || p.category === category)
       && (!stockOnly || (p.stock ?? 0) > 0)
+      && (!hideSent || !(outcome.has(p.sku) && outcome.get(p.sku).ok !== false))
       && (!q || p.sku.toLowerCase().includes(q) || (p.model_name ?? '').toLowerCase().includes(q)));
-  }, [candidates, category, stockOnly, search]);
+  }, [candidates, category, stockOnly, hideSent, outcome, search]);
   const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
   const current = Math.min(page, pageCount);
   const pageRows = shown.slice((current - 1) * pageSize, current * pageSize);
@@ -258,6 +285,12 @@ export default function WalmartBulkAdditionCard() {
             <input type="checkbox" checked={stockOnly} onChange={filterBy(setStockOnly)} className="accent-primary" />
             Only with USA stock
           </label>
+          {sentCount > 0 && (
+            <label className="inline-flex items-center gap-2 text-body-sm text-on-surface">
+              <input type="checkbox" checked={hideSent} onChange={filterBy(setHideSent)} className="accent-primary" />
+              Hide the {sentCount} already sent
+            </label>
+          )}
           <span className="text-body-sm text-on-surface-variant">{shown.length} shown · {candidates.length} not on Walmart USA</span>
         </div>
 
