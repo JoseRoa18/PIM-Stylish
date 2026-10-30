@@ -94,7 +94,9 @@ async function feedOutcome(wm: string, last: LastFeed): Promise<LastFeed> {
   if (!res.ok) return last;
   const d = await res.json() as Record<string, unknown>;
   const items = ((d.itemDetails as Record<string, unknown>)?.itemIngestionStatus ?? []) as Record<string, unknown>[];
-  const errors = items.filter((it) => it.ingestionStatus && it.ingestionStatus !== "SUCCESS").slice(0, 20).map((it) => ({
+  // Only a finished item that did not succeed is an error; INPROGRESS is
+  // Walmart still working on it (it showed in red on the first feed).
+  const errors = items.filter((it) => it.ingestionStatus && !["SUCCESS", "INPROGRESS"].includes(String(it.ingestionStatus))).slice(0, 20).map((it) => ({
     sku: String(it.sku ?? ""),
     error: (((it.ingestionErrors as Record<string, unknown>)?.ingestionError ?? []) as { description?: string }[]).map((e) => e.description).filter(Boolean).join(" · ") || String(it.ingestionStatus),
   }));
