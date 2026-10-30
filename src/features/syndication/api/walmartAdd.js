@@ -58,3 +58,6 @@ export function walmartFeedStatus(feedId, { sandbox = true } = {}) {
 // Walmart USA stock sync (walmart-us-inventory): our USA stock minus 2 units,
 // every hour while the switch is on. mode 'status' | 'switch' | 'push'.
 export const walmartUsStock = (body) => invoke(body, 'walmart-us-inventory');
+// Best Buy Canada stock sync (bestbuy-inventory): our Canada stock minus 2
+// units when a new Canada stock file arrives, while the switch is on.
+export const bestBuyStock = (body) => invoke(body, 'bestbuy-inventory');
