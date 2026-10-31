@@ -7,10 +7,10 @@
 //       at), the MSRP and the promotion (Reduced, promo MAP CAD) for the
 //       Canada window: first Thursday 00:00 ET → the day before the next
 //       first Thursday 23:59:59 ET.
-//   us  Walmart USA — feed `promo` (PromotionalPriceFeed 1.5, checked against
-//       Walmart's sandbox 2026-09-28): each line is the promo price (REDUCED)
-//       against the regular price (BASE = the PIM's MAP USD) for the USA
-//       window: the 1st 00:00 ET → month end 23:59:59 ET.
+//   us  Walmart USA — one PUT /v3/price?promo=true per product (since
+//       2026-10-31; the bulk `promo` feed was rejected whole): the promo price
+//       (REDUCED) against the regular price (BASE = the PIM's MAP USD) for
+//       the USA window: the 1st 00:00 ET → month end 23:59:59 ET.
 //
 // Body: {
 //   mode?: "push" | "status" | "promo" | "delete"   (default push; delete:
@@ -84,6 +84,21 @@ async function getToken(base: string, cid: string, sec: string, wmMarket: string
   return (await res.json()).access_token;
 }
 
+// The documented body of Walmart USA's single-item promo call
+// (PUT /v3/price?promo=true): the promo price (REDUCED) against the regular
+// price (BASE), for the window; UPSERT leaves other promos of the SKU alone.
+function usPromoBody(l: { sku: string; price: number; promo: number; start: string; end: string } | undefined) {
+  if (!l) return null;
+  return {
+    sku: l.sku,
+    pricing: [{
+      currentPriceType: "REDUCED", currentPrice: { currency: "USD", amount: l.promo },
+      comparisonPriceType: "BASE", comparisonPrice: { currency: "USD", amount: l.price },
+      effectiveDate: l.start, expirationDate: l.end, processMode: "UPSERT",
+    }],
+  };
+}
+
 // A local Eastern-time wall clock ("2026-10-01", "00:00:00") as a UTC instant,
 // DST-aware (EDT -04:00 / EST -05:00), in the ISO form the feeds want.
 function etInstant(day: string, time: string): string {
@@ -148,7 +163,10 @@ Deno.serve(async (req) => {
         const r = await wmGet(`/v3/feeds/${encodeURIComponent(body.feedId)}?includeDetails=true&limit=50&offset=${offset}`);
         if (r.status !== 200) return json({ ok: false, ...r }, 502);
         const d = r.data as Record<string, unknown>;
-        summary = { feedStatus: d.feedStatus, itemsReceived: d.itemsReceived, itemsSucceeded: d.itemsSucceeded, itemsFailed: d.itemsFailed, itemsProcessing: d.itemsProcessing };
+        // A feed Walmart rejects as a whole (feedStatus ERROR, 0 items) says why
+        // only in its feed-level ingestionErrors.
+        const { itemDetails: _items, ...feed } = d;
+        summary = { feedStatus: d.feedStatus, itemsReceived: d.itemsReceived, itemsSucceeded: d.itemsSucceeded, itemsFailed: d.itemsFailed, itemsProcessing: d.itemsProcessing, ...(d.feedStatus === "ERROR" ? { feed } : {}) };
         const page_ = ((d.itemDetails as Record<string, unknown>)?.itemIngestionStatus ?? []) as unknown[];
         items.push(...page_);
         offset += 50;
@@ -288,38 +306,69 @@ Deno.serve(async (req) => {
       if (wsku !== m.sku) aliased += 1;
       lines.push({ sku: wsku, price: Number(p.map), msrp: p.msrp != null ? Number(p.msrp) : null, promo: m.promo, start, end });
     }
-    const payload = market === "ca"
-      ? {
-        MPItemFeedHeader: { subCategory: "price-mp", mart: "WALMART_CA", feedType: "PRICE_AND_PROMOTION", processMode: "REPLACE", locale: ["en", "fr"], version: CA_FEED_VERSION, subset: "EXTERNAL", tenant: "WALMART_CA" },
-        MPItem: lines.map((l) => ({
-          Price: {
-            sku: l.sku,
-            price: l.price,
-            ...(l.msrp != null ? { msrp: l.msrp } : {}),
-            promotionInformation: { promotionSettingAction: "Create", promotionType: "Reduced", promotionPrice: l.promo, promotionPriceStartDateTime: l.start, promotionPriceEndDateTime: l.end },
-          },
-        })),
-      }
-      : {
-        PromotionalPriceFeedHeader: { version: "1.5" },
-        PromotionalPrice: lines.map((l) => ({
-          itemIdentifier: { sku: l.sku },
-          pricingList: { pricing: [{
-            currentPrice: { currency: "USD", amount: l.promo }, currentPriceType: "REDUCED",
-            comparisonPrice: { currency: "USD", amount: l.price }, comparisonPriceType: "BASE",
-            effectiveDate: l.start, expirationDate: l.end, processMode: "UPSERT",
-          }] },
-        })),
-      };
-    const feedType = market === "ca" ? "PRICE_AND_PROMOTION" : "promo";
+    // Walmart Canada's feed (Walmart USA goes one call per product, below).
+    const payload = {
+      MPItemFeedHeader: { subCategory: "price-mp", mart: "WALMART_CA", feedType: "PRICE_AND_PROMOTION", processMode: "REPLACE", locale: ["en", "fr"], version: CA_FEED_VERSION, subset: "EXTERNAL", tenant: "WALMART_CA" },
+      MPItem: lines.map((l) => ({
+        Price: {
+          sku: l.sku,
+          price: l.price,
+          ...(l.msrp != null ? { msrp: l.msrp } : {}),
+          promotionInformation: { promotionSettingAction: "Create", promotionType: "Reduced", promotionPrice: l.promo, promotionPriceStartDateTime: l.start, promotionPriceEndDateTime: l.end },
+        },
+      })),
+    };
     const report: Record<string, unknown> = {
       market, sandbox, promotion: promo.name, period: promo.period, window: { start, end },
       attempted: lines.length, sent_under_alias: aliased, not_listed: notListed.length, no_map: noMap, at_or_above_map: atOrAboveMap, excluded: excluded.length,
     };
-    if (dryRun) return json({ ok: true, dryRun: true, ...report, listed_known: listed != null, lines, payload });
+    if (market === "us") report.method = "price_api";
+    if (dryRun) return json({ ok: true, dryRun: true, ...report, listed_known: listed != null, lines, payload: market === "us" ? usPromoBody(lines[0]) : payload });
     if (!lines.length) return json({ error: `Nothing to send: no member is listed on ${cfg.label} with a promo price below its MAP.`, ...report }, 400);
 
-    const res = await fetch(`${BASE}/v3/feeds?feedType=${feedType}`, {
+    // Walmart USA: one documented call per product (PUT /v3/price?promo=true),
+    // answered at once. The bulk `promo` feed wants a multipart FILE whose
+    // schema Walmart does not publish; the raw-JSON PromotionalPriceFeed 1.5
+    // sent until then had only passed the sandbox (it answers anything) and,
+    // on the first real send (November 2026, 2026-10-31), came back
+    // feedStatus ERROR with 0 items and no reason.
+    if (market === "us") {
+      const failed: { sku: string; error: string }[] = [];
+      let succeeded = 0;
+      for (const l of lines) {
+        let error = "";
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const res = await fetch(`${BASE}/v3/price?promo=true`, {
+            method: "PUT",
+            headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm, "Content-Type": "application/json" }, cfg.wmMarket),
+            body: JSON.stringify(usPromoBody(l)),
+          });
+          const text = await res.text();
+          if (res.status === 429) { error = "Walmart asked to slow down (429)"; await new Promise((r) => setTimeout(r, 3000 * (attempt + 1))); continue; }
+          if (res.ok) { error = ""; break; }
+          let detail = text.slice(0, 300);
+          try {
+            const errs = (JSON.parse(text).errors ?? []) as Record<string, unknown>[];
+            if (errs.length) detail = errs.map((e) => String(e.description ?? e.info ?? e.code)).join(" · ").slice(0, 300);
+          } catch { /* keep the text */ }
+          error = `HTTP ${res.status}: ${detail}`;
+          break;
+        }
+        if (error) failed.push({ sku: l.sku, error });
+        else succeeded += 1;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      const schedule = { at: new Date().toISOString(), feed_id: null, ...report, itemsReceived: lines.length, itemsSucceeded: succeeded, itemsFailed: failed.length, failed };
+      // Stamped once Walmart took at least one: with none, the next nightly
+      // pass tries again.
+      if (!only && !sandbox && succeeded > 0) {
+        await admin.from("promotions").update({ [cfg.stampAt]: schedule.at, [cfg.stampReport]: schedule }).eq("id", promotionId);
+      }
+      if (!succeeded) return json({ error: `Walmart USA took none of the ${lines.length} promo prices: ${failed[0]?.error ?? "no answer"}`, ...schedule }, 502);
+      return json({ ok: true, feedId: null, feedStatus: failed.length ? "PARTIAL" : "PROCESSED", ...schedule });
+    }
+
+    const res = await fetch(`${BASE}/v3/feeds?feedType=PRICE_AND_PROMOTION`, {
       method: "POST",
       headers: wmHeaders({ "WM_SEC.ACCESS_TOKEN": wm, "Content-Type": "application/json" }, cfg.wmMarket),
       body: JSON.stringify(payload),
@@ -337,7 +386,7 @@ Deno.serve(async (req) => {
         const r = await wmGet(`/v3/feeds/${encodeURIComponent(feedId)}?includeDetails=true&limit=50&offset=0`);
         if (r.status !== 200) continue;
         const d = r.data as Record<string, unknown>;
-        outcome = { feedStatus: d.feedStatus, itemsReceived: d.itemsReceived, itemsSucceeded: d.itemsSucceeded, itemsFailed: d.itemsFailed, itemsProcessing: d.itemsProcessing };
+        outcome = { feedStatus: d.feedStatus, itemsReceived: d.itemsReceived, itemsSucceeded: d.itemsSucceeded, itemsFailed: d.itemsFailed, itemsProcessing: d.itemsProcessing, ...(d.ingestionErrors ? { ingestionErrors: d.ingestionErrors } : {}) };
         const items = ((d.itemDetails as Record<string, unknown>)?.itemIngestionStatus ?? []) as Record<string, unknown>[];
         outcome.failed = items.filter((it) => it.ingestionStatus !== "SUCCESS").slice(0, 20);
         if (d.feedStatus === "PROCESSED" || d.feedStatus === "ERROR") break;
