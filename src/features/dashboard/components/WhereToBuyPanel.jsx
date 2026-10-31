@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertCircle, Check, ChevronDown, Copy, ExternalLink, RefreshCw, Search, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -110,34 +110,24 @@ export default function WhereToBuyPanel() {
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
 
-  // The card of the load in flight (the tab opened, the site switched): a newer
-  // load or leaving the panel drops it. A reload after an action reports on
-  // that action's card instead (`parent`, a slice of it), so one action shows
-  // one card. Returns whether the links were read.
-  const loadTask = useRef(null);
-  useEffect(() => () => loadTask.current?.cancel(), []);
-
+  // A reload after an action reports on that action's card (`parent`, a
+  // slice of it); the panel's own load (the tab opened, the site switched)
+  // shows no card (user, 2026-10-31: cards only for exports and uploads).
+  // Returns whether the links were read.
   const reload = async (s = site, parent = null) => {
     setLoading(true);
     setError(null);
-    loadTask.current?.cancel();
-    const task = parent ? null : startTask('Where to Buy', { silent: true, detail: `Loading the ${WTB_SITES.find((x) => x.key === s)?.label ?? ''} links…` });
-    loadTask.current = task;
-    const report = parent ?? task;
     try {
-      const [r, st] = await Promise.all([loadWhereToBuy(s, { task: report.part(0, 0.9) }), whereToBuyStatus().catch(() => null)]);
+      const [r, st] = await Promise.all([loadWhereToBuy(s, { task: parent?.part(0, 0.9) ?? null }), whereToBuyStatus().catch(() => null)]);
       setRows(r);
       setDiffers(st?.differs ?? {});
       setDue(st?.due ?? null);
-      report.progress(1);
-      task?.finish('Loaded');
+      parent?.progress(1);
       return true;
     } catch (e) {
-      task?.fail(e);
       setError(e);
       return false;
     } finally {
-      if (task && loadTask.current === task) loadTask.current = null;
       setLoading(false);
     }
   };

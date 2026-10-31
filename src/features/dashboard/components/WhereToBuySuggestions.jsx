@@ -40,23 +40,10 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
   const [progress, setProgress] = useState(null);
   const [message, setMessage] = useState(null);
 
-  // `task`: the card of the load (the moving stripe: one read and one count).
-  const reload = async (task = null) => {
-    try {
-      setData(await loadWhereToBuySuggestions());
-      setError(null);
-      task?.finish('Loaded');
-    } catch (e) {
-      task?.fail(e);
-      setError(e);
-    }
+  const reload = async () => {
+    try { setData(await loadWhereToBuySuggestions()); setError(null); } catch (e) { setError(e); }
   };
-  // The first load has its own card; leaving the panel before it ends drops it.
-  useEffect(() => {
-    const task = startTask('Suggested links', { silent: true, detail: 'Loading the suggested links…' });
-    reload(task);
-    return () => task.cancel();
-  }, []);
+  useEffect(() => { reload(); }, []);
 
   // One suggestion per product and store (the newest opened), for the
   // products of the site on show.

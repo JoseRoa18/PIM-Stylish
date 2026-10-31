@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadSnapshots, loadActivityRows, aggregateActivity, loadTargets, loadProductNames, loadPromotions, loadScreenTime } from '../api/kpi';
 import { indexSnapshots, recentWeeks, weekBuckets, addDays, weekStart, toDateKey, weekTag, formatShort } from '../lib/weekly';
-import { startTask } from '@/lib/taskProgress';
 
 // Everything the Analytics page needs: the snapshot index (now vs week
 // start, trends, aging), 12 weeks of audit rows (bucketed for the team trend
@@ -24,29 +23,17 @@ export function useKpi(weekKey) {
 
   useEffect(() => {
     let active = true;
-    // The page's task card: one step per finished read. Leaving the page
-    // removes it while it runs.
-    const task = startTask('Analytics', { silent: true, detail: 'Reading snapshots, activity and promotions…' });
-    let settled = false;
     (async () => {
       try {
         const from = addDays(weekStart(new Date()), -12 * 7);
-        const reads = [
+        const [snaps, tg, rows, ln, pr, st] = await Promise.all([
           loadSnapshots(),
           loadTargets(),
           loadActivityRows(from, new Date()),
           loadProductNames(),
           loadPromotions(),
           loadScreenTime(from, new Date()).catch(() => []),
-        ];
-        let read = 0;
-        const [snaps, tg, rows, ln, pr, st] = await Promise.all(reads.map((p) => p.then((value) => {
-          read += 1;
-          task.count(read, reads.length, `Reading snapshots, activity and promotions (${read} of ${reads.length})`);
-          return value;
-        })));
-        settled = true;
-        task.finish('Loaded');
+        ]);
         if (!active) return;
         setSnapshots(snaps);
         setTargets(tg);
@@ -55,17 +42,12 @@ export function useKpi(weekKey) {
         setPromotions(pr);
         setScreenRows(st);
       } catch (err) {
-        settled = true;
-        task.fail(err);
         if (active) setError(err);
       } finally {
         if (active) setLoading(false);
       }
     })();
-    return () => {
-      active = false;
-      if (!settled) task.cancel();
-    };
+    return () => { active = false; };
   }, []);
 
   const index = useMemo(() => indexSnapshots(snapshots), [snapshots]);

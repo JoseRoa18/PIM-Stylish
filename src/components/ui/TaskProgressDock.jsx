@@ -23,7 +23,6 @@ export default function TaskProgressDock() {
     for (const t of tasks) {
       if (seen.get(t.id) === t.status) continue;
       seen.set(t.id, t.status);
-      if (t.silent && t.status !== 'error') continue; // a page load: only a failure is said
       if (t.status === 'running') say = `${t.title} started`;
       else if (t.status === 'done') say = `${t.title}: ${t.detail ?? 'done'}`;
       else if (t.status === 'error') say = `${t.title} failed: ${t.detail ?? ''}`;

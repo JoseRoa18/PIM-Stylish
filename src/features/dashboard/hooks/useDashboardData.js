@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { startTask } from '@/lib/taskProgress';
 import { getInventoryReport } from '@/features/pricing/api/inventory';
 import { MARKETPLACES, API_MARKETPLACE_KEYS } from '../lib/listingHealth';
 import {
@@ -198,16 +197,10 @@ export function useDashboardData() {
 
   useEffect(() => {
     let active = true;
-    // Two task cards: the page's reads, then (only when the cached scores are
-    // stale) the background re-score. Leaving the page removes a running one.
-    const task = startTask('Dashboard', { silent: true, detail: 'Reading the catalog and channel snapshots…' });
-    let scoreTask = null;
-    let settled = false;
-    let scoreSettled = false;
 
     (async () => {
       try {
-        const reads = [
+        const [productsResult, healthSummaries, inventoryReport, ...snapshots] = await Promise.all([
           supabase
             .from('products')
             .select(
@@ -216,15 +209,7 @@ export function useDashboardData() {
           latestHealthSummaries(),
           getInventoryReport().catch(() => null),
           ...SYNC_CHANNELS.map((c) => latestSnapshotLite(c)),
-        ];
-        let read = 0;
-        const [productsResult, healthSummaries, inventoryReport, ...snapshots] = await Promise.all(
-          reads.map((p) => Promise.resolve(p).then((value) => {
-            read += 1;
-            task.count(read, reads.length, `Reading the catalog and channel snapshots (${read} of ${reads.length})`);
-            return value;
-          })),
-        );
+        ]);
         if (productsResult.error) throw productsResult.error;
 
         const list = productsResult.data ?? [];
@@ -255,8 +240,6 @@ export function useDashboardData() {
           .slice(0, 5);
 
         const stale = summariesAreStale(healthSummaries);
-        settled = true;
-        task.finish('Loaded');
 
         if (active) {
           setData({
@@ -277,15 +260,11 @@ export function useDashboardData() {
         // Stale-while-revalidate: the cached summaries render instantly;
         // if they're missing or old, re-score the catalog in the background,
         // persist the fresh summaries and swap them into the UI.
-        // (A page already left still re-scores, without a card.)
         if (stale) {
-          if (active) scoreTask = startTask('Updating scores', { silent: true, detail: 'Reading the catalog and channel snapshots…' });
           try {
-            const { perMarketplaceData } = await computeListingHealth({ task: scoreTask });
+            const { perMarketplaceData } = await computeListingHealth();
             persistHealthSummaries(perMarketplaceData);
             const fresh = summarizeForDashboard(perMarketplaceData);
-            scoreSettled = true;
-            scoreTask?.finish('Scores updated');
             if (active) {
               setData((prev) =>
                 prev
@@ -298,18 +277,14 @@ export function useDashboardData() {
                   : prev,
               );
             }
-          } catch (err) {
+          } catch {
             // keep showing the cached summaries
-            scoreSettled = true;
-            scoreTask?.fail(err);
             if (active) {
               setData((prev) => (prev ? { ...prev, healthRefreshing: false } : prev));
             }
           }
         }
       } catch (err) {
-        settled = true;
-        task.fail(err);
         if (active) {
           setError(err);
           setLoading(false);
@@ -317,11 +292,7 @@ export function useDashboardData() {
       }
     })();
 
-    return () => {
-      active = false;
-      if (!settled) task.cancel();
-      if (scoreTask && !scoreSettled) scoreTask.cancel();
-    };
+    return () => { active = false; };
   }, []);
 
   return { data, loading, error };

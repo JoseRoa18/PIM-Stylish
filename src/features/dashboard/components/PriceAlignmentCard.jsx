@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DollarSign, ArrowRight } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
-import { startTask } from '@/lib/taskProgress';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 
 /**
@@ -19,39 +18,20 @@ export default function PriceAlignmentCard() {
 
   useEffect(() => {
     let active = true;
-    // Task card: one step per channel's saved report, counted as each arrives.
-    const task = startTask('Price Alignment', { silent: true, detail: 'Reading the saved reports…' });
-    let settled = false;
     import('@/features/pricing/api/priceAlignment')
       .then(async ({ ALIGN_TARGETS, ALIGN_TARGET_KEYS, loadLatestAlignment }) => {
-        let read = 0;
-        const total = ALIGN_TARGET_KEYS.length;
         // The channels' own reports show first; the stores read from their
         // pages (one larger read) join when they arrive.
-        const load = async (keys) => Object.fromEntries(await Promise.all(keys.map(async (k) => {
-          const report = await loadLatestAlignment(k).catch(() => null);
-          read += 1;
-          task.count(read, total, `Reading the saved reports (${read} of ${total})`);
-          return [k, report];
-        })));
+        const load = async (keys) => Object.fromEntries(await Promise.all(keys.map(async (k) => [k, await loadLatestAlignment(k).catch(() => null)])));
         const pageKeys = ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page');
         const apiReports = await load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind !== 'page'));
         if (!active) return;
         setState({ targets: ALIGN_TARGETS, keys: ALIGN_TARGET_KEYS, reports: apiReports });
         const pageReports = await load(pageKeys);
-        settled = true;
-        task.finish('Loaded');
         if (active) setState((s) => ({ ...s, reports: { ...s.reports, ...pageReports } }));
       })
-      .catch((err) => {
-        settled = true;
-        task.fail(err);
-        if (active) setError(err.message);
-      });
-    return () => {
-      active = false;
-      if (!settled) task.cancel();
-    };
+      .catch((err) => { if (active) setError(err.message); });
+    return () => { active = false; };
   }, []);
 
   // The stores read from their own pages (Where to Buy check) show once they

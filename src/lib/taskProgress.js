@@ -1,7 +1,8 @@
-// The long tasks running in this tab — a download, an import, a push to a
-// channel, a slow page load — each shown by TaskProgressDock as a card with
+// The long tasks running in this tab — a download or export, an import or
+// upload, a push to a channel — each shown by TaskProgressDock as a card with
 // its percentage and what it is doing (user, 2026-10-31: "que salga en
-// pantalla cuál es el porcentaje"). A plain module, not React state, so the
+// pantalla cuál es el porcentaje"). Never for a page loading its data (user,
+// the same day: "no me gusta que se muestre cuando cargan las páginas"). A plain module, not React state, so the
 // api/ and exports/ code that does the work can report from where it loops.
 //
 //   const task = startTask('Full Report', { detail: 'Loading products…' });
@@ -106,12 +107,10 @@ function reporter(id, from, to) {
 /**
  * Start a task card. `detail` is what it is doing; the bar stays
  * indeterminate (a moving stripe) until the first progress reading.
- * `silent`: a page loading its data — the card shows, but a screen reader
- * hears only a failure (not "started" / "loaded" on every visit).
  */
-export function startTask(title, { detail = null, silent = false } = {}) {
+export function startTask(title, { detail = null } = {}) {
   const id = ++seq;
-  tasks = [...tasks, { id, title, detail, silent, pct: null, status: 'running', shown: false, startedAt: Date.now() }];
+  tasks = [...tasks, { id, title, detail, pct: null, status: 'running', shown: false, startedAt: Date.now() }];
   setTimeout(() => {
     const t = tasks.find((x) => x.id === id);
     if (t && t.status === 'running') patch(id, { shown: true }, true);

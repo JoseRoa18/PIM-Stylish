@@ -37,13 +37,10 @@ export default function BestBuyContentPushCard() {
     // Viewers never see this card — don't load its candidates for them.
     if (!canEdit) return undefined;
     let active = true;
-    let ended = false;
-    const task = startTask('Best Buy · push candidates', { silent: true, detail: 'Reading the latest Best Buy snapshot…' });
-    loadBestBuyPushCandidates({ task })
-      .then((d) => { if (active) { ended = true; task.finish('Loaded'); setData(d); } })
-      .catch((err) => { if (active) { ended = true; task.fail(err); setError(err.message); } });
-    // Left the page before it loaded: the card goes without a word.
-    return () => { active = false; if (!ended) task.cancel(); };
+    loadBestBuyPushCandidates()
+      .then((d) => { if (active) setData(d); })
+      .catch((err) => { if (active) setError(err.message); });
+    return () => { active = false; };
   }, [canEdit]);
 
   const withDiff = useMemo(

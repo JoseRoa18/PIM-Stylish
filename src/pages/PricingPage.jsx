@@ -476,41 +476,28 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
 
   useEffect(() => {
     let active = true;
-    // One card for the whole overview: the channels counted as their
-    // reports arrive.
-    const total = ALIGN_TARGET_KEYS.length;
-    const task = startTask('Price Alignment — channels', { silent: true, detail: 'Reading the saved reports…' });
-    let settled = 0;
-    const counted = () => { settled += 1; task.count(settled, total, `${settled} of ${total} channels read`); };
     // The channels' own reports show first; the stores read from their pages
     // (one larger read) join when they arrive.
-    const load = (keys) => Promise.all(keys.map((k) => loadLatestAlignment(k).catch(() => null).finally(counted)))
+    const load = (keys) => Promise.all(keys.map((k) => loadLatestAlignment(k).catch(() => null)))
       .then((reports) => {
         if (active) setOverview((prev) => ({ ...(prev ?? {}), ...Object.fromEntries(keys.map((k, i) => [k, reports[i]])) }));
       });
     load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind !== 'page'))
-      .then(() => load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page')))
-      .then(() => task.finish(`All ${total} channels read`));
-    return () => { active = false; task.cancel(); };
+      .then(() => load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page')));
+    return () => { active = false; };
   }, []);
 
   // The last saved report for the site (cron or manual run) shows instantly.
-  // A channel picked by hand gets a card of its own; the first one is read
-  // under the overview's card.
-  const shownSite = useRef(null);
   useEffect(() => {
     let active = true;
-    const picked = shownSite.current !== null && shownSite.current !== site;
-    shownSite.current = site;
-    const task = picked ? startTask(`Price Alignment — ${ALIGN_TARGETS[site].label}`, { silent: true, detail: 'Reading the last report…' }) : null;
     setLoading(true);
     setResult(null);
     setMsg(null);
-    loadLatestAlignment(site, { task })
-      .then((r) => { if (active) setResult(r); task?.finish(alignDone(r)); })
-      .catch((err) => { if (active) setMsg({ tone: 'error', text: err.message }); task?.fail(err); })
+    loadLatestAlignment(site)
+      .then((r) => { if (active) setResult(r); })
+      .catch((err) => { if (active) setMsg({ tone: 'error', text: err.message }); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; task?.cancel(); };
+    return () => { active = false; };
   }, [site]);
 
   // `run` (optional): the card of a price fix this analysis re-checks — a
@@ -1348,8 +1335,6 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   useEffect(() => {
     if (!open || rows !== null) return;
     (async () => {
-      // A card only if it is slow (the 400 ms before a card shows).
-      const task = startTask(`Promotion prices — ${promo.name}`, { silent: true, detail: 'Reading the promotion prices…' });
       try {
         const prices = await getPromotionPrices(promo.id);
         setRows(prices);
@@ -1358,30 +1343,23 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         // parallel chunks of 100 (they used to go one after another).
         // Stock is an add-on to the table: if it cannot be read the prices
         // still show, with the Stock column empty.
+        const stockPromise = getStockFor(skus).catch(() => ({ ca: {}, us: {} }));
         const chunks = [];
         for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
-        const reads = task.part(0.2, 1);
-        let settled = 0;
-        const counted = () => { settled += 1; reads.count(settled, chunks.length + 1, `Reading the products and stock · ${settled} of ${chunks.length + 1}`); };
-        task.progress(0.2, `Reading the products and stock of ${skus.length} SKUs…`);
-        const stockPromise = getStockFor(skus).catch(() => ({ ca: {}, us: {} })).finally(counted);
         // The obsolete mark is for the rows' Obsolete pill.
         const parts = await Promise.all(chunks.map((part) => supabase
           .from('products')
           .select('sku, map_cad, map_usd, category, brand, is_obsolete')
-          .in('sku', part)
-          .then((res) => { counted(); return res; })));
+          .in('sku', part)));
         const maps = {};
         for (const { data } of parts) for (const p of data ?? []) maps[p.sku] = p;
         setMapBySku(maps);
         setStockByMarket(await stockPromise);
-        task.finish(`${prices.length} product${prices.length === 1 ? '' : 's'}`);
       } catch (err) {
-        task.fail(err);
         setMsg({ tone: 'error', text: err.message });
       }
     })();
-  }, [open, rows, promo.id, promo.name]);
+  }, [open, rows, promo.id]);
 
   // The market tab; the table below falls back to the promotion's first
   // market when the portals no longer include the one selected.
