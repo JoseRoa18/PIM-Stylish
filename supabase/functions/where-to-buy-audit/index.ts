@@ -133,6 +133,12 @@ const NEVER = "2999-01-01T00:00:00.000Z"; // scan-time verdicts are never probed
 const PASS_TZ = "America/Toronto"; // Cambridge, Ontario
 const PASS_WEEKDAYS = [1, 3, 5];   // Monday, Wednesday, Friday
 const PASS_HOUR = 1;               // from 1:00 AM
+// BB&B and Overstock are opened only through ScraperAPI (ultra premium, 30
+// credits a page, and 10) and one pass of them took ~7,900 of the plan's
+// 100,000 monthly credits; a whole pass took ~16,000 on 2026-10-30. They are
+// checked twice a week, Monday and Friday (user, 2026-10-31: "2 por semana").
+const PASS_WEEKDAYS_FOR: Record<string, number[]> = { bbb_us: [1, 5], overstock_us: [1, 5] };
+const passWeekdays = (retailer?: string) => (retailer && PASS_WEEKDAYS_FOR[retailer]) || PASS_WEEKDAYS;
 const WEEKDAY: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 // The local day ("2026-10-26"), weekday and hour of an instant in Eastern time.
 function eastern(t: Date): { day: string; weekday: number; hour: number } {
@@ -151,20 +157,20 @@ function easternAt(day: string, hour: number): Date {
   }
   return new Date(Date.UTC(y, m - 1, d, hour + 5));
 }
-// Whether an instant falls on a check day, from 1 AM to midnight.
-const inPass = (t: Date) => { const e = eastern(t); return PASS_WEEKDAYS.includes(e.weekday) && e.hour >= PASS_HOUR; };
-// The start of the next pass after an instant.
-function nextPassAt(t: Date = new Date()): string {
+// Whether an instant falls on a check day (of that store), from 1 AM to midnight.
+const inPass = (t: Date, retailer?: string) => { const e = eastern(t); return passWeekdays(retailer).includes(e.weekday) && e.hour >= PASS_HOUR; };
+// The start of the next pass (of that store) after an instant.
+function nextPassAt(t: Date = new Date(), retailer?: string): string {
   const today = eastern(t).day;
   for (let i = 0; i <= 7; i++) {
     const day = shiftDay(today, i);
     const start = easternAt(day, PASS_HOUR);
-    if (PASS_WEEKDAYS.includes(new Date(`${day}T12:00:00Z`).getUTCDay()) && start > t) return start.toISOString();
+    if (passWeekdays(retailer).includes(new Date(`${day}T12:00:00Z`).getUTCDay()) && start > t) return start.toISOString();
   }
   return new Date(t.getTime() + 86400e3).toISOString();
 }
 // The instant itself when it falls within a pass, else the next pass.
-const onPass = (t: Date) => (inPass(t) ? t.toISOString() : nextPassAt(t));
+const onPass = (t: Date, retailer?: string) => (inPass(t, retailer) ? t.toISOString() : nextPassAt(t, retailer));
 
 // ---------------------------------------------------------------- retailers
 // The stores the PIM keeps — one registry for the product page, this audit
@@ -1138,6 +1144,12 @@ function triesInOrder(route: Method[], fails: number): Method[] {
   const k = route.length > 1 && fails > 0 ? fails % route.length : 0;
   return k ? [...route.slice(k), ...route.slice(0, k)] : route;
 }
+// Where Bright Data opens the store, ScraperAPI waits until a link has missed
+// twice: as the first backup it took ~5,800 credits a pass (Home Depot,
+// Best Buy, Wayfair — 2026-10-30), a third of what a whole pass used. The
+// stores only ScraperAPI opens keep it from the first try.
+const SCRAPERAPI_FIRST = new Set(["bbb_us", "overstock_us", "ebay"]);
+const SCRAPERAPI_AFTER_FAILS = 2;
 
 async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
   row = { ...row, url: requestUrl(row.retailer, row.url) };
@@ -1145,6 +1157,7 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
   let last: Outcome = { kind: "none", note: "not tried" };
   let provisional: Outcome | null = null;
   for (const m of triesInOrder(routeFor(row.retailer, row.host ?? ""), row.fail_count ?? 0)) {
+    if (m === "scraperapi" && !SCRAPERAPI_FIRST.has(row.retailer) && (row.fail_count ?? 0) < SCRAPERAPI_AFTER_FAILS) continue;
     if (Date.now() + METHOD_MS[m] > deadline) return provisional ?? (misses.length ? { kind: "none", note: misses.join(" · ") } : { kind: "later" });
     let o: Outcome;
     if (m === "direct") {
@@ -1315,7 +1328,7 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
     verdict, note, http_status: o.status ?? null, final_url: verdict === "broken" ? o.finalUrl ?? null : null,
     checked_at: now, checked_via: o.via === "scraper" ? "brightdata" : o.via ?? null,
     fail_count: 0, signal_count: signals, signal_at: null, ...clearJob,
-    next_check_at: nextPassAt(),
+    next_check_at: nextPassAt(new Date(), row.retailer),
     ...reading,
   });
   switch (o.kind) {
@@ -1333,7 +1346,7 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
       // Not enough yet: keep the verdict, look again later (on a pass day).
       return {
         signal_count: signals, signal_at: counts ? now : row.signal_at, fail_count: 0, ...clearJob,
-        next_check_at: onPass(new Date((counts ? Date.now() : last!) + rule.everyHours * 3600e3)), ...reading,
+        next_check_at: onPass(new Date((counts ? Date.now() : last!) + rule.everyHours * 3600e3), row.retailer), ...reading,
         ...(row.verdict === "pending" ? { note: `${o.note} (${signals} of ${rule.strikes} checks before calling it broken)`, checked_at: now } : {}),
       };
     }
@@ -1343,7 +1356,7 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
       // answer later the same pass day, else at the next pass.
       const retry = new Date(Date.now() + Math.min(RETRY_HOURS * fails, 24) * 3600e3);
       return {
-        fail_count: fails, ...clearJob, next_check_at: row.verdict === "pending" ? retry.toISOString() : onPass(retry),
+        fail_count: fails, ...clearJob, next_check_at: row.verdict === "pending" ? retry.toISOString() : onPass(retry, row.retailer),
         ...(row.verdict === "pending" ? { note: `Not verified yet — ${o.note ?? "no answer"}`, checked_at: now } : {}),
       };
     }
