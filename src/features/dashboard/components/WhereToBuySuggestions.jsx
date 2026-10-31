@@ -6,6 +6,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import Dialog from '@/components/ui/Dialog';
 import { loadWhereToBuySuggestions } from '@/features/dashboard/api/whereToBuy';
 import { WTB_RETAILERS } from '@/features/dashboard/lib/whereToBuy';
+import { startTask } from '@/lib/taskProgress';
 
 // Listing Health → Where to Buy → the "Suggested links" button (user,
 // 2026-10-20: "1 hazlo" / "2 hazlo"; a button, not a section of the panel).
@@ -39,10 +40,23 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
   const [progress, setProgress] = useState(null);
   const [message, setMessage] = useState(null);
 
-  const reload = async () => {
-    try { setData(await loadWhereToBuySuggestions()); setError(null); } catch (e) { setError(e); }
+  // `task`: the card of the load (the moving stripe: one read and one count).
+  const reload = async (task = null) => {
+    try {
+      setData(await loadWhereToBuySuggestions());
+      setError(null);
+      task?.finish('Loaded');
+    } catch (e) {
+      task?.fail(e);
+      setError(e);
+    }
   };
-  useEffect(() => { reload(); }, []);
+  // The first load has its own card; leaving the panel before it ends drops it.
+  useEffect(() => {
+    const task = startTask('Suggested links', { silent: true, detail: 'Loading the suggested links…' });
+    reload(task);
+    return () => task.cancel();
+  }, []);
 
   // One suggestion per product and store (the newest opened), for the
   // products of the site on show.
@@ -67,15 +81,25 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
     setError(null);
     setMessage(null);
     setProgress(items.length > 1 ? { done: 0, total: new Set(items.map((s) => s.sku)).size, errors: 0 } : null);
+    const products = new Set(items.map((s) => s.sku)).size;
+    const task = startTask(items.length > 1 ? 'Use suggested links' : 'Use suggested link', {
+      detail: items.length > 1 ? `Publishing ${products} ${products === 1 ? 'product' : 'products'}…` : `${items[0].sku} · saving and publishing…`,
+    });
     try {
       const { applyWhereToBuySuggestions } = await import('@/features/products/api/whereToBuy');
-      const r = await applyWhereToBuySuggestions(items, (p) => setProgress(p));
+      const r = await applyWhereToBuySuggestions(items, (p) => setProgress(p), { task: task.part(0, 0.95) });
       setMessage(r.errors
         ? `${r.done - r.errors} of ${r.done} products updated. Not updated: ${r.failures.slice(0, 3).join('; ')}${r.failures.length > 3 ? '…' : ''}`
         : `${r.done} product${r.done === 1 ? '' : 's'} updated — the links are saved and the Stylish pages published.`);
+      task.progress(0.95, 'Reloading the suggestions…');
       await reload();
+      if (r.errors) task.fail(`${r.done - r.errors} of ${r.done} products updated; ${r.errors} not updated`);
+      else task.finish(`${r.done} ${r.done === 1 ? 'product' : 'products'} updated and published`);
       onApplied?.();
-    } catch (e) { setError(e); } finally { setBusy(null); setProgress(null); }
+    } catch (e) {
+      task.fail(e);
+      setError(e);
+    } finally { setBusy(null); setProgress(null); }
   };
   const useAll = async () => {
     const ok = await confirm({

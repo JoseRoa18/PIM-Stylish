@@ -18,6 +18,7 @@ import { LineTrend } from '@/features/analytics/components/charts';
 import DetailDialog from '@/features/analytics/components/DetailDialog';
 import { activityDetail, completenessDetail } from '@/features/analytics/lib/details';
 import { formatTimeAgo } from '@/lib/format';
+import { startTask } from '@/lib/taskProgress';
 
 // The page reads top to bottom like a weekly report: the week in one line,
 // the headline numbers, then the evidence by theme. The section index and
@@ -100,11 +101,15 @@ export default function Analytics() {
   async function snapshotNow() {
     setSnapping(true);
     setSnapMsg(null);
+    const task = startTask('KPI snapshot', { detail: 'Reading the catalog…' });
     try {
-      const r = await takeSnapshot();
+      const r = await takeSnapshot({ task: task.part(0, 0.95) });
+      task.progress(0.95, 'Reloading the history…');
       await reloadSnapshots();
+      task.finish(`Saved · ${r.rows} rows`);
       setSnapMsg({ tone: 'ok', text: `Snapshot for ${r.date} saved (${r.rows} rows).` });
     } catch (err) {
+      task.fail(err);
       setSnapMsg({ tone: 'error', text: err.message });
     } finally {
       setSnapping(false);

@@ -67,12 +67,15 @@ export async function pushBestBuyPrices(updates, { dryRun = false, protectRunnin
 /**
  * Pull the seller's Best Buy offers and persist a channel_health snapshot
  * (read-only against Best Buy; the snapshot lives in our own DB) so
- * Listing Health can score against it instantly.
+ * Listing Health can score against it instantly. `task` (optional
+ * taskProgress reporter): the pull (one call, 70%), the MSRPs, the snapshot.
  */
-export async function refreshBestBuyOffers() {
+export async function refreshBestBuyOffers({ task = null } = {}) {
+  if (task) await task.step('Pulling the Best Buy offers…');
   const { total, offers } = await invokeBestBuy();
 
   // Enrich the snapshot with PIM MSRPs so price mismatches are self-contained.
+  task?.progress(0.7, `Reading the PIM prices for ${offers.length} offers…`);
   const { data: prods, error } = await supabase.from('products').select('sku, msrp_cad');
   if (error) throw error;
   const msrpBySku = new Map((prods ?? []).map((p) => [p.sku, p.msrp_cad]));
@@ -85,6 +88,7 @@ export async function refreshBestBuyOffers() {
     (o) => o.msrp != null && o.price != null && Math.abs(o.price - o.msrp) > 0.01,
   ).length;
 
+  task?.progress(0.85, 'Saving the snapshot…');
   await insertSnapshot({
     channel: 'bestbuy',
     target: 'marketplace.bestbuy.ca',
@@ -95,6 +99,7 @@ export async function refreshBestBuyOffers() {
     partial: false,
     results,
   });
+  task?.progress(1);
 
   return { total, priceMismatches };
 }
@@ -128,7 +133,7 @@ const stripHtml = (h) =>
 // as "no images in the PIM" (found 2026-09-29). 20 SKUs a query stays under
 // the cap (a product has at most ~46 media rows); a query that still reaches
 // it is redone SKU by SKU.
-async function imagesForSkus(skus) {
+async function imagesForSkus(skus, task = null) {
   const CAP = 1000;
   const imagesBySku = new Map();
   const query = (part) => supabase
@@ -146,22 +151,26 @@ async function imagesForSkus(skus) {
   };
   const chunks = [];
   for (let i = 0; i < skus.length; i += 20) chunks.push(skus.slice(i, i + 20));
+  let settled = 0;
   const results = await Promise.all(chunks.map(async (part) => {
     const { data, error } = await query(part);
     if (error) throw error;
-    if ((data ?? []).length < CAP) return [data];
-    return Promise.all(part.map(async (sku) => {
+    const rows = (data ?? []).length < CAP ? [data] : await Promise.all(part.map(async (sku) => {
       const one = await query([sku]);
       if (one.error) throw one.error;
       return one.data;
     }));
+    settled += 1;
+    task?.count(settled, chunks.length, `Reading the images… (${settled} of ${chunks.length})`);
+    return rows;
   }));
   // Chunk order kept, so each SKU's images stay primary-first, display order.
   for (const group of results) for (const rows of group) add(rows);
   return imagesBySku;
 }
 
-export async function loadBestBuyPushCandidates() {
+/** `task` (optional taskProgress reporter): the snapshot 30%, the PIM reads 70%. */
+export async function loadBestBuyPushCandidates({ task = null } = {}) {
   const { data: snaps, error: snapErr } = await supabase
     .from('channel_health')
     .select('run_at, results')
@@ -174,6 +183,7 @@ export async function loadBestBuyPushCandidates() {
 
   const offers = snap.results.filter((o) => o.sku);
   const skus = offers.map((o) => o.sku);
+  task?.progress(0.3, `Reading ${skus.length} products and their images…`);
 
   // PostgREST caps unfiltered selects — always filter by the SKUs we need.
   const [{ data: prods, error: prodErr }, imagesBySku] = await Promise.all([
@@ -181,7 +191,7 @@ export async function loadBestBuyPushCandidates() {
       .from('products')
       .select('sku, brand, description, attributes, channel_exclusions')
       .in('sku', skus),
-    imagesForSkus(skus),
+    imagesForSkus(skus, task?.part(0.3, 1)),
   ]);
   if (prodErr) throw prodErr;
 

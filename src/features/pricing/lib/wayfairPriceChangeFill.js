@@ -44,6 +44,7 @@ import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pric
 import { markPromotionTask, savePromoFile, loadPromoFile, freshFileTasks } from '@/features/pricing/api/promoTasks';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const COLUMNS = {
   sku: 'SupplierPartNumber',
@@ -78,17 +79,21 @@ const list = (a, n = 8) => `${a.slice(0, n).join(', ')}${a.length > n ? '…' : 
  * @param promotion promotions row (the one that ended)
  * @param supplier  'USA' | 'CAN'
  * @param target    'blue' (the promotion ended) | 'promo' (it starts: MAP of its level)
+ * `task` (optional taskProgress reporter): the file read, members, prices in
+ * batches of 100, fill, the file written, kept (Promo MAP day) and marked done.
  */
-export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'USA', target = 'blue', { fromSaved = false } = {}) {
+export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'USA', target = 'blue', { fromSaved = false, task = null } = {}) {
   const usa = supplier === 'USA';
   const start = target === 'promo';
   const tier = start ? promotionLevel(promotion) : null;
   const levelName = start ? levelLabel(tier) : 'Blue';
   const label = usa ? 'Wayfair USA' : 'Wayfair Canada';
+  task?.step('Opening the file…');
   const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const sharedFile = zip.file('xl/sharedStrings.xml');
   const shared = parseSharedStrings(sharedFile ? await sharedFile.async('string') : '');
+  task?.progress(0.1);
 
   const path = await sheetPathByName(zip, 'Pricing');
   if (!path) throw new Error('No "Pricing" sheet found — upload the pricing file downloaded from Wayfair Partner Home (Current / New base cost and MAP).');
@@ -110,8 +115,11 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   // not listed there yet its MAP went down), read from the database now;
   // only a promotion without that record falls back to its members.
   const channel = usa ? 'wayfair_us' : 'wayfair_ca';
+  task?.progress(0.1, "Reading the promotion's products…");
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel);
+  task?.progress(0.2);
   const tasks = start ? {} : await freshFileTasks(promotion);
+  task?.progress(0.25);
   const sentAtStart = [...new Set([...(tasks[`${channel}:promo_file`]?.skus ?? []), ...(tasks[`${channel}:price_start`]?.skus ?? [])])];
   const memberSkus = !start && sentAtStart.length ? sentAtStart : members.map((r) => r.sku);
   if (!memberSkus.length) throw new Error(`This promotion has no products for ${label}.`);
@@ -125,7 +133,9 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   const select = ['sku', `map:${mapField}`, withCost ? `cost:${costField}` : null, usdMapField ? `usdMap:${usdMapField}` : null].filter(Boolean).join(', ');
   const numOrNull = (v) => (v != null ? Number(v) : null);
   const values = new Map();
+  const tick = batchTicker(task?.part(0.25, 0.5), memberSkus.length, 100, `Reading the ${levelName} prices`);
   for (let i = 0; i < memberSkus.length; i += 100) {
+    tick(i);
     const { data, error } = await supabase.from('products').select(select).in('sku', memberSkus.slice(i, i + 100));
     if (error) throw error;
     for (const p of data ?? []) values.set(p.sku, { cost: withCost ? numOrNull(p.cost) : null, map: numOrNull(p.map), usdMap: numOrNull(p.usdMap) });
@@ -149,6 +159,7 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   // when the price has them (user, 2026-10-16) — 533, 450.05. The file's
   // default style (xf 0) is General, so the written cells carry no style.
   const money = null;
+  await blockingStep(task, 0.5, 'Filling the sheet…');
   const firstData = hit.headerRow + 3; // labels, instructions, then data
   const cellsByRow = new Map();
   const fileSkus = new Set();
@@ -193,7 +204,9 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   // The market's own days (dates are per country): first day for Promo MAP, last for Blue.
   const w = promoWindow(promotion, usa ? 'us' : 'ca');
   const day = start ? w.start : w.end;
+  await blockingStep(task, 0.65, 'Writing the file…');
   await downloadZip(zip, `Wayfair_${usa ? 'USA' : 'Canada'}_Price_Change_${start ? 'Promo' : 'Blue'}_${day}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
+  task?.progress(0.85, start && !fromSaved ? 'Keeping the file for Back to Blue…' : 'Marking the file done…');
 
   logActivity({
     action: 'export',
@@ -206,17 +219,24 @@ export async function fillWayfairPriceChangeFile(file, promotion, supplier = 'US
   // The Promo MAP day keeps its pricing file (60 days) so Back to Blue can be
   // generated from it without another upload.
   const saved = start && !fromSaved ? await savePromoFile(promotion, `${channel}:price_start`, file) : {};
+  task?.progress(0.95, 'Marking the file done…');
   await markPromotionTask(promotion.id, `${channel}:${start ? 'price_start' : 'price_change'}`, { rows: cellsByRow.size, tier, skus: written.sort(), ...saved, ...(fromSaved ? { from_saved: true } : {}) });
+  task?.progress(1);
 
   return { supplier, target, levelName, rows: cellsByRow.size, removed: kept.removed, already, missing, notInFile, excluded, usdRows, fromSaved, saved: Boolean(saved.file), onlySent: !start && sentAtStart.length > 0 };
 }
 
-/** Back to Blue from the pricing file kept on the Promo MAP day. */
-export async function fillWayfairPriceChangeFromSaved(promotion, supplier = 'USA') {
+/**
+ * Back to Blue from the pricing file kept on the Promo MAP day. `task`
+ * (optional taskProgress reporter): the saved file's download, then the fill.
+ */
+export async function fillWayfairPriceChangeFromSaved(promotion, supplier = 'USA', { task = null } = {}) {
+  task?.step('Downloading the saved pricing file…');
   const entry = (await freshFileTasks(promotion))[`${supplier === 'USA' ? 'wayfair_us' : 'wayfair_ca'}:price_start`];
   const file = await loadPromoFile(entry);
   if (!file) throw new Error('No pricing file is saved for this promotion (it is kept 60 days after the Promo MAP day) — upload a fresh one from Partner Home.');
-  return fillWayfairPriceChangeFile(file, promotion, supplier, 'blue', { fromSaved: true });
+  task?.progress(0.15);
+  return fillWayfairPriceChangeFile(file, promotion, supplier, 'blue', { fromSaved: true, task: task?.part(0.15, 1) });
 }
 
 export function summarizeWayfairPriceChange(r) {

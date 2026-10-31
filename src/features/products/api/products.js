@@ -366,12 +366,17 @@ export async function listVariants(familyNumber, excludeSku = null) {
 }
 
 /**
- * Apply the same patch to many products at once.
+ * Apply the same patch to many products at once. `task` (optional
+ * taskProgress reporter): the column update is one request (no reading);
+ * attribute edits count the products read, then the products written.
  */
-export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}) {
+export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}, { task = null } = {}) {
   if (!skus?.length) return [];
+  const hasPatch = Object.keys(patch ?? {}).length > 0;
+  const hasAttrs = Object.keys(attrPatch ?? {}).length > 0;
   let data = [];
-  if (Object.keys(patch ?? {}).length) {
+  if (hasPatch) {
+    task?.step(`Saving ${skus.length} products…`);
     const res = await supabase
       .from('products')
       .update(patch)
@@ -379,11 +384,14 @@ export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}) {
       .select('*');
     if (res.error) throw res.error;
     data = res.data ?? [];
+    if (hasAttrs) task?.progress(0.2);
   }
 
   // attributes is one JSONB column: merge into each product's own (null
   // removes the key, as the product page does) so its other attributes stay.
-  if (Object.keys(attrPatch ?? {}).length) {
+  if (hasAttrs) {
+    const reading = task?.part(hasPatch ? 0.2 : 0, 0.3);
+    const writing = task?.part(0.3, 1);
     const current = [];
     for (let i = 0; i < skus.length; i += 200) {
       const { data: rows, error } = await supabase
@@ -392,7 +400,9 @@ export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}) {
         .in('sku', skus.slice(i, i + 200));
       if (error) throw error;
       current.push(...(rows ?? []));
+      reading?.count(Math.min(i + 200, skus.length), skus.length, `Reading ${skus.length} products…`);
     }
+    let written = 0;
     for (let i = 0; i < current.length; i += 8) {
       await Promise.all(current.slice(i, i + 8).map(async (row) => {
         const attributes = { ...(row.attributes ?? {}) };
@@ -402,6 +412,8 @@ export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}) {
         }
         const { error } = await supabase.from('products').update({ attributes }).eq('sku', row.sku);
         if (error) throw error;
+        written += 1;
+        writing?.count(written, current.length, `Product ${written} of ${current.length}`);
       }));
     }
   }
@@ -437,15 +449,17 @@ export async function obsoleteAmong(skus) {
  * promotions don't change. Products already in the requested state are left
  * alone, so the rows returned and the Activity Log entry are the products
  * that actually changed. When a batch fails after others were saved, the
- * error carries those (`err.changed`) so the caller can say so.
+ * error carries those (`err.changed`) so the caller can say so. `task`
+ * (optional taskProgress reporter) counts the products sent.
  */
-export async function setProductsObsolete(skus, obsolete) {
+export async function setProductsObsolete(skus, obsolete, { task = null } = {}) {
   const mark = Boolean(obsolete);
   const list = [...new Set(skus ?? [])];
   const changed = [];
   try {
     // 200 per request, so one batch can never reach the API's 1,000-row cap.
     for (let i = 0; i < list.length; i += 200) {
+      if (list.length > 200) task?.step(`Products ${i + 1} to ${Math.min(i + 200, list.length)} of ${list.length}…`);
       const { data, error } = await supabase
         .from('products')
         .update({ is_obsolete: mark })
@@ -454,6 +468,7 @@ export async function setProductsObsolete(skus, obsolete) {
         .select('sku, is_obsolete');
       if (error) throw Object.assign(new Error(error.message), { changed });
       changed.push(...(data ?? []));
+      task?.count(Math.min(i + 200, list.length), list.length);
     }
   } finally {
     // Logged even when a later batch fails: the earlier ones are saved.
@@ -476,12 +491,15 @@ export async function setProductsObsolete(skus, obsolete) {
  * Permanently delete products from the PIM. product_media rows cascade with
  * the FK; their Supabase-hosted files (images, documents, videos) are removed
  * from Storage afterwards, best-effort. Channel listings (Wix, Wayfair, …)
- * are NOT touched — this only removes the PIM's copy.
+ * are NOT touched — this only removes the PIM's copy. `task` (optional
+ * taskProgress reporter): listing the media 30%, the delete to 50%, removing
+ * the files the rest (no reading inside a step).
  */
-export async function deleteProducts(skus) {
+export async function deleteProducts(skus, { task = null } = {}) {
   if (!skus?.length) return { count: 0 };
 
   // Collect the storage paths BEFORE deleting — the rows cascade away.
+  const listing = task?.part(0, 0.3);
   const mediaPaths = [];
   for (let i = 0; i < skus.length; i += 40) {
     const { data } = await supabase
@@ -489,14 +507,18 @@ export async function deleteProducts(skus) {
       .select('storage_path')
       .in('sku', skus.slice(i, i + 40));
     for (const m of data ?? []) mediaPaths.push(m.storage_path);
+    listing?.count(Math.min(i + 40, skus.length), skus.length, `Listing the media of ${skus.length} products…`);
   }
 
+  task?.progress(0.3, `Deleting ${skus.length} products…`);
   const { error } = await supabase.from('products').delete().in('sku', skus);
   if (error) throw error;
 
   // Unreferenced-only: videos/documents are family-shared, so a file can
   // still be linked by surviving variants of the deleted product's family.
+  if (mediaPaths.length) task?.progress(0.5, `Removing ${mediaPaths.length} media files…`);
   await deleteStorageObjectsIfUnreferenced(mediaPaths);
+  task?.progress(1);
 
   logActivity({
     action: 'delete',

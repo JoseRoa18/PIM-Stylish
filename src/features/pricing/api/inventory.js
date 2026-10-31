@@ -19,16 +19,20 @@ const NOT_TRACKED = { ca: 'Not in the Canada inventory file', us: 'Not tracked i
 
 const COLUMNS = 'sku, on_hand, available, warehouses, source, eta, dropped_at, synced_at';
 
-async function rowsFor(market, skus) {
+// `onChunk` (optional) is called as each chunk's read settles.
+async function rowsFor(market, skus, onChunk = null) {
   const out = {};
   // Chunks of 100 SKUs, fetched in parallel (they used to go one by one).
   const chunks = [];
   for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
-  const results = await Promise.all(chunks.map((part) => supabase
-    .from('product_inventory')
-    .select(COLUMNS)
-    .eq('market', market)
-    .in('sku', part)));
+  const results = await Promise.all(chunks.map((part) => {
+    const read = supabase
+      .from('product_inventory')
+      .select(COLUMNS)
+      .eq('market', market)
+      .in('sku', part);
+    return onChunk ? read.then((res) => { onChunk(); return res; }) : read;
+  }));
   for (const { data, error } of results) {
     if (error) throw error;
     for (const r of data ?? []) out[r.sku] = r;
@@ -44,9 +48,15 @@ async function allRows(market) {
   return Object.fromEntries((data ?? []).map((r) => [r.sku, r]));
 }
 
-/** { ca: { sku → row }, us: { sku → row } } for the given SKUs. */
-export async function getStockFor(skus) {
-  const [ca, us] = await Promise.all([rowsFor('ca', skus), rowsFor('us', skus)]);
+/**
+ * { ca: { sku → row }, us: { sku → row } } for the given SKUs. `task`
+ * (optional taskProgress reporter) counts the chunk reads of both markets.
+ */
+export async function getStockFor(skus, { task = null } = {}) {
+  const reads = Math.ceil(skus.length / 100) * 2;
+  let done = 0;
+  const onChunk = task ? () => { done += 1; task.count(done, reads, 'Reading the stock…'); } : null;
+  const [ca, us] = await Promise.all([rowsFor('ca', skus, onChunk), rowsFor('us', skus, onChunk)]);
   return { ca, us };
 }
 

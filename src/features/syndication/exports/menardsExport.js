@@ -8,6 +8,7 @@ import {
   injectRows,
   fetchImagesBySku,
   createFillTracker,
+  labelTask,
 } from './templateFiller';
 
 // Menards (Syndigo "PIM Hierarchy") exporter.
@@ -190,10 +191,11 @@ function isDataSheetName(name) {
 /**
  * Fill one Menards workbook (content or containers). Returns the filled file
  * as a blob (kept under its original name — the set ships as one ZIP, the way
- * Menards delivers it) plus per-file stats.
+ * Menards delivers it) plus per-file stats. `task` (optional taskProgress
+ * reporter): the template 40%, the rows 10%, writing the file the rest.
  */
-async function fillOne(template, products) {
-  const { zip, shared } = await openTemplate(template.storage_path);
+async function fillOne(template, products, task = null) {
+  const { zip, shared } = await openTemplate(template.storage_path, { task: task?.part(0, 0.4) });
   const wbXml = await zip.file('xl/workbook.xml').async('string');
   const sheetNames = [...wbXml.matchAll(/<sheet[^>]*name="([^"]+)"/g)].map((m) => m[1]);
 
@@ -217,6 +219,10 @@ async function fillOne(template, products) {
   const unmapped = new Set();
   let rowsXml = '';
   const fill = createFillTracker();
+  if (task) {
+    task.progress(0.4);
+    await task.step(`Filling ${products.length} rows…`);
+  }
   products.forEach((p, pi) => {
     const rowNum = START + pi;
     const bullets = attr(p).bullet_points || [];
@@ -240,7 +246,9 @@ async function fillOne(template, products) {
   });
 
   zip.file(dataPath, injectRows(sheetXml, rowsXml, START - 1 + products.length));
-  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const writing = task?.part(0.5, 1);
+  writing?.progress(0, 'Writing the file…');
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }, writing ? (meta) => writing.progress(meta.percent / 100) : undefined);
   return {
     file: template.file_name,
     blob,
@@ -255,22 +263,27 @@ async function fillOne(template, products) {
  * Fill a whole Menards file set (content + containers) for the given products.
  * @param {Object[]} templates  marketplace_templates rows (all Menards files)
  * @param {Object[]} products   full product rows
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (the
+ *   images 5%, each file an equal share to 90%, the ZIP the rest)
  */
-export async function generateMenardsFromTemplates(templates, products) {
+export async function generateMenardsFromTemplates(templates, products, { task = null } = {}) {
   if (!templates?.length) throw new Error('No Menards templates uploaded.');
   if (!products?.length) throw new Error('No products to export.');
 
   // Attach primary-first image URLs (Master Image column).
+  task?.step(`Loading images for ${products.length} products…`);
   const imgBySku = await fetchImagesBySku(products.map((p) => p.sku));
   for (const p of products) p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
+  task?.progress(0.05);
 
   // True duplicates (re-uploaded files) are detected by their data sheet:
   // each Containers file carries a distinct dimension sheet, the content file
   // carries "Attributes". Same sheet twice = same file uploaded twice.
   const results = [];
   const seenSheets = new Set();
-  for (const t of templates) {
-    const r = await fillOne(t, products);
+  for (const [i, t] of templates.entries()) {
+    const slice = labelTask(task?.part(0.05 + (0.85 * i) / templates.length, 0.05 + (0.85 * (i + 1)) / templates.length), templates.length > 1 ? `File ${i + 1} of ${templates.length}` : '');
+    const r = await fillOne(t, products, slice);
     if (seenSheets.has(r.dataSheet)) continue;
     seenSheets.add(r.dataSheet);
     results.push(r);
@@ -280,7 +293,9 @@ export async function generateMenardsFromTemplates(templates, products) {
   const JSZip = await loadJSZip();
   const bundle = new JSZip();
   for (const r of results) bundle.file(r.file, r.blob);
-  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const zipping = task?.part(0.9, 1);
+  zipping?.progress(0, 'Writing the ZIP…');
+  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' }, zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined);
   const category = (products[0]?.category ?? 'export').replace(/[^\w-]+/g, '_');
   const url = URL.createObjectURL(out);
   const link = document.createElement('a');

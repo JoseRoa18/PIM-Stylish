@@ -280,6 +280,11 @@ h1, h2, h3, h4, h5, h6 {
 .animate-banner-in { animation: banner-in 250ms var(--ease-out-cubic) both; }
 .animate-dialog-in { animation: dialog-in 200ms var(--ease-out-quint) both; }
 
+/* A task whose size is not known yet (TaskProgressDock): a stripe sweeps
+   the bar. Reduced motion shows a still, faint full bar instead. */
+@keyframes task-indeterminate { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.animate-task-indeterminate { animation: task-indeterminate 1.3s var(--ease-in-out-cubic) infinite; }
+
 /* Press feedback: a subtle sink on real buttons (rows with role="button"
    are excluded on purpose — scaling a table row reads as a glitch).
    Uses the standalone `scale` property, NOT `transform: scale()`, so it

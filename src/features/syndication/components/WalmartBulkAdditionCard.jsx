@@ -9,6 +9,7 @@ import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { latestSnapshot } from '../lib/channels';
 import { previewWalmartItems, submitWalmartItems, walmartFeedStatus } from '../api/walmartAdd';
 import { refreshWalmartItems } from '../api/walmartSync';
+import { startTask } from '@/lib/taskProgress';
 
 // Walmart USA in lots (user, 2026-10-30: "queremos todos, pero podemos
 // empezar por lotes"). Almost every Stylish product already has a listing in
@@ -35,6 +36,20 @@ async function readAll(table, columns, build) {
     if (!data || data.length < PAGE) break;
   }
   return rows;
+}
+
+// A one-call operation of the card under a task card (the stripe moves until
+// Walmart answers); `done(result)` is what the finished card says.
+async function walmartTask(title, detail, fn, done) {
+  const task = startTask(title, { detail });
+  try {
+    const result = await fn();
+    task.finish(done?.(result) ?? 'Done');
+    return result;
+  } catch (e) {
+    task.fail(e);
+    throw e;
+  }
 }
 
 // Walmart's answer for one SKU of a feed, in a few words. A UPC Walmart's
@@ -72,7 +87,14 @@ export default function WalmartBulkAdditionCard() {
 
   useEffect(() => {
     let active = true;
-    (async () => {
+    let ended = false;
+    // The page's load: three reads (products, USA stock, Walmart's live item
+    // list) counted as they settle (80%), then one feed status per recent lot.
+    const task = startTask('Walmart USA', { silent: true, detail: "Reading Walmart's live item list and the catalog…" });
+    const reads = task.part(0, 0.8);
+    let settled = 0;
+    const counted = (p) => p.finally(() => { settled += 1; if (active) reads.count(settled, 3, `Reading… (${settled} of 3)`); });
+    const loadList = async () => {
       try {
         // What is on Walmart USA now: its live item list (saved as the
         // channel's snapshot too), not the twice-a-day snapshot — after a lot
@@ -80,17 +102,19 @@ export default function WalmartBulkAdditionCard() {
         // (2026-10-30). The saved snapshot only when Walmart does not answer.
         const live = refreshWalmartItems('us').then(() => latestSnapshot('walmart_us'), () => latestSnapshot('walmart_us'));
         const [rows, stock, snap] = await Promise.all([
-          readAll('products', 'sku, model_name, category, brand, map_usd', (q) => q.neq('workflow_status', 'archived').order('sku')),
-          readAll('product_inventory', 'sku, available', (q) => q.eq('market', 'us').order('sku')),
-          live,
+          counted(readAll('products', 'sku, model_name, category, brand, map_usd', (q) => q.neq('workflow_status', 'archived').order('sku'))),
+          counted(readAll('product_inventory', 'sku, available', (q) => q.eq('market', 'us').order('sku'))),
+          counted(live),
         ]);
         if (!active) return;
         const stockOf = new Map(stock.map((s) => [s.sku, Number(s.available ?? 0)]));
         setOnWalmart(new Set((snap?.results ?? []).map((r) => r.sku)));
         setProducts(rows.map((p) => ({ ...p, stock: stockOf.has(p.sku) ? stockOf.get(p.sku) : null })));
       } catch (e) {
-        if (active) setLoadError(e.message);
+        if (active) { ended = true; task.fail(e); setLoadError(e.message); }
       }
+    };
+    const loadLots = async () => {
       // The lots sent in the last week and Walmart's answer to each, oldest
       // first (a later new-item feed overrides a lot's "not listed"): a
       // product Walmart accepted takes up to an hour to show in its item
@@ -100,7 +124,12 @@ export default function WalmartBulkAdditionCard() {
         const { data } = await supabase.from('app_settings').select('value').eq('key', 'walmart_us_lots').maybeSingle();
         const since = Date.now() - LOTS_KEPT_MS;
         const lots = (Array.isArray(data?.value) ? data.value : []).filter((l) => l?.feedId && Date.parse(l.at) > since);
-        const answers = await Promise.all(lots.map((l) => walmartFeedStatus(l.feedId, { sandbox: false }).catch(() => null)));
+        const lotsPart = task.part(0.8, 1);
+        let read = 0;
+        const answers = await Promise.all(lots.map((l) => walmartFeedStatus(l.feedId, { sandbox: false }).catch(() => null).finally(() => {
+          read += 1;
+          if (active) lotsPart.count(read, lots.length, `Walmart's answer to the recent lots… (${read} of ${lots.length})`);
+        })));
         if (!active || !lots.length) return;
         const next = new Map();
         lots.forEach((l, i) => {
@@ -111,8 +140,15 @@ export default function WalmartBulkAdditionCard() {
         const last = lots[lots.length - 1];
         setSent((s) => s ?? { feedId: last.feedId, submitted: last.skus ?? [], feedStatus: answers[lots.length - 1]?.feedStatus });
       } catch { /* the lots are a convenience: the list works without them */ }
+    };
+    (async () => {
+      await loadList();
+      if (!active) return;
+      await loadLots();
+      if (active && !ended) { ended = true; task.finish('Loaded'); }
     })();
-    return () => { active = false; };
+    // Left the page before it loaded: the card goes without a word.
+    return () => { active = false; if (!ended) task.cancel(); };
   }, []);
 
   const candidates = useMemo(() => (products ?? [])
@@ -181,8 +217,14 @@ export default function WalmartBulkAdditionCard() {
   async function runCheck() {
     if (!picked.length) return;
     setBusy('check'); setError(null);
-    try { setCheck(await previewWalmartItems(picked, { setup: 'match', enableChannel: true })); }
-    catch (e) { setError(e.message); }
+    try {
+      setCheck(await walmartTask(
+        `Walmart USA · check ${picked.length} product${picked.length === 1 ? '' : 's'}`,
+        'Checking UPC, price and shipping weight…',
+        () => previewWalmartItems(picked, { setup: 'match', enableChannel: true }),
+        (r) => `${(r?.products ?? []).filter((x) => x.ready).length} of ${picked.length} ready`,
+      ));
+    } catch (e) { setError(e.message); }
     finally { setBusy(null); }
   }
 
@@ -196,7 +238,12 @@ export default function WalmartBulkAdditionCard() {
     if (!ok) return;
     setBusy('send'); setError(null);
     try {
-      const data = await submitWalmartItems(ready, { sandbox: false, confirm: 'CREATE', setup: 'match', enableChannel: true });
+      const data = await walmartTask(
+        `Walmart USA · send ${ready.length} product${ready.length === 1 ? '' : 's'}`,
+        'Sending the lot to Walmart…',
+        () => submitWalmartItems(ready, { sandbox: false, confirm: 'CREATE', setup: 'match', enableChannel: true }),
+        (r) => `${r?.submitted?.length ?? 0} sent · Walmart processes them`,
+      );
       setSent(data);
       const next = new Map(outcome);
       for (const it of data.items ?? []) next.set(it.sku, itemOutcome(it));
@@ -215,7 +262,12 @@ export default function WalmartBulkAdditionCard() {
     if (!newItems.length) return;
     setBusy('new'); setError(null);
     try {
-      const pre = await previewWalmartItems(newItems, { validate: true, enableChannel: true });
+      const pre = await walmartTask(
+        `Walmart USA · check ${newItems.length} new item${newItems.length === 1 ? '' : 's'}`,
+        "Checking them against Walmart's item spec…",
+        () => previewWalmartItems(newItems, { validate: true, enableChannel: true }),
+        (r) => `${(r?.products ?? []).filter((x) => x.ready && !x.specErrors?.length).length} of ${newItems.length} ready`,
+      );
       const next = new Map(outcome);
       for (const s of pre.skipped ?? []) next.set(s.sku, { ok: false, text: s.reason });
       for (const r of pre.products ?? []) {
@@ -231,7 +283,12 @@ export default function WalmartBulkAdditionCard() {
         confirmLabel: 'Create items',
       });
       if (!ok) return;
-      const data = await submitWalmartItems(good, { sandbox: false, confirm: 'CREATE', enableChannel: true });
+      const data = await walmartTask(
+        `Walmart USA · create ${good.length} item${good.length === 1 ? '' : 's'}`,
+        'Sending the new items to Walmart…',
+        () => submitWalmartItems(good, { sandbox: false, confirm: 'CREATE', enableChannel: true }),
+        (r) => `${r?.submitted?.length ?? 0} sent · Walmart processes them`,
+      );
       setSent(data);
       setOutcome((o) => {
         const n = new Map(o);
@@ -247,7 +304,12 @@ export default function WalmartBulkAdditionCard() {
     if (!sent?.feedId) return;
     setBusy('status'); setError(null);
     try {
-      const data = await walmartFeedStatus(sent.feedId, { sandbox: false });
+      const data = await walmartTask(
+        'Walmart USA · lot status',
+        "Reading Walmart's answer…",
+        () => walmartFeedStatus(sent.feedId, { sandbox: false }),
+        (r) => `Walmart: ${r?.feedStatus ?? 'read'}`,
+      );
       setSent((s) => ({ ...s, feedStatus: data.feedStatus, itemsReceived: data.itemsReceived, itemsSucceeded: data.itemsSucceeded, itemsFailed: data.itemsFailed, itemsProcessing: data.itemsProcessing }));
       setOutcome((o) => { const n = new Map(o); for (const it of data.items ?? []) n.set(it.sku, itemOutcome(it)); return n; });
     } catch (e) { setError(e.message); }

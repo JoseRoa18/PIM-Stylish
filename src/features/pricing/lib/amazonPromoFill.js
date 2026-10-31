@@ -28,6 +28,7 @@ import {
 import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const HEADER_SCAN_ROWS = 12;
 const text = (v) => String(v ?? '').trim();
@@ -59,9 +60,13 @@ function locate(grid) {
  * @param template  marketplace_templates row (Amazon, purpose "promotions")
  * @param promotion promotions row
  * @param channel   PROMO_CHANNELS entry: market 'ca' | 'us'
+ * @param task      optional taskProgress reporter: template 20%, members,
+ *                  the seller SKUs in batches of 100, fill, then the file
  */
-export async function fillAmazonPromoTemplate(template, promotion, channel) {
+export async function fillAmazonPromoTemplate(template, promotion, channel, { task = null } = {}) {
+  task?.step('Downloading the template…');
   const { zip, shared } = await openTemplate(template.storage_path);
+  task?.progress(0.2, 'Reading the template…');
   const path = await sheetPathByName(zip, 'Template');
   if (!path) throw new Error('No "Template" sheet in this file. Upload Amazon\'s promotions flat file.');
   const xml = await zip.file(path).async('string');
@@ -74,7 +79,9 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
 
   const market = channel.market;
   const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
+  task?.progress(0.25, "Reading the promotion's products…");
   const { rows: prices, excluded } = await promotionMembersFor(promotion, channel.key);
+  task?.progress(0.35);
   const members = prices.filter((r) => r[priceKey] != null);
   if (!members.length) throw new Error(`This promotion has no ${market === 'us' ? 'USD' : 'CAD'} promo prices loaded.`);
   const priceBySku = new Map(members.map((r) => [r.sku, r[priceKey]]));
@@ -86,7 +93,9 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   if (channel.sellerSku === 'pim') {
     for (const r of members) offers.push({ seller: r.sku, sku: r.sku, price: r[priceKey] });
   } else {
+    const tick = batchTicker(task?.part(0.35, 0.75), skus.length, 100, 'Reading the Amazon seller SKUs');
     for (let i = 0; i < skus.length; i += 100) {
+      tick(i);
       const { data, error } = await supabase
         .from('amazon_links')
         .select('sku, seller_sku')
@@ -102,6 +111,7 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
     throw new Error(`None of the promotion's products has an Amazon ${market.toUpperCase()} seller SKU on file. Load the seller SKU list first.`);
   }
   offers.sort((a, b) => a.seller.localeCompare(b.seller));
+  await blockingStep(task, 0.75, `Filling the sheet · ${offers.length} offers…`);
 
   const window = promoWindow(promotion, market);
   const { sku: skuCol, price: priceCol, start: startCol, end: endCol, fulfillment: fulfillCol } = loc.cols;
@@ -143,7 +153,9 @@ export async function fillAmazonPromoTemplate(template, promotion, channel) {
   zip.file(path, merged);
 
   const period = String(promotion.period).slice(0, 7);
+  await blockingStep(task, 0.85, 'Writing the file…');
   await downloadZip(zip, `Amazon_${market.toUpperCase()}_Promo_${period}`, templateExt(template.storage_path));
+  task?.progress(1);
 
   const report = {
     offers: offers.length,

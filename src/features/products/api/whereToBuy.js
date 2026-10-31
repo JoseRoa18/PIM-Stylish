@@ -50,9 +50,10 @@ export async function loadProductWhereToBuy(product) {
  * Save the product's links ({ [retailer]: url | '' }) and publish them to its
  * Stylish pages. Returns { changed, published: [{ site, label, status, error? }] }.
  * `suggested` = the retailers whose new address is a suggestion the person used
- * (kept as the link's source).
+ * (kept as the link's source). `task` (optional taskProgress reporter): saving
+ * the links 25%, publishing (one call: the bar waits on it) up to 100%.
  */
-export async function saveProductWhereToBuy(product, draft, current, { suggested = [] } = {}) {
+export async function saveProductWhereToBuy(product, draft, current, { suggested = [], task = null } = {}) {
   const sku = product.sku;
   const upserts = [];
   const removed = [];
@@ -65,7 +66,13 @@ export async function saveProductWhereToBuy(product, draft, current, { suggested
     if (problem) throw new Error(`${retailer}: ${problem}`);
     upserts.push({ sku, retailer, url, source: suggested.includes(retailer) ? 'suggested' : 'manual', updated_at: new Date().toISOString() });
   }
-  if (!upserts.length && !removed.length) return { changed: 0, published: await publishWhereToBuy(product) };
+  if (!upserts.length && !removed.length) {
+    task?.step(`Publishing ${sku} on the Stylish pages…`);
+    const published = await publishWhereToBuy(product);
+    task?.progress(1);
+    return { changed: 0, published };
+  }
+  task?.step(`Saving ${upserts.length + removed.length} ${upserts.length + removed.length === 1 ? 'link' : 'links'} of ${sku}…`);
   if (upserts.length) {
     const { error } = await supabase.from('product_where_to_buy').upsert(upserts, { onConflict: 'sku,retailer' });
     if (error) throw error;
@@ -82,7 +89,9 @@ export async function saveProductWhereToBuy(product, draft, current, { suggested
     summary: `Where to Buy links of ${sku}: ${upserts.length} set${upserts.some((u) => u.source === 'suggested') ? ` (${upserts.filter((u) => u.source === 'suggested').length} suggested by the PIM)` : ''}, ${removed.length} removed`,
     metadata: { set: upserts.map((u) => ({ retailer: u.retailer, url: u.url, source: u.source })), removed },
   });
+  task?.progress(0.25, `Publishing ${sku} on the Stylish pages…`);
   const published = await publishWhereToBuy(product);
+  task?.progress(1);
   return { changed: upserts.length + removed.length, published };
 }
 
@@ -90,8 +99,10 @@ export async function saveProductWhereToBuy(product, draft, current, { suggested
  * Use suggested links: each product's list gets the suggested address for that
  * store and its Stylish pages are published (the audit's sync marks the
  * suggestions used). One product after the other; reports { done, total, errors }.
+ * `task` (optional taskProgress reporter): reading the products 5%, then
+ * product N of M (a single product: its save, then its publish).
  */
-export async function applyWhereToBuySuggestions(suggestions, onProgress) {
+export async function applyWhereToBuySuggestions(suggestions, onProgress, { task = null } = {}) {
   const bySku = new Map();
   for (const s of suggestions) {
     if (!bySku.has(s.sku)) bySku.set(s.sku, new Map());
@@ -107,11 +118,16 @@ export async function applyWhereToBuySuggestions(suggestions, onProgress) {
   let done = 0;
   let errors = 0;
   const failures = [];
+  const total = products?.length ?? 0;
+  task?.progress(0.05);
+  const each = task?.part(0.05, 1);
   for (const product of products ?? []) {
     const current = Object.fromEntries((rows ?? []).filter((r) => r.sku === product.sku).map((r) => [r.retailer, r.url]));
     const chosen = Object.fromEntries(bySku.get(product.sku));
+    each?.count(done, total, `Publishing ${product.sku} (${done + 1} of ${total})…`);
     try {
-      const r = await saveProductWhereToBuy(product, { ...current, ...chosen }, current, { suggested: Object.keys(chosen) });
+      // one product: its save and publish move the bar; several: product N of M
+      const r = await saveProductWhereToBuy(product, { ...current, ...chosen }, current, { suggested: Object.keys(chosen), task: total === 1 ? each : null });
       if (r.published.some((x) => x.status === 'error')) { errors += 1; failures.push(`${product.sku}: ${r.published.find((x) => x.status === 'error').error}`); }
     } catch (err) {
       errors += 1;
@@ -119,6 +135,7 @@ export async function applyWhereToBuySuggestions(suggestions, onProgress) {
     }
     done += 1;
     onProgress?.({ done, total: products.length, errors });
+    each?.count(done, total);
   }
   return { done, errors, failures };
 }

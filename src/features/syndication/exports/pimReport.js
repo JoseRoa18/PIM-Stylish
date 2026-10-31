@@ -71,15 +71,22 @@ const SHOWN_COLUMNS = new Set(['sku', 'brand', 'category', 'attributes', 'workfl
   'channel_exclusions', 'wix_raw', 'additional_info_sections', 'wix_collection_ids']);
 const filled = (v) => v != null && v !== '' && !(Array.isArray(v) && !v.length);
 
-async function loadReportData() {
-  const [products, media, aliases, amazon, stock, wix] = await Promise.all([
+// `task` (optional taskProgress reporter): one step per table read.
+async function loadReportData(task = null) {
+  const reads = [
     fetchAllProducts(),
     readAll('product_media', 'id, sku, media_type, storage_path, file_name, file_size_bytes, is_primary, display_order, document_type, language, image_role', 'id'),
     readAll('product_aliases', 'sku, marketplace, alias, kind, note, listing_title', 'sku'),
     readAll('amazon_links', 'marketplace, sku, seller_sku, asin, status, fulfillment', 'sku'),
     readAll('product_inventory', 'market, sku, on_hand, available, eta, synced_at', 'sku'),
     readAll('wix_links', 'site, sku, wix_product_id, synced_at', 'sku'),
-  ]);
+  ];
+  let done = 0;
+  const [products, media, aliases, amazon, stock, wix] = await Promise.all(reads.map((p) => p.then((rows) => {
+    done += 1;
+    task?.count(done, reads.length, `Loading the catalog… (${done} of ${reads.length} tables)`);
+    return rows;
+  })));
   return { products, media, aliases, amazon, stock, wix };
 }
 
@@ -360,12 +367,17 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
-/** Builds and downloads the full report; returns what it holds. */
-export async function generatePimReport() {
-  const data = await loadReportData();
+/**
+ * Builds and downloads the full report; returns what it holds. `task`
+ * (optional taskProgress reporter): loading 45%, the sheets 10%, writing 45%.
+ */
+export async function generatePimReport({ task = null } = {}) {
+  const data = await loadReportData(task?.part(0, 0.45));
   if (!data.products.length) throw new Error('The catalog has no products.');
   const date = new Date().toISOString().slice(0, 10);
+  if (task) await task.step(`Building the sheets for ${data.products.length} products…`);
   const { sheets, products, columns } = pimReportSheets(data, date);
-  downloadBlob(await buildSectionedWorkbook(sheets), `Stylish_PIM_Full_Report_${date}.xlsx`);
+  task?.progress(0.55);
+  downloadBlob(await buildSectionedWorkbook(sheets, { task: task?.part(0.55, 1) }), `Stylish_PIM_Full_Report_${date}.xlsx`);
   return { products, columns, files: data.media.length, ids: sheets[3].rows.length };
 }

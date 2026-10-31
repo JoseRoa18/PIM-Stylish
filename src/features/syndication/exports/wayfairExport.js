@@ -149,11 +149,13 @@ function assignVariants(groups, imgBySku) {
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]           base name for the download
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (the
+ *   template 20%, families and media 30%, the rows 10%, writing the file 40%)
  */
-export async function generateWayfairFromTemplate(templateStoragePath, products, fileName = 'Wayfair_Export') {
+export async function generateWayfairFromTemplate(templateStoragePath, products, fileName = 'Wayfair_Export', { task = null } = {}) {
   if (!products?.length) throw new Error('No products to export.');
 
-  const { zip, shared } = await openTemplate(templateStoragePath);
+  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.2) });
 
   const wbXml = await zip.file('xl/workbook.xml').async('string');
   const mainName = listSheetNames(wbXml).find((n) => /^\d+\s*-/.test(n));
@@ -171,12 +173,20 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
   const validMaps = vvPath ? buildValidMaps(sheetToGrid(await zip.file(vvPath).async('string'), shared)) : {};
 
   // Expand each selected product into its full variant family, then group.
+  task?.progress(0.2, 'Loading the variant families…');
   const groups = await expandFamilies(products);
   const allSkus = [...groups.values()].flat().map((p) => p.sku);
+  task?.progress(0.3, `Loading images for ${allSkus.length} products…`);
   const imgBySku = await fetchImagesBySku(allSkus);
+  task?.progress(0.37, 'Loading videos…');
   const vidBySku = await fetchVideosBySku(allSkus);
+  task?.progress(0.43, 'Loading documents…');
   const docBySku = await fetchDocsBySku(allSkus, DOC_TYPE_MAP, DOC_TYPE_PRIORITY);
   const { ordered, warnings } = assignVariants(groups, imgBySku);
+  if (task) {
+    task.progress(0.5);
+    await task.step(`Filling ${ordered.length} rows…`);
+  }
 
   // How many numbered media slots the main sheet has — anything beyond them
   // overflows into the "Additional …" sheets.
@@ -262,7 +272,7 @@ export async function generateWayfairFromTemplate(templateStoragePath, products,
   await fillAdditional('Additional Videos', extraVideos);
   await fillAdditional('Additional Documents', extraDocs);
 
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath), { task: task?.part(0.6, 1) });
 
   if (warnings.length) {
     console.warn(

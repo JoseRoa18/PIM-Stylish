@@ -3,6 +3,7 @@ import { Plus, Trash2, Loader2 } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { bulkUpdateProducts } from '../api/products';
+import { startTask } from '@/lib/taskProgress';
 import { WORKFLOW_STATUS } from '../lib/workflowStatus';
 import { CATEGORY_OPTIONS } from '../lib/categories';
 import { BRAND_OPTIONS } from '../lib/brands';
@@ -113,11 +114,14 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
 
     setBusy(true);
     setError(null);
+    const task = startTask('Edit fields', { detail: `${count} product${count === 1 ? '' : 's'} · ${patchRows.length} field${patchRows.length === 1 ? '' : 's'}` });
     try {
-      await bulkUpdateProducts([...selectedSkus], patch, attrPatch);
+      await bulkUpdateProducts([...selectedSkus], patch, attrPatch, { task });
+      task.finish(`Updated ${count} product${count === 1 ? '' : 's'}`);
       onChanged?.();
       onClose();
     } catch (err) {
+      task.fail(err);
       setError(err.message ?? 'Update failed');
       setBusy(false);
     }

@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertCircle, Check, ChevronDown, Copy, ExternalLink, RefreshCw, Search, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
+import { startTask } from '@/lib/taskProgress';
 import { loadWhereToBuy, scanWhereToBuy, checkWhereToBuy, whereToBuyStatus, republishWhereToBuy } from '@/features/dashboard/api/whereToBuy';
 import WhereToBuySuggestions from './WhereToBuySuggestions';
 import WhereToBuyExcel from './WhereToBuyExcel';
@@ -105,17 +106,40 @@ export default function WhereToBuyPanel() {
   const [copied, setCopied] = useState(null);
   const [differs, setDiffers] = useState({}); // site → SKUs whose live section is not the PIM's list
   const [republish, setRepublish] = useState(null); // { done, total, errors }
+  const [due, setDue] = useState(null); // links due for a check now (both sites), for the check's percentage
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
 
-  const reload = async (s = site) => {
+  // The card of the load in flight (the tab opened, the site switched): a newer
+  // load or leaving the panel drops it. A reload after an action reports on
+  // that action's card instead (`parent`, a slice of it), so one action shows
+  // one card. Returns whether the links were read.
+  const loadTask = useRef(null);
+  useEffect(() => () => loadTask.current?.cancel(), []);
+
+  const reload = async (s = site, parent = null) => {
     setLoading(true);
     setError(null);
+    loadTask.current?.cancel();
+    const task = parent ? null : startTask('Where to Buy', { silent: true, detail: `Loading the ${WTB_SITES.find((x) => x.key === s)?.label ?? ''} links…` });
+    loadTask.current = task;
+    const report = parent ?? task;
     try {
-      const [r, st] = await Promise.all([loadWhereToBuy(s), whereToBuyStatus().catch(() => null)]);
+      const [r, st] = await Promise.all([loadWhereToBuy(s, { task: report.part(0, 0.9) }), whereToBuyStatus().catch(() => null)]);
       setRows(r);
       setDiffers(st?.differs ?? {});
-    } catch (e) { setError(e); } finally { setLoading(false); }
+      setDue(st?.due ?? null);
+      report.progress(1);
+      task?.finish('Loaded');
+      return true;
+    } catch (e) {
+      task?.fail(e);
+      setError(e);
+      return false;
+    } finally {
+      if (task && loadTask.current === task) loadTask.current = null;
+      setLoading(false);
+    }
   };
   useEffect(() => { reload(site); setPage(1); setExpanded(null); setToAdd(null); }, [site]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -146,28 +170,52 @@ export default function WhereToBuyPanel() {
     try { await navigator.clipboard.writeText(skus.join('\n')); setCopied(retailer); setTimeout(() => setCopied(null), 2000); } catch { /* clipboard blocked */ }
   };
 
+  // Each action has its own card; its reload is the last 10% of it.
   const runRepublish = async (skus) => {
     setRepublish({ done: 0, total: skus.length, errors: 0 });
     setError(null);
+    const task = startTask("Publish the PIM's links", { detail: `Publishing ${skus.length} ${skus.length === 1 ? 'product' : 'products'}…` });
     try {
-      await republishWhereToBuy(skus, (p) => setRepublish(p));
-      await reload();
-    } catch (e) { setError(e); } finally { setRepublish(null); }
+      const r = await republishWhereToBuy(skus, (p) => setRepublish(p), { task: task.part(0, 0.9) });
+      task.progress(0.9, 'Reloading the links…');
+      const reloaded = await reload(site, task.part(0.9, 1));
+      if (r.errors) task.fail(`${r.done - r.errors} of ${r.done} products published; ${r.errors} failed`);
+      else if (!reloaded) task.fail('Published, but the links could not be reloaded');
+      else task.finish(`${r.done} ${r.done === 1 ? 'product' : 'products'} published`);
+    } catch (e) {
+      task.fail(e);
+      setError(e);
+    } finally { setRepublish(null); }
   };
 
   const runScan = async () => {
     setBusy('scan');
     setError(null);
-    try { await scanWhereToBuy(); await reload(); } catch (e) { setError(e); } finally { setBusy(null); }
+    const task = startTask('Where to Buy scan', { detail: 'Reading the WHERE TO BUY sections of both sites…' });
+    try {
+      await scanWhereToBuy();
+      task.progress(0.9, 'Reloading the links…');
+      if (await reload(site, task.part(0.9, 1))) task.finish('Scanned');
+      else task.fail('Scanned, but the links could not be reloaded');
+    } catch (e) {
+      task.fail(e);
+      setError(e);
+    } finally { setBusy(null); }
   };
   const runCheck = async () => {
     setBusy('check');
     setError(null);
     setProgress({ checked: 0 });
+    const task = startTask('Where to Buy check', { detail: 'Checking the links that are due…' });
     try {
-      await checkWhereToBuy({ onProgress: (p) => setProgress(p) });
-      await reload();
-    } catch (e) { setError(e); } finally { setBusy(null); setProgress(null); }
+      const r = await checkWhereToBuy({ onProgress: (p) => setProgress(p), task: task.part(0, 0.9), due });
+      task.progress(0.9, 'Reloading the links…');
+      if (await reload(site, task.part(0.9, 1))) task.finish(`${r.checked.toLocaleString()} links checked${r.done ? '' : ' · the automatic pass checks the rest'}`);
+      else task.fail(`${r.checked.toLocaleString()} links checked, but the links could not be reloaded`);
+    } catch (e) {
+      task.fail(e);
+      setError(e);
+    } finally { setBusy(null); setProgress(null); }
   };
 
   const counts = summary.byVerdict;

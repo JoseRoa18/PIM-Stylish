@@ -37,13 +37,18 @@ async function invokeGenerate(skus, force) {
  * edge function (which holds the Gemini key and checks the caller's role).
  * Without `force`, products that already have keywords are skipped — so the
  * bulk action only fills gaps. Returns { generated, skipped, failed, results }.
+ * `task` (optional taskProgress reporter) counts the products sent.
  */
-export async function generateKeywords(skus, { force = false, onProgress } = {}) {
+export async function generateKeywords(skus, { force = false, onProgress, task = null } = {}) {
   const all = [];
   for (let i = 0; i < skus.length; i += CHUNK) {
+    const end = Math.min(i + CHUNK, skus.length);
+    // one call writes up to 20 products and reports nothing until it answers
+    task?.step(skus.length > CHUNK ? `Products ${i + 1} to ${end} of ${skus.length}…` : `Writing keywords for ${skus.length} product${skus.length === 1 ? '' : 's'}…`);
     const results = await invokeGenerate(skus.slice(i, i + CHUNK), force);
     all.push(...results);
-    onProgress?.(Math.min(i + CHUNK, skus.length), skus.length);
+    task?.count(end, skus.length);
+    onProgress?.(end, skus.length);
   }
 
   const generated = all.filter((r) => r.status === 'generated');

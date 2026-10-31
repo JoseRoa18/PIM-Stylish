@@ -138,19 +138,26 @@ function rowsBelow(grid, index, sheetName) {
   return { headers: headers.filter(Boolean), rows };
 }
 
-async function parseXlsx(file, { scoreHeader = null, allSheets = false } = {}) {
+// `task` (optional taskProgress reporter): opening the file 10%, then one
+// share per sheet read (each waits for a paint first: the XML parse blocks).
+async function parseXlsx(file, { scoreHeader = null, allSheets = false, task = null } = {}) {
   const { default: JSZip } = await import('jszip');
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
 
+  if (task) await task.step('Reading the shared texts…');
   const ssFile = zip.file('xl/sharedStrings.xml');
   const sharedStrings = parseSharedStrings(ssFile ? await ssFile.async('string') : null);
+  task?.progress(0.1);
 
   const sheets = await listSheets(zip);
   // every visible sheet (the PIM's Excel keeps its dropdown lists on a hidden one)
   const wanted = allSheets ? sheets.filter((s) => !s.hidden) : sheets.slice(0, 1);
   const headers = [];
   const rows = [];
-  for (const sheet of wanted) {
+  const reading = task?.part(0.1, 1);
+  for (const [n, sheet] of wanted.entries()) {
+    reading?.count(n, wanted.length);
+    if (reading) await reading.step(`Reading sheet ${n + 1} of ${wanted.length} (${sheet.name})…`);
     const sheetFile = zip.file(sheet.path);
     if (!sheetFile) continue;
     const grid = sheetGrid(await sheetFile.async('string'), sharedStrings);
@@ -161,6 +168,7 @@ async function parseXlsx(file, { scoreHeader = null, allSheets = false } = {}) {
     for (const h of part.headers) if (!headers.includes(h)) headers.push(h);
     rows.push(...part.rows);
   }
+  reading?.progress(1, `${rows.length} rows read`);
   if (!headers.length) throw new Error(allSheets ? 'No sheet in the file has the template columns.' : 'The file appears to be empty.');
   return { headers, rows, sheets: wanted.length };
 }
@@ -204,11 +212,15 @@ export function parseCsvText(text) {
   return rows;
 }
 
-function parseCsv(text, { scoreHeader = null } = {}) {
+async function parseCsv(text, { scoreHeader = null, task = null } = {}) {
+  // one blocking parse: the card shows the step first
+  if (task) await task.step('Reading the rows…');
   const grid = parseCsvText(text).map((arr, i) => Object.assign(arr, { rowNumber: i + 1 }));
   const { index } = headerIndex(grid, scoreHeader);
   if (index === -1) throw new Error('The file appears to be empty.');
-  return { ...rowsBelow(grid, index, null), sheets: 1 };
+  const out = { ...rowsBelow(grid, index, null), sheets: 1 };
+  task?.progress(1, `${out.rows.length} rows read`);
+  return out;
 }
 
 /**
@@ -217,6 +229,7 @@ function parseCsv(text, { scoreHeader = null } = {}) {
  *     the first ten rows with content wins (else the first one).
  *   allSheets — read every sheet of an .xlsx (a sheet that scores under 2 is
  *     skipped); rows then carry their sheet name.
+ *   task — an optional taskProgress reporter, moved through the sheets.
  */
 export async function parseSpreadsheetFile(file, options = {}) {
   const name = file.name.toLowerCase();

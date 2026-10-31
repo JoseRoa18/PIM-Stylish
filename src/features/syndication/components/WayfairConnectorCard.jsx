@@ -3,6 +3,7 @@ import { CheckCircle2, AlertCircle, ShieldCheck, DownloadCloud, Send } from 'luc
 import { ThinkingOrb } from 'thinking-orbs';
 import { pullWayfairItemGroups, pushWayfairAttributes } from '../api/wayfairSync';
 import WayfairPushDialog from './WayfairPushDialog';
+import { startTask } from '@/lib/taskProgress';
 
 // Wayfair syndication workspace — review-then-push media for one product
 // (title, description, bullets and prices never travel), validate spec
@@ -28,14 +29,18 @@ export default function WayfairConnectorCard() {
     if (!sku.trim()) return;
     setAttrsBusy(true);
     setAttrs(null);
+    // One call: the stripe moves until Wayfair answers.
+    const task = startTask(`Wayfair specs · ${sku.trim()}`, { detail: validateOnly ? 'Validating the spec attributes…' : 'Pushing the spec attributes…' });
     try {
       const data = await pushWayfairAttributes(sku.trim(), {
         validateOnly,
         supplier,
         market: market === 'CA_FR' ? 'CA' : market, // attrs are language-neutral
       });
+      task.finish(validateOnly ? 'Validated' : 'Sent to Wayfair');
       setAttrs(data);
     } catch (err) {
+      task.fail(err);
       setAttrs({ error: err.message });
     } finally {
       setAttrsBusy(false);
@@ -44,13 +49,20 @@ export default function WayfairConnectorCard() {
 
   async function runPull() {
     setPull({ busy: true, done: 0, total: 0 });
+    // Batches of 30 SKUs, one call each: the bar counts the batches.
+    const task = startTask('Wayfair item-group IDs', { detail: 'Reading the products…' });
     try {
       const summary = await pullWayfairItemGroups({
         apply: true,
-        onProgress: (done, total) => setPull({ busy: true, done, total }),
+        onProgress: (done, total) => {
+          task.count(done, total, `Batch ${done} of ${total}…`);
+          setPull({ busy: true, done, total });
+        },
       });
+      task.finish('Item-group IDs imported');
       setPull({ busy: false, summary });
     } catch (err) {
+      task.fail(err);
       setPull({ busy: false, error: err.message });
     }
   }

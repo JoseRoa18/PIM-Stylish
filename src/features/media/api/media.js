@@ -231,8 +231,9 @@ export async function listMedia(sku) {
 /**
  * listMedia() for several SKUs in a few parallel queries: a Map sku → the
  * same rows in the same order listMedia(sku) returns (empty array when none).
+ * `task` (optional taskProgress reporter) counts the queries answered.
  */
-export async function listMediaFor(skus) {
+export async function listMediaFor(skus, { task = null } = {}) {
   const list = [...new Set(skus)];
   // 15 SKUs a query: a product carries at most ~46 media rows, so a query
   // stays well under the API's 1,000-row cap; a query that still reaches it
@@ -241,6 +242,11 @@ export async function listMediaFor(skus) {
   const chunks = [];
   for (let i = 0; i < list.length; i += 15) chunks.push(list.slice(i, i + 15));
   const bySku = new Map(list.map((s) => [s, []]));
+  let answered = 0;
+  const answer = () => {
+    answered += 1;
+    task?.count(answered, chunks.length, `Loading media for ${list.length} products…`);
+  };
   await Promise.all(chunks.map(async (part) => {
     const { data, error } = await supabase
       .from('product_media')
@@ -251,9 +257,11 @@ export async function listMediaFor(skus) {
     if (error) throw error;
     if ((data ?? []).length >= CAP) {
       for (const sku of part) bySku.set(sku, await listMedia(sku));
+      answer();
       return;
     }
     for (const m of data ?? []) bySku.get(m.sku)?.push(m);
+    answer();
   }));
   return bySku;
 }
@@ -355,8 +363,11 @@ export async function deleteStorageObjectsIfUnreferenced(storagePaths) {
  * @param {File[]}   files     browser File objects (images / videos)
  * @param {string?}  language  'en' | 'en_fr' | 'en_es' | null=Universal
  * @param {function} onProgress optional (doneCount, total) callback
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter —
+ *   the uploads by size to 85% (Storage reports nothing during one file),
+ *   then the thumbnails and saving the rows
  */
-export async function uploadMediaFiles(sku, files, language = null, onProgress) {
+export async function uploadMediaFiles(sku, files, language = null, onProgress, { task = null } = {}) {
   const list = Array.from(files ?? []).filter(
     (f) => f.type.startsWith('image/') || f.type.startsWith('video/'),
   );
@@ -406,8 +417,16 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
   const rows = [];
   const thumbJobs = [];
   let done = 0;
+  // The bar moves by the bytes of the files done, so a large video weighs
+  // what it takes to upload.
+  const weight = (f) => Math.max(f.size || 0, 1);
+  const totalBytes = list.reduce((sum, f) => sum + weight(f), 0);
+  const uploading = task?.part(0, 0.85);
+  let bytesDone = 0;
   for (const file of list) {
     const path = buildObjectPath(sku, file.name);
+    // detail only: the bar shows the files already up
+    uploading?.step(list.length > 1 ? `Uploading ${file.name} (${done + 1} of ${list.length})…` : `Uploading ${file.name}…`);
     const { error: upErr } = await supabase.storage.from(MEDIA_BUCKET).upload(path, file, {
       cacheControl: '2592000',
       upsert: true,
@@ -451,12 +470,17 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress) 
       }
     }
     done += 1;
+    bytesDone += weight(file);
+    uploading?.progress(bytesDone / totalBytes);
     onProgress?.(done, list.length);
   }
+  if (thumbJobs.length) task?.progress(0.85, 'Making thumbnails…');
   await Promise.all(thumbJobs);
 
+  task?.progress(0.95, 'Saving…');
   const { data, error } = await supabase.from('product_media').insert(rows).select();
   if (error) throw error;
+  task?.progress(1);
 
   const uploaded = rows.filter((r) => r.sku === sku);
   const videoCount = uploaded.filter((r) => r.media_type === 'video').length;
@@ -586,14 +610,19 @@ async function clearDocumentSlot(famSkus, documentType, language) {
  * Upload a document file (PDF, DXF, …) from the user's computer to
  * Supabase Storage and register it. Family-shared: the file uploads once and
  * every variant of the family gets a row; any document already occupying the
- * same (type, language) slot on any variant is replaced.
+ * same (type, language) slot on any variant is replaced. `task` (optional
+ * taskProgress reporter): the family and the slot 20%, the upload to 85%,
+ * saving the rows the rest.
  */
-export async function uploadDocumentFile(sku, documentType, file, language = null) {
+export async function uploadDocumentFile(sku, documentType, file, language = null, { task = null } = {}) {
   if (!file) throw new Error('No file selected.');
 
+  task?.step('Finding the variant family…');
   const famSkus = await getFamilySkus(sku);
+  task?.progress(0.1, famSkus.length > 1 ? `Clearing the slot on ${famSkus.length} variants…` : 'Clearing the slot…');
   await clearDocumentSlot(famSkus, documentType, language);
 
+  task?.progress(0.2, `Uploading ${file.name}…`);
   const path = buildObjectPath(sku, file.name);
   const { error: upErr } = await supabase.storage.from(DOCS_BUCKET).upload(path, file, {
     cacheControl: '2592000',
@@ -602,6 +631,7 @@ export async function uploadDocumentFile(sku, documentType, file, language = nul
   });
   if (upErr) throw new Error(`Upload failed for ${file.name}: ${upErr.message}`);
 
+  task?.progress(0.85, 'Saving…');
   const { data: pub } = supabase.storage.from(DOCS_BUCKET).getPublicUrl(path);
   const orders = await nextDisplayOrders(famSkus);
 

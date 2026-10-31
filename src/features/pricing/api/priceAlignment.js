@@ -175,11 +175,14 @@ function classifySnapshot(snapshot, outOfScope = null) {
  * the PIM are out of scope (source-of-truth rule), mirroring the Wix orphan
  * handling.
  */
-async function loadOfferAlignment(cfg) {
+async function loadOfferAlignment(cfg, task = null) {
+  task?.progress(0, `Reading the latest ${cfg.short} report…`);
   const data = await latestChannelSnapshot(cfg.channel);
   if (!data?.length) return null;
   const snapshot = data[0];
+  task?.progress(0.4, 'Reading the expected prices…');
   const { baseBySku, promoBySku } = await loadExpectedPrices(cfg);
+  task?.progress(0.9, 'Comparing the prices…');
 
   // Mirakl keeps the promo as a discount next to the regular price: the live
   // selling price is the discount while its window is open, and a discount
@@ -236,7 +239,9 @@ const PAGE_RETAILERS = PAGE_STORES.map((s) => s.key);
 const READINGS_TTL_MS = 5 * 60 * 1000;
 let readings = null; // { at, promise }
 const dropPageReadings = () => { readings = null; };
-function pageReadings() {
+// `task` (optional taskProgress reporter) counts the pages read — only when
+// this call reads them; one that joins the shared read reports nothing.
+function pageReadings(task = null) {
   if (readings && Date.now() - readings.at < READINGS_TTL_MS) return readings.promise;
   const query = () => supabase
     .from('where_to_buy_readings')
@@ -245,10 +250,15 @@ function pageReadings() {
     .order('retailer')
     .order('sku');
   const promise = (async () => {
+    task?.progress(0, 'Reading the store prices…');
     const first = await query().range(0, 999);
     if (first.error) throw first.error;
+    const total = Math.max(1, Math.ceil((first.count ?? 0) / 1000));
+    let read = 1;
+    const counted = (p) => { read += 1; task?.count(read, total, `Reading the store prices · ${read} of ${total} pages`); return p; };
+    task?.count(read, total, `Reading the store prices · ${read} of ${total} pages`);
     const rest = [];
-    for (let from = 1000; from < (first.count ?? 0); from += 1000) rest.push(query().range(from, from + 999));
+    for (let from = 1000; from < (first.count ?? 0); from += 1000) rest.push(task ? query().range(from, from + 999).then(counted) : query().range(from, from + 999));
     const pages = await Promise.all(rest);
     for (const p of pages) if (p.error) throw p.error;
     return [first, ...pages].flatMap((p) => p.data ?? []);
@@ -283,14 +293,16 @@ const etDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Am
  * MAP when its promo is under the 5% NLP minimum (the PIM's NLP workbook
  * leaves it out).
  */
-async function loadPageAlignment(cfg) {
-  const rows = (await pageReadings()).filter((r) => r.retailer === cfg.retailer);
+async function loadPageAlignment(cfg, task = null) {
+  const rows = (await pageReadings(task?.part(0, 0.6))).filter((r) => r.retailer === cfg.retailer);
   if (!rows.some((r) => r.read_at)) return null;
+  task?.progress(0.6, 'Reading the expected prices…');
   const [{ baseBySku, promoBySku }, changedOn, categories] = await Promise.all([
     loadExpectedPrices(cfg),
     loadPriceChangeDays(cfg),
     cfg.nlpMinimum ? productCategories() : null,
   ]);
+  task?.progress(0.9, 'Comparing the prices…');
   const currency = cfg.market === 'us' ? 'USD' : 'CAD';
   const bySku = new Map();
   for (const r of rows) {
@@ -336,13 +348,20 @@ async function loadPageAlignment(cfg) {
   return { ...classifySnapshot({ run_at: readTo, results }), readFrom, readTo, ...left };
 }
 
-/** Latest saved report for a target (cron or manual) — instant, no live pull. */
-export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
+/**
+ * Latest saved report for a target (cron or manual) — instant, no live pull.
+ * `task` (optional taskProgress reporter): the report, the expected prices,
+ * the comparison. The reads stay shared: a call that joins one already
+ * running just waits for it.
+ */
+export async function loadLatestAlignment(target = DEFAULT_WIX_SITE, { task = null } = {}) {
   const cfg = ALIGN_TARGETS[target];
-  if (cfg.kind === 'page') return loadPageAlignment(cfg);
-  if (cfg.kind === 'bestbuy' || cfg.kind === 'walmart') return loadOfferAlignment(cfg);
+  if (cfg.kind === 'page') return loadPageAlignment(cfg, task);
+  if (cfg.kind === 'bestbuy' || cfg.kind === 'walmart') return loadOfferAlignment(cfg, task);
+  task?.progress(0, `Reading the latest ${cfg.short} report…`);
   const data = await latestChannelSnapshot(cfg.channel);
   if (!data?.length) return null;
+  task?.progress(0.4);
   // Brand scope applies to older snapshots too: products of a brand the site
   // never carries are dropped before classifying (Azuni on the Stylish sites).
   let outOfScope = null;
@@ -357,7 +376,9 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
   // The snapshot's expected prices are as old as the pull; the PIM's are
   // read now, so a price changed today is judged today. Live prices stay
   // as pulled.
+  task?.progress(0.5, 'Reading the expected prices…');
   const { baseBySku, promoBySku } = await loadExpectedPrices(cfg);
+  task?.progress(0.9, 'Comparing the prices…');
   const results = (data[0].results ?? []).map((r) => {
     if (r.state !== 'live' || !baseBySku.has(r.sku)) return r;
     const base = baseBySku.get(r.sku) ?? null;
@@ -379,19 +400,23 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE) {
 /**
  * Fresh live analysis — pulls the channel now and PERSISTS the snapshot. A
  * store read from its pages is not pulled (each page read costs a paid
- * unlocker request): its readings are read again as they are.
+ * unlocker request): its readings are read again as they are. `task`
+ * (optional taskProgress reporter): the pull (one call, no share to
+ * measure) up to 70%, then the report read again.
  */
-export async function runPriceAlignment(target = DEFAULT_WIX_SITE) {
+export async function runPriceAlignment(target = DEFAULT_WIX_SITE, { task = null } = {}) {
   const cfg = ALIGN_TARGETS[target];
   if (cfg.kind === 'page') {
     dropPageReadings();
-    return loadLatestAlignment(target);
+    return loadLatestAlignment(target, { task });
   }
+  task?.step(`Pulling the live prices from ${cfg.label}…`);
   if (cfg.kind === 'bestbuy') await refreshBestBuyOffers();
   else if (cfg.kind === 'walmart') await refreshWalmartItems(cfg.market);
   else await refreshWixCatalog(target);
+  task?.progress(0.7);
   dropShared(`snapshot:${cfg.channel}`); // the pull just wrote a new one
-  return loadLatestAlignment(target);
+  return loadLatestAlignment(target, { task: task?.part(0.7, 1) });
 }
 
 /**

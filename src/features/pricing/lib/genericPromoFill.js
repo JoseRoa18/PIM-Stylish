@@ -32,6 +32,7 @@ import {
 import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const HEADER_SCAN_ROWS = 15;
 
@@ -77,12 +78,16 @@ const fmtDate = (iso, style) => {
  * @param template  marketplace_templates row (purpose "promotions")
  * @param promotion promotions row
  * @param channel   PROMO_CHANNELS entry (market, costSlug, label, key)
+ * @param task      optional taskProgress reporter: template 20%, members,
+ *                  aliases and MAPs in batches of 100, fill, the file
  */
-export async function fillPromoTemplate(template, promotion, channel) {
+export async function fillPromoTemplate(template, promotion, channel, { task = null } = {}) {
   if (/\.csv$/i.test(template.file_name ?? '')) {
     throw new Error('CSV promotion templates are not supported yet. Upload the marketplace\'s XLSX version.');
   }
+  task?.step('Downloading the template…');
   const { zip, shared } = await openTemplate(template.storage_path);
+  task?.progress(0.2, 'Reading the template…');
   const workbookXml = await zip.file('xl/workbook.xml').async('string');
 
   let hit = null;
@@ -100,7 +105,9 @@ export async function fillPromoTemplate(template, promotion, channel) {
 
   const priceKey = channel.market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
   const mapKey = channel.market === 'us' ? 'map_usd' : 'map_cad';
+  task?.progress(0.25, "Reading the promotion's products…");
   const { rows: prices, excluded } = await promotionMembersFor(promotion, channel.key);
+  task?.progress(0.35);
   const members = prices
     .map((r) => ({ sku: r.sku, price: r[priceKey] ?? null, cost: channel.costSlug ? r.promo_costs?.[channel.costSlug] ?? null : null }))
     .filter((m) => m.price != null || m.cost != null);
@@ -113,7 +120,9 @@ export async function fillPromoTemplate(template, promotion, channel) {
   const alias = new Map();
   const noAlias = [];
   if (channel.aliasMarketplace) {
+    const tick = batchTicker(task?.part(0.35, 0.55), skus.length, 100, `Reading the ${channel.aliasMarketplace} ids`);
     for (let i = 0; i < skus.length; i += 100) {
+      tick(i);
       const { data } = await supabase.from('product_aliases').select('sku, alias').eq('marketplace', channel.aliasMarketplace).in('sku', skus.slice(i, i + 100));
       for (const a of data ?? []) if (a.alias) alias.set(a.sku, a.alias);
     }
@@ -130,13 +139,16 @@ export async function fillPromoTemplate(template, promotion, channel) {
 
   const mapBySku = new Map();
   if (hit.cols.map != null) {
+    const tick = batchTicker(task?.part(0.55, 0.75), skus.length, 100, 'Reading the MAPs');
     for (let i = 0; i < skus.length; i += 100) {
+      tick(i);
       const { data } = await supabase.from('products').select(`sku, map:${mapKey}`).in('sku', skus.slice(i, i + 100));
       for (const p of data ?? []) mapBySku.set(p.sku, p.map);
     }
   }
   const window = promoWindow(promotion, channel.market);
   const dateStyle = channel.dateStyle ?? 'iso';
+  await blockingStep(task, 0.75, `Filling the sheet · ${eligible.length} products…`);
 
   const cellsFor = (rowNum, m) => {
     const cells = new Map();
@@ -185,7 +197,9 @@ export async function fillPromoTemplate(template, promotion, channel) {
 
   const period = String(promotion.period).slice(0, 7);
   const baseName = `${channel.label.replace(/[^\w]+/g, '_')}_Promo_${period}`;
+  await blockingStep(task, 0.85, 'Writing the file…');
   await downloadZip(zip, baseName, templateExt(template.storage_path));
+  task?.progress(1);
 
   const columns = Object.fromEntries(Object.entries(hit.cols).map(([role, c]) => [role, indexToCol(c + 1)]));
   const wanted = ['promoPrice', ...(channel.costSlug ? ['cost'] : []), 'start', 'end'];

@@ -188,11 +188,14 @@ export const WALMART_RULES = {
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (the
+ *   template 25%, the PIM's media 25%, the rows 10%, writing the file 40%)
  */
-export async function generateWalmartFromTemplate(templateStoragePath, products, fileName = 'Walmart_Export') {
+export async function generateWalmartFromTemplate(templateStoragePath, products, fileName = 'Walmart_Export', { task = null } = {}) {
   if (!products?.length) throw new Error('No products to export.');
 
-  const { zip, shared } = await openTemplate(templateStoragePath);
+  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.2) });
+  task?.progress(0.2, 'Reading the template…');
 
   // Data sheet = the one whose A1 carries the "Version=…" settings string
   // (companion "Hidden_*" sheet holds the closed lists).
@@ -235,10 +238,16 @@ export async function generateWalmartFromTemplate(templateStoragePath, products,
   if (!colKeys.filter(Boolean).length) throw new Error('Could not read the Walmart attribute XML-name row.');
 
   const skus = products.map((p) => p.sku);
+  task?.progress(0.25, `Loading images for ${skus.length} products…`);
   const imgBySku = await fetchImagesBySku(skus);
+  task?.progress(0.38, 'Loading documents…');
   const docBySku = await fetchDocsBySku(skus, WALMART_DOC_TYPES, Object.keys(WALMART_DOC_TYPES));
 
   const sheetXml = await zip.file(tplPath).async('string');
+  if (task) {
+    task.progress(0.5);
+    await task.step(`Filling ${products.length} rows…`);
+  }
   const fill = createFillTracker();
   let rowsXml = '';
   products.forEach((p, pi) => {
@@ -267,7 +276,7 @@ export async function generateWalmartFromTemplate(templateStoragePath, products,
   });
 
   zip.file(tplPath, injectRows(sheetXml, rowsXml, DATA_ROW - 1 + products.length));
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath), { task: task?.part(0.6, 1) });
 
   // Report with display labels where available; XML names are the fallback.
   const reportLabels = colKeys.map((k, ci) => (labels[ci] ? String(labels[ci]).trim() : k));

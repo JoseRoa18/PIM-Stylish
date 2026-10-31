@@ -9,6 +9,7 @@ import {
   downloadZip,
   templateExt,
   mergeRows,
+  labelTask,
 } from './templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
 import { channelCategory, isFaucetCategory } from '@/features/products/lib/categories';
@@ -229,11 +230,12 @@ export const LOWES_RULES = {
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
+ * @param {object} [task]  a taskProgress reporter (optional)
  */
-async function fillItemTemplate(templateStoragePath, products) {
+async function fillItemTemplate(templateStoragePath, products, task = null) {
   if (!products?.length) throw new Error('No products to export.');
 
-  const { zip, shared } = await openTemplate(templateStoragePath);
+  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.75) });
   const tplPath = await sheetPathByName(zip, 'Core');
   if (!tplPath) throw new Error('The file has no "Core" sheet — is this a Lowe\'s item template?');
   const sheetXml = await zip.file(tplPath).async('string');
@@ -255,6 +257,10 @@ async function fillItemTemplate(templateStoragePath, products) {
   if (!techNames.filter(Boolean).length) throw new Error('Could not read the Lowe\'s tech-name row.');
 
   const DATA_ROW = 7;
+  if (task) {
+    task.progress(0.8);
+    await task.step(`Filling ${products.length} rows…`);
+  }
   const cellsByRow = new Map();
   products.forEach((p, pi) => {
     const rowNum = DATA_ROW + pi;
@@ -272,6 +278,7 @@ async function fillItemTemplate(templateStoragePath, products) {
   });
 
   zip.file(tplPath, mergeRows(sheetXml, cellsByRow));
+  task?.progress(1);
   return zip;
 }
 
@@ -351,11 +358,12 @@ const freightAssortment = (p) => {
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
+ * @param {object} [task]  a taskProgress reporter (optional)
  */
-async function fillFreightTemplate(templateStoragePath, products) {
+async function fillFreightTemplate(templateStoragePath, products, task = null) {
   if (!products?.length) throw new Error('No products to export.');
 
-  const { zip, shared } = await openTemplate(templateStoragePath);
+  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.6) });
   const tplPath = await sheetPathByName(zip, 'Item Proposal');
   if (!tplPath) throw new Error('The file has no "Item Proposal" sheet — is this the Lowe\'s SOS Freight Analysis template?');
   const sheetXml = await zip.file(tplPath).async('string');
@@ -382,6 +390,7 @@ async function fillFreightTemplate(templateStoragePath, products) {
 
   // Wayfair is the one competitive channel the PIM tracks (audit snapshots);
   // its public URL isn't in the API data, so that one cell stays manual.
+  task?.progress(0.65, 'Reading the latest Wayfair snapshot…');
   const { data: wfSnap } = await supabase
     .from('channel_health')
     .select('results')
@@ -397,6 +406,10 @@ async function fillFreightTemplate(templateStoragePath, products) {
   const top8 = new Map(); put(top8, 8, 'B', 'KITCHENS & BATH'); cellsByRow.set(8, top8);
 
   const DATA_ROW = 16;
+  if (task) {
+    task.progress(0.85);
+    await task.step(`Filling ${products.length} rows…`);
+  }
   products.forEach((p, pi) => {
     const rowNum = DATA_ROW + pi;
     const cells = new Map();
@@ -436,6 +449,7 @@ async function fillFreightTemplate(templateStoragePath, products) {
   });
 
   zip.file(tplPath, mergeRows(sheetXml, cellsByRow));
+  task?.progress(1);
   return zip;
 }
 
@@ -453,24 +467,37 @@ export async function generateLowesFreightFromTemplate(templateStoragePath, prod
  * @param {Object[]} templates  Lowe's template rows ({ file_name, storage_path })
  * @param {Object[]} products
  * @param {string} [baseName]
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter
+ *   (filling the files 60%, writing them 30%, the ZIP the rest)
  */
-export async function generateLowesSet(templates, products, baseName = 'Lowes') {
+export async function generateLowesSet(templates, products, baseName = 'Lowes', { task = null } = {}) {
   const freightTpl = templates.find((t) => /freight|drop.?ship/i.test(t.file_name));
   const itemTpl = templates.find((t) => t !== freightTpl && /item|template|\.xlsm$/i.test(t.file_name));
   if (!itemTpl && !freightTpl) {
     throw new Error("No Lowe's template matched — upload the Item Template and/or the SOS Freight Analysis file.");
   }
 
+  // Each file has its own slice of the bar (filling 0–60%, writing 60–90%)
+  // and says which file it is.
+  const n = (itemTpl ? 1 : 0) + (freightTpl ? 1 : 0);
+  const slice = (i, from, to) => labelTask(
+    task?.part(from + ((to - from) * i) / n, from + ((to - from) * (i + 1)) / n),
+    n > 1 ? `File ${i + 1} of ${n}` : '',
+  );
   const parts = [];
-  if (itemTpl) parts.push({ name: itemTpl.file_name, zip: await fillItemTemplate(itemTpl.storage_path, products) });
-  if (freightTpl) parts.push({ name: freightTpl.file_name, zip: await fillFreightTemplate(freightTpl.storage_path, products) });
+  if (itemTpl) parts.push({ name: itemTpl.file_name, zip: await fillItemTemplate(itemTpl.storage_path, products, slice(0, 0, 0.6)) });
+  if (freightTpl) parts.push({ name: freightTpl.file_name, zip: await fillFreightTemplate(freightTpl.storage_path, products, slice(parts.length, 0, 0.6)) });
 
   const JSZip = await loadJSZip();
   const bundle = new JSZip();
-  for (const part of parts) {
-    bundle.file(part.name, await part.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }));
+  for (const [i, part] of parts.entries()) {
+    const writing = slice(i, 0.6, 0.9);
+    writing?.progress(0, `Writing ${part.name}…`);
+    bundle.file(part.name, await part.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }, writing ? (meta) => writing.progress(meta.percent / 100) : undefined));
   }
-  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const zipping = task?.part(0.9, 1);
+  zipping?.progress(0, 'Writing the ZIP…');
+  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' }, zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined);
   const url = URL.createObjectURL(out);
   const link = document.createElement('a');
   link.href = url;

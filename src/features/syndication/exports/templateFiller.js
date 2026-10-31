@@ -162,13 +162,18 @@ export function snap(value, validMap) {
 }
 
 // Download a template from the `templates` bucket and open it as a zip.
-export async function openTemplate(templateStoragePath) {
+// `task` (optional src/lib/taskProgress reporter): the download is the first
+// half (Storage reports nothing, so it shows only once done), opening it the rest.
+export async function openTemplate(templateStoragePath, { task = null } = {}) {
   const JSZip = await loadJSZip();
+  task?.step('Downloading the template…');
   const { data: blob, error } = await supabase.storage.from('templates').download(templateStoragePath);
   if (error) throw new Error(`Failed to download template: ${error.message}`);
+  task?.progress(0.5, 'Opening the template…');
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
   const sharedFile = zip.file('xl/sharedStrings.xml');
   const shared = parseSharedStrings(sharedFile ? await sharedFile.async('string') : '');
+  task?.progress(1);
   return { zip, shared };
 }
 
@@ -356,14 +361,34 @@ export function templateExt(storagePath) {
   return m ? m[1] : 'xlsx';
 }
 
-// Serialize the zip and hand it to the browser as a download.
-export async function downloadZip(zip, fileName, ext = 'xlsx') {
+// A taskProgress reporter whose details start with `label` ("File 2 of 3:
+// Downloading the template…"), its sub-slices included — for a run that
+// fills several files one after the other on one card. No task, no label:
+// the task itself.
+export function labelTask(task, label) {
+  if (!task || !label) return task;
+  const say = (d) => (d == null ? d : `${label}: ${d}`);
+  return {
+    progress: (share, d) => task.progress(share, say(d)),
+    count: (done, total, d) => task.count(done, total, say(d)),
+    step: (d) => task.step(say(d)),
+    paint: () => task.paint(),
+    part: (start, end) => labelTask(task.part(start, end), label),
+    counter: (d) => task.counter(typeof d === 'function' ? (done, total) => say(d(done, total)) : say(d)),
+  };
+}
+
+// Serialize the zip and hand it to the browser as a download. `task`
+// (optional taskProgress reporter) follows the compression.
+export async function downloadZip(zip, fileName, ext = 'xlsx', { task = null } = {}) {
+  task?.progress(0, 'Writing the file…');
   const out = await zip.generateAsync({
     type: 'blob',
     mimeType: MIME_BY_EXT[ext] ?? MIME_BY_EXT.xlsx,
     compression: 'DEFLATE',
-  });
+  }, task ? (meta) => task.progress(meta.percent / 100) : undefined);
   saveBlob(out, `${fileName}_${new Date().toISOString().slice(0, 10)}.${ext}`);
+  task?.progress(1);
 }
 
 function saveBlob(blob, name) {
@@ -415,8 +440,10 @@ export function mediaFileName(sku, index, url, suffix = '') {
 // brand's one warranty PDF in every folder) is fetched once. A bundle past
 // ~600 MB is closed and a new part started, so the browser never holds more
 // than that; files that could not be fetched are listed in
-// _could_not_download.txt.
-export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 1024 * 1024 } = {}) {
+// _could_not_download.txt. `task` (optional taskProgress reporter) counts
+// the files fetched (95%) and follows the last part being written; a part
+// closed on the way says so in the detail.
+export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 1024 * 1024, task = null } = {}) {
   const safeFolder = (f) => String(f).replace(/[\\/:*?"<>|\s]+/g, '-');
   const groups = new Map(); // folder ('' = top level) → [{ path, url }]
   const seen = new Set();
@@ -440,13 +467,26 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
   let inZip = 0;
   let part = 0;
   let files = 0;
+  const total = seen.size;
+  const fetching = task?.part(0, 0.95);
+  const writing = task?.part(0.95, 1);
+  let fetched = 0;
+  const fetchedOne = () => {
+    fetched += 1;
+    fetching?.count(fetched, total, `Downloading files ${fetched} of ${total}${part ? ` (part ${part + 1})` : ''}`);
+  };
   const flush = async (last) => {
     if (!inZip && !(last && failed.length)) return;
     if (last && failed.length) zip.file('_could_not_download.txt', failed.map((f) => `${f.path}\t${f.url}`).join('\n'));
     part += 1;
+    const name = `${fileName}_media${last && part === 1 ? '' : `_part${part}`}_${day}.zip`;
+    // A part closed on the way keeps the bar where the downloads are.
+    const report = last ? writing : null;
+    if (last) writing?.progress(0, part === 1 ? 'Writing the .zip…' : `Writing part ${part}…`);
+    else task?.step(`Writing part ${part} (${Math.round(bytes / 1024 / 1024)} MB)…`);
     // JPEG/PNG/PDF are already compressed: STORE keeps the bundle fast.
-    const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
-    saveBlob(blob, `${fileName}_media${last && part === 1 ? '' : `_part${part}`}_${day}.zip`);
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' }, report ? (meta) => report.progress(meta.percent / 100) : undefined);
+    saveBlob(blob, name);
     zip = new JSZip();
     bytes = 0;
     inZip = 0;
@@ -462,9 +502,14 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
   };
   const sharedBlobs = new Map(); // url → Promise<Blob|null>, only for URLs used more than once
   const fetchOne = async ({ path, url }) => {
-    if ((uses.get(url) ?? 0) < 2) return { path, url, blob: await fetchBlob(url) };
-    if (!sharedBlobs.has(url)) sharedBlobs.set(url, fetchBlob(url));
-    return { path, url, blob: await sharedBlobs.get(url) };
+    let blob;
+    if ((uses.get(url) ?? 0) < 2) blob = await fetchBlob(url);
+    else {
+      if (!sharedBlobs.has(url)) sharedBlobs.set(url, fetchBlob(url));
+      blob = await sharedBlobs.get(url);
+    }
+    fetchedOne();
+    return { path, url, blob };
   };
   const add = (g) => {
     zip.file(g.path, g.blob);
@@ -472,6 +517,7 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
     inZip += 1;
     files += 1;
   };
+  fetching?.progress(0, `Downloading ${total} files…`);
   for (const [folder, list] of groups) {
     // Four downloads at a time, added in order.
     const got = [];
@@ -491,6 +537,7 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
     }
   }
   await flush(true);
+  task?.progress(1);
   return { files, parts: part, failed: failed.map((f) => f.path) };
 }
 

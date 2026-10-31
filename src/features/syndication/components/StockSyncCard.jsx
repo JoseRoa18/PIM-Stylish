@@ -5,6 +5,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import Pagination from '@/components/ui/Pagination';
 import { formatTimeAgo } from '@/lib/format';
 import { walmartUsStock, bestBuyStock } from '../api/walmartAdd';
+import { startTask } from '@/lib/taskProgress';
 
 // A channel's stock sync, on its channel page (user 2026-10-30): our stock
 // minus 2 units of safety margin, 0 when we do not track it, while the switch
@@ -36,9 +37,10 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
   const [busy, setBusy] = useState(null); // 'load' | 'switch' | 'preview' | 'send'
   const [error, setError] = useState(null);
 
-  const run = async (kind, body) => {
+  // `task` (optional): a task card the call fails when it throws.
+  const run = async (kind, body, task = null) => {
     setBusy(kind); setError(null);
-    try { return await sync.invoke(body); } catch (e) { setError(e.message); return null; } finally { setBusy(null); }
+    try { return await sync.invoke(body); } catch (e) { setError(e.message); task?.fail(e); return null; } finally { setBusy(null); }
   };
   const load = async () => { const s = await run('load', { mode: 'status' }); if (s) setStatus(s); };
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -52,10 +54,24 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
     }))) return;
     if (await run('switch', { mode: 'switch', enabled })) await load();
   };
-  const showPreview = async () => { const p = await run('preview', { mode: 'push', dryRun: true, all: true }); if (p) { setPreview(p); setPage(1); } };
+  // One call each: the stripe moves until the channel answers.
+  const showPreview = async () => {
+    const task = startTask(`${sync.channel} stock · preview`, { detail: `Comparing our stock with ${sync.channel}…` });
+    const p = await run('preview', { mode: 'push', dryRun: true, all: true }, task);
+    if (p) {
+      task.finish(p.lines?.length ? `${p.lines.length} to change` : 'Nothing to send');
+      setPreview(p); setPage(1);
+    }
+  };
   const sendNow = async () => {
     if (!(await confirm({ title: `Send the stock to ${sync.channel} now?`, message: 'Sends the quantities now, without waiting for the automatic run.', confirmLabel: 'Send now' }))) return;
-    if (await run('send', { mode: 'push', all: true })) { setPreview(null); await load(); }
+    const task = startTask(`${sync.channel} stock`, { detail: `Sending the quantities to ${sync.channel}…` });
+    if (await run('send', { mode: 'push', all: true }, task)) {
+      setPreview(null);
+      task.progress(0.85, 'Reloading the status…');
+      await load();
+      task.finish(`Sent to ${sync.channel}`);
+    }
   };
 
   const last = status?.last;

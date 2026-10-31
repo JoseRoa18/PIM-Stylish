@@ -6,11 +6,15 @@ import { logActivity } from '@/features/activity/api/activityLog';
  * Check which of the given SKUs already exist. Returns a Map of
  * sku → { attributes, description, is_obsolete } for merge purposes (the
  * mark tells the Activity Log which products an import marks or unmarks).
+ * `task` (optional taskProgress reporter): one step per chunk of 100 SKUs.
  */
-export async function fetchExistingProducts(skus) {
+export async function fetchExistingProducts(skus, { task = null } = {}) {
   if (!skus.length) return new Map();
   const out = new Map();
+  const chunks = Math.ceil(skus.length / 100);
   for (let i = 0; i < skus.length; i += 100) {
+    const n = i / 100;
+    task?.count(n, chunks, chunks > 1 ? `Looking up existing products (${n + 1} of ${chunks})…` : 'Looking up existing products…');
     const chunk = skus.slice(i, i + 100);
     const { data, error } = await supabase
       .from('products')
@@ -19,6 +23,7 @@ export async function fetchExistingProducts(skus) {
     if (error) throw error;
     for (const row of data ?? []) out.set(row.sku, row);
   }
+  task?.progress(1);
   return out;
 }
 
@@ -36,13 +41,21 @@ const textOf = (html) => String(html ?? '')
  * null out columns missing from some rows, because PostgREST requires every
  * row in a batch to share the same keys).
  *
- * onProgress(done, total) fires as rows complete.
+ * onProgress(done, total) fires as rows complete. `task` (optional
+ * taskProgress reporter): the rows written 90%, the variant family re-sync
+ * after them the rest.
  */
-export async function importProducts(rows, existingMap, onProgress) {
+export async function importProducts(rows, existingMap, onProgress, { task = null } = {}) {
   const newRows = rows.filter((r) => !existingMap.has(r.sku));
   const updateRows = rows.filter((r) => existingMap.has(r.sku));
   const total = rows.length;
   let done = 0;
+  const writing = task?.part(0, 0.9);
+  const report = () => {
+    onProgress?.(done, total);
+    writing?.count(done, total, `Product ${done} of ${total} saved`);
+  };
+  writing?.count(0, total, newRows.length ? `Creating ${newRows.length} new products…` : `Updating ${updateRows.length} products…`);
   // What got written ({ r, isNew }), for the Activity Log entry — kept when a
   // batch fails midway, since the rows before it are saved.
   const written = [];
@@ -67,7 +80,7 @@ export async function importProducts(rows, existingMap, onProgress) {
         }
         written.push(...newRows.slice(i, i + 50).map((r) => ({ r, isNew: true })));
         done += chunk.length;
-        onProgress?.(done, total);
+        report();
       }
     }
 
@@ -95,7 +108,7 @@ export async function importProducts(rows, existingMap, onProgress) {
         throw new Error(`Update failed: ${failed.error.message}`);
       }
       done += batch.length;
-      onProgress?.(done, total);
+      report();
     }
   } finally {
     logImport(written, existingMap);
@@ -104,12 +117,14 @@ export async function importProducts(rows, existingMap, onProgress) {
   // Re-derive variant families for every base model touched by this import.
   // Spreadsheet "Family #" values are ignored — the SKU is the source of truth.
   let familiesSynced = 0;
+  task?.step('Re-syncing variant families…');
   try {
     const sync = await syncVariantFamilies(rows.map((r) => r.sku));
     familiesSynced = sync.updated;
   } catch (err) {
     console.error('Variant family sync failed (non-fatal):', err);
   }
+  task?.progress(1);
 
   return { created: newRows.length, updated: updateRows.length, familiesSynced };
 }

@@ -37,6 +37,7 @@ import {
 import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const ACTION = 'Create';
 const norm = (v) => String(v ?? '').trim().toLowerCase();
@@ -104,9 +105,13 @@ function locate(grid) {
  * @param template  marketplace_templates row (Walmart CA, purpose "promotions" or "flash_deals")
  * @param promotion promotions row (kind decides the MAP level: monthly and flash → Orange, special event → Purple; see KIND_LEVEL)
  * @param channel   PROMO_CHANNELS entry for Walmart Canada
+ * @param task      optional taskProgress reporter: template 20%, members,
+ *                  products and aliases in batches of 100, fill, the file
  */
-export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
+export async function fillWalmartCaPromoTemplate(template, promotion, channel, { task = null } = {}) {
+  task?.step('Downloading the template…');
   const { zip, shared } = await openTemplate(template.storage_path);
+  task?.progress(0.2, 'Reading the template…');
   const workbookXml = await zip.file('xl/workbook.xml').async('string');
   let hit = null;
   let deal = null;
@@ -121,7 +126,7 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
     const d = locateDeal(grid);
     if (d) { deal = { name, path, xml, grid, ...d }; break; }
   }
-  if (deal) return fillDealFile(zip, deal, template, promotion, channel);
+  if (deal) return fillDealFile(zip, deal, template, promotion, channel, task);
   if (!hit) throw new Error(`No sheet in "${template.file_name}" has the Walmart price columns (sku, promotionPrice) or the deal columns (SKU, Promo Price). Send me the file and I map it.`);
   const { cols } = hit;
   if (cols.start === -1 || cols.end === -1) throw new Error('The file has no promotionPriceStartDateTime / promotionPriceEndDateTime columns.');
@@ -129,13 +134,17 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
   const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const promoMapField = `map_${tier}_cad`;
+  task?.progress(0.25, "Reading the promotion's products…");
   const { rows: members, excluded } = await promotionMembersFor(promotion, 'walmart_ca');
+  task?.progress(0.35);
   if (!members.length) throw new Error('This promotion has no products.');
   const skus = members.map((m) => m.sku);
 
   const pim = new Map();
   const alias = new Map();
+  const tick = batchTicker(task?.part(0.35, 0.75), skus.length, 100, 'Reading the products and Walmart SKUs');
   for (let i = 0; i < skus.length; i += 100) {
+    tick(i);
     const chunk = skus.slice(i, i + 100);
     const [{ data: prods, error: pErr }, { data: aliases, error: aErr }] = await Promise.all([
       supabase.from('products').select(`sku, map_cad, ${promoMapField}`).in('sku', chunk),
@@ -166,6 +175,7 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
     lines.push({ sku: m.sku, walmartSku: alias.get(m.sku) ?? m.sku, map, promo });
   }
   if (!lines.length) throw new Error(`Nothing to write: no product has a MAP ${tierLabel} below its MAP.`);
+  await blockingStep(task, 0.75, `Filling the sheet · ${lines.length} products…`);
 
   // Styles of the file's own sample row (text action, date-time cells).
   const styles = new Map();
@@ -214,7 +224,9 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
   zip.file(hit.path, xml);
 
   const period = String(promotion.period).slice(0, 7);
+  await blockingStep(task, 0.85, 'Writing the file…');
   await downloadZip(zip, `Walmart_Canada_Promo_${period}`, templateExt(template.storage_path));
+  task?.progress(1);
 
   const report = { rows: lines.length, tier, tierLabel, aliased, fromList, noMap, noPromo, atOrAbove, excluded, window, sheet: hit.name };
   logActivity({
@@ -229,17 +241,21 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel) {
 }
 
 // The deal file: one row per product, SKU + promo price, nothing else.
-async function fillDealFile(zip, hit, template, promotion, channel) {
+async function fillDealFile(zip, hit, template, promotion, channel, task = null) {
   const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const promoMapField = `map_${tier}_cad`;
+  task?.progress(0.25, "Reading the promotion's products…");
   const { rows: members, excluded } = await promotionMembersFor(promotion, 'walmart_ca');
+  task?.progress(0.35);
   if (!members.length) throw new Error('This promotion has no products.');
   const skus = members.map((m) => m.sku);
 
   const pim = new Map();
   const alias = new Map();
+  const tick = batchTicker(task?.part(0.35, 0.75), skus.length, 100, 'Reading the products and Walmart SKUs');
   for (let i = 0; i < skus.length; i += 100) {
+    tick(i);
     const chunk = skus.slice(i, i + 100);
     const [{ data: prods, error: pErr }, { data: aliases, error: aErr }] = await Promise.all([
       supabase.from('products').select(`sku, map_cad, ${promoMapField}`).in('sku', chunk),
@@ -270,6 +286,7 @@ async function fillDealFile(zip, hit, template, promotion, channel) {
     lines.push({ sku: m.sku, walmartSku: alias.get(m.sku) ?? m.sku, promo });
   }
   if (!lines.length) throw new Error(`Nothing to write: no product has a MAP ${tierLabel} below its MAP.`);
+  await blockingStep(task, 0.75, `Filling the sheet · ${lines.length} products…`);
 
   const { cols } = hit;
   let lastUsed = hit.headerRow;
@@ -282,7 +299,9 @@ async function fillDealFile(zip, hit, template, promotion, channel) {
   zip.file(hit.path, injectRows(hit.xml, rowsXml, lastUsed + 1 + lines.length));
 
   const period = String(promotion.period).slice(0, 7);
+  await blockingStep(task, 0.85, 'Writing the file…');
   await downloadZip(zip, `Walmart_Canada_Deal_${period}`, templateExt(template.storage_path));
+  task?.progress(1);
 
   const report = { deal: true, rows: lines.length, tier, tierLabel, aliased, fromList, noMap, noPromo, atOrAbove, excluded, window, sheet: hit.name };
   logActivity({

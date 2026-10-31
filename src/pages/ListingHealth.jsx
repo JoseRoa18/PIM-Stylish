@@ -22,6 +22,7 @@ import { refreshBestBuyOffers } from '@/features/syndication/api/bestbuySync';
 import { refreshWalmartItems } from '@/features/syndication/api/walmartSync';
 import WayfairAuditCard from '@/features/syndication/components/WayfairAuditCard';
 import SCORE_BADGE_STYLES from '@/lib/scoreBadgeStyles';
+import { startTask } from '@/lib/taskProgress';
 
 // The PIM tab scores the catalog's OWN data completeness, live — it leads
 // the strip because every channel score starts from it.
@@ -255,10 +256,14 @@ export default function ListingHealth() {
   async function refreshChannel() {
     if (refreshing) return;
     setRefreshing(true);
+    // One edge call that reports nothing: the moving stripe until it answers.
+    const task = startTask(`${mktDef.label} refresh`, { detail: `Waiting for ${mktDef.label}…` });
     try {
       await refreshDef.run();
+      task.finish('Pulled · reloading the page…');
       window.location.reload();
     } catch (err) {
+      task.fail(err);
       alert(`${refreshDef.label} refresh failed: ${err.message}`);
       setRefreshing(false);
     }
@@ -271,6 +276,7 @@ export default function ListingHealth() {
 
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: linked.length });
+    const task = startTask('Refresh from Wix', { detail: `Product 0 of ${linked.length}` });
 
     let done = 0;
     for (let i = 0; i < linked.length; i += 4) {
@@ -278,8 +284,10 @@ export default function ListingHealth() {
       await Promise.allSettled(batch.map((p) => readWixProduct(p.sku)));
       done += batch.length;
       setRefreshProgress({ done, total: linked.length });
+      task.count(done, linked.length, `Product ${done} of ${linked.length}`);
     }
 
+    task.finish(`${linked.length} products read · reloading the page…`);
     window.location.reload();
   }
 

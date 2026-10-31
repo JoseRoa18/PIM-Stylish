@@ -15,23 +15,57 @@ export { summarizeForDashboard };
 // database (then the smallest Supabase size) without memory — it froze until
 // restarted. Short, so a fix made on the product page shows on return.
 const SHARE_MS = 30 * 1000;
-let shared = null; // { at, promise }
+let shared = null; // { at, promise, hub }
+
+// One run's progress, sent to every task card waiting on it: the caller that
+// started the run and any that join it while it is shared (a remount, React's
+// double effect in development — by then the first card is gone, so the run
+// still has a card that moves). A joining card starts at the last reading.
+function progressHub() {
+  const cards = new Set();
+  let last = null;
+  const hub = {
+    watch(task) {
+      if (!task) return;
+      cards.add(task);
+      if (last) task.progress(last.share, last.detail);
+    },
+    progress(share, detail) {
+      last = { share, detail };
+      for (const t of cards) t.progress(share, detail);
+    },
+    // The reading, then a paint, before work that blocks the page.
+    async step(share, detail) {
+      hub.progress(share, detail);
+      const [first] = cards;
+      if (first) await first.paint();
+    },
+  };
+  return hub;
+}
 
 /**
  * Browser-side listing-health computation: fetch the catalog (with media)
  * and the latest channel snapshots, then run the shared scoring pipeline.
  * The scheduled `health-refresh` edge function runs the same pipeline
- * server-side twice a day.
+ * server-side twice a day. `task` (optional taskProgress reporter) follows
+ * the run — the one this call starts or the shared one it joins: the reads
+ * up to 85%, then the scoring.
  */
-export function computeListingHealth() {
-  if (shared && Date.now() - shared.at < SHARE_MS) return shared.promise;
-  const promise = computeListingHealthNow();
-  shared = { at: Date.now(), promise };
+export function computeListingHealth({ task = null } = {}) {
+  if (shared && Date.now() - shared.at < SHARE_MS) {
+    shared.hub.watch(task);
+    return shared.promise;
+  }
+  const hub = progressHub();
+  hub.watch(task);
+  const promise = computeListingHealthNow(hub);
+  shared = { at: Date.now(), promise, hub };
   promise.catch(() => { if (shared?.promise === promise) shared = null; });
   return promise;
 }
 
-async function computeListingHealthNow() {
+async function computeListingHealthNow(hub) {
   // The catalog load is shared with the PIM completeness panel (both run on
   // the Listing Health page), and the ten snapshots load at the same time.
   const catalog = loadCatalogWithMedia();
@@ -56,11 +90,7 @@ async function computeListingHealthNow() {
     return null;
   }
 
-  const [
-    dbProducts,
-    wayfairMap, wayfairUsaMap, bestbuyMap, walmartUs, walmartCa,
-    wixSinksdirectUs, wixStylishCa, wixStylishUs, wixAzuniCa,
-  ] = await Promise.all([
+  const reads = [
     catalog,
     latestSnapshotMap('wayfair'),
     latestSnapshotMap('wayfair_usa'),
@@ -71,8 +101,20 @@ async function computeListingHealthNow() {
     latestSnapshotMap('wix_stylish_ca'),
     latestSnapshotMap('wix_stylish_us'),
     latestSnapshotMap('wix_azuni_ca'),
-  ]);
+  ];
+  let read = 0;
+  const [
+    dbProducts,
+    wayfairMap, wayfairUsaMap, bestbuyMap, walmartUs, walmartCa,
+    wixSinksdirectUs, wixStylishCa, wixStylishUs, wixAzuniCa,
+  ] = await Promise.all(reads.map((p) => p.then((value) => {
+    read += 1;
+    hub.progress((read / reads.length) * 0.85, `Reading the catalog and channel snapshots (${read} of ${reads.length})`);
+    return value;
+  })));
 
+  // The scoring blocks the page: the card shows the step first.
+  await hub.step(0.85, `Scoring ${(dbProducts ?? []).length} products on every channel…`);
   return buildListingHealthData(dbProducts ?? [], {
     wayfairMap,
     wayfairUsaMap,

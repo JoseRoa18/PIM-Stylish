@@ -17,15 +17,24 @@ import { WIX_SITES } from '../lib/wixSites';
  *
  * Every step is idempotent and a no-op for products that don't exist on the
  * channel yet — a brand-new product simply links later (re-run any time from
- * the product's Marketplaces tab).
+ * the product's Marketplaces tab). `task` (optional taskProgress reporter)
+ * counts the channel calls answered.
  */
-export async function autoLinkChannels(skus) {
+export async function autoLinkChannels(skus, { task = null } = {}) {
   const list = [skus].flat().filter(Boolean);
   if (!list.length) return null;
 
   const summary = { wix: {}, wayfair: 0, wayfair_usa: 0, bestbuy: 0, walmart_us: 0, errors: [] };
+  // every Wix store, the Wix links read, two Wayfair suppliers, two snapshots
+  const calls = Object.keys(WIX_SITES).length + 5;
+  let answered = 0;
+  const answer = (detail) => {
+    answered += 1;
+    task?.count(answered, calls, detail);
+  };
 
   // --- Wix: one link-only run per site (matches by SKU, idempotent) --------
+  task?.step(`Linking on ${Object.keys(WIX_SITES).length} Wix stores…`);
   await Promise.allSettled(
     Object.keys(WIX_SITES).map(async (site) => {
       try {
@@ -36,6 +45,8 @@ export async function autoLinkChannels(skus) {
         if (data?.error) throw new Error(data.error);
       } catch (err) {
         summary.errors.push(`${WIX_SITES[site].label}: ${err.message}`);
+      } finally {
+        answer();
       }
     }),
   );
@@ -45,6 +56,7 @@ export async function autoLinkChannels(skus) {
     .select('site, sku')
     .in('sku', list);
   for (const l of links ?? []) summary.wix[l.site] = (summary.wix[l.site] ?? 0) + 1;
+  answer('Wayfair Canada…');
 
   // --- Wayfair Canada + USA: store each supplier's listing id when it exists
   for (const [supplier, key] of [['CAN', 'wayfair'], ['USA', 'wayfair_usa']]) {
@@ -57,6 +69,7 @@ export async function autoLinkChannels(skus) {
     } catch (err) {
       summary.errors.push(`Wayfair ${supplier}: ${err.message}`);
     }
+    answer(supplier === 'CAN' ? 'Wayfair USA…' : 'Best Buy and Walmart USA snapshots…');
   }
 
   // --- Snapshot-only channels: report presence, write nothing --------------
@@ -73,6 +86,7 @@ export async function autoLinkChannels(skus) {
     } catch {
       // informational only — never block the link run on a snapshot read
     }
+    answer();
   }
 
   const wixTotal = Object.values(summary.wix).reduce((a, b) => a + b, 0);

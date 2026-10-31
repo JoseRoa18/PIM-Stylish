@@ -8,6 +8,7 @@ import { formatFileSize } from '@/lib/format';
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
+import { startTask } from '@/lib/taskProgress';
 import { getBrandWarranties, brandWarrantyFor } from '@/features/settings/api/brandWarranty';
 import { isFaucetCategory } from '@/features/products/lib/categories';
 
@@ -195,12 +196,16 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
     const key = slotKey(docTypeConfig.id, language);
     setErrorMessage(null);
     setBusyKey(key);
+    const langLabel = language ? LANGUAGES.find((l) => l.id === language)?.short : null;
+    const task = startTask('Upload document', { detail: `${docTypeConfig.label}${langLabel ? ` (${langLabel})` : ''} · ${file.name}` });
     try {
       // uploadDocumentFile replaces the (type, language) slot across the whole
       // variant family — no need to pre-delete the existing document here.
-      await uploadDocumentFile(sku, docTypeConfig.id, file, language);
+      await uploadDocumentFile(sku, docTypeConfig.id, file, language, { task });
+      task.finish(`Uploaded ${file.name}`);
       reload();
     } catch (err) {
+      task.fail(err);
       setErrorMessage(err.message);
       console.error('Upload document error:', err);
     } finally {

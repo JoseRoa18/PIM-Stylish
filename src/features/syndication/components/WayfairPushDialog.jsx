@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Image as ImageIcon, Film, FileText, Ruler } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { planWayfairPush, pushWayfairMedia, pushWayfairAttributes, checkWayfairRequestStatus, setWayfairLeadImage } from '../api/wayfairSync';
+import { startTask } from '@/lib/taskProgress';
 
 const STEP_ICON = { specs: Ruler, images: ImageIcon, videos: Film, documents: FileText };
 const thumb = (url) => url.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/') + '?width=96&height=96&resize=contain';
@@ -25,21 +26,29 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
 
   useEffect(() => {
     let active = true;
+    // Two calls (the plan, the spec dry run): the bar counts the settled ones.
+    const task = startTask(`Wayfair push plan · ${sku}`, { detail: `Reading ${label}…` });
+    let settled = 0;
+    let ended = false;
+    const counted = (p) => p.finally(() => { settled += 1; if (active) task.count(settled, 2, `Reading ${label}… (${settled} of 2)`); });
     (async () => {
       try {
         const [p, s] = await Promise.all([
-          planWayfairPush(sku, { supplier, market }),
-          pushWayfairAttributes(sku, { dryRun: true, supplier, market }).catch((e) => ({ error: e.message })),
+          counted(planWayfairPush(sku, { supplier, market })),
+          counted(pushWayfairAttributes(sku, { dryRun: true, supplier, market }).catch((e) => ({ error: e.message }))),
         ]);
         if (!active) return;
+        ended = true;
+        task.finish('Plan ready');
         setPlan(p);
         setSpecs(s);
       } catch (e) {
-        if (active) setError(e.message);
+        if (active) { ended = true; task.fail(e); setError(e.message); }
       }
     })();
-    return () => { active = false; };
-  }, [sku, supplier, market]);
+    // Closed before the plan came back: the card goes without a word.
+    return () => { active = false; if (!ended) task.cancel(); };
+  }, [sku, supplier, market, label]);
 
   const specChanges = specs && !specs.error ? Object.entries(specs.diff ?? {}).filter(([, v]) => v.changed) : [];
   // Every mapped attribute (changed or identical) + the ones with no PIM value.
@@ -56,6 +65,12 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
     setPhase('pushing');
     const log = [];
     const record = (entry) => { log.push(entry); setProgress([...log]); };
+    // Stages: the spec attributes (one call), then the media (one call).
+    const doSpecs = enabled.specs && specChanges.length > 0;
+    const mediaOn = { images: enabled.images, videos: enabled.videos, documents: enabled.documents };
+    const doMedia = Object.values(mediaOn).some(Boolean) && (plan?.steps ?? []).some((s) => mediaOn[s.key] && s.items.length);
+    const stages = (doSpecs ? 1 : 0) + (doMedia ? 1 : 0);
+    const task = startTask(`Wayfair push · ${sku}`, { detail: doSpecs ? 'Sending the spec attributes…' : 'Sending the media…' });
     try {
       if (enabled.specs && specChanges.length > 0) {
         record({ key: 'specs', label: 'Spec attributes', state: 'running', count: specChanges.length });
@@ -66,6 +81,7 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
           log[log.length - 1] = { ...log[log.length - 1], state: 'error', error: e.message };
         }
         setProgress([...log]);
+        if (doMedia) task.count(1, stages, `Sending the media to ${label}… (step 2 of 2)`);
       }
       const mediaSteps = { images: enabled.images, videos: enabled.videos, documents: enabled.documents };
       if (Object.values(mediaSteps).some(Boolean) && (plan?.steps ?? []).some((s) => mediaSteps[s.key] && s.items.length)) {
@@ -78,7 +94,13 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
         for (const l of log) if (l.state === 'running') l.state = 'skipped';
         setProgress([...log]);
       }
+      const failed = log.filter((l) => l.state === 'error');
+      if (failed.length) task.fail(`${failed.map((l) => l.label).join(', ')} failed: ${failed[0].error ?? ''}`);
+      else task.finish(`Sent to ${label} · check what Wayfair did`);
       onPushed?.();
+    } catch (e) {
+      task.fail(e);
+      throw e;
     } finally {
       setPhase('done');
     }
@@ -89,18 +111,35 @@ export default function WayfairPushDialog({ sku, supplier = 'CAN', market, label
 
   async function forceLead() {
     setLead('busy');
-    try { setLead(await setWayfairLeadImage(sku, { supplier, market })); } catch (e) { setLead({ error: e.message }); }
+    // One call: the stripe moves until Wayfair answers.
+    const task = startTask(`Wayfair lead image · ${sku}`, { detail: 'Asking Wayfair to lead with the white main…' });
+    try {
+      const r = await setWayfairLeadImage(sku, { supplier, market });
+      task.finish('Lead requested');
+      setLead(r);
+    } catch (e) {
+      task.fail(e);
+      setLead({ error: e.message });
+    }
   }
 
   async function refreshStatus() {
     setChecking(true);
+    const ids = [...progress.map((p) => p.requestId), lead?.requestId].filter(Boolean);
+    // One status read per request id, one after the other.
+    const task = startTask(`Wayfair status · ${sku}`, { detail: 'Asking Wayfair what it did…' });
     try {
       const out = {};
-      const ids = [...progress.map((p) => p.requestId), lead?.requestId].filter(Boolean);
-      for (const id of ids) {
+      for (const [i, id] of ids.entries()) {
+        task.count(i, ids.length, `Request ${i + 1} of ${ids.length}…`);
         try { out[id] = await checkWayfairRequestStatus(id, { supplier }); } catch (e) { out[id] = { error: e.message }; }
       }
       setStatus(out);
+      const problems = Object.values(out).filter((x) => x.error || x.problems?.length).length;
+      task.finish(ids.length ? `${ids.length} request${ids.length === 1 ? '' : 's'} read${problems ? ` · ${problems} with problems` : ''}` : 'No request to check');
+    } catch (e) {
+      task.fail(e);
+      throw e;
     } finally {
       setChecking(false);
     }

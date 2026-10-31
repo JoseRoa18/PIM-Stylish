@@ -4,6 +4,7 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { loadProductWhereToBuy, saveProductWhereToBuy, publishWhereToBuy, dismissWhereToBuySuggestion } from '../api/whereToBuy';
 import { WTB_MARKETS, WTB_RETAILERS, wtbUrlProblem, cleanWtbUrl } from '../lib/whereToBuy';
 import { PAGE_STORE_KEYS, readingCounts } from '@/features/pricing/lib/pageStores';
+import { startTask } from '@/lib/taskProgress';
 
 // Product page → Where to Buy. The store links of the Stylish websites, owned
 // by the PIM (user, 2026-10-19): ONE list for the product, and saving writes
@@ -84,14 +85,26 @@ export default function WhereToBuyTab({ product }) {
   // The stores whose field holds a suggested address (kept as the link's source).
   const suggestedNow = data ? Object.entries(data.suggestions ?? {}).filter(([k, list]) => list.some((s) => s.url === draft[k])).map(([k]) => k) : [];
 
+  // Save and Publish each have a card: the save 25%, the publish (one call)
+  // up to 90%, the reload the rest.
+  const publishOutcome = (task, published, done) => {
+    const failed = published.filter((p) => p.status === 'error');
+    if (failed.length) task.fail(`Not published on ${failed.map((p) => p.label).join(', ')}: ${failed[0].error ?? 'failed'}`);
+    else task.finish(done);
+  };
+
   async function handleSave() {
     setBusy('save');
     setResult(null);
+    const task = startTask(`Where to Buy · ${product.sku}`, { detail: 'Saving the links…' });
     try {
-      const r = await saveProductWhereToBuy(product, draft, data.links, { suggested: suggestedNow });
+      const r = await saveProductWhereToBuy(product, draft, data.links, { suggested: suggestedNow, task: task.part(0, 0.9) });
       setResult(r.published);
+      task.progress(0.9, 'Reloading the links…');
       await reload();
+      publishOutcome(task, r.published, r.published.length ? 'Saved and published' : 'Saved');
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setBusy(null);
@@ -112,10 +125,15 @@ export default function WhereToBuyTab({ product }) {
   async function handlePublish() {
     setBusy('publish');
     setResult(null);
+    const task = startTask(`Where to Buy · ${product.sku}`, { detail: 'Publishing on the Stylish pages…' });
     try {
-      setResult(await publishWhereToBuy(product));
+      const published = await publishWhereToBuy(product);
+      setResult(published);
+      task.progress(0.9, 'Reloading the links…');
       await reload();
+      publishOutcome(task, published, 'Published');
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setBusy(null);

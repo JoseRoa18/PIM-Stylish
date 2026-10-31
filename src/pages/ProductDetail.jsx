@@ -32,6 +32,7 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { startTask } from '@/lib/taskProgress';
 import { FIELD_HELP } from '@/features/products/lib/fieldHelp';
 import { ThinkingOrb } from 'thinking-orbs';
 import { useProduct } from '@/features/products/hooks/useProduct';
@@ -789,11 +790,13 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
   async function handleApply() {
     setApplying(true);
     setResult(null);
+    const targets = variants.filter((v) => chosenSkus.has(v.sku));
+    const task = startTask('Apply to variants', { detail: `${targets.length} variant${targets.length === 1 ? '' : 's'} of ${product.sku}…` });
     try {
       const fields = changes.filter((c) => selKeys.has(c.key));
-      const targets = variants.filter((v) => chosenSkus.has(v.sku));
       let ok = 0;
-      for (const v of targets) {
+      for (const [i, v] of targets.entries()) {
+        task.progress(i / targets.length, `Variant ${i + 1} of ${targets.length}: ${v.sku}`);
         const row = full[v.sku] ?? (await getProduct(v.sku));
         if (!row) continue;
         const patch = {};
@@ -806,8 +809,10 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
         if (attrsChanged) patch.attributes = attrs;
         if (Object.keys(patch).length) { await updateProduct(v.sku, patch); ok++; }
       }
+      task.finish(`Applied to ${ok} of ${targets.length} variant${targets.length === 1 ? '' : 's'}`);
       setResult({ ok, total: targets.length });
     } catch (err) {
+      task.fail(err);
       setResult({ error: err.message ?? 'Failed to apply' });
     } finally {
       setApplying(false);
@@ -1758,19 +1763,28 @@ function MarketplacesTab({ product, media, onUpdate }) {
     });
     if (!ok) return;
     setPushAll('busy');
+    const task = startTask(`Push to ${label}`, { detail: product.sku });
     try {
       const { pushProductToAllWixSites } = await import('@/features/syndication/api/wixSync');
-      setPushAll(await pushProductToAllWixSites(product.sku, brand));
+      const results = await pushProductToAllWixSites(product.sku, brand, { task });
+      // A store that failed keeps the card red; the line under the buttons says which.
+      const sent = Object.entries(results).filter(([, r]) => r.skipped !== 'excluded');
+      const failed = sent.filter(([, r]) => !r.ok).map(([k]) => WIX_SITES[k]?.label ?? k);
+      if (failed.length) task.fail(`Failed on ${failed.join(', ')}`);
+      else task.finish(`Pushed to ${sent.length} store${sent.length === 1 ? '' : 's'}`);
+      setPushAll(results);
     } catch (err) {
+      task.fail(err);
       setPushAll(err instanceof Error ? err : new Error(String(err)));
     }
   }
 
   async function runAutoLink() {
     setAutoLink('busy');
+    const task = startTask('Auto-link channels', { detail: product.sku });
     try {
       const { autoLinkChannels } = await import('@/features/syndication/api/autoLink');
-      const s = await autoLinkChannels(product.sku);
+      const s = await autoLinkChannels(product.sku, { task: task.part(0, 0.95) });
       setAutoLink(s);
       onUpdate?.();
       const { data } = await supabase
@@ -1778,7 +1792,9 @@ function MarketplacesTab({ product, media, onUpdate }) {
         .select('site, wix_product_id, synced_at')
         .eq('sku', product.sku);
       setWixLinks(new Map((data ?? []).map((r) => [r.site, r])));
+      task.finish(s?.errors?.length ? `Done · ${s.errors.length} channel error${s.errors.length === 1 ? '' : 's'}` : 'Links refreshed');
     } catch (err) {
+      task.fail(err);
       setAutoLink(err);
     }
   }
@@ -2063,6 +2079,8 @@ function ExportTemplatesCard({ product, media }) {
     setAsking(null);
     setExporting(marketplace);
     setError(null);
+    const task = startTask(`${marketplace} export`, { detail: product.sku });
+    let done = 'Downloaded';
     try {
       const set = filesFor(marketplace, files, purpose);
       if (!set.length) throw new Error(`No ${templatePurposeLabel(purpose)} file for ${marketplace} fits this product.`);
@@ -2071,11 +2089,11 @@ function ExportTemplatesCard({ product, media }) {
       // The exporters load on click — they stay out of the page's first download.
       if (/menards/i.test(marketplace)) {
         const { generateMenardsFromTemplates } = await import('@/features/syndication/exports/menardsExport');
-        await generateMenardsFromTemplates(set, [product]);
+        await generateMenardsFromTemplates(set, [product], { task });
       } else if (/wayfair/i.test(marketplace)) {
         // Wayfair exports the whole variant family, so name the file by collection.
         const { generateWayfairFromTemplate } = await import('@/features/syndication/exports/wayfairExport');
-        const res = await generateWayfairFromTemplate(set[0].storage_path, [product], `Wayfair_${base}`);
+        const res = await generateWayfairFromTemplate(set[0].storage_path, [product], `Wayfair_${base}`, { task });
         if (res.warnings?.length) {
           setError(
             `Downloaded ${res.count} variant(s). ${res.warnings.length} share a finish — set a 2nd Variant Grouping in Excel before uploading (details in console).`
@@ -2083,28 +2101,31 @@ function ExportTemplatesCard({ product, media }) {
         }
       } else if (/amazon/i.test(marketplace)) {
         const { generateAmazonFromTemplate } = await import('@/features/syndication/exports/amazonExport');
-        await generateAmazonFromTemplate(set[0].storage_path, [product], `Amazon_${base}`);
+        await generateAmazonFromTemplate(set[0].storage_path, [product], `Amazon_${base}`, { task });
       } else if (/walmart/i.test(marketplace)) {
         const { generateWalmartFromTemplate } = await import('@/features/syndication/exports/walmartExport');
-        await generateWalmartFromTemplate(set[0].storage_path, [product], `Walmart_${base}`);
+        await generateWalmartFromTemplate(set[0].storage_path, [product], `Walmart_${base}`, { task });
       } else if (/home ?depot.*(\bca\b|canada)/i.test(marketplace)) {
         const { generateHomeDepotCaFromTemplate } = await import('@/features/syndication/exports/homeDepotCaExport');
-        await generateHomeDepotCaFromTemplate(set[0].storage_path, [product], `HomeDepotCA_${base}`);
+        const res = await generateHomeDepotCaFromTemplate(set[0].storage_path, [product], `HomeDepotCA_${base}`, { task });
+        if (res.media?.files) done = `Downloaded + ${res.media.files} media file${res.media.files === 1 ? '' : 's'}${res.media.failed?.length ? ` · ${res.media.failed.length} could not be fetched` : ''}`;
       } else if (/home ?depot/i.test(marketplace)) {
         const { generateHomeDepotFromTemplate } = await import('@/features/syndication/exports/homeDepotExport');
-        await generateHomeDepotFromTemplate(set[0].storage_path, [product], `HomeDepot_${base}`);
+        await generateHomeDepotFromTemplate(set[0].storage_path, [product], `HomeDepot_${base}`, { task });
       } else if (/lowe/i.test(marketplace)) {
         const { generateLowesSet } = await import('@/features/syndication/exports/lowesExport');
-        await generateLowesSet(set, [product], `Lowes_${base}`);
+        await generateLowesSet(set, [product], `Lowes_${base}`, { task });
       } else if (/bb&b|bbb|overstock/i.test(marketplace)) {
         const { generateBBBFromTemplate } = await import('@/features/syndication/exports/bbbExport');
-        await generateBBBFromTemplate(set[0].storage_path, product, media);
+        await generateBBBFromTemplate(set[0].storage_path, product, media, { task });
       } else {
         throw new Error(
           `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B and Menards are supported so far.`
         );
       }
+      task.finish(done);
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setExporting(null);

@@ -3,6 +3,7 @@ import { Loader2, AlertCircle, CheckCircle2, ShieldCheck, PlusCircle, RefreshCw,
 import { ThinkingOrb } from 'thinking-orbs';
 import { submitWayfairAdditions, checkWayfairAdditionStatus } from '../api/wayfairSync';
 import { useAuth } from '@/features/auth/AuthContext';
+import { startTask } from '@/lib/taskProgress';
 
 // Per-product "new listing" panel (Marketplaces tab): validate the PIM data
 // against Wayfair's Product Addition questions, then create the listing.
@@ -32,10 +33,16 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
     setBusy(mode);
     setResult(null);
     setStatus(null);
+    // One call: the stripe moves until Wayfair answers.
+    const task = startTask(`Wayfair ${SUPPLIER_LABEL[supplier] ?? supplier} · ${product.sku}`, {
+      detail: mode === 'create' ? `Creating the listing${sandbox ? ' (sandbox)' : ''}…` : mode === 'mapping' ? 'Building the mapped attributes…' : "Validating against Wayfair's questions…",
+    });
     try {
       const data = await submitWayfairAdditions([product.sku], { supplier, validateOnly, sandbox, preview: mode === 'mapping' });
+      task.finish(mode === 'create' ? 'Sent to Wayfair' : mode === 'mapping' ? 'Mapping ready' : 'Validated');
       setResult(data);
     } catch (err) {
+      task.fail(err);
       setResult({ error: err.message });
     } finally {
       setBusy(null);
@@ -45,9 +52,13 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
   async function refreshStatus() {
     if (!result?.requestId) return;
     setBusy('status');
+    const task = startTask(`Wayfair ${SUPPLIER_LABEL[supplier] ?? supplier} · ${product.sku}`, { detail: 'Reading what Wayfair did…' });
     try {
-      setStatus(await checkWayfairAdditionStatus(result.requestId, { supplier, sandbox }));
+      const data = await checkWayfairAdditionStatus(result.requestId, { supplier, sandbox });
+      task.finish(`Wayfair: ${data?.status ?? 'read'}`);
+      setStatus(data);
     } catch (err) {
+      task.fail(err);
       setStatus({ error: err.message });
     } finally {
       setBusy(null);

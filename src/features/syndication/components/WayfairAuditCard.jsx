@@ -8,6 +8,7 @@ import { latestSnapshot, insertSnapshot } from '../lib/channels';
 import { pushWayfairAttributes } from '../api/wayfairSync';
 import Dialog from '@/components/ui/Dialog';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { startTask } from '@/lib/taskProgress';
 
 // Catalog-wide spec-attributes audit: runs the per-SKU attribute diff
 // (dryRun — reads Wayfair, changes nothing) across the WHOLE catalog and
@@ -67,6 +68,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
     const targets = diffRows.map((r) => r.sku);
     const state = { busy: true, done: 0, total: targets.length, ok: 0, failed: [], startedAt: Date.now() };
     setPush({ ...state });
+    const task = startTask(`Wayfair spec push · ${n} SKUs`, { detail: `Product 0 of ${n}…` });
 
     let cursor = 0;
     async function worker() {
@@ -79,18 +81,26 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
           state.failed.push({ sku, message: err.message });
         }
         state.done += 1;
+        task.count(state.done, state.total, `Product ${state.done} of ${state.total}…`);
         setPush({ ...state, failed: [...state.failed] });
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     state.busy = false;
     setPush({ ...state, failed: [...state.failed] });
+    if (cancelRef.current && state.done < state.total) task.cancel();
+    else if (state.failed.length) task.fail(`${state.ok} pushed, ${state.failed.length} failed`);
+    else task.finish(`${state.ok} pushed`);
   }
 
   async function startAudit() {
     cancelRef.current = false;
     setPush(null);
     const { supplier, market } = TARGETS[target];
+    // One dry run per product, 3 at a time: the bar counts the products
+    // (95%), then the snapshot is saved.
+    const task = startTask(`Wayfair audit · ${TARGETS[target].label}`, { detail: 'Reading the catalog…' });
+    const audit = task.part(0, 0.95);
 
     // Whole catalog — the edge function handles every Wayfair class; items
     // Wayfair doesn't know land in the errors list, not in the results.
@@ -100,6 +110,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
       .order('category')
       .order('sku');
     if (error) {
+      task.fail(error.message);
       setRun({ busy: false, error: error.message, rows: [], errors: [] });
       return;
     }
@@ -107,6 +118,7 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
     const skus = products.map((p) => p.sku);
     const state = { busy: true, done: 0, total: skus.length, rows: [], errors: [], startedAt: Date.now() };
     setRun({ ...state });
+    audit.count(0, skus.length, `Product 0 of ${skus.length}…`);
 
     let cursor = 0;
     async function worker() {
@@ -124,12 +136,15 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
           state.errors.push({ sku, message: err.message });
         }
         state.done += 1;
+        audit.count(state.done, state.total, `Product ${state.done} of ${state.total}…`);
         setRun({ ...state, rows: [...state.rows], errors: [...state.errors] });
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     state.busy = false;
     setRun({ ...state, rows: [...state.rows], errors: [...state.errors] });
+    if (cancelRef.current && state.done < state.total) await task.step('Stopped — saving what was audited…');
+    else await task.step('Saving the snapshot…');
 
     // Persist a snapshot (best-effort) so Listing Health can show channel
     // sync at a glance without re-running the ~1 min live audit.
@@ -163,6 +178,8 @@ export default function WayfairAuditCard({ defaultTarget = 'CAN_CA' }) {
     } catch (err) {
       console.error('channel_health snapshot:', err);
     }
+    if (cancelRef.current && state.done < state.total) task.cancel();
+    else task.finish(`${state.rows.filter((r) => r.changed > 0).length} with differences${state.errors.length ? ` · ${state.errors.length} errors` : ''}`);
   }
 
   const rows = run?.rows ?? [];
@@ -497,10 +514,14 @@ function DiffDetailDialog({ sku, supplier, market, onClose }) {
 
   async function pushThis() {
     setPushState('busy');
+    // One call: the stripe moves until Wayfair answers.
+    const task = startTask(`Wayfair specs · ${sku}`, { detail: 'Pushing the spec attributes…' });
     try {
       await pushWayfairAttributes(sku, { validateOnly: false, supplier, market });
+      task.finish('Sent to Wayfair');
       setPushState('ok');
     } catch (err) {
+      task.fail(err.message ?? 'Push failed');
       setPushState(err.message ?? 'Push failed');
     }
   }

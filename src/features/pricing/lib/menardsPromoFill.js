@@ -49,12 +49,15 @@ import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/prom
 import { logActivity } from '@/features/activity/api/activityLog';
 import { markPromotionTask, savePromoFile, loadPromoFile, freshFileTasks } from '@/features/pricing/api/promoTasks';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
+import { blockingStep } from '@/features/pricing/lib/fileProgress';
 
 // The whole catalog with the given columns, read now in pages of 1,000 (the
-// API's cap per request) so no product is ever missing from a fill.
-async function catalog(columns) {
+// API's cap per request) so no product is ever missing from a fill. `task`
+// (optional taskProgress reporter) says how many are read so far.
+async function catalog(columns, task = null) {
   const all = [];
   for (let from = 0; ; from += 1000) {
+    task?.progress(0, from ? `Reading the catalog… ${from} products so far` : 'Reading the catalog…');
     const { data, error } = await supabase.from('products').select(columns).order('sku').range(from, from + 999);
     if (error) throw error;
     all.push(...(data ?? []));
@@ -96,26 +99,33 @@ async function locateSkuColumn(zip, shared, pimSkus) {
 /**
  * Read the file and decide every row, without writing anything.
  * Returns the plan the dialog shows and fillMenardsPromoFile consumes.
+ * `task` (optional taskProgress reporter): members, the catalog, the file
+ * opened and searched for our SKUs.
  */
-export async function analyzeMenardsPromoFile(file, promotion) {
+export async function analyzeMenardsPromoFile(file, promotion, { task = null } = {}) {
   const tier = promotionLevel(promotion);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const mapField = `map_${tier}_usd`;
   const costField = `cost_usd_menards_${tier}`;
 
+  task?.progress(0, "Reading the promotion's products…");
   const { rows: members, excluded } = await promotionMembersFor(promotion, 'menards');
+  task?.progress(0.15);
   if (!members.length) throw new Error('This promotion has no products.');
   const bySku = new Map(members.map((m) => [m.sku, m]));
 
   // Every product's Blue and level prices: rows outside the promotion need
   // Blue too, so the whole catalog is read.
-  const prods = await catalog(`sku, map_usd, cost_usd_menards, ${mapField}, ${costField}`);
+  const prods = await catalog(`sku, map_usd, cost_usd_menards, ${mapField}, ${costField}`, task?.part(0.15, 0.5));
   const pim = new Map((prods ?? []).map((p) => [p.sku, p]));
   const pimSkus = new Set(pim.keys());
 
+  await blockingStep(task, 0.5, 'Opening the file…');
   const { zip, shared } = await openFile(file);
+  await blockingStep(task, 0.7, 'Finding our SKUs in the file…');
   const hit = await locateSkuColumn(zip, shared, pimSkus);
   if (!hit) throw new Error(`No column of "${file.name}" holds our SKUs. Upload the promotion file Menards sent.`);
+  task?.progress(0.9);
 
   const fills = new Map(); // 1-based row number → { map, cost }
   const missing = []; // { sku, row, reason }
@@ -148,17 +158,23 @@ export async function analyzeMenardsPromoFile(file, promotion) {
   if (!fills.size && !missing.length) throw new Error('No row of the file belongs to this promotion. Check that the file and the promotion match.');
 
   const notInFile = members.map((m) => m.sku).filter((s) => !fileSkus.has(s)).sort();
+  task?.progress(1);
   return { tier, tierLabel, sheet: hit.name, path: hit.path, xml: hit.xml, skuCol: hit.col, fills, missing, notInPromo, notInFile, excluded, fromList, fileRows: fileSkus.size };
 }
 
 /**
  * Write F/G/H on the planned rows and download the file. Promotion products
  * without a level price are left as they came (`missing` = 'blank', the
- * default; 'blue' would give them the Blue prices instead).
+ * default; 'blue' would give them the Blue prices instead). `task` (optional
+ * taskProgress reporter): the analysis when no `plan` comes, then the file
+ * opened, filled, written, kept for Back to Blue and marked done.
  */
-export async function fillMenardsPromoFile(file, promotion, { plan = null, missing = 'blank' } = {}) {
-  const p = plan ?? (await analyzeMenardsPromoFile(file, promotion));
+export async function fillMenardsPromoFile(file, promotion, { plan = null, missing = 'blank', task = null } = {}) {
+  const p = plan ?? (await analyzeMenardsPromoFile(file, promotion, { task: task?.part(0, 0.5) }));
+  const rest = plan ? task : task?.part(0.5, 1);
+  rest?.step('Opening the file…');
   const { zip } = await openFile(file);
+  await blockingStep(rest, 0.25, 'Filling the sheet…');
   const cellsByRow = new Map();
   const write = (rn, f) => writeFGH(cellsByRow, rn, f);
   for (const [rn, f] of p.fills) write(rn, f);
@@ -176,7 +192,9 @@ export async function fillMenardsPromoFile(file, promotion, { plan = null, missi
     if (r.blue) { write(r.row, r.blue); othersBlue.push(r.sku); } else othersNoBlue.push(r.sku);
   }
   zip.file(p.path, mergeRows(p.xml, cellsByRow, true));
+  await blockingStep(rest, 0.45, 'Writing the file…');
   await downloadZip(zip, `Menards_Promo_${String(promotion.period).slice(0, 7)}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
+  rest?.progress(0.75, 'Keeping the file for Back to Blue…');
 
   const report = { ...p, filled: p.fills.size, othersBlue, othersNoBlue, withBlue, noBlue, leftBlank: missing === 'blank' ? p.missing.length : 0 };
   logActivity({
@@ -189,7 +207,9 @@ export async function fillMenardsPromoFile(file, promotion, { plan = null, missi
   });
   const skus = [...new Set([...[...p.fills.values()].map((f) => f.sku), ...p.missing.map((m) => m.sku)])].sort();
   const saved = await savePromoFile(promotion, 'menards:promo_file', file);
+  rest?.progress(0.9, 'Marking the file done…');
   await markPromotionTask(promotion.id, 'menards:promo_file', { rows: report.filled, tier: p.tier, skus, ...saved });
+  rest?.progress(1);
   report.saved = Boolean(saved.file);
   return report;
 }
@@ -206,20 +226,28 @@ function writeFGH(cellsByRow, rn, f) {
 /**
  * Back to Blue: the promotion's products (those that went out at the start)
  * at the Blue prices, every other product row removed — see the header.
+ * `task` (optional taskProgress reporter): members, the catalog, the file
+ * opened, searched, filled, written and marked done.
  */
-export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false } = {}) {
+export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false, task = null } = {}) {
+  task?.progress(0, "Reading the promotion's products…");
   const { rows: members, excluded } = await promotionMembersFor(promotion, 'menards');
+  task?.progress(0.1);
   // The products that went out at the start, as the database holds them now.
   const sentAtStart = (await freshFileTasks(promotion))['menards:promo_file']?.skus ?? null;
+  task?.progress(0.15);
   const promoSkus = sentAtStart?.length ? sentAtStart : members.map((m) => m.sku);
   if (!promoSkus.length) throw new Error('This promotion has no products for Menards.');
   const promoSet = new Set(promoSkus);
-  const prods = await catalog('sku, map_usd, cost_usd_menards');
+  const prods = await catalog('sku, map_usd, cost_usd_menards', task?.part(0.15, 0.4));
   const pim = new Map((prods ?? []).map((p) => [p.sku, p]));
 
+  await blockingStep(task, 0.4, 'Opening the file…');
   const { zip, shared } = await openFile(file);
+  await blockingStep(task, 0.5, 'Finding our SKUs in the file…');
   const hit = await locateSkuColumn(zip, shared, new Set(pim.keys()));
   if (!hit) throw new Error(`No column of "${file.name}" holds our SKUs. Upload the promotion file Menards sent.`);
+  await blockingStep(task, 0.65, 'Filling the sheet…');
 
   const cellsByRow = new Map();
   const back = []; // the promotion's products, now at Blue
@@ -262,7 +290,9 @@ export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false
   }
   zip.file(hit.path, xml);
   const day = promoWindow(promotion, 'us').end; // Menards is a USA channel: its last day
+  await blockingStep(task, 0.75, 'Writing the file…');
   await downloadZip(zip, `Menards_Back_to_Blue_${day}`, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
+  task?.progress(0.92, 'Marking the file done…');
 
   const notInFile = promoSkus.filter((s) => !fileSkus.has(s)).sort();
   const removed = removal ? removal.removed : 0;
@@ -276,14 +306,20 @@ export async function fillMenardsBackToBlue(file, promotion, { fromSaved = false
     metadata: { file: file.name, back: back.length, removed, kept_others: keptOthers, others_blue: othersBlue.length, others_no_blue: othersNoBlue.length, no_blue: noBlue.length, not_in_file: notInFile.length, from_saved: fromSaved },
   });
   await markPromotionTask(promotion.id, 'menards:price_change', { rows: back.length, skus: back.slice().sort(), ...(fromSaved ? { from_saved: true } : {}) });
+  task?.progress(1);
   return { back, removed, keptOthers, othersBlue, othersNoBlue, noBlue, notInFile, excluded, fileRows: fileSkus.size, fromSaved, onlySent: Boolean(sentAtStart?.length) };
 }
 
-/** Back to Blue from the Menards file kept when the promotion started. */
-export async function fillMenardsBackToBlueFromSaved(promotion) {
+/**
+ * Back to Blue from the Menards file kept when the promotion started. `task`
+ * (optional taskProgress reporter): the saved file's download, then the fill.
+ */
+export async function fillMenardsBackToBlueFromSaved(promotion, { task = null } = {}) {
+  task?.step('Downloading the saved Menards file…');
   const file = await loadPromoFile((await freshFileTasks(promotion))['menards:promo_file']);
   if (!file) throw new Error('The Menards file of this promotion is no longer saved (files are kept 60 days) — upload it.');
-  return fillMenardsBackToBlue(file, promotion, { fromSaved: true });
+  task?.progress(0.15);
+  return fillMenardsBackToBlue(file, promotion, { fromSaved: true, task: task?.part(0.15, 1) });
 }
 
 export function summarizeMenardsBackToBlue(r) {

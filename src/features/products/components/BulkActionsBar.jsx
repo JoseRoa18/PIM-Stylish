@@ -21,6 +21,8 @@ import { generateKeywords } from '../api/keywords';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind, purposesIn, templatePurpose } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import { listMediaFor } from '@/features/media/api/media';
+import { startTask } from '@/lib/taskProgress';
+import { useDockClearance } from '@/components/ui/useDockClearance';
 
 // The exporters, the PIM round-trip export and the Wix push load on click
 // (performance pass 2026-09-29) — they stay out of the Catalog's first download.
@@ -36,6 +38,8 @@ const loadExports = {
   pim: () => import('@/features/syndication/exports/pimExport'),
 };
 const loadWixSync = () => import('@/features/syndication/api/wixSync');
+// Shared with the exporters above (already loaded with any of them).
+const loadTemplateFiller = () => import('@/features/syndication/exports/templateFiller');
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { isExcluded, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -68,10 +72,22 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   const [asking, setAsking] = useState(null); // { marketplace, purposes, templates }
 
   const count = selectedSkus.size;
+  // The progress cards sit above the bar instead of covering its buttons.
+  const barRef = useRef(null);
+  useDockClearance(barRef, count > 0);
   if (count === 0) return null;
 
   const selectedProducts = products.filter((p) => selectedSkus.has(p.sku));
   const linkedSkus = selectedProducts.filter((p) => p.wix_product_id).map((p) => p.sku);
+  const noun = (n) => `${n} product${n === 1 ? '' : 's'}`;
+
+  // Every action starts clean: busy, no message, and no "N/M" left over from
+  // an earlier one (the inline counter read "N/N" after a Wix push).
+  function begin(kind) {
+    setBusy(kind);
+    setResult(null);
+    setProgress({ done: 0, total: 0 });
+  }
 
   async function handleStatusChange(status) {
     if (!status) return;
@@ -82,13 +98,15 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       confirmLabel: 'Change Status',
     });
     if (!ok) return;
-    setBusy('status');
-    setResult(null);
+    begin('status');
+    const task = startTask('Change status', { detail: `Setting ${noun(count)} to ${statusLabel}…` });
     try {
-      await bulkUpdateProducts([...selectedSkus], { workflow_status: status });
+      await bulkUpdateProducts([...selectedSkus], { workflow_status: status }, {}, { task });
+      task.finish(`${noun(count)} set to ${statusLabel}`);
       setResult({ type: 'success', message: `Updated status for ${count} product${count === 1 ? '' : 's'}.` });
       onChanged?.();
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? 'Update failed' });
     } finally {
       setBusy(null);
@@ -112,14 +130,14 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         });
     if (!ok) return;
     const skus = [...selectedSkus];
-    setBusy('obsolete');
-    setResult(null);
-    setProgress({ done: 0, total: 0 });
+    begin('obsolete');
+    const task = startTask(obsolete ? 'Mark as obsolete' : 'Remove obsolete mark', { detail: `${noun(skus.length)}…` });
     try {
-      const changed = await setProductsObsolete(skus, obsolete);
+      const changed = await setProductsObsolete(skus, obsolete, { task });
       const n = changed.length;
       // The others were already in that state (setProductsObsolete skips them).
       const rest = skus.length - n;
+      task.finish(obsolete ? `${noun(n)} marked obsolete` : `Mark removed from ${noun(n)}`);
       setResult({
         type: 'success',
         message: (obsolete
@@ -134,6 +152,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       // this message stay (reloading the catalog would clear both); running it
       // again finishes the rest, as the products already done are skipped.
       const n = err.changed?.length ?? 0;
+      task.fail(n ? `${n} of ${skus.length} done before an error: ${err.message}` : err);
       setResult({
         type: 'error',
         message: n
@@ -156,13 +175,15 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       destructive: true,
     });
     if (!ok) return;
-    setBusy('delete');
-    setResult(null);
+    begin('delete');
+    const task = startTask('Delete products', { detail: `Deleting ${noun(skus.length)}…` });
     try {
-      await deleteProducts(skus);
+      await deleteProducts(skus, { task });
+      task.finish(`${noun(skus.length)} deleted`);
       onChanged?.();
       onClear?.();
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? 'Delete failed' });
     } finally {
       setBusy(null);
@@ -180,41 +201,52 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       confirmLabel: 'Generate',
     });
     if (!ok) return;
-    setBusy('keywords');
-    setResult(null);
+    begin('keywords');
     setProgress({ done: 0, total: skus.length });
+    const task = startTask('Generate keywords', { detail: `Writing keywords for ${noun(skus.length)}…` });
     try {
       const { generated, skipped, failed } = await generateKeywords(skus, {
         onProgress: (done, total) => setProgress({ done, total }),
+        task,
       });
       const parts = [`${generated.length} generated`];
       if (skipped.length) parts.push(`${skipped.length} already had keywords`);
       if (failed.length) parts.push(`${failed.length} failed (${failed.slice(0, 3).map((f) => f.sku).join(', ')}${failed.length > 3 ? '…' : ''})`);
+      if (failed.length) task.fail(parts.join(', '));
+      else task.finish(parts.join(', '));
       // No onChanged here: keywords aren't a catalog column, and reloading the
       // list clears the selection — which unmounts this bar and its message.
       setResult({ type: failed.length ? 'error' : 'success', message: parts.join(', ') + '.' });
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? 'Generation failed' });
     } finally {
       setBusy(null);
     }
   }
 
-  async function runBatch(skus, action, taskLabel) {
-    setBusy(taskLabel);
-    setResult(null);
+  // Three products at a time; the card counts each product as it answers.
+  async function runBatch(skus, action, taskLabel, title) {
+    begin(taskLabel);
     setProgress({ done: 0, total: skus.length });
+    const task = startTask(title, { detail: `${noun(skus.length)}…` });
     let succeeded = 0;
     let failed = 0;
+    let answered = 0;
     for (let i = 0; i < skus.length; i += 3) {
       const batch = skus.slice(i, i + 3);
-      const results = await Promise.allSettled(batch.map(action));
+      const results = await Promise.allSettled(batch.map((sku) => Promise.resolve(action(sku)).finally(() => {
+        answered += 1;
+        task.count(answered, skus.length, `Product ${answered} of ${skus.length}`);
+      })));
       for (const r of results) {
         if (r.status === 'fulfilled') succeeded++;
         else failed++;
       }
       setProgress({ done: Math.min(i + 3, skus.length), total: skus.length });
     }
+    if (failed > 0) task.fail(`${succeeded} succeeded, ${failed} failed`);
+    else task.finish(`${noun(succeeded)} done`);
     setBusy(null);
     setResult({
       type: failed > 0 ? 'error' : 'success',
@@ -237,7 +269,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     });
     if (!ok) return;
     const { pushProductToWix } = await loadWixSync();
-    await runBatch(linkedSkus, (sku) => pushProductToWix(sku), 'push');
+    await runBatch(linkedSkus, (sku) => pushProductToWix(sku), 'push', 'Push to Wix');
   }
 
   async function handleRefreshAll() {
@@ -246,53 +278,69 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       return;
     }
     const { readWixProduct } = await loadWixSync();
-    await runBatch(linkedSkus, (sku) => readWixProduct(sku), 'refresh');
+    await runBatch(linkedSkus, (sku) => readWixProduct(sku), 'refresh', 'Refresh from Wix');
   }
 
   // Exports products back into the PIM's own category templates (one sectioned
   // .xlsx, a sheet per category, that the importer accepts) — selection or the
   // whole catalog.
   async function handleExportPim(scope) {
-    setBusy('export');
-    setResult(null);
+    begin('export');
+    const task = startTask(scope === 'all' ? 'PIM export · entire catalog' : 'PIM export', { detail: 'Loading products…' });
     try {
       const { generatePimExport, fetchAllProducts } = await loadExports.pim();
       const productList = scope === 'all' ? await fetchAllProducts() : await getProducts([...selectedSkus]);
       if (!productList.length) throw new Error('No products to export.');
-      const res = await generatePimExport(productList);
+      task.progress(0.1);
+      const res = await generatePimExport(productList, { task: task.part(0.1, 1) });
+      task.finish(`Downloaded · ${noun(res.count)}, ${res.sheets} sheet${res.sheets === 1 ? '' : 's'}`);
       setResult({
         type: 'success',
         message: `Exported ${res.count} product(s) into one Excel file, ${res.sheets} sheet${res.sheets === 1 ? '' : 's'}: ${res.categories.join(', ')}.`,
       });
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? 'PIM export failed' });
     } finally {
       setBusy(null);
     }
   }
 
-  // One entry point for every marketplace with an uploaded template.
+  // One entry point for every marketplace with an uploaded template. The
+  // card starts here; when the marketplace asks which file first, it goes
+  // away with the question and the chosen export starts its own.
   async function handleExportMarketplace(marketplace) {
     if (marketplace === '__pim_selected__') return handleExportPim('selected');
     if (marketplace === '__pim_all__') return handleExportPim('all');
-    const all = (await listTemplates()).filter((t) => t.marketplace === marketplace);
+    begin('export');
+    const task = startTask(`${marketplace} export`, { detail: 'Loading the templates…' });
+    let all;
+    try {
+      all = (await listTemplates()).filter((t) => t.marketplace === marketplace);
+    } catch (err) {
+      task.fail(err);
+      setResult({ type: 'error', message: err.message ?? 'Could not load the templates' });
+      setBusy(null);
+      return;
+    }
     const purposes = purposesIn(all);
     if (purposes.length > 1) {
       // "N files" is what THIS selection downloads for each purpose, not how
       // many templates the purpose has (Amazon CA's six listing templates).
-      setBusy('export');
       try {
         const loaded = await getProducts([...selectedSkus]);
         const counted = purposes.map((p) => ({ ...p, count: filesForSelection(marketplace, all.filter((t) => templatePurpose(t) === p.value), loaded) }));
+        task.cancel();
         setAsking({ marketplace, purposes: counted, templates: all });
       } catch (err) {
+        task.fail(err);
         setResult({ type: 'error', message: err.message ?? 'Could not load the selected products' });
       } finally {
         setBusy(null);
       }
       return;
     }
-    return runMarketplaceExport(marketplace, all);
+    return runMarketplaceExport(marketplace, all, null, task);
   }
 
   // The files an export of these products will write — the same routing the
@@ -311,29 +359,32 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     return new Set(kept.map((p) => templateForProduct(templates, p)?.id).filter(Boolean)).size;
   }
 
-  // The chosen purpose's files go through the marketplace's own exporter.
-  function runMarketplaceExport(marketplace, templates, purpose = null) {
+  // The chosen purpose's files go through the marketplace's own exporter,
+  // on the card handleExportMarketplace started (or a new one after the
+  // purpose question).
+  function runMarketplaceExport(marketplace, templates, purpose = null, task = null) {
     setAsking(null);
+    task ??= startTask(`${marketplace} export`, { detail: 'Loading products…' });
     if (purpose) templates = templates.filter((t) => templatePurpose(t) === purpose);
-    if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates, marketplace);
-    if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates);
-    if (/lowe/i.test(marketplace)) return handleExportLowes(templates, marketplace);
-    if (/menards/i.test(marketplace)) return handleExportMenards(templates, marketplace);
-    setResult({
-      type: 'error',
-      message: `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart, Home Depot and Lowe's are supported so far.`,
-    });
+    if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates, marketplace, task);
+    if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates, task);
+    if (/lowe/i.test(marketplace)) return handleExportLowes(templates, marketplace, task);
+    if (/menards/i.test(marketplace)) return handleExportMenards(templates, marketplace, task);
+    const message = `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart, Home Depot and Lowe's are supported so far.`;
+    task.fail(message);
+    setBusy(null);
+    setResult({ type: 'error', message });
   }
 
   // Lowe's new-item setup is a two-file package (Item Template + SOS Freight
   // Analysis); one Lowe's template covers every category, so no grouping.
-  async function handleExportLowes(templates, marketplace) {
-    setBusy('export');
-    setResult(null);
+  async function handleExportLowes(templates, marketplace, task) {
+    begin('export');
     try {
       const productList = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
+      task.step(`Loading ${noun(count)}…`);
       const [{ generateLowesSet }, loaded] = await Promise.all([loadExports.lowes(), getProducts([...selectedSkus])]);
       for (const p of loaded) {
         // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the file.
@@ -344,13 +395,16 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         throw new Error(excludedSkus.length ? `Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.` : 'Could not load product data.');
       }
 
-      const res = await generateLowesSet(templates, productList);
+      task.progress(0.1);
+      const res = await generateLowesSet(templates, productList, undefined, { task: task.part(0.1, 1) });
+      task.finish(`Downloaded · ${res.files} file${res.files === 1 ? '' : 's'}, ${noun(res.count)}`);
       setResult({
         type: 'success',
         message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — USD cost/MSRP/MAP included; lead times, forecast and competitive URLs stay blank for the business.` +
           (excludedSkus.length ? ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.` : ''),
       });
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? "Lowe's export failed" });
     } finally {
       setBusy(null);
@@ -361,9 +415,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   // dimension). Like the grouped exporters, a mixed selection exports the
   // categories that HAVE a template set and reports the ones that don't —
   // it never refuses the whole selection over one uncovered category.
-  async function handleExportMenards(templates, marketplace) {
-    setBusy('export');
-    setResult(null);
+  async function handleExportMenards(templates, marketplace, task) {
+    begin('export');
     try {
       // Recipient Reference is documentation, not fillable. NOTE: the five
       // Containers files share a name except the "(n)" suffix but hold
@@ -384,6 +437,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const productList = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
+      task.step(`Loading ${noun(count)}…`);
       const [{ generateMenardsFromTemplates }, loaded] = await Promise.all([
         loadExports.menards(),
         getProducts(selectedProducts.filter((p) => wanted.has(p.category)).map((p) => p.sku)),
@@ -403,11 +457,14 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       let countTotal = 0;
       const menardsReports = [];
       const unmapped = new Set();
-      for (const cat of coveredCats) {
+      const { labelTask } = await loadTemplateFiller();
+      const sets = coveredCats.filter((cat) => productList.some((p) => p.category === cat));
+      task.progress(0.1);
+      for (const [i, cat] of sets.entries()) {
         const catTemplates = fillable.filter((t) => templateAppliesTo(t, cat));
         const catProducts = productList.filter((p) => p.category === cat);
-        if (!catProducts.length) continue;
-        const res = await generateMenardsFromTemplates(catTemplates, catProducts);
+        const slice = labelTask(task.part(0.1 + (0.9 * i) / sets.length, 0.1 + (0.9 * (i + 1)) / sets.length), sets.length > 1 ? `Set ${i + 1} of ${sets.length}: ${cat}` : '');
+        const res = await generateMenardsFromTemplates(catTemplates, catProducts, { task: slice });
         files += res.files;
         countTotal += res.count;
         for (const r of res.results) {
@@ -421,8 +478,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       if (unmapped.size) message += ` ${unmapped.size} column(s) left for manual/account data (vendor terms, master packs…).`;
       if (skippedCats.length) message += ` ⚠ Skipped (no template): ${skippedCats.join(', ')}.`;
       if (excludedSkus.length) message += ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.`;
+      task.finish(`Downloaded · ${files} file${files === 1 ? '' : 's'}, ${noun(countTotal)}`);
       setResult({ type: skippedCats.length ? 'error' : 'success', message });
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? 'Menards export failed' });
     } finally {
       setBusy(null);
@@ -433,10 +492,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   // Sinks, Bathroom Faucets, Soap Dispensers…) — resolve each product to ITS
   // template, fill each, one ZIP. Products without a template are reported,
   // never block the rest.
-  async function handleExportBBB(templates, marketplace) {
-    setBusy('export');
-    setResult(null);
-    setProgress({ done: 0, total: count + 1 });
+  async function handleExportBBB(templates, marketplace, task) {
+    begin('export');
     try {
       const groups = new Map(); // template id → { template, productList }
       const skippedSkus = [];
@@ -450,11 +507,15 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         if (tpl) withTemplate.push({ sku: p.sku, tpl });
         else skippedSkus.push(p.sku);
       }
-      setProgress({ done: skippedSkus.length, total: count + 1 });
+      // The exporter, the products and their media load together (20%).
+      const loading = task.part(0, 0.2);
+      loading.step(`Loading ${noun(withTemplate.length)} and their media…`);
+      let reads = 0;
+      const settle = (p) => p.then((v) => { reads += 1; loading.count(reads, 3); return v; });
       const [{ generateBBBSet }, loaded, mediaBySku] = await Promise.all([
-        loadExports.bbb(),
-        getProducts(withTemplate.map((w) => w.sku)),
-        listMediaFor(withTemplate.map((w) => w.sku)),
+        settle(loadExports.bbb()),
+        settle(getProducts(withTemplate.map((w) => w.sku))),
+        settle(listMediaFor(withTemplate.map((w) => w.sku))),
       ]);
       const productBySku = new Map(loaded.map((p) => [p.sku, p]));
       for (const { sku, tpl } of withTemplate) {
@@ -468,7 +529,6 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           groups.set(tpl.id, g);
         }
       }
-      setProgress({ done: count, total: count + 1 });
       if (groups.size === 0) {
         if (excludedSkus.length && !skippedSkus.length) throw new Error(`Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.`);
         throw new Error(
@@ -476,8 +536,9 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         );
       }
 
-      const res = await generateBBBSet([...groups.values()]);
+      const res = await generateBBBSet([...groups.values()], { task: task.part(0.2, 1) });
       if (res?.reports) setReadiness(res.reports);
+      task.finish(`Downloaded · ${res.files} file${res.files === 1 ? '' : 's'}, ${noun(res.count)}`);
 
       setResult({
         type: skippedSkus.length ? 'error' : 'success',
@@ -486,18 +547,19 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           (excludedSkus.length ? ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.` : ''),
       });
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? 'Export failed' });
     } finally {
       setBusy(null);
-      setProgress({ done: 0, total: 0 });
     }
   }
 
   // Wayfair/Amazon templates are class-specific — resolve each product to its
   // template (category + accessory kind) and generate one file per template.
-  async function handleExportGrouped(marketplace, mkTemplates) {
-    setBusy('export');
-    setResult(null);
+  // One card: loading the products 10%, then each template an equal share
+  // ("Template 2 of 3 · kitchen_sink: …").
+  async function handleExportGrouped(marketplace, mkTemplates, task) {
+    begin('export');
     try {
       if (!mkTemplates.length) {
         throw new Error(`No ${marketplace} template found. Upload one in /templates first.`);
@@ -517,6 +579,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const noTemplate = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
+      task.step(`Loading ${noun(count)}…`);
       for (const p of await getProducts([...selectedSkus])) {
         const sku = p.sku;
         // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the file.
@@ -541,12 +604,20 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const reports = [];
       let warnings = 0;
       const leftOut = []; // products an exporter could not write (e.g. no Home Depot Canada item number)
-      for (const { tmpl, label, products: productList } of byTemplate.values()) {
-        const res = await generate(tmpl.storage_path, productList, `${prefix}_${label.replace(/[^a-z0-9_]+/gi, '_')}`);
+      const media = { files: 0, parts: 0, failed: 0 }; // Home Depot Canada's media .zip
+      const { labelTask } = await loadTemplateFiller();
+      const groups = [...byTemplate.values()];
+      task.progress(0.1);
+      for (const [i, { tmpl, label, products: productList }] of groups.entries()) {
+        const slice = labelTask(task.part(0.1 + (0.9 * i) / groups.length, 0.1 + (0.9 * (i + 1)) / groups.length), groups.length > 1 ? `Template ${i + 1} of ${groups.length} · ${label}` : '');
+        const res = await generate(tmpl.storage_path, productList, `${prefix}_${label.replace(/[^a-z0-9_]+/gi, '_')}`, { task: slice });
         warnings += res.warnings?.length ?? 0;
         if (res.skipped?.length) leftOut.push(`${res.skipped.join(', ')} (${res.skippedReason ?? 'not written'})`);
         if (res.fillReport) reports.push({ file: `${marketplace} — ${label}`, ...res.fillReport });
         parts.push(`${label}: ${res.count} product(s)${res.families != null ? ` / ${res.families} group(s)` : ''}`);
+        media.files += res.media?.files ?? 0;
+        media.parts += res.media?.parts ?? 0;
+        media.failed += res.media?.failed?.length ?? 0;
       }
       if (reports.length) setReadiness(reports);
 
@@ -558,8 +629,12 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       if (excludedSkus.length) message += ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.`;
       if (warnings) message += ` ⚠ ${warnings} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`;
       if (leftOut.length) message += ` ⚠ Left out: ${leftOut.join('; ')}.`;
+      task.finish(`Downloaded · ${parts.length} file${parts.length === 1 ? '' : 's'}` +
+        (media.parts ? ` + ${media.files} media file${media.files === 1 ? '' : 's'} in ${media.parts} .zip${media.parts === 1 ? '' : 's'}` : '') +
+        (media.failed ? ` · ${media.failed} could not be fetched` : ''));
       setResult({ type: noTemplate.length || warnings || leftOut.length ? 'error' : 'success', message });
     } catch (err) {
+      task.fail(err);
       setResult({ type: 'error', message: err.message ?? `${marketplace} export failed` });
     } finally {
       setBusy(null);
@@ -574,7 +649,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         pointer-events-none would swallow its clicks. */}
     <div className="fixed bottom-4 left-0 right-0 lg:left-64 z-30 px-4 sm:px-8 flex justify-center pointer-events-none">
       {/* No overflow-hidden here — the dropdown menus open above the bar. */}
-      <div role="region" aria-label="Bulk actions" className="w-full max-w-5xl pointer-events-auto rounded-2xl border border-outline-variant bg-surface shadow-lg">
+      <div ref={barRef} role="region" aria-label="Bulk actions" className="w-full max-w-5xl pointer-events-auto rounded-2xl border border-outline-variant bg-surface shadow-lg">
         {result && (
           <div
             role={result.type === 'error' ? 'alert' : 'status'}

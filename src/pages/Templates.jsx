@@ -26,6 +26,7 @@ import {
 import { formatTimeAgo } from '@/lib/format';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { startTask } from '@/lib/taskProgress';
 
 const MARKETPLACE_OPTIONS = [
   'Wayfair CA',
@@ -484,13 +485,19 @@ function UploadCard({ onDone, onCancel }) {
     if (!canSubmit) return;
     setUploading(true);
     setError(null);
+    const n = files.length;
+    // One file = one storage upload (the stripe); several = a count per file.
+    const task = startTask(n === 1 ? 'Template upload' : `${n} template uploads`, { detail: `Uploading ${files[0].name}…` });
     try {
       for (let i = 0; i < files.length; i++) {
         setProgress(i + 1);
+        if (n > 1) task.count(i, n, `Uploading ${files[i].name} (${i + 1} of ${n})…`);
         await uploadTemplate(effectiveMarketplace, files[i], categories, purpose);
       }
+      task.finish(n === 1 ? `${files[0].name} uploaded` : `${n} files uploaded`);
       onDone();
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setUploading(false);

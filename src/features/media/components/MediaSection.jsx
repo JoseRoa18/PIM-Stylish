@@ -28,6 +28,7 @@ import {
 import Skeleton from '@/components/ui/Skeleton';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAuth } from '@/features/auth/AuthContext';
+import { startTask } from '@/lib/taskProgress';
 import Lightbox from 'yet-another-react-lightbox';
 import Zoom from 'yet-another-react-lightbox/plugins/zoom';
 import 'yet-another-react-lightbox/styles.css';
@@ -224,12 +225,19 @@ export default function MediaSection({ sku, familyNumber = null, category = null
     if (files.length === 0) return;
     setErrorMessage(null);
     setUploadProgress({ done: 0, total: files.length });
+    const task = startTask('Upload media', { detail: `${files.length} file${files.length === 1 ? '' : 's'} to ${sku}…` });
     try {
-      await uploadMediaFiles(sku, files, addLanguage || null, (done, total) =>
-        setUploadProgress({ done, total }),
+      await uploadMediaFiles(
+        sku,
+        files,
+        addLanguage || null,
+        (done, total) => setUploadProgress({ done, total }),
+        { task },
       );
+      task.finish(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'} to ${sku}`);
       reload();
     } catch (err) {
+      task.fail(err);
       setErrorMessage(err.message);
       console.error('Upload error:', err);
     } finally {
@@ -305,11 +313,14 @@ export default function MediaSection({ sku, familyNumber = null, category = null
     if (items.length === 0) return;
     setBusy(true);
     setErrorMessage(null);
+    // One image at a time (90% of the bar), then the .zip.
+    const task = startTask('Download images', { detail: `${items.length} image${items.length === 1 ? '' : 's'} of ${sku}…` });
     try {
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       const failures = [];
-      for (const m of items) {
+      const fetching = task.part(0, 0.9);
+      for (const [i, m] of items.entries()) {
         try {
           const res = await fetch(getMediaUrl(m.storage_path));
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -317,6 +328,7 @@ export default function MediaSection({ sku, familyNumber = null, category = null
         } catch {
           failures.push(m);
         }
+        fetching.count(i + 1, items.length, `Downloading images ${i + 1} of ${items.length}`);
       }
       if (failures.length) {
         zip.file(
@@ -324,21 +336,26 @@ export default function MediaSection({ sku, familyNumber = null, category = null
           failures.map((m) => `${m.file_name}\t${getMediaUrl(m.storage_path)}`).join('\n'),
         );
       }
-      const blob = await zip.generateAsync({ type: 'blob' });
+      const zipping = task.part(0.9, 1);
+      zipping.progress(0, 'Writing the .zip…');
+      const blob = await zip.generateAsync({ type: 'blob' }, (meta) => zipping.progress(meta.percent / 100));
+      const fileName = `${sku}_images_${new Date().toISOString().slice(0, 10)}.zip`;
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${sku}_images_${new Date().toISOString().slice(0, 10)}.zip`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+      task.finish(failures.length ? `Downloaded ${fileName} · ${failures.length} could not be fetched` : `Downloaded ${fileName}`);
       if (failures.length) {
         setErrorMessage(
           `${failures.length} file(s) couldn't be downloaded — their links are in _could_not_download.txt inside the zip.`,
         );
       }
     } catch (err) {
+      task.fail(err);
       setErrorMessage(`Download failed: ${err.message}`);
     } finally {
       setBusy(false);

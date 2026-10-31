@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { runWixImport } from '../api/wixSync';
 import { WIX_SITES, WIX_SITE_KEYS, DEFAULT_WIX_SITE } from '../lib/wixSites';
+import { startTask } from '@/lib/taskProgress';
 
 export default function WixConnectorCard() {
   const [phase, setPhase] = useState('idle'); // idle | previewing | preview-ready | applying | done | error
@@ -20,11 +21,15 @@ export default function WixConnectorCard() {
     setPhase('previewing');
     setError(null);
     setResult(null);
+    // One edge-function call: the stripe moves until Wix answers.
+    const task = startTask('Link with Wix · preview', { detail: `Fetching the ${WIX_SITES[site].label} catalog…` });
     try {
       const data = await runWixImport({ dryRun: true, site });
+      task.finish('Preview ready');
       setPreview(data);
       setPhase('preview-ready');
     } catch (err) {
+      task.fail(err);
       setError(err.message);
       setPhase('error');
     }
@@ -33,11 +38,15 @@ export default function WixConnectorCard() {
   async function handleApply() {
     setPhase('applying');
     setError(null);
+    // One edge-function call: the stripe moves until it answers.
+    const task = startTask('Link with Wix', { detail: `Applying the ${WIX_SITES[site].label} links…` });
     try {
       const data = await runWixImport({ dryRun: false, site });
+      task.finish('Links applied');
       setResult(data);
       setPhase('done');
     } catch (err) {
+      task.fail(err);
       setError(err.message);
       setPhase('error');
     }

@@ -8,12 +8,16 @@ import { completenessContext, inCompleteness, scoreCompleteness } from '@/featur
  * obsolete ones (user, 2026-10-16). Returns the scored rows; the panel groups
  * them (by category / by field) for the brand on screen. `obsoleteLeftOut`
  * lists the obsolete products ({ sku, brand }) so the panel can say how many
- * it left out.
+ * it left out. `task` (optional taskProgress reporter): the catalog read (one
+ * request) up to 70%, then the scoring.
  */
-export async function computePimCompleteness() {
+export async function computePimCompleteness({ task = null } = {}) {
   // Shared with the Listing Health scoring on the same page (one catalog
   // download instead of two); already in SKU order from the database.
   const products = (await loadCatalogWithMedia()).filter((p) => p.workflow_status !== 'archived');
+  task?.progress(0.7);
+  // The scoring blocks the page: the card shows the step first.
+  if (task) await task.step(`Scoring ${products.length} products…`);
   // Every non-archived product, obsolete ones included: a UPC on two products
   // fails both, even when one of them is no longer scored.
   const ctx = completenessContext(products);

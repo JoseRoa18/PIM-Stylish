@@ -130,8 +130,11 @@ export async function readWixProduct(sku, site = DEFAULT_WIX_SITE) {
  * The "general push": send the PIM's content (fields = PIM columns, source of
  * truth) to EVERY Wix site the product is linked on. The server auto-formats
  * the description on each push (house style + typo repairs, never rewording).
+ * `task` (optional taskProgress reporter): the PIM reads 10%, then each store
+ * an equal share — reading it, the content push, the images push.
  */
-export async function pushProductToAllWixSites(sku, brand = null) {
+export async function pushProductToAllWixSites(sku, brand = null, { task = null } = {}) {
+  task?.step('Reading the product…');
   const { data: links } = await supabase.from('wix_links').select('site').eq('sku', sku);
   let sites = new Set((links ?? []).map((l) => l.site));
   const { data: p } = await supabase
@@ -158,7 +161,14 @@ export async function pushProductToAllWixSites(sku, brand = null) {
   }
   if (!sites.size) throw new Error(Object.keys(results).length ? `${sku} is excluded from every ${brand ? (brand === 'stylish' ? 'Stylish' : 'SinksDirect') : 'linked'} store.` : (brand ? `Not linked on any ${brand === 'stylish' ? 'Stylish' : 'SinksDirect'} store yet.` : 'Not linked on any Wix store yet.'));
 
+  task?.progress(0.1);
+  const order = [...sites];
   for (const site of sites) {
+    // One store's share of the bar: reading it 20%, the content to 55%, the images the rest.
+    const i = order.indexOf(site);
+    const store = task?.part(0.1 + (0.9 * i) / order.length, 0.1 + (0.9 * (i + 1)) / order.length);
+    const say = (what) => `${siteLabel(site)}${order.length > 1 ? ` (${i + 1} of ${order.length})` : ''}: ${what}`;
+    store?.progress(0, say('reading the store…'));
     // Accordion sections travel too (rule 2026-08-31): rebuilt from the PIM
     // (Dimensions from measurements, Features from bullets, document links
     // repointed at PIM files) on top of what the store currently shows, so
@@ -171,16 +181,19 @@ export async function pushProductToAllWixSites(sku, brand = null) {
     } catch {
       // store unreadable — push content without touching its sections
     }
+    store?.progress(0.2, say('pushing the content…'));
     try {
       const r = await pushProductToWix(sku, fields, undefined, site);
       results[site] = { ok: true, autoformat: r?.description_autoformat ?? null, sections: fields ? 'rebuilt' : 'kept' };
     } catch (err) {
       results[site] = { ok: false, error: err.message };
+      store?.progress(1);
       continue;
     }
     // Images ride along (rule 2026-08-31): full gallery replace, with the
     // per-brand main-picture rule applied by wix-push-media (gray hero on
     // SinksDirect, white main on Stylish). The name is NEVER pushed.
+    store?.progress(0.55, say('pushing the images…'));
     try {
       const m = await pushMediaToWix(sku, site);
       // The push verifies the gallery after attaching: "ok" only when every
@@ -191,6 +204,7 @@ export async function pushProductToAllWixSites(sku, brand = null) {
     } catch (err) {
       results[site].media = `failed: ${err.message}`;
     }
+    store?.progress(1);
   }
   const okCount = Object.values(results).filter((r) => r.ok).length;
   logActivity({

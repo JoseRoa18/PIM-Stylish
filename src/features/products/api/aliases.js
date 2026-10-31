@@ -108,9 +108,10 @@ export async function setAliasTitle(sku, row, title) {
 /**
  * Paste "SKU<TAB>name" lines for one marketplace: each product's listing
  * name goes on its alias row. Products without an alias there yet are
- * reported (add the alias first), as are SKUs not in the PIM.
+ * reported (add the alias first), as are SKUs not in the PIM. `task`
+ * (optional taskProgress reporter): the lookups 30%, the names written the rest.
  */
-export async function importAliasTitles(marketplace, text) {
+export async function importAliasTitles(marketplace, text, { task = null } = {}) {
   const pairs = [];
   for (const raw of String(text ?? '').split(/\r?\n/)) {
     const line = raw.trim();
@@ -123,6 +124,7 @@ export async function importAliasTitles(marketplace, text) {
   const skus = [...new Set(pairs.map((p) => p.sku))];
   const known = new Set();
   const withAlias = new Map();
+  const looking = task?.part(0, 0.3);
   for (let i = 0; i < skus.length; i += 200) {
     const chunk = skus.slice(i, i + 200);
     const [{ data: prods }, { data: aliases }] = await Promise.all([
@@ -131,9 +133,13 @@ export async function importAliasTitles(marketplace, text) {
     ]);
     for (const p of prods ?? []) known.add(p.sku);
     for (const a of aliases ?? []) withAlias.set(a.sku, a.id);
+    looking?.count(Math.min(i + 200, skus.length), skus.length, `Looking up ${skus.length} products…`);
   }
   const notInPim = skus.filter((s) => !known.has(s));
   const noAlias = skus.filter((s) => known.has(s) && !withAlias.has(s));
+  // one update per name
+  const writing = task?.part(0.3, 1);
+  const toWrite = pairs.filter((p) => withAlias.has(p.sku)).length;
   let written = 0;
   for (const p of pairs) {
     const id = withAlias.get(p.sku);
@@ -141,6 +147,7 @@ export async function importAliasTitles(marketplace, text) {
     const { error } = await supabase.from('product_aliases').update({ listing_title: p.title }).eq('id', id);
     if (error) throw error;
     written += 1;
+    writing?.count(written, toWrite, `Name ${written} of ${toWrite}`);
   }
   logActivity({ action: 'import', entityType: 'product', entityId: `${written} listing names`, target: 'pim', summary: `Imported ${written} ${marketplace} listing names${noAlias.length ? ` · ${noAlias.length} products have no ${marketplace} alias yet` : ''}${notInPim.length ? ` · ${notInPim.length} SKUs not in the PIM` : ''}`, metadata: { marketplace, written, noAlias: noAlias.slice(0, 50), notInPim: notInPim.slice(0, 50) } });
   return { written, noAlias, notInPim };
@@ -166,8 +173,10 @@ export async function removeAlias(sku, row) {
  * "-CAN" on Amazon Canada (or "-US"/"-USA" on Amazon USA) when exactly one
  * has it; otherwise the SKU is skipped and reported for a manual pick. A
  * SKU that already has a different alias on the marketplace is skipped too.
+ * `task` (optional taskProgress reporter): the two lookups 25% each, the
+ * aliases written the rest.
  */
-export async function importAliasList(marketplace, text, kind = 'sku') {
+export async function importAliasList(marketplace, text, kind = 'sku', { task = null } = {}) {
   const lines = String(text ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const pairs = [];
   for (const line of lines) {
@@ -178,9 +187,11 @@ export async function importAliasList(marketplace, text, kind = 'sku') {
   if (!pairs.length) throw new Error('No "alias, SKU" lines found. One pair per line, separated by a tab or a comma.');
   const skus = [...new Set(pairs.map((p) => p.sku))];
   const known = new Set();
+  const looking = task?.part(0, 0.25);
   for (let i = 0; i < skus.length; i += 200) {
     const { data } = await supabase.from('products').select('sku').in('sku', skus.slice(i, i + 200));
     for (const p of data ?? []) known.add(p.sku);
+    looking?.count(Math.min(i + 200, skus.length), skus.length, `Looking up ${skus.length} products…`);
   }
   const notInPim = [...new Set(pairs.filter((p) => !known.has(p.sku)).map((p) => p.sku))];
   const amazon = amazonCode(marketplace);
@@ -201,6 +212,8 @@ export async function importAliasList(marketplace, text, kind = 'sku') {
   // A product that already answers to a different alias keeps it.
   const conflicts = [];
   const skusToWrite = usable.map((p) => p.sku);
+  const checking = task?.part(0.25, 0.5);
+  checking?.progress(0, `Checking the current ${marketplace} aliases…`);
   for (let i = 0; i < skusToWrite.length; i += 200) {
     const chunk = skusToWrite.slice(i, i + 200);
     const { data } = amazon
@@ -210,9 +223,12 @@ export async function importAliasList(marketplace, text, kind = 'sku') {
       const wanted = usable.find((p) => p.sku === row.sku);
       if (wanted && wanted.alias !== row.alias) conflicts.push({ sku: row.sku, current: row.alias, given: wanted.alias });
     }
+    checking?.count(Math.min(i + 200, skusToWrite.length), skusToWrite.length);
   }
   const conflictSkus = new Set(conflicts.map((c) => c.sku));
   const toWrite = usable.filter((p) => !conflictSkus.has(p.sku));
+  const writing = task?.part(0.5, 1);
+  writing?.progress(0, `Saving ${toWrite.length} aliases…`);
   let written = 0;
   for (let i = 0; i < toWrite.length; i += 200) {
     const chunk = toWrite.slice(i, i + 200);
@@ -221,6 +237,7 @@ export async function importAliasList(marketplace, text, kind = 'sku') {
       : await supabase.from('product_aliases').upsert(chunk.map((p) => ({ marketplace, alias: p.alias, sku: p.sku, kind })), { onConflict: 'marketplace,alias' });
     if (error) throw error;
     written += chunk.length;
+    writing?.count(written, toWrite.length, `Saved ${written} of ${toWrite.length} aliases`);
   }
   logActivity({ action: 'import', entityType: 'product', entityId: `${written} aliases`, target: 'pim', summary: `Imported ${written} ${marketplace} aliases${notInPim.length ? ` · ${notInPim.length} SKUs not in the PIM` : ''}${review.length ? ` · ${review.length} need a manual pick` : ''}`, metadata: { marketplace, written, notInPim: notInPim.slice(0, 50), review: review.slice(0, 50), conflicts: conflicts.slice(0, 50) } });
   return { written, notInPim, review, conflicts };

@@ -50,6 +50,7 @@ import { parseCsvText } from '@/features/import/lib/parseSpreadsheet';
 import { promotionMembersFor, LEVEL_FIELDS, promotionLevel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { supabase } from '@/lib/supabase';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const ALIAS_MARKETPLACE = 'BB&B / Overstock';
 export const BEYOND_PORTALS = {
@@ -64,14 +65,16 @@ const tierLabel = (tier) => tier.charAt(0).toUpperCase() + tier.slice(1);
  * level has no value, so planFills can report it instead of dropping the
  * row as "not in the promo".
  */
-async function levelPrices(skus, tier) {
+async function levelPrices(skus, tier, task = null) {
   const level = LEVEL_FIELDS[tier];
   if (!level) throw new Error(`Unknown price level "${tier}".`);
   const mapCol = level.promo_price_usd;
   const costCol = level.costs.lowes_sod_bbb_usd;
   const num = (v) => (v == null || v === '' ? null : Number(v));
   const out = new Map();
+  const tick = batchTicker(task, skus.length, 200, `Reading the ${tierLabel(tier)} prices`);
   for (let i = 0; i < skus.length; i += 200) {
+    tick(i);
     const { data, error } = await supabase
       .from('products')
       .select(`sku, ${mapCol}, ${costCol}`)
@@ -83,9 +86,11 @@ async function levelPrices(skus, tier) {
 }
 
 /** Overstock SKU → PIM SKU for the promotion's members. */
-async function loadAliasMap(skus) {
+async function loadAliasMap(skus, task = null) {
   const byAlias = new Map();
+  const tick = batchTicker(task, skus.length, 200, 'Reading the BB&B / Overstock ids');
   for (let i = 0; i < skus.length; i += 200) {
+    tick(i);
     const { data, error } = await supabase
       .from('product_aliases')
       .select('sku, alias')
@@ -185,13 +190,17 @@ function downloadCsv(name, text) {
  * `tier`: read PROMO_MAP / PROMO_COST from the products' price level
  * ('purple') instead of the promotion's rows — the Beyond rule for flash
  * deals and special events.
+ * `task` (optional taskProgress reporter): members, level prices and aliases
+ * in batches of 200, the file read, filled and written.
  */
-export async function fillBBBPromoFile(file, promotion, { trim = false, portal = 'bbb', tier = null } = {}) {
+export async function fillBBBPromoFile(file, promotion, { trim = false, portal = 'bbb', tier = null, task = null } = {}) {
   const who = BEYOND_PORTALS[portal] ?? BEYOND_PORTALS.bbb;
   // Exclusions are one switch for both portals.
+  task?.progress(0, "Reading the promotion's products…");
   const { rows: prices, excluded } = await promotionMembersFor(promotion, 'bbb');
+  task?.progress(0.15);
   const bySku = tier
-    ? await levelPrices(prices.map((r) => r.sku), tier)
+    ? await levelPrices(prices.map((r) => r.sku), tier, task?.part(0.15, 0.35))
     : new Map(
       prices
         .filter((r) => r.promo_price_usd != null || r.promo_costs?.lowes_sod_bbb_usd != null)
@@ -202,13 +211,14 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
       ? `None of this promotion's products exist in the PIM to read their ${tierLabel(tier)} prices from.`
       : 'This promotion has no US promo MAP or Lowes/SOD/BB&B promo costs loaded.');
   }
-  const byAlias = await loadAliasMap([...bySku.keys()]);
+  const byAlias = await loadAliasMap([...bySku.keys()], task?.part(0.35, 0.55));
 
   const isCsv = /\.csv$/i.test(file.name);
   const baseName = `${who.file}_${String(promotion.period).slice(0, 7)}`;
   let plan;
 
   if (isCsv) {
+    await blockingStep(task, 0.55, 'Reading the file…');
     const text = await file.text();
     const hadBom = text.charCodeAt(0) === 0xfeff;
     const grid = parseCsvText(text);
@@ -216,6 +226,7 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
     if (headerRow === -1) {
       throw new Error('No PARTNER_SKU / PROMO_MAP header found — upload the promotion file downloaded from the BB&B / Overstock portal.');
     }
+    await blockingStep(task, 0.7, 'Filling the file…');
     plan = planFills(grid, headerRow, bySku, byAlias);
     for (const [rowIdx, f] of plan.fills) {
       const row = grid[rowIdx];
@@ -226,8 +237,10 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
     // Trimming keeps the instruction rows, the header and the promo's rows only.
     const kept = trim ? grid.filter((_, i) => i <= headerRow || plan.fills.has(i)) : grid;
     const out = kept.map((row) => row.map(csvQuote).join(',')).join('\r\n');
+    await blockingStep(task, 0.85, 'Writing the file…');
     downloadCsv(`${baseName}.csv`, (hadBom ? '﻿' : '') + out);
   } else {
+    await blockingStep(task, 0.55, 'Opening the file…');
     const JSZip = await loadJSZip();
     const zip = await JSZip.loadAsync(await file.arrayBuffer());
     const sharedFile = zip.file('xl/sharedStrings.xml');
@@ -250,6 +263,7 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
       throw new Error('No PARTNER_SKU / PROMO_MAP header found — upload the promotion file downloaded from the BB&B / Overstock portal.');
     }
 
+    await blockingStep(task, 0.7, 'Filling the sheet…');
     plan = planFills(grid, headerRow, bySku, byAlias);
     const cellsByRow = new Map();
     for (const [rowIdx, f] of plan.fills) {
@@ -268,8 +282,10 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
       sheetXml = removeRows(sheetXml, gone);
     }
     zip.file(path, sheetXml);
+    await blockingStep(task, 0.85, 'Writing the file…');
     await downloadZip(zip, baseName, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
   }
+  task?.progress(1);
 
   const notInFile = [...bySku.keys()].filter((s) => !plan.fileSkus.has(s)).sort();
   const filled = plan.fills.size;
@@ -317,13 +333,16 @@ export async function fillBBBPromoFile(file, promotion, { trim = false, portal =
  * columns (SITE_PRICE, FIRST_COST, MAP_PRICE) are whatever the template
  * carried the day it was uploaded. A flash deal or special event takes its
  * level for this channel (Purple for both here) straight from the products.
+ * `task` (optional taskProgress reporter): the template 20%, then the fill.
  */
-export async function fillBBBPromoTemplate(template, promotion, channel) {
+export async function fillBBBPromoTemplate(template, promotion, channel, { task = null } = {}) {
+  task?.step('Downloading the template…');
   const { data: blob, error } = await supabase.storage.from('templates').download(template.storage_path);
   if (error) throw new Error(`Failed to download template: ${error.message}`);
+  task?.progress(0.2);
   const file = { name: template.file_name, text: () => blob.text(), arrayBuffer: () => blob.arrayBuffer() };
   const tier = (promotion.kind ?? 'monthly') === 'monthly' ? null : promotionLevel(promotion, channel);
-  return fillBBBPromoFile(file, promotion, { trim: true, portal: channel?.portal ?? 'bbb', tier });
+  return fillBBBPromoFile(file, promotion, { trim: true, portal: channel?.portal ?? 'bbb', tier, task: task?.part(0.2, 1) });
 }
 
 /** Message after Generate (template, trimmed) or Fill file (portal file, nothing removed). */

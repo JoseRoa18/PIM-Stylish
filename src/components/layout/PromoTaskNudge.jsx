@@ -170,7 +170,7 @@ export default function PromoTaskNudge() {
     <div
       role="region"
       aria-labelledby="promo-task-nudge-title"
-      className="fixed right-4 bottom-4 z-40 w-[24rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-outline-variant/70 bg-surface shadow-xl overflow-hidden animate-menu-in-up"
+      className="fixed right-4 bottom-[calc(1rem+min(var(--dock-clear-h,0px)+var(--task-dock-h,0px),50vh))] z-40 w-[24rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-outline-variant/70 bg-surface shadow-xl overflow-hidden animate-menu-in-up"
     >
       {/* Header: what this is and how much is waiting */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-3">

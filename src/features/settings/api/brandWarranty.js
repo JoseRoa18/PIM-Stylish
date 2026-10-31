@@ -37,13 +37,16 @@ export async function countBrandProducts(brand) {
  * Upload a brand's general warranty and put it on every product of the
  * brand, replacing their current warranty file. Old files are deleted once
  * nothing references them. Returns { products } — how many carry it now.
+ * `task` (optional taskProgress reporter): one step of five per stage.
  */
-export async function setBrandWarranty(brand, file) {
+export async function setBrandWarranty(brand, file, { task = null } = {}) {
   if (!file) throw new Error('No file selected.');
   if (!/\.pdf$/i.test(file.name)) throw new Error(`${file.name} is not a PDF.`);
 
+  const STEPS = 5;
   const rand = Math.random().toString(36).slice(2, 8);
   const path = `_warranty/${brand.toLowerCase()}-warranty-${rand}.pdf`;
+  task?.count(0, STEPS, `Uploading ${file.name}…`);
   const { error: upErr } = await supabase.storage.from(DOCS_BUCKET).upload(path, file, {
     cacheControl: '2592000',
     upsert: false,
@@ -52,6 +55,7 @@ export async function setBrandWarranty(brand, file) {
   if (upErr) throw new Error(`Upload failed for ${file.name}: ${upErr.message}`);
   const { data: pub } = supabase.storage.from(DOCS_BUCKET).getPublicUrl(path);
 
+  task?.count(1, STEPS, 'Saving the setting…');
   const current = await getBrandWarranties();
   const entry = {
     storage_path: pub.publicUrl,
@@ -62,11 +66,15 @@ export async function setBrandWarranty(brand, file) {
   };
   await saveAppSetting(KEY, { ...current, [brand]: entry });
 
+  task?.count(2, STEPS, `Putting it on every ${brand} product…`);
   const { data: old, error } = await supabase.rpc('apply_brand_warranty', { p_brand: brand });
   if (error) throw error;
+  task?.count(3, STEPS, 'Removing the old warranty files…');
   await deleteStorageObjectsIfUnreferenced((old ?? []).map((r) => r.old_path));
 
+  task?.count(4, STEPS, `Counting the ${brand} products…`);
   const products = await countBrandProducts(brand);
+  task?.count(STEPS, STEPS);
   logActivity({
     action: 'media',
     entityType: 'setting',

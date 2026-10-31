@@ -14,6 +14,7 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { statusMeta, STATUS_ORDER } from '@/features/products/lib/workflowStatus';
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { getAllStock } from '@/features/pricing/api/inventory';
+import { startTask } from '@/lib/taskProgress';
 
 // Loaded when "New product" opens — it drags the exporters' shared code along.
 const CreateProductDialog = lazy(() => import('@/features/products/components/CreateProductDialog'));
@@ -47,14 +48,17 @@ export default function Catalog() {
   // viewers get it too; the builder loads on click.
   async function downloadReport() {
     setReport('busy');
+    const task = startTask('Full Report', { detail: 'Loading the catalog…' });
     try {
       const { generatePimReport } = await import('@/features/syndication/exports/pimReport');
-      const r = await generatePimReport();
+      const r = await generatePimReport({ task });
+      task.finish(`Downloaded · ${r.products} products`);
       setReport({
         ok: true,
         text: `Full report downloaded: ${r.products} products, ${r.columns} columns, ${r.files.toLocaleString()} media files, ${r.ids.toLocaleString()} marketplace IDs.`,
       });
     } catch (err) {
+      task.fail(err);
       setReport({ ok: false, text: err.message ?? 'The report could not be built.' });
     }
   }

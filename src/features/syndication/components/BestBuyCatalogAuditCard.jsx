@@ -6,6 +6,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { formatTimeAgo, formatCategory } from '@/lib/format';
 import { latestSnapshot } from '../lib/channels';
+import { startTask } from '@/lib/taskProgress';
 
 // Normalize for title comparison: case, punctuation and spacing noise out.
 const norm = (s) =>
@@ -29,24 +30,32 @@ export default function BestBuyCatalogAuditCard() {
 
   useEffect(() => {
     let active = true;
+    let ended = false;
+    // Two reads (the snapshot, the products): the bar counts the settled ones.
+    const task = startTask('Best Buy · catalog audit', { silent: true, detail: 'Reading the latest snapshot and the catalog…' });
+    let settled = 0;
+    const counted = (p) => Promise.resolve(p).finally(() => { settled += 1; if (active) task.count(settled, 2, `Reading… (${settled} of 2)`); });
     (async () => {
       try {
         const [snapshot, { data: prods, error: prodErr }] = await Promise.all([
-          latestSnapshot('bestbuy'),
-          supabase
+          counted(latestSnapshot('bestbuy')),
+          counted(supabase
             .from('products')
-            .select('sku, category, brand, model_name, upc:attributes->>upc, title:attributes->>general_title_en'),
+            .select('sku, category, brand, model_name, upc:attributes->>upc, title:attributes->>general_title_en')),
         ]);
         if (prodErr) throw prodErr;
         if (active) {
+          ended = true;
+          task.finish('Loaded');
           setSnap(snapshot);
           setProducts(prods ?? []);
         }
       } catch (err) {
-        if (active) setError(err.message);
+        if (active) { ended = true; task.fail(err); setError(err.message); }
       }
     })();
-    return () => { active = false; };
+    // Left the page before it loaded: the card goes without a word.
+    return () => { active = false; if (!ended) task.cancel(); };
   }, []);
 
   const audit = useMemo(() => {

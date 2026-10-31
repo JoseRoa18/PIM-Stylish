@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { RefreshCw, ArrowRight, CheckCircle2, AlertCircle, OctagonX, ShieldCheck } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/format';
+import { startTask } from '@/lib/taskProgress';
 import { latestSnapshot } from '../lib/channels';
 import { refreshBestBuyOffers } from '../api/bestbuySync';
 import { refreshWalmartItems } from '../api/walmartSync';
@@ -11,6 +12,7 @@ import { refreshWalmartItems } from '../api/walmartSync';
 // Per-product detail lives in Listing Health — deep-linked, not duplicated.
 const CHANNELS = {
   bestbuy: {
+    label: 'Best Buy',
     healthTab: 'bestbuy',
     refresh: refreshBestBuyOffers,
     counters: (s) => [
@@ -21,6 +23,7 @@ const CHANNELS = {
     note: 'Offers, stock and prices are pulled from the Mirakl API. Nothing is ever written to Best Buy — and prices in particular are NEVER pushed.',
   },
   walmart_us: {
+    label: 'Walmart USA',
     healthTab: 'walmart_us',
     refresh: () => refreshWalmartItems('us'),
     shield: 'Items and publish status are read from the API. New listings are created only from the card below, after validation and confirmation.',
@@ -31,6 +34,7 @@ const CHANNELS = {
     note: 'New US seller account (reconnected 2026-09-22): the catalog is being rebuilt from the PIM. Prices are USD. Content and prices of existing items are never pushed from here.',
   },
   walmart_ca: {
+    label: 'Walmart Canada',
     healthTab: 'walmart_ca',
     refresh: () => refreshWalmartItems('ca'),
     shield: 'Content and stock are never written. Promotional prices go out from the Pricing section.',
@@ -60,10 +64,15 @@ export default function ReadOnlyChannelCard({ channel }) {
   async function refresh() {
     setBusy(true);
     setError(null);
+    // One edge call that reports nothing: the moving stripe, then the read.
+    const task = startTask(`${def.label} refresh`, { detail: `Waiting for ${def.label}…` });
     try {
       await def.refresh();
+      task.progress(0.9, 'Reading the new snapshot…');
       await load();
+      task.finish('Pulled');
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setBusy(false);

@@ -3,6 +3,7 @@ import { Loader2, AlertCircle, CheckCircle2, ListChecks, ShieldCheck, PlusCircle
 import { previewWalmartItems, submitWalmartItems, walmartFeedStatus } from '../api/walmartAdd';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { startTask } from '@/lib/taskProgress';
 
 // Per-product "new listing" panel for Walmart USA, one product at a time.
 // Two ways in:
@@ -68,13 +69,20 @@ export default function WalmartAdditionCard({ product }) {
     setBusy(mode);
     setResult(null);
     setStatus(null);
+    // One call: the stripe moves until Walmart (or the preview) answers.
+    const sending = mode === 'create' || mode === 'sandbox';
+    const task = startTask(`Walmart USA · ${product.sku}`, {
+      detail: sending ? `Sending it to Walmart${mode === 'sandbox' ? "'s sandbox" : ''}…` : mode === 'validate' ? "Checking it against Walmart's item spec…" : 'Building the preview…',
+    });
     try {
       const how = match ? 'match' : undefined;
       const data = mode === 'preview' || mode === 'validate'
         ? await previewWalmartItems([product.sku], { validate: mode === 'validate' && !match, trim, setup: how })
         : await submitWalmartItems([product.sku], { sandbox: mode === 'sandbox', confirm: mode === 'create' ? 'CREATE' : undefined, trim, setup: how });
+      task.finish(sending ? 'Sent · Walmart processes it' : mode === 'validate' ? 'Validated' : 'Preview ready');
       setResult(data);
     } catch (err) {
+      task.fail(err);
       setResult({ error: err.message });
     } finally {
       setBusy(null);
@@ -84,9 +92,15 @@ export default function WalmartAdditionCard({ product }) {
   async function refreshStatus() {
     if (!result?.feedId) return;
     setBusy('status');
-    try { setStatus(await walmartFeedStatus(result.feedId, { sandbox: result.env === 'sandbox' })); }
-    catch (err) { setStatus({ error: err.message }); }
-    finally { setBusy(null); }
+    const task = startTask(`Walmart USA · ${product.sku}`, { detail: "Reading Walmart's answer…" });
+    try {
+      const data = await walmartFeedStatus(result.feedId, { sandbox: result.env === 'sandbox' });
+      task.finish(`Walmart: ${data?.feedStatus ?? 'read'}`);
+      setStatus(data);
+    } catch (err) {
+      task.fail(err);
+      setStatus({ error: err.message });
+    } finally { setBusy(null); }
   }
 
   const btn = 'inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50';

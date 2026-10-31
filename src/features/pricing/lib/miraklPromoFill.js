@@ -46,6 +46,7 @@ import {
 import { promotionMembersFor } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const norm = (v) => String(v ?? '').trim().toLowerCase();
 
@@ -111,9 +112,13 @@ function locate(grid) {
  * @param template  marketplace_templates row (purpose "promotions")
  * @param promotion promotions row
  * @param channel   PROMO_CHANNELS entry: market, priceField, msrpField, aliasMarketplace, label, key
+ * @param task      optional taskProgress reporter: template 20%, members,
+ *                  products and aliases in batches of 100, fill, the file
  */
-export async function fillMiraklPromoTemplate(template, promotion, channel) {
+export async function fillMiraklPromoTemplate(template, promotion, channel, { task = null } = {}) {
+  task?.step('Downloading the template…');
   const { zip, shared } = await openTemplate(template.storage_path);
+  task?.progress(0.2, 'Reading the template…');
   const workbookXml = await zip.file('xl/workbook.xml').async('string');
   let hit = null;
   for (const name of listSheetNames(workbookXml)) {
@@ -129,20 +134,26 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
 
   const market = channel.market;
   const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
+  task?.progress(0.25, "Reading the promotion's products…");
   const { rows: prices, excluded } = await promotionMembersFor(promotion, channel.key);
+  task?.progress(0.35);
   const members = prices.filter((r) => r[priceKey] != null);
   if (!members.length) throw new Error(`This promotion has no ${market === 'us' ? 'USD' : 'CAD'} promo prices loaded.`);
   const skus = members.map((r) => r.sku);
 
   const pim = new Map();
+  const tickProducts = batchTicker(task?.part(0.35, channel.aliasMarketplace ? 0.55 : 0.75), skus.length, 100, 'Reading the products');
   for (let i = 0; i < skus.length; i += 100) {
+    tickProducts(i);
     const cols = ['sku', 'map_usd', 'map_cad', 'msrp_usd', 'msrp_cad', channel.costField].filter(Boolean).join(', ');
     const { data } = await supabase.from('products').select(cols).in('sku', skus.slice(i, i + 100));
     for (const p of data ?? []) pim.set(p.sku, p);
   }
   const alias = new Map();
   if (channel.aliasMarketplace) {
+    const tickAliases = batchTicker(task?.part(0.55, 0.75), skus.length, 100, `Reading the ${channel.label} ids`);
     for (let i = 0; i < skus.length; i += 100) {
+      tickAliases(i);
       const { data } = await supabase.from('product_aliases').select('sku, alias').eq('marketplace', channel.aliasMarketplace).in('sku', skus.slice(i, i + 100));
       for (const a of data ?? []) alias.set(a.sku, a.alias);
     }
@@ -172,6 +183,7 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
     });
   }
   if (!lines.length) throw new Error('Nothing to write: no member has a promo price below its regular price.');
+  await blockingStep(task, 0.75, `Filling the sheet · ${lines.length} offers…`);
 
   // Dates in the template's own format: each column copies the time and
   // offset of its example rows (a column without examples takes the discount
@@ -223,7 +235,9 @@ export async function fillMiraklPromoTemplate(template, promotion, channel) {
   zip.file(hit.path, injectRows(cleared.xml, rowsXml, lastRow + lines.length));
 
   const period = String(promotion.period).slice(0, 7);
+  await blockingStep(task, 0.85, 'Writing the file…');
   await downloadZip(zip, `${channel.label.replace(/[^\w]+/g, '_')}_Promo_${period}`, templateExt(template.storage_path));
+  task?.progress(1);
 
   const noPromoCost = lines.filter((l) => l.promoCost == null).length;
   const noBaseCost = channel.costField ? lines.filter((l) => l.baseCost == null).length : 0;

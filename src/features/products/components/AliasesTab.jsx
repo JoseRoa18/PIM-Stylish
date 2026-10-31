@@ -4,6 +4,7 @@ import Dialog from '@/components/ui/Dialog';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { loadAliases, addAlias, removeAlias, importAliasList, importAliasTitles, setAliasTitle, ALIAS_MARKETPLACES, ALIAS_KINDS } from '../api/aliases';
+import { startTask } from '@/lib/taskProgress';
 
 // Amazon USA lists products under the PIM SKU itself, so only Canada takes aliases.
 const AMAZON = ['Amazon Canada'];
@@ -260,9 +261,13 @@ function ImportAliasesDialog({ onClose, onImported }) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    const task = startTask(mode === 'names' ? 'Import listing names' : 'Import aliases', { detail: `${marketplace}…` });
     try {
-      setResult(mode === 'names' ? await importAliasTitles(marketplace, text) : await importAliasList(marketplace, text, kind));
+      const res = mode === 'names' ? await importAliasTitles(marketplace, text, { task }) : await importAliasList(marketplace, text, kind, { task });
+      task.finish(`${res.written} ${mode === 'names' ? 'names' : 'aliases'} saved`);
+      setResult(res);
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setBusy(false);

@@ -63,6 +63,7 @@ import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import DealsOverview from '@/features/pricing/components/DealsOverview';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { startTask } from '@/lib/taskProgress';
 
 // The promotion file tools load the first time a file of their kind is
 // generated (performance pass 2026-09-29) — they stay out of the page's first
@@ -96,6 +97,22 @@ const LIBS = {
   walmartCa: lazyLib(() => import('@/features/pricing/lib/walmartCaPromoFill')),
   lowes: lazyLib(() => import('@/features/pricing/lib/lowesPromoFill')),
 };
+
+// Best Buy's discounts scheduled again after a promotion's list changed —
+// work that runs on after the action, so it gets a card of its own (a moving
+// stripe: one Mirakl import has no share to measure). Nothing to send
+// (automation off, no CAD price yet) leaves no card. `then` runs after a
+// schedule went out, as before.
+function scheduleBestBuyInBackground(promo, then) {
+  const task = startTask(`Best Buy discounts — ${promo.name}`, { detail: 'Checking the automation switches…' });
+  autoScheduleBestBuyPromo(promo, { task })
+    .then((r) => {
+      if (r?.skipped) task.cancel();
+      else task.finish(`${r.scheduled} discount${r.scheduled === 1 ? '' : 's'} scheduled${r.not_listed ? ` · ${r.not_listed} not listed on Best Buy` : ''}`);
+      return then?.();
+    })
+    .catch((err) => task.fail(err));
+}
 
 // Promotional dealer costs live in promo_costs keyed by channel-group slug.
 // Each slug belongs to one market view (Canada or USA) — Wayfair Canada is
@@ -289,7 +306,7 @@ export default function PricingPage() {
             // Fire-and-forget for the MONTHLY promotion only: schedule the
             // month's discounts on Best Buy (honors the /settings switches).
             // Flash deals and special events are scheduled by hand.
-            if (promo && promo.kind === 'monthly') autoScheduleBestBuyPromo(promo).then(reload).catch(() => {});
+            if (promo && promo.kind === 'monthly') scheduleBestBuyInBackground(promo, reload);
           }}
         />
       )}
@@ -361,6 +378,9 @@ function alignTiles(cfg) {
 
 // "Oct 20" — when a store page was read.
 const fmtDay = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+
+// What a Price Alignment card says when its report is in.
+const alignDone = (r) => (r ? `${r.problems.length} problem${r.problems.length === 1 ? '' : 's'} · ${r.total} products` : 'No report yet');
 
 const STATUS_TEXT = {
   promo_missing: 'still at the regular price',
@@ -456,39 +476,62 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
 
   useEffect(() => {
     let active = true;
+    // One card for the whole overview: the channels counted as their
+    // reports arrive.
+    const total = ALIGN_TARGET_KEYS.length;
+    const task = startTask('Price Alignment — channels', { silent: true, detail: 'Reading the saved reports…' });
+    let settled = 0;
+    const counted = () => { settled += 1; task.count(settled, total, `${settled} of ${total} channels read`); };
     // The channels' own reports show first; the stores read from their pages
     // (one larger read) join when they arrive.
-    const load = (keys) => Promise.all(keys.map((k) => loadLatestAlignment(k).catch(() => null)))
+    const load = (keys) => Promise.all(keys.map((k) => loadLatestAlignment(k).catch(() => null).finally(counted)))
       .then((reports) => {
         if (active) setOverview((prev) => ({ ...(prev ?? {}), ...Object.fromEntries(keys.map((k, i) => [k, reports[i]])) }));
       });
     load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind !== 'page'))
-      .then(() => load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page')));
-    return () => { active = false; };
+      .then(() => load(ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page')))
+      .then(() => task.finish(`All ${total} channels read`));
+    return () => { active = false; task.cancel(); };
   }, []);
 
   // The last saved report for the site (cron or manual run) shows instantly.
+  // A channel picked by hand gets a card of its own; the first one is read
+  // under the overview's card.
+  const shownSite = useRef(null);
   useEffect(() => {
     let active = true;
+    const picked = shownSite.current !== null && shownSite.current !== site;
+    shownSite.current = site;
+    const task = picked ? startTask(`Price Alignment — ${ALIGN_TARGETS[site].label}`, { silent: true, detail: 'Reading the last report…' }) : null;
     setLoading(true);
     setResult(null);
     setMsg(null);
-    loadLatestAlignment(site)
-      .then((r) => { if (active) setResult(r); })
-      .catch((err) => { if (active) setMsg({ tone: 'error', text: err.message }); })
+    loadLatestAlignment(site, { task })
+      .then((r) => { if (active) setResult(r); task?.finish(alignDone(r)); })
+      .catch((err) => { if (active) setMsg({ tone: 'error', text: err.message }); task?.fail(err); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    return () => { active = false; task?.cancel(); };
   }, [site]);
 
-  async function analyze() {
+  // `run` (optional): the card of a price fix this analysis re-checks — a
+  // slice of it, so one fix is one card from the push to the re-check.
+  // Returns whether the analysis went through.
+  async function analyze(run = null) {
     setRunning(true);
     setMsg(null);
+    const own = run ? null : startTask(`Price Alignment — ${cfg.label}`, {
+      detail: cfg.kind === 'page' ? 'Reading the store prices…' : `Pulling the live prices from ${cfg.label}…`,
+    });
     try {
-      const fresh = await runPriceAlignment(site);
+      const fresh = await runPriceAlignment(site, { task: run ?? own });
       setResult(fresh);
       setOverview((prev) => (prev ? { ...prev, [site]: fresh } : prev));
+      own?.finish(alignDone(fresh));
+      return true;
     } catch (err) {
+      own?.fail(err);
       setMsg({ tone: 'error', text: err.message });
+      return false;
     } finally {
       setRunning(false);
     }
@@ -501,15 +544,32 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   //  - Best Buy (Mirakl): offer imports are processed in the background over
   //    a few minutes → re-checking now would show the old prices, so leave
   //    the report as-is and tell the user when to re-run.
-  async function reanalyzeAfterIndexLag(prefix) {
+  // `task`: the fix's card — the push took its first half; the wait (counted
+  // down, second by second) and the re-check fill the rest.
+  async function reanalyzeAfterIndexLag(prefix, task) {
     if (cfg.kind === 'bestbuy') {
       setMsg({ tone: 'success', text: `${prefix} Best Buy applies offer updates in the background (a few minutes) — run a fresh analysis later to confirm.` });
+      task.finish('Sent — Best Buy applies it within a few minutes');
       return;
     }
     setMsg({ tone: 'success', text: `${prefix} Waiting ~20s for the store index before re-checking…` });
-    await new Promise((resolve) => setTimeout(resolve, 20000));
-    await analyze();
+    // One 20 s timer decides when to go on (a chain of 1 s timers is slowed to
+    // one a minute in a tab hidden for a while); a second one only counts down.
+    const wait = task.part(0.5, 0.7);
+    await new Promise((resolve) => {
+      const end = Date.now() + 20_000;
+      const show = () => {
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        wait.progress((20 - left) / 20, `Waiting for the store to update… ${left} s`);
+      };
+      show();
+      const tick = setInterval(show, 1000);
+      setTimeout(() => { clearInterval(tick); resolve(); }, 20_000);
+    });
+    const ok = await analyze(task.part(0.7, 1));
     setMsg({ tone: 'success', text: `${prefix} Analysis refreshed.` });
+    if (ok) task.finish('Pushed and checked again');
+    else task.fail('Pushed, but the new analysis failed — run it again.');
   }
 
   async function fixOne(problem) {
@@ -524,10 +584,13 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
     if (!ok) return;
     setFixing(problem.sku);
     setMsg(null);
+    const task = startTask(`Push ${problem.sku} to ${cfg.label}`, { detail: `Pushing ${money(problem.expected)}…` });
     try {
       await pushExpectedPrice(problem.sku, problem.expected, site, problem);
-      await reanalyzeAfterIndexLag(`${problem.sku} → ${money(problem.expected)} pushed.`);
+      task.progress(0.5);
+      await reanalyzeAfterIndexLag(`${problem.sku} → ${money(problem.expected)} pushed.`, task);
     } catch (err) {
+      task.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setFixing(null);
@@ -545,15 +608,26 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
     setFixing('all');
     setMsg(null);
     setProgress(null);
+    // One card from the push to the re-check: the push is its first half
+    // (Wix one product at a time, Best Buy one import — a moving stripe).
+    const task = startTask(`Fix prices — ${cfg.label}`, {
+      detail: cfg.kind === 'bestbuy' ? `Sending ${fixable.length} price${fixable.length === 1 ? '' : 's'} to Best Buy…` : `Pushing ${fixable.length} price${fixable.length === 1 ? '' : 's'}…`,
+    });
+    const pushing = task.part(0, 0.5);
     try {
-      const r = await fixAlignment(fixable, setProgress, site);
+      const r = await fixAlignment(fixable, (p) => {
+        setProgress(p);
+        if (p.done > 0) pushing.count(p.done, p.total, `${p.done} of ${p.total} pushed`);
+      }, site);
       setProgress(null);
       if (r.failures.length) {
         setMsg({ tone: 'error', text: `${r.fixed} pushed · failed: ${r.failures.join('; ')}` });
+        task.fail(`${r.fixed} pushed · ${r.failures.length} failed`);
       } else {
-        await reanalyzeAfterIndexLag(`${r.fixed} price${r.fixed === 1 ? '' : 's'} pushed.`);
+        await reanalyzeAfterIndexLag(`${r.fixed} price${r.fixed === 1 ? '' : 's'} pushed.`, task);
       }
     } catch (err) {
+      task.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setFixing(null);
@@ -602,7 +676,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
         </div>
         <button
           type="button"
-          onClick={analyze}
+          onClick={() => analyze()}
           disabled={running}
           aria-busy={running}
           title={cfg.kind === 'page' ? 'Read the latest prices the Where to Buy check found (nothing is opened again)' : undefined}
@@ -933,6 +1007,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   async function handleCreate() {
     setBusy(true);
     setError(null);
+    let task = null;
     try {
       if (customDates && (!startsOn || !endsOn)) throw new Error('Pick both the first and the last day, or switch back to the month calendar.');
       if (customDates && endsOn < startsOn) throw new Error('The end date is before the start date.');
@@ -949,15 +1024,19 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       // takes the file's prices over Orange, the USA Orange over the file
       // (monthly rule 2026-10-02, applied by the database). A pasted SKU list
       // takes everything from the level.
-      const res = monthly && mode === 'file'
-        ? await createPromotionFromFile({ ...payload, rows: mergedFileRows })
-        : await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: monthly ? [] : portals });
+      const fromFile = monthly && mode === 'file';
+      task = startTask(`Create ${PROMOTION_KINDS[kind].toLowerCase()}`, { detail: fromFile ? 'Checking the SKUs against the PIM…' : `Reading the ${levelLabel(KIND_LEVEL[kind])} prices…` });
+      const res = fromFile
+        ? await createPromotionFromFile({ ...payload, rows: mergedFileRows, task })
+        : await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: monthly ? [] : portals, task });
       const notes = [];
       if (res.notInPim.length) notes.push(`Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
       if (res.noLevel?.length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in the PIM: ${res.noLevel.join(', ')}`);
       if (notes.length) setError(`Created — ${res.added} SKUs added. ${notes.join(' · ')}`);
+      task.finish(`Created · ${res.added} SKU${res.added === 1 ? '' : 's'}`);
       onCreated(res.promotion);
     } catch (err) {
+      task?.fail(err);
       setError(err.message);
       setBusy(false);
     }
@@ -1269,6 +1348,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   useEffect(() => {
     if (!open || rows !== null) return;
     (async () => {
+      // A card only if it is slow (the 400 ms before a card shows).
+      const task = startTask(`Promotion prices — ${promo.name}`, { silent: true, detail: 'Reading the promotion prices…' });
       try {
         const prices = await getPromotionPrices(promo.id);
         setRows(prices);
@@ -1277,23 +1358,30 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         // parallel chunks of 100 (they used to go one after another).
         // Stock is an add-on to the table: if it cannot be read the prices
         // still show, with the Stock column empty.
-        const stockPromise = getStockFor(skus).catch(() => ({ ca: {}, us: {} }));
         const chunks = [];
         for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
+        const reads = task.part(0.2, 1);
+        let settled = 0;
+        const counted = () => { settled += 1; reads.count(settled, chunks.length + 1, `Reading the products and stock · ${settled} of ${chunks.length + 1}`); };
+        task.progress(0.2, `Reading the products and stock of ${skus.length} SKUs…`);
+        const stockPromise = getStockFor(skus).catch(() => ({ ca: {}, us: {} })).finally(counted);
         // The obsolete mark is for the rows' Obsolete pill.
         const parts = await Promise.all(chunks.map((part) => supabase
           .from('products')
           .select('sku, map_cad, map_usd, category, brand, is_obsolete')
-          .in('sku', part)));
+          .in('sku', part)
+          .then((res) => { counted(); return res; })));
         const maps = {};
         for (const { data } of parts) for (const p of data ?? []) maps[p.sku] = p;
         setMapBySku(maps);
         setStockByMarket(await stockPromise);
+        task.finish(`${prices.length} product${prices.length === 1 ? '' : 's'}`);
       } catch (err) {
+        task.fail(err);
         setMsg({ tone: 'error', text: err.message });
       }
     })();
-  }, [open, rows, promo.id]);
+  }, [open, rows, promo.id, promo.name]);
 
   // The market tab; the table below falls back to the promotion's first
   // market when the portals no longer include the one selected.
@@ -1318,11 +1406,18 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   async function refreshStock() {
     setBusy('stock');
     setMsg(null);
+    // The pull is one call (a moving stripe), then the table's stock.
+    const task = startTask('Refresh stock', { detail: 'Pulling ShipStation (USA) and the Canada inventory file…' });
     try {
       const r = await refreshInventory();
-      setStockByMarket(await getStockFor((rows ?? []).map((x) => x.sku)));
-      setMsg({ tone: r.ok ? 'success' : 'error', text: `Stock refreshed — ${describeInventoryPull(r).join(' · ')}.` });
+      task.progress(0.8, "Reading the promotion's stock…");
+      setStockByMarket(await getStockFor((rows ?? []).map((x) => x.sku), { task: task.part(0.8, 1) }));
+      const text = `Stock refreshed — ${describeInventoryPull(r).join(' · ')}.`;
+      setMsg({ tone: r.ok ? 'success' : 'error', text });
+      if (r.ok) task.finish('Stock refreshed');
+      else task.fail(text);
     } catch (err) {
+      task.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setBusy(null);
@@ -1332,8 +1427,10 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   async function saveSkus() {
     setBusy('skus');
     setMsg(null);
+    const task = startTask(`Save SKUs — ${promo.name}`, { detail: "Reading the promotion's products…" });
     try {
-      const r = await setPromotionSkusFromLevel(promo, parseSkuList(skuText).skus);
+      const r = await setPromotionSkusFromLevel(promo, parseSkuList(skuText).skus, undefined, { task });
+      task.finish(`${r.added} added, ${r.removed} removed`);
       const notes = [`${r.added} added, ${r.removed} removed.`];
       if (r.notInPim.length) notes.push(`Not in the PIM, skipped: ${r.notInPim.join(', ')}.`);
       if (r.noLevel.length) notes.push(`No ${levelLabel(promotionLevel(promo))} price in the PIM: ${r.noLevel.join(', ')}.`);
@@ -1342,13 +1439,16 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
       setRows(null); // reload the list
       onChanged();
     } catch (err) {
+      task.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setBusy(null);
     }
   }
 
-  async function run(kind, fn, confirmOpts) {
+  // `taskTitle`: the slow actions get a progress card (fn receives it and
+  // returns `done`, what the card says at the end); a quick one has none.
+  async function run(kind, fn, confirmOpts, taskTitle = null) {
     if (confirmOpts) {
       const ok = await confirm(confirmOpts);
       if (!ok) return;
@@ -1356,11 +1456,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
     setBusy(kind);
     setMsg(null);
     setProgress(null);
+    const task = taskTitle ? startTask(taskTitle, { detail: "Reading the promotion's products…" }) : null;
     try {
-      const res = await fn();
+      const res = await fn(task);
+      task?.finish(res?.done);
       if (res?.text) setMsg({ tone: 'success', text: res.text });
       onChanged();
     } catch (err) {
+      task?.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setBusy(null);
@@ -1427,14 +1530,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                     icon={Play}
                     label="Apply to store pricing"
                     busy={busy === 'apply'}
-                    onClick={() => run('apply', async () => {
-                      const r = await applyPromotion(promo);
-                      return { text: `${r.applied} products set on sale in the PIM. Now push to Wix to publish.` };
+                    onClick={() => run('apply', async (task) => {
+                      const r = await applyPromotion(promo, { task });
+                      return { text: `${r.applied} products set on sale in the PIM. Now push to Wix to publish.`, done: `Applied to ${r.applied} products` };
                     }, {
                       title: `Apply "${promo.name}"?`,
                       message: 'Sets the CAD promo price as the sale price on every SKU in the list (in the PIM only — pushing to Wix is the next step).',
                       confirmLabel: 'Apply',
-                    })}
+                    }, `Apply to store pricing — ${promo.name}`)}
                   />
                   )}
                   <ActionButton
@@ -1457,14 +1560,20 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   icon={Send}
                   label="Push to Wix"
                   busy={busy === 'push'}
-                  onClick={() => run('push', async () => {
-                    const r = await pushPromotionToWix(promo, setProgress);
-                    return { text: `Pushed ${r.pushed}/${r.total} to Wix${r.notLinked ? ` · ${r.notLinked} not linked` : ''}${r.failures.length ? ` · ${r.failures.length} failed` : ''}` };
+                  onClick={() => run('push', async (task) => {
+                    const r = await pushPromotionToWix(promo, (p) => {
+                      setProgress(p);
+                      task.count(p.done, p.total, `${p.done} of ${p.total} pushed`);
+                    });
+                    return {
+                      text: `Pushed ${r.pushed}/${r.total} to Wix${r.notLinked ? ` · ${r.notLinked} not linked` : ''}${r.failures.length ? ` · ${r.failures.length} failed` : ''}`,
+                      done: `Pushed ${r.pushed} of ${r.total}${r.failures.length ? ` · ${r.failures.length} failed` : ''}`,
+                    };
                   }, {
                     title: `Push to Wix?`,
                     message: `Pushes the current pricing of every linked SKU in this promotion to the live store.`,
                     confirmLabel: 'Push',
-                  })}
+                  }, `Push to Wix — ${promo.name}`)}
                 />
               )}
               {promo.status === 'active' && (
@@ -1472,15 +1581,15 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   icon={Square}
                   label="End promotion"
                   busy={busy === 'end'}
-                  onClick={() => run('end', async () => {
-                    const r = await endPromotion(promo);
-                    return { text: `${r.cleared} products back to regular price in the PIM. Push to Wix to publish.` };
+                  onClick={() => run('end', async (task) => {
+                    const r = await endPromotion(promo, { task });
+                    return { text: `${r.cleared} products back to regular price in the PIM. Push to Wix to publish.`, done: `${r.cleared} products back to regular price` };
                   }, {
                     title: `End "${promo.name}"?`,
                     message: 'Clears the sale price on every SKU in the list (in the PIM). Push to Wix afterwards to update the store.',
                     confirmLabel: 'End promotion',
                     destructive: true,
-                  })}
+                  }, `End promotion — ${promo.name}`)}
                 />
               )}
               {promo.status !== 'ended' && (
@@ -1542,14 +1651,22 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                 // An updated list re-schedules the Best Buy discounts (the
                 // OF24 import overwrites the previous ones and clears the
                 // SKUs that left).
-                autoScheduleBestBuyPromo(promo).then(onChanged).catch(() => {});
+                scheduleBestBuyInBackground(promo, onChanged);
                 // Walmart Canada already scheduled: the SKUs that left the
                 // Canada list lose its promo there (joined ones are sent by
-                // hand from the Walmart row).
+                // hand from the Walmart row). Its own card, like Best Buy's.
                 if (info?.market === 'ca' && promo.wm_ca_scheduled_at && info.leftSkus?.length) {
-                  syncWalmartCaList(promo, info)
-                    .then(onChanged)
-                    .catch((err) => setMsg({ tone: 'error', text: `Walmart Canada: ${err.message}` }));
+                  const task = startTask(`Walmart Canada list — ${promo.name}`, { detail: 'Checking the SKUs that left the Canada list…' });
+                  syncWalmartCaList(promo, { ...info, task })
+                    .then((r) => {
+                      if (r?.skipped) task.cancel();
+                      else task.finish(r?.removed?.to_delete ? `Promo removed from ${r.removed.to_delete} SKU${r.removed.to_delete === 1 ? '' : 's'}` : 'Nothing to remove');
+                      return onChanged();
+                    })
+                    .catch((err) => {
+                      task.fail(err);
+                      setMsg({ tone: 'error', text: `Walmart Canada: ${err.message}` });
+                    });
                 }
               }}
             />
@@ -1887,7 +2004,7 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Fills the cost after discount with the WC Wayfair Canada of the promotion's level and keeps only its products.",
     accept: '.xlsx,.xlsm',
-    fill: async (file, promo) => (await LIBS.wayfairPromo.load()).fillWayfairPromoFile(file, promo),
+    fill: async (file, promo, { task } = {}) => (await LIBS.wayfairPromo.load()).fillWayfairPromoFile(file, promo, 'CAN', { task }),
     summarize: (r) => LIBS.wayfairPromo.get().summarizeWayfairFill(null, r),
   },
   wayfair_us: {
@@ -1898,7 +2015,7 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Fills the cost after discount with the WC Wayfair of the promotion's level and keeps only its products.",
     accept: '.xlsx,.xlsm',
-    fill: async (file, promo) => (await LIBS.wayfairPromo.load()).fillWayfairPromoFile(file, promo, 'USA'),
+    fill: async (file, promo, { task } = {}) => (await LIBS.wayfairPromo.load()).fillWayfairPromoFile(file, promo, 'USA', { task }),
     summarize: (r) => LIBS.wayfairPromo.get().summarizeWayfairFill(null, r),
   },
   // Price change, the pricing file downloaded from Partner Home: the day the
@@ -1912,7 +2029,7 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Lowers the MAP of the promotion's products to its level. Upload it the day the promotion starts.",
     accept: '.xlsx,.xlsm',
-    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'CAN', 'promo'),
+    fill: async (file, promo, { task } = {}) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'CAN', 'promo', { task }),
     summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   wayfair_us_price_start: {
@@ -1923,7 +2040,7 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Lowers the MAP of the promotion's products to its level. Upload it the day the promotion starts.",
     accept: '.xlsx,.xlsm',
-    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'USA', 'promo'),
+    fill: async (file, promo, { task } = {}) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'USA', 'promo', { task }),
     summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   wayfair_price_change: {
@@ -1934,8 +2051,8 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Puts the promotion's products back at their Blue MAP and cost.",
     accept: '.xlsx,.xlsm',
-    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'CAN', 'blue'),
-    saved: { task: 'wayfair_ca:price_start', fill: async (promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFromSaved(promo, 'CAN'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
+    fill: async (file, promo, { task } = {}) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'CAN', 'blue', { task }),
+    saved: { task: 'wayfair_ca:price_start', fill: async (promo, { task } = {}) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFromSaved(promo, 'CAN', { task }), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
     summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   wayfair_us_price_change: {
@@ -1946,8 +2063,8 @@ const FILE_FILLERS = {
     monogramCls: 'bg-brand-wayfair/15 text-brand-wayfair',
     hint: "Puts the promotion's products back at their Blue MAP and cost.",
     accept: '.xlsx,.xlsm',
-    fill: async (file, promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'USA', 'blue'),
-    saved: { task: 'wayfair_us:price_start', fill: async (promo) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFromSaved(promo, 'USA'), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
+    fill: async (file, promo, { task } = {}) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFile(file, promo, 'USA', 'blue', { task }),
+    saved: { task: 'wayfair_us:price_start', fill: async (promo, { task } = {}) => (await LIBS.wayfairPriceChange.load()).fillWayfairPriceChangeFromSaved(promo, 'USA', { task }), note: "Made from the Promo MAP day's file. If Partner Home rejects it, upload a fresh one." },
     summarize: (r) => LIBS.wayfairPriceChange.get().summarizeWayfairPriceChange(r),
   },
   // Menards: their file comes in, F/G/H go out. `analyze` runs first so the
@@ -1960,7 +2077,7 @@ const FILE_FILLERS = {
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
     hint: "Fills F, G and H with the prices of the promotion's level.",
     accept: '.xlsx,.xlsm',
-    analyze: async (file, promo) => (await LIBS.menards.load()).analyzeMenardsPromoFile(file, promo),
+    analyze: async (file, promo, opts) => (await LIBS.menards.load()).analyzeMenardsPromoFile(file, promo, opts),
     fill: async (file, promo, opts) => (await LIBS.menards.load()).fillMenardsPromoFile(file, promo, opts),
     summarize: (r) => LIBS.menards.get().summarizeMenardsFill(r),
   },
@@ -1972,8 +2089,8 @@ const FILE_FILLERS = {
     monogramCls: 'bg-surface-container-high text-on-surface-variant',
     hint: "Puts the promotion's products back at Blue and leaves out the rest.",
     accept: '.xlsx,.xlsm',
-    fill: async (file, promo) => (await LIBS.menards.load()).fillMenardsBackToBlue(file, promo),
-    saved: { task: 'menards:promo_file', fill: async (promo) => (await LIBS.menards.load()).fillMenardsBackToBlueFromSaved(promo) },
+    fill: async (file, promo, { task } = {}) => (await LIBS.menards.load()).fillMenardsBackToBlue(file, promo, { task }),
+    saved: { task: 'menards:promo_file', fill: async (promo, { task } = {}) => (await LIBS.menards.load()).fillMenardsBackToBlueFromSaved(promo, { task }) },
     summarize: (r) => LIBS.menards.get().summarizeMenardsBackToBlue(r),
   },
 };
@@ -1991,6 +2108,14 @@ const FILE_STEPS = {
   price_start: { order: 1, label: 'Promo MAP', when: 'The day it starts', dot: 'bg-[#f0b27a]' },
   price_change: { order: 2, label: 'Back to Blue', when: 'The day it ends', dot: 'bg-[#4a8ee6]' },
 };
+// The progress card's title of a filler: "Wayfair USA promo file",
+// "Promo MAP — Wayfair Canada", "Back to Blue — Menards".
+function fileTaskTitle(def) {
+  const market = FILE_GROUPS.find((g) => g.key === def.group)?.label ?? def.label;
+  if (def.step === 'price_start') return `Promo MAP — ${market}`;
+  if (def.step === 'price_change') return `Back to Blue — ${market}`;
+  return `${market} promo file`;
+}
 
 // ============================ Marketplace channels ============================
 
@@ -2185,40 +2310,47 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
 
   async function generate(channel, template) {
     setBusy(channel.key);
+    // The card: the promotion re-read, the file tools loaded, then the
+    // filler's own stages (template, products, fill, the file).
+    const task = startTask(`${channel.label} promo file`, { detail: 'Reading the promotion…' });
     try {
       // Files are made from the promotion as it is now, not the page's copy.
       const current = await refreshPromotion(promo);
+      task.progress(0.03, 'Loading the file tools…');
+      const opts = { task: task.part(0.05, 1) };
       let text;
       if (channel.fill === 'amazon') {
         const m = await LIBS.amazon.load();
-        text = m.summarizeAmazonFill(channel, await m.fillAmazonPromoTemplate(template, current, channel));
+        text = m.summarizeAmazonFill(channel, await m.fillAmazonPromoTemplate(template, current, channel, opts));
       } else if (channel.fill === 'mirakl') {
         const m = await LIBS.mirakl.load();
-        text = m.summarizeMiraklFill(channel, await m.fillMiraklPromoTemplate(template, current, channel));
+        text = m.summarizeMiraklFill(channel, await m.fillMiraklPromoTemplate(template, current, channel, opts));
       } else if (channel.fill === 'rona') {
         const m = await LIBS.rona.load();
-        text = m.summarizeRonaFill(channel, await m.fillRonaPromoTemplate(template, current, channel));
+        text = m.summarizeRonaFill(channel, await m.fillRonaPromoTemplate(template, current, channel, opts));
       } else if (channel.fill === 'homedepot_ca') {
         // Home Depot Canada hands out one file per product family: every
         // promotions template of the marketplace is filled in one go.
         const m = await LIBS.homeDepotCa.load();
-        text = m.summarizeHomeDepotCaFill(channel, await m.fillHomeDepotCaPromoTemplates(channel.templates?.length ? channel.templates : [template], current, channel));
+        text = m.summarizeHomeDepotCaFill(channel, await m.fillHomeDepotCaPromoTemplates(channel.templates?.length ? channel.templates : [template], current, channel, opts));
       } else if (channel.fill === 'walmart_ca') {
         const m = await LIBS.walmartCa.load();
-        text = m.summarizeWalmartCaFill(channel, await m.fillWalmartCaPromoTemplate(template, current, channel));
+        text = m.summarizeWalmartCaFill(channel, await m.fillWalmartCaPromoTemplate(template, current, channel, opts));
       } else if (channel.fill === 'lowes') {
         const m = await LIBS.lowes.load();
-        text = m.summarizeLowesFill(channel, await m.fillLowesPromoTemplate(template, current, channel));
+        text = m.summarizeLowesFill(channel, await m.fillLowesPromoTemplate(template, current, channel, opts));
       } else if (channel.fill === 'bbb') {
         const m = await LIBS.bbb.load();
-        text = m.summarizeBBBFill(channel, await m.fillBBBPromoTemplate(template, current, channel));
+        text = m.summarizeBBBFill(channel, await m.fillBBBPromoTemplate(template, current, channel, opts));
       } else {
         const m = await LIBS.generic.load();
-        text = m.summarizePromoFill(channel, await m.fillPromoTemplate(template, current, channel));
+        text = m.summarizePromoFill(channel, await m.fillPromoTemplate(template, current, channel, opts));
       }
+      task.finish('File downloaded');
       setHistory((h) => ({ ...h, [channel.key]: new Date().toISOString() }));
       onMsg({ tone: 'success', text });
     } catch (err) {
+      task.fail(err);
       onMsg({ tone: 'error', text: err.message });
     } finally {
       setBusy(null);
@@ -2436,9 +2568,13 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
 
   async function runPreview() {
     setBusy('preview'); setError(null); setResult(null); setLive({});
+    const task = startTask(`Preview — ${label}`, { detail: 'Building the feed (nothing is sent)…' });
     try {
-      setPreview(await scheduleWalmartPromo(promo, market, { skus: subset, dryRun: true }));
+      const p = await scheduleWalmartPromo(promo, market, { skus: subset, dryRun: true });
+      setPreview(p);
+      task.finish(`${p?.lines?.length ?? 0} line${p?.lines?.length === 1 ? '' : 's'} ready`);
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setBusy(null);
@@ -2447,12 +2583,15 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
 
   async function send() {
     setBusy('send'); setError(null);
+    const task = startTask(`Send promo prices — ${label}`, { detail: `Sending ${lines.length} promo price${lines.length === 1 ? '' : 's'} to Walmart…` });
     try {
       const r = await scheduleWalmartPromo(promo, market, { skus: subset });
       setResult(r);
       const sent = Math.max(0, (r.attempted ?? 0) - (r.itemsFailed ?? 0));
+      task.finish(`${sent} scheduled${r.itemsFailed ? ` · ${r.itemsFailed} rejected` : ''}`);
       onSent(`${label}: ${sent} promo price${sent === 1 ? '' : 's'} scheduled for ${r.window?.start?.slice(0, 10)} to ${r.window?.end?.slice(0, 10)} (feed ${r.feedId ?? '?'}, ${r.feedStatus ?? 'status pending'})` + (r.itemsFailed ? ` · ${r.itemsFailed} rejected` : ''));
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setBusy(null);
@@ -2608,22 +2747,35 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
   async function generateFromSaved() {
     setBusy(true);
     setError(null);
+    const task = startTask(fileTaskTitle(def), { detail: 'Reading the promotion…' });
     try {
-      const r = await def.saved.fill(await refreshPromotion(promo));
+      const current = await refreshPromotion(promo);
+      task.progress(0.03);
+      const r = await def.saved.fill(current, { task: task.part(0.03, 1) });
+      task.finish('File downloaded');
       onDone({ tone: 'success', text: def.summarize(r) });
     } catch (err) {
+      task.fail(err);
       setError(err.message);
       setBusy(false);
     }
   }
 
-  async function finish(file, opts) {
+  // `run`: the card of an upload that was analyzed first (Menards) carries
+  // on into the fill — { task, from } — so one upload is one card.
+  async function finish(file, opts, run = null) {
     setBusy(true);
     setError(null);
+    const task = run?.task ?? startTask(fileTaskTitle(def), { detail: 'Reading the promotion…' });
+    const from = run?.from ?? 0;
     try {
-      const r = await def.fill(file, await refreshPromotion(promo), opts);
+      const current = await refreshPromotion(promo);
+      task.progress(from + 0.03);
+      const r = await def.fill(file, current, { ...opts, task: task.part(from + 0.03, 1) });
+      task.finish('File downloaded');
       onDone({ tone: 'success', text: def.summarize(r) });
     } catch (err) {
+      task.fail(err);
       setError(err.message);
       setBusy(false);
       setPending(null);
@@ -2635,11 +2787,20 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
     if (!def.analyze) return finish(file);
     setBusy(true);
     setError(null);
+    const task = startTask(fileTaskTitle(def), { detail: 'Reading the promotion…' });
     try {
-      const plan = await def.analyze(file, await refreshPromotion(promo));
-      if (plan.notInFile?.length) { setPending({ file, plan }); setBusy(false); return; }
-      await finish(file, { plan });
+      const plan = await def.analyze(file, await refreshPromotion(promo), { task: task.part(0.03, 0.5) });
+      if (plan.notInFile?.length) {
+        // The dialog asks before writing: the check is done, the fill is
+        // another action (and another card).
+        task.finish(`File checked — ${plan.notInFile.length} product${plan.notInFile.length === 1 ? '' : 's'} of the promotion not in it`);
+        setPending({ file, plan });
+        setBusy(false);
+        return;
+      }
+      await finish(file, { plan }, { task, from: 0.5 });
     } catch (err) {
+      task.fail(err);
       setError(err.message);
       setBusy(false);
     }
@@ -2802,8 +2963,11 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
     if (!file) return;
     setBusy(true);
     setError(null);
+    // The file read (a moving stripe), then the list saved in batches.
+    const task = startTask(`Import ${marketLabel} promotion file`, { detail: `Reading ${file.name}…` });
     try {
       const parsed = await parsePromoFile(file);
+      task.progress(0.2);
       const marketCols = parsed.matchedColumns.filter((c) => MARKET_FIELDS[market].includes(c));
       if (!marketCols.length) {
         const other = market === 'us' ? 'Canada' : 'USA';
@@ -2812,7 +2976,8 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
       // The file IS this market's list (Canada at the file's prices over
       // Orange, the USA at Orange — monthly rule 2026-10-02); the SKUs not in
       // it leave the list. The other market is not touched.
-      const r = await addFileToPromotion(promo, parsed.rows, market);
+      const r = await addFileToPromotion(promo, parsed.rows, market, { task: task.part(0.2, 1) });
+      task.finish(`${r.added} SKUs on the ${marketLabel} list${r.left ? ` · ${r.left} left it` : ''}`);
       onImported(
         `${marketLabel}: ${r.added} SKUs on the list from ${file.name}` +
         (r.left ? ` · ${r.left} not in the file left the ${marketLabel} list` : '') +
@@ -2820,6 +2985,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
         { market, ...r },
       );
     } catch (err) {
+      task.fail(err);
       setError(err.message);
       setBusy(false);
     }

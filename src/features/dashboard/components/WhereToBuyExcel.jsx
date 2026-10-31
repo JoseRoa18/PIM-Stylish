@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertCircle, ArrowRight, Download, Loader2, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
+import { startTask } from '@/lib/taskProgress';
 
 // Listing Health → Where to Buy → "Export" and "Import links" (user,
 // 2026-10-21): the links in an Excel with the PIM's look — what the audit
@@ -35,30 +36,64 @@ export default function WhereToBuyExcel({ onImported }) {
   const [progress, setProgress] = useState(null);
   const [result, setResult] = useState(null);
 
+  // The file being read: closing the dialog drops its card (the plan is not used).
+  const reading = useRef(null);
+
   const runExport = async () => {
     setExporting(true);
     setExportError(null);
-    try { await (await load()).downloadWhereToBuyExcel(); } catch (e) { setExportError(e.message); } finally { setExporting(false); }
+    const task = startTask('Where to Buy Excel', { detail: 'Loading the links…' });
+    try {
+      const r = await (await load()).downloadWhereToBuyExcel({ task });
+      task.finish(`Downloaded · ${r.links.toLocaleString()} links of ${plural(r.products, 'product')}`);
+    } catch (e) {
+      task.fail(e);
+      setExportError(e.message);
+    } finally { setExporting(false); }
   };
 
   const reset = () => { setFile(null); setPlan(null); setError(null); setResult(null); setProgress(null); };
-  const close = () => { if (busy !== 'apply') { setOpen(false); reset(); } };
+  const close = () => {
+    if (busy === 'apply') return;
+    reading.current?.cancel();
+    reading.current = null;
+    setOpen(false);
+    reset();
+  };
 
   const read = async (f) => {
     reset();
     setFile(f);
     setBusy('read');
-    try { setPlan(await (await load()).readWhereToBuyImport(f)); } catch (e) { setError(e.message); } finally { setBusy(null); }
+    const task = startTask('Where to Buy import', { detail: `Reading ${f.name}…` });
+    reading.current = task;
+    try {
+      const p = await (await load()).readWhereToBuyImport(f, { task });
+      setPlan(p);
+      task.finish(p.changes.length ? `${plural(p.changes.length, 'change')} to review` : 'Nothing to change');
+    } catch (e) {
+      task.fail(e);
+      setError(e.message);
+    } finally {
+      if (reading.current === task) reading.current = null;
+      setBusy(null);
+    }
   };
 
   const apply = async () => {
     setBusy('apply');
     setError(null);
+    const task = startTask('Where to Buy links', { detail: `Saving ${plural(plan.changes.length, 'change')}…` });
     try {
-      const r = await (await load()).applyWhereToBuyImport(plan, (p) => setProgress(p));
+      const r = await (await load()).applyWhereToBuyImport(plan, (p) => setProgress(p), { task });
       setResult(r);
+      if (r.failures.length) task.fail(`Links saved; ${plural(r.failures.length, 'publishing call')} failed — publish them again from the products’ Where to Buy tab`);
+      else task.finish(`${plural(r.products, 'product')} saved and published`);
       onImported?.();
-    } catch (e) { setError(e.message); } finally { setBusy(null); setProgress(null); }
+    } catch (e) {
+      task.fail(e);
+      setError(e.message);
+    } finally { setBusy(null); setProgress(null); }
   };
 
   const count = (a) => plan?.changes.filter((c) => c.action === a).length ?? 0;

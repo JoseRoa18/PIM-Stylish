@@ -90,6 +90,7 @@ import { channelCategory } from '@/features/products/lib/categories';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { NLP_MIN_DISCOUNT, nlpDiscount, CATEGORY_FAMILY } from '@/features/pricing/lib/homeDepotCaNlp';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const ALIAS_MARKETPLACE = 'Home Depot CA';
 
@@ -202,9 +203,13 @@ const labelOf = (c) => CATEGORY_LABELS[c] ?? c;
 /**
  * One template → one filled workbook (not downloaded). Returns
  * { zip, name, ext, report } or throws when nothing can be written.
+ * `task` (optional taskProgress reporter, `label` before each step): the
+ * template 25%, members, products and aliases in batches of 100, stock, fill.
  */
-async function buildWorkbook(template, promotion, channel) {
+async function buildWorkbook(template, promotion, channel, { task = null, label = '' } = {}) {
+  task?.step(`${label}Downloading the template…`);
   const { zip, shared } = await openTemplate(template.storage_path);
+  task?.progress(0.25, `${label}Reading the template…`);
   const workbookXml = await zip.file('xl/workbook.xml').async('string');
   let hit = null;
   for (const name of listSheetNames(workbookXml)) {
@@ -223,13 +228,17 @@ async function buildWorkbook(template, promotion, channel) {
   const promoCostField = `cost_cad_rona_hd_${tier}`;
   const tagged = template.categories ?? [];
   const categories = new Set(tagged.flatMap((c) => CATEGORY_FAMILY[c] ?? [c]));
+  task?.progress(0.3, `${label}Reading the promotion's products…`);
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel.key);
+  task?.progress(0.4);
   if (!members.length) throw new Error('This promotion has no products.');
   const skus = members.map((r) => r.sku);
 
   const pim = new Map();
   const alias = new Map();
+  const tick = batchTicker(task?.part(0.4, 0.7), skus.length, 100, `${label}Reading the products and Home Depot ids`);
   for (let i = 0; i < skus.length; i += 100) {
+    tick(i);
     const chunk = skus.slice(i, i + 100);
     const [{ data: prods, error: pErr }, { data: aliases, error: aErr }] = await Promise.all([
       supabase.from('products').select(`sku, category, map_cad, ${promoMapField}, cost_cad_rona_hd, ${promoCostField}`).in('sku', chunk),
@@ -240,7 +249,7 @@ async function buildWorkbook(template, promotion, channel) {
     for (const p of prods ?? []) pim.set(p.sku, p);
     for (const a of aliases ?? []) alias.set(a.sku, a);
   }
-  const stock = (await getStockFor(skus)).ca ?? {};
+  const stock = (await getStockFor(skus, { task: task?.part(0.7, 0.8) })).ca ?? {};
 
   const lines = [];
   const otherCategory = [];
@@ -296,6 +305,7 @@ async function buildWorkbook(template, promotion, channel) {
     });
   }
   if (!lines.length) throw new Error(`no ${tagged.length ? tagged.map(labelOf).join(' / ') + ' ' : ''}product of this promotion has a Home Depot Canada id and a promo MAP`);
+  await blockingStep(task, 0.8, `${label}Filling the sheet · ${lines.length} articles…`);
 
   // Rows already carrying an article stay; ours go on the first empty rows
   // after them. Both templates ship their data rows pre-formatted (formula
@@ -366,6 +376,7 @@ async function buildWorkbook(template, promotion, channel) {
   if (appended) xml = injectRows(xml, appended, firstRow + lines.length - 1);
   zip.file(hit.path, xml);
   await recalcOnOpen(zip); // the % formulas have no cached value until Excel computes them
+  task?.progress(1);
 
   const period = String(promotion.period).slice(0, 7);
   const catLabel = tagged.map(labelOf).join('_').replace(/[^\w]+/g, '_');
@@ -386,15 +397,21 @@ async function buildWorkbook(template, promotion, channel) {
  * template with nothing to write (no member of its categories) is reported
  * and skipped; the others still go out.
  * @param templates marketplace_templates rows (Home Depot CA, purpose "promotions" or "flash_deals")
+ * @param task      optional taskProgress reporter: the templates one after
+ *                  another (85%), then the file or the ZIP
  */
-export async function fillHomeDepotCaPromoTemplates(templates, promotion, channel) {
+export async function fillHomeDepotCaPromoTemplates(templates, promotion, channel, { task = null } = {}) {
   const list = (Array.isArray(templates) ? templates : [templates]).filter(Boolean);
   if (!list.length) throw new Error('No Home Depot Canada promotions template is uploaded in Templates.');
   const files = [];
   const skipped = [];
-  for (const t of list) {
+  const building = task?.part(0, 0.85);
+  for (const [i, t] of list.entries()) {
     try {
-      files.push(await buildWorkbook(t, promotion, channel));
+      files.push(await buildWorkbook(t, promotion, channel, {
+        task: building?.part(i / list.length, (i + 1) / list.length),
+        label: list.length > 1 ? `Template ${i + 1} of ${list.length} · ` : '',
+      }));
     } catch (err) {
       skipped.push({ template: t.file_name, error: err.message });
     }
@@ -403,12 +420,20 @@ export async function fillHomeDepotCaPromoTemplates(templates, promotion, channe
 
   const period = String(promotion.period).slice(0, 7);
   if (files.length === 1) {
+    await blockingStep(task, 0.85, 'Writing the file…');
     await downloadZip(files[0].zip, files[0].name, files[0].ext);
   } else {
     const JSZip = await loadJSZip();
     const bundle = new JSZip();
-    for (const f of files) bundle.file(`${f.name}.${f.ext}`, await f.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }));
-    const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    const packing = task?.part(0.85, 0.97);
+    for (const [i, f] of files.entries()) {
+      const one = packing?.part(i / files.length, (i + 1) / files.length);
+      one?.progress(0, `Compressing file ${i + 1} of ${files.length}…`);
+      bundle.file(`${f.name}.${f.ext}`, await f.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }, one ? (meta) => one.progress(meta.percent / 100) : undefined));
+    }
+    const zipping = task?.part(0.97, 1);
+    zipping?.progress(0, 'Writing the ZIP…');
+    const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' }, zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined);
     const url = URL.createObjectURL(out);
     const link = document.createElement('a');
     link.href = url;
@@ -416,6 +441,7 @@ export async function fillHomeDepotCaPromoTemplates(templates, promotion, channe
     link.click();
     URL.revokeObjectURL(url);
   }
+  task?.progress(1);
 
   const reports = files.map((f) => f.report);
   logActivity({

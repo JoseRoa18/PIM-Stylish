@@ -10,6 +10,7 @@ import { logActivity } from '@/features/activity/api/activityLog';
 import { WARRANTY_BRANDS, getBrandWarranties, setBrandWarranty, countBrandProducts } from '@/features/settings/api/brandWarranty';
 import { DocumentRow } from '@/features/media/components/DocumentsSection';
 import { Link } from 'react-router-dom';
+import { startTask } from '@/lib/taskProgress';
 
 function monthLabel(period) {
   if (!period) return '';
@@ -187,11 +188,15 @@ function WarrantySection() {
     });
     if (!ok) return;
     setBusy(brand);
+    const task = startTask(`${brand} warranty`, { detail: `Uploading ${file.name}…` });
     try {
-      const r = await setBrandWarranty(brand, file);
+      const r = await setBrandWarranty(brand, file, { task: task.part(0, 0.9) });
+      await task.step('Reloading the warranties…');
       setWarranties(await getBrandWarranties());
+      task.finish(`On all ${r.products} ${brand} products`);
       setMsg({ tone: 'success', text: `${file.name} is now the warranty of all ${r.products} ${brand} products.` });
     } catch (err) {
+      task.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setBusy(null);
@@ -256,11 +261,17 @@ function InventorySection() {
   async function refresh() {
     setBusy('refresh');
     setMsg(null);
+    // One edge-function call: the stripe moves until it answers.
+    const task = startTask('Stock refresh', { detail: 'Waiting for ShipStation and the Canada file…' });
     try {
       const r = await refreshInventory();
+      task.progress(0.85, 'Reloading the report…');
       setReport((await getInventoryReport()) ?? {});
+      if (r.ok) task.finish('Stock refreshed');
+      else task.fail(describeInventoryPull(r).join(' · ') || 'The stock could not be refreshed.');
       setMsg({ tone: r.ok ? 'success' : 'error', text: describeInventoryPull(r).join(' · ') });
     } catch (err) {
+      task.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setBusy(null);
@@ -271,14 +282,20 @@ function InventorySection() {
     if (!file) return;
     setBusy('upload');
     setMsg(null);
+    // Encoding + one edge-function call: the stripe moves until it answers.
+    const task = startTask('Canada stock file', { detail: `Loading "${file.name}"…` });
     try {
       const r = await uploadCanadaInventory(file);
+      task.progress(0.85, 'Reloading the report…');
       setReport((await getInventoryReport()) ?? {});
       const ca = r.markets?.ca;
+      if (ca?.ok) task.finish(`"${file.name}" loaded`);
+      else task.fail(ca?.error ?? r.error ?? 'The file could not be loaded.');
       setMsg(ca?.ok
         ? { tone: 'success', text: `"${file.name}" loaded — ${describeInventoryPull(r).join(' · ')}` }
         : { tone: 'error', text: ca?.error ?? r.error ?? 'The file could not be loaded.' });
     } catch (err) {
+      task.fail(err);
       setMsg({ tone: 'error', text: err.message });
     } finally {
       setBusy(null);
@@ -424,11 +441,17 @@ export default function SettingsPage() {
     setRunning(true);
     setRunReport(null);
     setError(null);
+    // One edge-function call: the stripe moves until it answers.
+    const task = startTask('Promotion automation', { detail: "Applying today's promotions on Wix, Best Buy and Walmart…" });
     try {
       const r = await runPromoApplyNow();
       setRunReport(r);
+      task.progress(0.9, 'Reloading the promotions…');
       setPromotions(await listPromotions());
+      if (r?.errors?.length) task.fail(`${r.errors.length} error${r.errors.length === 1 ? '' : 's'} — see Settings`);
+      else task.finish(r?.skipped ? `Skipped: ${r.skipped}` : 'Done');
     } catch (err) {
+      task.fail(err);
       setError(err.message);
     } finally {
       setRunning(false);

@@ -52,6 +52,7 @@ import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/prom
 import { getStockFor } from '@/features/pricing/api/inventory';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 export const RONA_SUPPLIER = { name: 'STYLISH INTERNATIONAL INC(OE)', id: '550562' };
 
@@ -91,9 +92,13 @@ function locate(grid) {
  * @param template  marketplace_templates row (Rona, purpose "promotions" or "flash_deals")
  * @param promotion promotions row (kind decides the level: monthly and flash → Orange, special event → Purple; see KIND_LEVEL)
  * @param channel   PROMO_CHANNELS entry for Rona (key, label, market 'ca')
+ * @param task      optional taskProgress reporter: template 20%, members,
+ *                  products and aliases in batches of 100, stock, fill, file
  */
-export async function fillRonaPromoTemplate(template, promotion, channel) {
+export async function fillRonaPromoTemplate(template, promotion, channel, { task = null } = {}) {
+  task?.step('Downloading the template…');
   const { zip, shared } = await openTemplate(template.storage_path);
+  task?.progress(0.2, 'Reading the template…');
   const workbookXml = await zip.file('xl/workbook.xml').async('string');
   let hit = null;
   for (const name of listSheetNames(workbookXml)) {
@@ -109,13 +114,17 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   const tier = promotionLevel(promotion, channel);
   const promoCostField = `cost_cad_rona_hd_${tier}`;
   const promoMapField = `map_${tier}_cad`;
+  task?.progress(0.25, "Reading the promotion's products…");
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel.key);
+  task?.progress(0.35);
   if (!members.length) throw new Error('This promotion has no products.');
   const skus = members.map((r) => r.sku);
 
   const pim = new Map();
   const alias = new Map();
+  const tick = batchTicker(task?.part(0.35, 0.65), skus.length, 100, 'Reading the products and Rona ids');
   for (let i = 0; i < skus.length; i += 100) {
+    tick(i);
     const chunk = skus.slice(i, i + 100);
     const [{ data: prods, error: pErr }, { data: aliases, error: aErr }] = await Promise.all([
       supabase.from('products').select(`sku, brand, map_cad, ${promoMapField}, cost_cad_rona_hd, ${promoCostField}, attributes`).in('sku', chunk),
@@ -129,7 +138,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
 
   // Column J is the Canada stock in the PIM; a SKU the inventory file does
   // not carry goes out as 0 and is reported.
-  const stock = (await getStockFor(skus)).ca ?? {};
+  const stock = (await getStockFor(skus, { task: task?.part(0.65, 0.75) })).ca ?? {};
 
   const window = promoWindow(promotion, 'ca');
   const lines = [];
@@ -176,6 +185,7 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
     });
   }
   if (!lines.length) throw new Error('Nothing to write: no product has a Rona id with a promo cost below its regular cost.');
+  await blockingStep(task, 0.75, `Filling the sheet · ${lines.length} products…`);
 
   // Rows already carrying a Rona id stay; ours go on the first empty rows
   // after them (the template ships thousands of pre-formatted empty rows).
@@ -235,7 +245,9 @@ export async function fillRonaPromoTemplate(template, promotion, channel) {
   zip.file(hit.path, xml);
 
   const period = String(promotion.period).slice(0, 7);
+  await blockingStep(task, 0.85, 'Writing the file…');
   await downloadZip(zip, `Rona_Promo_${period}`, templateExt(template.storage_path));
+  task?.progress(1);
 
   const atZero = lines.filter((l) => l.inventory === 0 && stock[l.sku]).length;
   const report = { rows: lines.length, tier, fromList, noAlias, noName, noUpc, noRegularCost, noPromoCost, noPromoMap, noStock, atZero, atOrAbove, excluded, window, sheet: hit.name };

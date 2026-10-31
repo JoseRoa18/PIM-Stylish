@@ -624,11 +624,15 @@ const resolveForColumn = (v, options) => {
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (the
+ *   template and its lists 30%, the PIM's media 20%, the rows 10%, writing
+ *   the file 40%)
  */
-export async function generateHomeDepotFromTemplate(templateStoragePath, products, fileName = 'HomeDepot_Export') {
+export async function generateHomeDepotFromTemplate(templateStoragePath, products, fileName = 'HomeDepot_Export', { task = null } = {}) {
   if (!products?.length) throw new Error('No products to export.');
 
-  const { zip, shared } = await openTemplate(templateStoragePath);
+  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.2) });
+  task?.progress(0.2, 'Reading the value lists…');
   const tplPath = await sheetPathByName(zip, 'Data');
   if (!tplPath) throw new Error('The file has no "Data" sheet — is this a Home Depot (Mirakl) template?');
   const sheetXml = await zip.file(tplPath).async('string');
@@ -678,8 +682,14 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
   }
 
   const skus = products.map((p) => p.sku);
+  task?.progress(0.3, `Loading images for ${skus.length} products…`);
   const imgBySku = await fetchImagesBySku(skus);
+  task?.progress(0.4, 'Loading documents…');
   const docBySku = await fetchDocsBySku(skus, HD_DOC_TYPES, Object.keys(HD_DOC_TYPES));
+  if (task) {
+    task.progress(0.5);
+    await task.step(`Filling ${products.length} rows…`);
+  }
 
   // Image URLs land in CONSECUTIVE columns starting at "Product Image",
   // regardless of the per-view headers between it and the last image slot
@@ -730,7 +740,7 @@ export async function generateHomeDepotFromTemplate(templateStoragePath, product
   });
 
   zip.file(tplPath, injectRows(sheetXml, rowsXml, DATA_ROW - 1 + products.length));
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath), { task: task?.part(0.6, 1) });
   // No images .zip: Home Depot USA takes its images as the links in the sheet
   // (user, 2026-10-09 — the zip is Home Depot Canada's only).
 

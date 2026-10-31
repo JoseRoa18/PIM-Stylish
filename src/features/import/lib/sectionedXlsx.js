@@ -327,8 +327,10 @@ const LISTS_SHEET = 'PIM Lists';
  * column checks from row 3, or null: { type: 'list', values } (a dropdown,
  * its list on a hidden "PIM Lists" sheet), { type: 'decimal' | 'whole' } or
  * { type: 'textLength', min, max } (user, 2026-10-15).
+ * `task` (a src/lib/taskProgress reporter, optional) moves through the sheets
+ * written (first 60%) and the zipping (the rest).
  */
-export async function buildSectionedWorkbook(sheets, { validationFor = null } = {}) {
+export async function buildSectionedWorkbook(sheets, { validationFor = null, task = null } = {}) {
   if (!sheets.length) throw new Error('Nothing to write.');
   const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
@@ -376,12 +378,16 @@ export async function buildSectionedWorkbook(sheets, { validationFor = null } = 
     ? (values, c) => { const k = cellKey(sheet.cellColor(values, c)); return k ? cellBase + cellKeys.indexOf(k) : null; }
     : () => null);
 
-  sheets.forEach((sheet, i) => {
-    if (sheet.blocks) return put(`xl/worksheets/sheet${i + 1}.xml`, reportSheetXml(sheet, colors));
+  const writing = task?.part(0, 0.6);
+  for (const [i, sheet] of sheets.entries()) {
+    // each sheet blocks the page while its XML is built: show it first
+    if (writing) { writing.count(i, sheets.length, `Writing sheet "${sheet.name}"…`); await writing.paint(); }
+    if (sheet.blocks) { put(`xl/worksheets/sheet${i + 1}.xml`, reportSheetXml(sheet, colors)); continue; }
     const { xml, links } = sheetXml(sheet, styleOf, perSheet[i], colors, cellStyleOf(sheet));
     put(`xl/worksheets/sheet${i + 1}.xml`, xml);
     if (links.length) put(`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, linksRelsXml(links));
-  });
+  }
+  writing?.progress(1);
   const allNames = lists.length ? [...names, LISTS_SHEET] : names;
   if (lists.length) put(`xl/worksheets/sheet${allNames.length}.xml`, listsSheetXml(lists));
   put('xl/styles.xml', stylesXml(colors, cellKeys));
@@ -417,5 +423,10 @@ ${allNames.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.op
 <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 ${allNames.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('\n')}
 </Types>`);
-  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
+  const zipping = task?.part(0.6, 1);
+  if (zipping) await zipping.step('Compressing the file…');
+  return zip.generateAsync(
+    { type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' },
+    zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined,
+  );
 }

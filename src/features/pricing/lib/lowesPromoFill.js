@@ -61,6 +61,7 @@ import { channelCategory } from '@/features/products/lib/categories';
 import { promotionMembersFor, PROMOTION_KINDS, promotionLevel } from '@/features/pricing/api/promotions';
 import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 export const LOWES_CONSTANTS = {
   offerNumber: 1,
@@ -181,18 +182,25 @@ const monthName = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-US
  * @param template  marketplace_templates row (Lowe's US, purpose "promotions" or "flash_deals")
  * @param promotion promotions row (kind decides the level: monthly and flash → Orange, special event → Purple; see KIND_LEVEL)
  * @param channel   PROMO_CHANNELS entry for Lowe's USA
+ * @param task      optional taskProgress reporter: members, products and
+ *                  aliases in batches of 100, one template per file, the file
+ *                  or the ZIP
  */
-export async function fillLowesPromoTemplate(template, promotion, channel) {
+export async function fillLowesPromoTemplate(template, promotion, channel, { task = null } = {}) {
   const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
   const mapField = `map_${tier}_usd`;
+  task?.progress(0, "Reading the promotion's products…");
   const { rows: members, excluded } = await promotionMembersFor(promotion, channel.key);
+  task?.progress(0.1);
   if (!members.length) throw new Error('This promotion has no products.');
   const skus = members.map((m) => m.sku);
 
   const pim = new Map();
   const alias = new Map();
+  const tick = batchTicker(task?.part(0.1, 0.4), skus.length, 100, "Reading the products and Lowe's item numbers");
   for (let i = 0; i < skus.length; i += 100) {
+    tick(i);
     const chunk = skus.slice(i, i + 100);
     const [{ data: prods, error: pErr }, { data: aliases, error: aErr }] = await Promise.all([
       supabase.from('products').select(`sku, category, product_type, model_name, attributes, map_usd, ${mapField}, cost_usd_lowes_sod_bbb`).in('sku', chunk),
@@ -247,13 +255,18 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
   const period = String(promotion.period).slice(0, 7);
   const files = [];
   const fileOrder = Object.keys(FILES);
+  const building = task?.part(0.4, 0.85);
   for (const { file, lines: unsorted } of [...byFile.entries()].sort((x, y) => fileOrder.indexOf(x[0]) - fileOrder.indexOf(y[0])).map(([, v]) => v)) {
     // One Offer # per group of the file, in GROUP_ORDER: the kitchen file is
     // Offer # 1 Kitchen Sinks, Offer # 2 Kitchen Faucets.
     const lines = [...unsorted].sort((x, y) => GROUP_ORDER.indexOf(groupKey(x.group)) - GROUP_ORDER.indexOf(groupKey(y.group)));
     const offerOf = new Map();
     for (const l of lines) if (!offerOf.has(l.group)) offerOf.set(l.group, offerOf.size + 1);
+    const slice = building?.part(files.length / byFile.size, (files.length + 1) / byFile.size);
+    const fileLabel = byFile.size > 1 ? `File ${files.length + 1} of ${byFile.size} (${file.label}) · ` : '';
+    slice?.step(`${fileLabel}Downloading the template…`);
     const { zip, shared } = await openTemplate(template.storage_path);
+    await blockingStep(slice, 0.6, `${fileLabel}Filling the sheet · ${lines.length} products…`);
     const workbookXml = await zip.file('xl/workbook.xml').async('string');
     const name = listSheetNames(workbookXml).find((n) => /^discounted pricing$/i.test(n));
     if (!name) throw new Error(`"${template.file_name}" has no "Discounted Pricing" sheet.`);
@@ -307,17 +320,26 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
       rowsXml += `<row r="${rn}">` + [...cells.entries()].sort((a, b) => a[0] - b[0]).map(([, x]) => x).join('') + '</row>';
     }
     zip.file(path, injectRows(xml, rowsXml, lastUsed + 1 + lines.length));
+    slice?.progress(1);
     const offers = [...offerOf.keys()].map((g) => ({ label: g.label, subdivision: g.subdivision, rows: lines.filter((l) => l.group === g).length }));
     files.push({ name: `Lowes_Promo_${period}_${file.name}.xlsm`, zip, label: file.label, offers, rows: lines.length });
   }
 
   if (files.length === 1) {
+    await blockingStep(task, 0.85, 'Writing the file…');
     await downloadZip(files[0].zip, files[0].name.replace(/\.xlsm$/, ''), 'xlsm');
   } else {
     const JSZip = await loadJSZip();
     const bundle = new JSZip();
-    for (const f of files) bundle.file(f.name, await f.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }));
-    const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    const packing = task?.part(0.85, 0.97);
+    for (const [i, f] of files.entries()) {
+      const one = packing?.part(i / files.length, (i + 1) / files.length);
+      one?.progress(0, `Compressing file ${i + 1} of ${files.length}…`);
+      bundle.file(f.name, await f.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }, one ? (meta) => one.progress(meta.percent / 100) : undefined));
+    }
+    const zipping = task?.part(0.97, 1);
+    zipping?.progress(0, 'Writing the ZIP…');
+    const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' }, zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined);
     const url = URL.createObjectURL(out);
     const link = document.createElement('a');
     link.href = url;
@@ -327,6 +349,7 @@ export async function fillLowesPromoTemplate(template, promotion, channel) {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }
+  task?.progress(1);
 
   const rows = files.reduce((n, f) => n + f.rows, 0);
   const report = { rows, tier, tierLabel, fromList, files: files.map((f) => ({ name: f.name, label: f.label, offers: f.offers, rows: f.rows })), noAlias, noName, noMap, noPromo, atOrAbove, noCost, excluded, window };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import TaskProgressDock from '@/components/ui/TaskProgressDock';
 
 // The reminders appear seconds after load at the earliest, so their code
 // (and the promotion helpers they use) stays out of the first download
@@ -61,6 +62,8 @@ export default function AppShell({ children }) {
         <PromoNudge />
         <PromoTaskNudge />
       </Suspense>
+      {/* The percentage cards of long tasks (downloads, imports, pushes, slow loads). */}
+      <TaskProgressDock />
       <div className="lg:ml-64 h-screen flex flex-col">
         <Topbar onMenuClick={() => setSidebarOpen(true)} menuOpen={sidebarOpen} />
         {/* relative: <main> contains its absolutely placed children (the sr-only

@@ -49,6 +49,7 @@ import {
 import { promotionMembersFor, promotionLevel, levelLabel } from '@/features/pricing/api/promotions';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { markPromotionTask } from '@/features/pricing/api/promoTasks';
+import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
 const COST_FORMAT = '"$"#,##0.00';
 // Technical column names (header row) → roles.
@@ -83,13 +84,18 @@ const colLetter = (c) => { let n = c + 1; let s = ''; while (n > 0) { const m = 
  * @param file      the file the person uploaded (anything with .name and .arrayBuffer())
  * @param promotion promotions row
  * @param supplier  'CAN' | 'USA'
+ * @param task      optional taskProgress reporter: the file read, members,
+ *                  costs in batches of 100, fill, Wayfair's listing, the
+ *                  file written and the task saved
  */
-export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
+export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN', { task = null } = {}) {
   const usa = supplier === 'USA';
+  task?.step('Opening the file…');
   const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const sharedFile = zip.file('xl/sharedStrings.xml');
   const shared = parseSharedStrings(sharedFile ? await sharedFile.async('string') : '');
+  task?.progress(0.1);
 
   const path = await sheetPathByName(zip, 'Promotions');
   if (!path) throw new Error('No "Promotions" sheet found — upload the promotions file downloaded from Wayfair Partner Home.');
@@ -99,7 +105,9 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   if (!hit) throw new Error('Unexpected column layout — this doesn\'t look like Wayfair\'s promotions file (no SupplierPartNumber / PromotionalDiscountPercent / PromotionalDiscountBaseCost header).');
   const { cols } = hit;
 
+  task?.progress(0.15, "Reading the promotion's products…");
   const { rows: prices, excluded } = await promotionMembersFor(promotion, usa ? 'wayfair_us' : 'wayfair_ca');
+  task?.progress(0.25);
   const tier = promotionLevel(promotion);
   // The base cost per member: the promotion's own (the file's WC Wayfair /
   // WC Wayfair Canada USD, rule 2026-09-30), else the product's level in
@@ -109,7 +117,9 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   const field = usa ? `cost_usd_wayfair_${tier}` : `cost_usd_wayfair_ca_${tier}`;
   const costSlug = usa ? 'wayfair_usd' : 'wayfair_ca_usd';
   const skus = prices.map((r) => r.sku);
+  const tick = batchTicker(task?.part(0.25, 0.5), skus.length, 100, `Reading the ${costName} ${levelLabel(tier)}`);
   for (let i = 0; i < skus.length; i += 100) {
+    tick(i);
     const { data, error } = await supabase.from('products').select(`sku, cost:${field}`).in('sku', skus.slice(i, i + 100));
     if (error) throw error;
     for (const p of data ?? []) if (p.cost != null) costBySku.set(p.sku, Number(p.cost));
@@ -121,6 +131,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   const noCost = prices.map((r) => r.sku).filter((s) => !costBySku.has(s)).sort();
   if (!costBySku.size) throw new Error(`No member of this promotion has a ${costName} ${levelLabel(tier)} in Pricing.`);
 
+  await blockingStep(task, 0.5, 'Filling the sheet…');
   // The currency style for the base cost, cloned from the editable cells.
   const firstData = hit.headerRow + 3; // labels, instructions, then data
   const baseStyle = Number((xml.match(new RegExp(`<c r="${colLetter(cols.baseCost)}${firstData + 1}" s="(\\d+)"`)) || [])[1] ?? 0);
@@ -166,6 +177,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   const notInFile = [...costBySku.keys()].filter((s) => !fileSkus.has(s)).sort();
   let toAppend = notInFile;
   let notOnWayfair = [];
+  task?.progress(0.6, `Checking what ${usa ? 'Wayfair USA' : 'Wayfair Canada'} lists…`);
   const { data: snaps } = await supabase
     .from('channel_health')
     .select('results')
@@ -204,7 +216,9 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   zip.file(path, merged);
 
   const baseName = `Wayfair_${usa ? 'USA' : 'Canada'}_Promotions_${String(promotion.period).slice(0, 7)}`;
+  await blockingStep(task, 0.75, 'Writing the file…');
   await downloadZip(zip, baseName, /\.xlsm$/i.test(file.name) ? 'xlsm' : 'xlsx');
+  task?.progress(0.92, 'Marking the file done…');
 
   logActivity({
     action: 'export',
@@ -216,6 +230,7 @@ export async function fillWayfairPromoFile(file, promotion, supplier = 'CAN') {
   });
 
   await markPromotionTask(promotion.id, `${usa ? 'wayfair_us' : 'wayfair_ca'}:promo_file`, { rows: filled + toAppend.length, skus: [...new Set([...sentSkus, ...toAppend])].sort() });
+  task?.progress(1);
 
   return { supplier, tier, filled, removed, appended: toAppend, fileRows: fileSkus.size, notOnWayfair, noCost, excluded };
 }

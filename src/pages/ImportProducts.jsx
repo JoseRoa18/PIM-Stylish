@@ -18,6 +18,7 @@ import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
+import { startTask } from '@/lib/taskProgress';
 
 const BLANK_TEMPLATE_GROUPS = [
   {
@@ -137,39 +138,54 @@ export default function ImportProducts() {
   // (user, 2026-10-15), with no rows.
   async function downloadTemplate(category = 'sink') {
     const headers = TEMPLATES[category] ?? TEMPLATE_HEADERS;
-    const suggestions = await loadSuggestionLists();
     const label = BLANK_TEMPLATE_GROUPS.flatMap((g) => g.templates).find((t) => t.key === category)?.label ?? 'Products';
-    const blob = await buildSectionedWorkbook([{ name: label, kind: templateKindOf(headers), sections: templateLayout(headers), rows: [] }], {
-      validationFor: (h, kind) => excelValidationFor(h, kind, suggestions),
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `stylish_pim_${category}_import_template.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // the catalog's values for the dropdowns 30%, the workbook the rest
+    const task = startTask('Blank template', { detail: `${label} · reading the catalog’s values…` });
+    try {
+      const suggestions = await loadSuggestionLists({ task: task.part(0, 0.3) });
+      const blob = await buildSectionedWorkbook([{ name: label, kind: templateKindOf(headers), sections: templateLayout(headers), rows: [] }], {
+        validationFor: (h, kind) => excelValidationFor(h, kind, suggestions),
+        task: task.part(0.3, 1),
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `stylish_pim_${category}_import_template.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      task.finish(`Downloaded · ${label}`);
+    } catch (err) {
+      console.error('Blank template failed:', err);
+      task.fail(err);
+    }
   }
 
   async function handleFile(file) {
     if (!file) return;
     setParseError(null);
     setFileName(file.name);
+    // reading the sheets 70%, the rows 5%, the lookup of existing SKUs the rest
+    const task = startTask('Import file', { detail: `Opening ${file.name}…` });
     try {
       // Every sheet (the PIM export has one per category), headers found under the section band.
-      const parsed = await parseSpreadsheetFile(file, { scoreHeader: scoreImportHeader, allSheets: true });
+      const parsed = await parseSpreadsheetFile(file, { scoreHeader: scoreImportHeader, allSheets: true, task: task.part(0, 0.7) });
       if (parsed.rows.length === 0) {
         throw new Error('The file has headers but no data rows.');
       }
+      await task.step(`Checking ${parsed.rows.length} rows…`);
       const built = buildImportRows(parsed);
+      task.progress(0.75);
       const skus = built.rows.map((r) => r.sku).filter(Boolean);
-      const existing = await fetchExistingProducts(skus);
+      const existing = await fetchExistingProducts(skus, { task: task.part(0.75, 1) });
       setRows(built.rows);
       setUnknownHeaders(built.unknownHeaders);
       setExistingMap(existing);
       setPhase('preview');
+      task.finish(`${built.rows.length} ${built.rows.length === 1 ? 'row' : 'rows'} ready to review`);
     } catch (err) {
+      task.fail(err.message ?? 'Failed to parse the file.');
       setParseError(err.message ?? 'Failed to parse the file.');
       setFileName(null);
     }
@@ -178,10 +194,15 @@ export default function ImportProducts() {
   async function handleImport() {
     setPhase('importing');
     setProgress({ done: 0, total: validRows.length });
+    const task = startTask('Import', { detail: `Importing ${validRows.length} ${validRows.length === 1 ? 'product' : 'products'}…` });
     try {
-      const summary = await importProducts(validRows, existingMap, (done, total) =>
-        setProgress({ done, total }),
+      const summary = await importProducts(
+        validRows,
+        existingMap,
+        (done, total) => setProgress({ done, total }),
+        { task },
       );
+      task.finish(`${summary.created} created · ${summary.updated} updated`);
       // Fire-and-forget: link the whole batch to every API-connected channel
       // where the products already exist (Wix by SKU, Wayfair group ids).
       autoLinkChannels(validRows.map((r) => r.sku)).catch((err) =>
@@ -190,6 +211,7 @@ export default function ImportProducts() {
       setResult({ ok: true, ...summary });
       setPhase('done');
     } catch (err) {
+      task.fail(err);
       setResult({ ok: false, message: err.message });
       setPhase('done');
     }

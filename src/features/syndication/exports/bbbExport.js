@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { mergeRows, isYes } from './templateFiller';
+import { mergeRows, isYes, labelTask } from './templateFiller';
 import { isFaucetCategory } from '@/features/products/lib/categories';
 
 // JSZip loads on demand — it's only needed when the user actually exports,
@@ -504,17 +504,24 @@ function insertRowsInOrder(sheetXml, rows) {
 }
 
 // Core fill: template + products → { blob, fillReport }. Shared by the
-// single-file export and the per-category set below.
-async function fillBBBWorkbook(templateStoragePath, productList) {
+// single-file export and the per-category set below. `task` (optional
+// taskProgress reporter): the template 40%, the rows 10%, writing the rest.
+async function fillBBBWorkbook(templateStoragePath, productList, task = null) {
+  task?.step('Downloading the template…');
   const { data: blob, error } = await supabase.storage
     .from('templates')
     .download(templateStoragePath);
   if (error) throw new Error(`Failed to download template: ${error.message}`);
 
+  task?.progress(0.25, 'Opening the template…');
   const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
   const sheet = await findDataSheet(zip);
   const baseRow = sheet.headerRow + 1;
+  if (task) {
+    task.progress(0.4);
+    await task.step(`Filling ${productList.length} rows…`);
+  }
 
   // Build cellData for each product (header → column letter → value).
   // rowDatas is kept header-keyed for the readiness report at the end.
@@ -551,11 +558,13 @@ async function fillBBBWorkbook(templateStoragePath, productList) {
 
   zip.file(sheet.path, xml);
 
+  const writing = task?.part(0.5, 1);
+  writing?.progress(0, 'Writing the file…');
   const output = await zip.generateAsync({
     type: 'blob',
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     compression: 'DEFLATE',
-  });
+  }, writing ? (meta) => writing.progress(meta.percent / 100) : undefined);
 
   // Readiness report: how many of the template's headed columns each export
   // actually filled (rowData is header-keyed, so count per header).
@@ -603,12 +612,15 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
  * Lowe's).
  *
  * @param {Array<{ template: { storage_path: string, file_name: string }, productList: Array }>} groups
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (each
+ *   file an equal share to 90%, the ZIP the rest)
  */
-export async function generateBBBSet(groups) {
+export async function generateBBBSet(groups, { task = null } = {}) {
   const filled = [];
-  for (const g of groups) {
-    if (!g.productList?.length) continue;
-    const { blob, fillReport } = await fillBBBWorkbook(g.template.storage_path, g.productList);
+  const todo = groups.filter((g) => g.productList?.length);
+  for (const [i, g] of todo.entries()) {
+    const slice = task?.part((0.9 * i) / todo.length, (0.9 * (i + 1)) / todo.length);
+    const { blob, fillReport } = await fillBBBWorkbook(g.template.storage_path, g.productList, labelTask(slice, todo.length > 1 ? `File ${i + 1} of ${todo.length}` : ''));
     filled.push({ name: g.template.file_name, blob, fillReport });
   }
   if (!filled.length) throw new Error('No products matched a BB&B template.');
@@ -619,7 +631,9 @@ export async function generateBBBSet(groups) {
     const JSZip = await loadJSZip();
     const bundle = new JSZip();
     for (const f of filled) bundle.file(f.name, f.blob);
-    const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    const zipping = task?.part(0.9, 1);
+    zipping?.progress(0, 'Writing the ZIP…');
+    const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' }, zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined);
     triggerDownload(out, `BBB_${new Date().toISOString().slice(0, 10)}.zip`);
   }
 
@@ -641,14 +655,17 @@ export async function generateBBBSet(groups) {
 
 // ===================== Main export (single product) =====================
 
-export async function generateBBBFromTemplate(templateStoragePath, product, media) {
+// `task` (optional taskProgress reporter): the template half, writing the rest.
+export async function generateBBBFromTemplate(templateStoragePath, product, media, { task = null } = {}) {
   // 1. Download template
+  task?.step('Downloading the template…');
   const { data: blob, error } = await supabase.storage
     .from('templates')
     .download(templateStoragePath);
   if (error) throw new Error(`Failed to download template: ${error.message}`);
 
   // 2. Open as ZIP
+  task?.progress(0.3, 'Opening the template…');
   const JSZip = await loadJSZip();
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
 
@@ -672,11 +689,13 @@ export async function generateBBBFromTemplate(templateStoragePath, product, medi
   zip.file(sheet.path, updatedXml);
 
   // 7. Download
+  const writing = task?.part(0.5, 1);
+  writing?.progress(0, 'Writing the file…');
   const output = await zip.generateAsync({
     type: 'blob',
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     compression: 'DEFLATE',
-  });
+  }, writing ? (meta) => writing.progress(meta.percent / 100) : undefined);
   const url = URL.createObjectURL(output);
   const link = document.createElement('a');
   link.href = url;

@@ -638,16 +638,27 @@ async function homeDepotCaItemNumbers(skus) {
   return out;
 }
 
-async function fillHomeDepotCaUpdate(zip, sheet, products, fileName, templateStoragePath) {
+// `task` (optional taskProgress reporter): the reads to 20%, the sheet to
+// 30%, the media .zip the rest.
+async function fillHomeDepotCaUpdate(zip, sheet, products, fileName, templateStoragePath, task = null) {
   const skus = products.map((p) => p.sku);
-  const [imgBySku, docBySku, itemBySku] = await Promise.all([
+  const reads = [
     fetchImagesBySku(skus),
     fetchDocsBySku(skus, HDCA_DOC_TYPES, Object.keys(HDCA_DOC_TYPES)),
     homeDepotCaItemNumbers(skus),
-  ]);
+  ];
+  const loading = task?.part(0.08, 0.2);
+  loading?.progress(0, `Loading media and item numbers for ${skus.length} products…`);
+  let settled = 0;
+  const [imgBySku, docBySku, itemBySku] = await Promise.all(reads.map((r) => r.then((v) => {
+    settled += 1;
+    loading?.count(settled, reads.length);
+    return v;
+  })));
   const noItem = products.filter((p) => !itemBySku[p.sku]).map((p) => p.sku);
   const rows = products.filter((p) => itemBySku[p.sku]);
   if (!rows.length) throw new Error(`None of these products has a Home Depot Canada item number (Aliases tab): ${noItem.join(', ')}.`);
+  if (task) await task.step(`Filling ${rows.length} rows…`);
 
   const cols = sheet.heads
     .map((h, ci) => {
@@ -678,12 +689,13 @@ async function fillHomeDepotCaUpdate(zip, sheet, products, fileName, templateSto
   const cleared = sheet.xml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (m, r) => (Number(r) >= UPDATE_DATA_ROW ? '' : m));
   zip.file(sheet.path, injectRows(cleared, rowsXml, UPDATE_DATA_ROW - 1 + rows.length));
 
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath), { task: task?.part(0.2, 0.3) });
   // The images and PDFs the sheet names, one folder per part number — the
   // same .zip as a new listing.
   const media = await downloadMediaZip(
     rows.flatMap((p) => [...p._media.images, ...p._media.pdfs.filter(Boolean)].map((e) => ({ ...e, folder: p.sku }))),
     fileName,
+    { task: task?.part(0.3, 1) },
   );
   return { count: rows.length, skipped: noItem, skippedReason: 'no Home Depot Canada item number in Aliases', media };
 }
@@ -697,17 +709,22 @@ async function fillHomeDepotCaUpdate(zip, sheet, products, fileName, templateSto
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (the
+ *   template and the PIM's media 15%, the six sheets 10%, writing the
+ *   workbook 10%, the media .zip — the long part — the rest)
  */
-export async function generateHomeDepotCaFromTemplate(templateStoragePath, products, fileName = 'HomeDepotCA_Export') {
+export async function generateHomeDepotCaFromTemplate(templateStoragePath, products, fileName = 'HomeDepotCA_Export', { task = null } = {}) {
   if (!products?.length) throw new Error('No products to export.');
 
-  const { zip, shared } = await openTemplate(templateStoragePath);
+  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.08) });
   const updateSheet = await findUpdateSheet(zip, shared);
-  if (updateSheet) return fillHomeDepotCaUpdate(zip, updateSheet, products, fileName, templateStoragePath);
+  if (updateSheet) return fillHomeDepotCaUpdate(zip, updateSheet, products, fileName, templateStoragePath, task);
   const countries = await templateCountries(zip, shared);
 
   const skus = products.map((p) => p.sku);
+  task?.progress(0.08, `Loading images for ${skus.length} products…`);
   const imgBySku = await fetchImagesBySku(skus);
+  task?.progress(0.12, 'Loading documents…');
   const docBySku = await fetchDocsBySku(skus, HDCA_DOC_TYPES, Object.keys(HDCA_DOC_TYPES));
   for (const p of products) {
     p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
@@ -761,20 +778,31 @@ export async function generateHomeDepotCaFromTemplate(templateStoragePath, produ
   // Net Weight (AA), and Gross Weight (Z) alike: a whole number reads whole,
   // decimals as they are (user, 2026-10-14) — the template's first rows are
   // formatted 0.000 ("34.000").
+  const filling = task?.part(0.15, 0.25);
+  if (filling) {
+    filling.progress(0, 'Filling "Basic Data"…');
+    await filling.paint();
+  }
   await fillSheet('Basic Data', BASIC_DATA_RULES, { results: BASIC_DATA_RESULTS, general: ['Z', 'AA'] });
+  filling?.progress(1 / 6, 'Filling "Online Core Attributes"…');
   await fillSheet('Online Core Attributes', ONLINE_CORE_RULES, { results: ONLINE_CORE_RESULTS, clear: ONLINE_CORE_CLEAR });
+  filling?.progress(2 / 6, 'Filling "Add EAN UPC"…');
   await fillSheet('Add EAN UPC', EAN_UPC_RULES, { results: EAN_UPC_RESULTS });
+  filling?.progress(3 / 6, 'Filling "Digital Assets"…');
   await fillSheet('Digital Assets', digitalRules(), { results: MIRROR_RESULTS });
+  filling?.progress(4 / 6, 'Filling "ECO Options"…');
   await fillSheet('ECO Options', ECO_RULES, { results: MIRROR_RESULTS });
+  filling?.progress(5 / 6, 'Filling "HAZMAT"…');
   await fillSheet('HAZMAT', HAZMAT_RULES, { results: MIRROR_RESULTS });
   // Excel recalculates every formula when the file is opened.
   await recalcOnOpen(zip);
 
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath), { task: task?.part(0.25, 0.35) });
   // One folder per part number with its images and PDFs (user, 2026-10-05).
   const media = await downloadMediaZip(
     products.flatMap((p) => [...p._media.images, ...p._media.pdfs.filter(Boolean)].map((e) => ({ ...e, folder: p.sku }))),
     fileName,
+    { task: task?.part(0.35, 1) },
   );
   return { count: products.length, media };
 }

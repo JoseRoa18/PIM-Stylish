@@ -5,6 +5,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import Checkbox from '@/components/ui/Checkbox';
 import { formatTimeAgo } from '@/lib/format';
 import { loadBestBuyPushCandidates, pushBestBuyContent } from '../api/bestbuySync';
+import { startTask } from '@/lib/taskProgress';
 
 // Same normalization the audit card uses, so "differs" means the same thing
 // in both cards.
@@ -36,10 +37,13 @@ export default function BestBuyContentPushCard() {
     // Viewers never see this card — don't load its candidates for them.
     if (!canEdit) return undefined;
     let active = true;
-    loadBestBuyPushCandidates()
-      .then((d) => { if (active) setData(d); })
-      .catch((err) => { if (active) setError(err.message); });
-    return () => { active = false; };
+    let ended = false;
+    const task = startTask('Best Buy · push candidates', { silent: true, detail: 'Reading the latest Best Buy snapshot…' });
+    loadBestBuyPushCandidates({ task })
+      .then((d) => { if (active) { ended = true; task.finish('Loaded'); setData(d); } })
+      .catch((err) => { if (active) { ended = true; task.fail(err); setError(err.message); } });
+    // Left the page before it loaded: the card goes without a word.
+    return () => { active = false; if (!ended) task.cancel(); };
   }, [canEdit]);
 
   const withDiff = useMemo(
@@ -70,10 +74,17 @@ export default function BestBuyContentPushCard() {
     setBusy(true);
     setResult(null);
     setProgress({ done: 0, total: chosen.length });
+    // Calls of 50 products: the bar counts the products sent.
+    const task = startTask(`Best Buy content · ${chosen.length} product${chosen.length === 1 ? '' : 's'}`, { detail: 'Sending to Best Buy…' });
     try {
       const res = await pushBestBuyContent(chosen, {
-        onProgress: (done, total) => setProgress({ done, total }),
+        onProgress: (done, total) => {
+          task.count(done, total, `Product ${done} of ${total}…`);
+          setProgress({ done, total });
+        },
       });
+      if (res.linesError > 0) task.fail(`${res.linesOk} accepted, ${res.linesError} rejected by Mirakl`);
+      else task.finish(`${res.linesOk} sent · Best Buy applies them after QC`);
       setResult({
         type: res.linesError > 0 ? 'error' : 'success',
         message: res.linesError > 0
@@ -83,6 +94,7 @@ export default function BestBuyContentPushCard() {
       });
       if (res.linesError === 0) setSelected(new Set());
     } catch (err) {
+      task.fail(err.message ?? 'Push failed');
       setResult({ type: 'error', message: err.message ?? 'Push failed' });
     } finally {
       setBusy(false);

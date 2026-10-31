@@ -4,6 +4,7 @@ import { logActivity, getActivityActor } from '@/features/activity/api/activityL
 import { pushProductToWix } from '@/features/syndication/api/wixSync';
 import { pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
 import { getAppSetting } from '@/features/settings/api/appSettings';
+import { batchTicker } from '../lib/fileProgress';
 
 /**
  * Monthly promotions. Promo prices come from the user's official lists (one
@@ -207,15 +208,18 @@ export function promotionLevel(promotion, channel = null) {
  * The promotion rows a SKU list gets from a price level: promo MAP CAD/USD
  * and the WC of each channel group, read from the products. SKUs not in the
  * PIM are reported, and so are those with no price on that level at all
- * (still returned, so the files can report them).
+ * (still returned, so the files can report them). `task` (optional
+ * taskProgress reporter) counts the batches of 200.
  */
-async function levelPriceRows(skus, tier) {
+async function levelPriceRows(skus, tier, task = null) {
   const level = LEVEL_FIELDS[tier];
   if (!level) throw new Error(`Unknown price level "${tier}".`);
   const wanted = [...new Set(skus)];
   const cols = ['sku', level.promo_price_cad, level.promo_price_usd, ...Object.values(level.costs)].join(', ');
   const found = new Map();
+  const tick = batchTicker(task, wanted.length, 200, `Reading the ${levelLabel(tier)} prices`);
   for (let i = 0; i < wanted.length; i += 200) {
+    tick(i);
     const { data, error } = await supabase.from('products').select(cols).in('sku', wanted.slice(i, i + 200));
     if (error) throw error;
     for (const p of data ?? []) found.set(p.sku, p);
@@ -240,26 +244,34 @@ async function levelPriceRows(skus, tier) {
 /**
  * Replace the SKU list of a flash deal / special event: SKUs added get
  * their prices from the level, SKUs no longer listed are removed, the rest
- * keep what they have. Returns what changed.
+ * keep what they have. Returns what changed. `task` (optional taskProgress
+ * reporter): the list, the level prices, the inserts in batches of 200, the
+ * removals.
  */
-export async function setPromotionSkusFromLevel(promotion, skus, tier = promotionLevel(promotion)) {
+export async function setPromotionSkusFromLevel(promotion, skus, tier = promotionLevel(promotion), { task = null } = {}) {
   const wanted = [...new Set((skus ?? []).map((s) => String(s).trim().toUpperCase()).filter(Boolean))];
   if (!wanted.length) throw new Error('Keep at least one SKU.');
+  task?.progress(0, "Reading the promotion's products…");
   const current = await getPromotionPrices(promotion.id);
+  task?.progress(0.1);
   const have = new Set(current.map((r) => r.sku));
   const toAdd = wanted.filter((s) => !have.has(s));
   const keep = new Set(wanted);
   const toRemove = current.filter((r) => !keep.has(r.sku));
-  const { rows, valid, notInPim, noLevel } = toAdd.length ? await levelPriceRows(toAdd, tier) : { rows: [], valid: [], notInPim: [], noLevel: [] };
+  const { rows, valid, notInPim, noLevel } = toAdd.length ? await levelPriceRows(toAdd, tier, task?.part(0.1, 0.5)) : { rows: [], valid: [], notInPim: [], noLevel: [] };
   if (!valid.length && toRemove.length === current.length) throw new Error('None of the SKUs in the list exist in the PIM.');
+  const tick = batchTicker(task?.part(0.5, 0.9), rows.length, 200, `Adding ${rows.length} SKUs`);
   for (let i = 0; i < rows.length; i += 200) {
+    tick(i);
     const { error } = await supabase.from('promotion_prices').insert(rows.slice(i, i + 200).map((r) => ({ promotion_id: promotion.id, ...r })));
     if (error) throw error;
   }
   if (toRemove.length) {
+    task?.progress(0.9, `Removing ${toRemove.length} SKUs…`);
     const { error } = await supabase.from('promotion_prices').delete().in('id', toRemove.map((r) => r.id));
     if (error) throw error;
   }
+  task?.progress(1);
   logActivity({
     action: 'update',
     entityType: 'promotion',
@@ -273,16 +285,19 @@ export async function setPromotionSkusFromLevel(promotion, skus, tier = promotio
 // `marketplaces` are the PROMO_CHANNELS keys the promotion is made for
 // (flash deals and special events go to the portals picked on creation,
 // one or several); empty/null means every marketplace (monthly).
-export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [] }) {
+// `task` (optional taskProgress reporter): the level prices in batches of
+// 200, the promotion, its rows in batches of 200.
+export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [], task = null }) {
   assertKindDates(kind, starts_on, ends_on);
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
   if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} is for.`);
   const wanted = [...new Set(skus)];
   if (!wanted.length) throw new Error('Paste at least one SKU.');
   const level = tier ?? promotionLevel({ kind });
-  const { rows, valid, notInPim, noLevel } = await levelPriceRows(wanted, level);
+  const { rows, valid, notInPim, noLevel } = await levelPriceRows(wanted, level, task?.part(0, 0.45));
   if (!valid.length) throw new Error('None of the SKUs in the list exist in the PIM.');
 
+  task?.progress(0.45, 'Creating the promotion…');
   const { data: promo, error } = await supabase
     .from('promotions')
     .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), marketplaces: portals.length ? portals : null, created_by: getActivityActor()?.id ?? null })
@@ -291,10 +306,13 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
   if (error) throw error;
 
   const priceRows = rows.map((r) => ({ promotion_id: promo.id, ...r }));
+  const tick = batchTicker(task?.part(0.5, 1), priceRows.length, 200, `Saving ${priceRows.length} SKUs`);
   for (let i = 0; i < priceRows.length; i += 200) {
+    tick(i);
     const { error: insErr } = await supabase.from('promotion_prices').insert(priceRows.slice(i, i + 200));
     if (insErr) throw insErr;
   }
+  task?.progress(1);
 
   logActivity({
     action: 'create',
@@ -377,17 +395,22 @@ export async function createPromotion({ name, period, currency, rows, kind = 'mo
 /**
  * Create a promotion from full row objects (the file-import path):
  *   [{ sku, promo_price_cad, promo_price_usd, promo_costs }]
+ * `task` (optional taskProgress reporter): the PIM's SKUs, the promotion,
+ * its rows in batches of 200.
  */
-export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null }) {
+export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null, task = null }) {
   assertKindDates(kind, starts_on, ends_on);
+  task?.progress(0, 'Checking the SKUs against the PIM…');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
+  task?.progress(0.2);
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
 
   const valid = rows.filter((r) => pimSkus.has(r.sku));
   const notInPim = rows.filter((r) => !pimSkus.has(r.sku)).map((r) => r.sku);
   if (!valid.length) throw new Error('None of the SKUs in the file exist in the PIM.');
 
+  task?.progress(0.2, 'Creating the promotion…');
   const { data: promo, error } = await supabase
     .from('promotions')
     .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), created_by: getActivityActor()?.id ?? null })
@@ -413,10 +436,13 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
       set_costs: r.promo_costs ?? {},
     };
   });
+  const tick = batchTicker(task?.part(0.25, 1), priceRows.length, 200, `Saving ${priceRows.length} SKUs`);
   for (let i = 0; i < priceRows.length; i += 200) {
+    tick(i);
     const { error: insErr } = await supabase.from('promotion_prices').insert(priceRows.slice(i, i + 200));
     if (insErr) throw insErr;
   }
+  task?.progress(1);
   const counts = { ca: priceRows.filter((r) => r.in_ca).length, us: priceRows.filter((r) => r.in_us).length };
 
   logActivity({
@@ -451,17 +477,21 @@ function withoutMarketCosts(costs, market) {
  * Orange and the USA takes Orange over them (rule 2026-10-02, decided by the
  * trigger); SKUs of the promotion that are not in the file leave that
  * market's list, and a row on neither list is removed. The other market is
- * never touched.
+ * never touched. `task` (optional taskProgress reporter): the PIM's SKUs, the
+ * promotion's rows, the saves in batches of 200, the removals.
  */
-export async function addFileToPromotion(promotion, rows, market) {
+export async function addFileToPromotion(promotion, rows, market, { task = null } = {}) {
   if (market !== 'ca' && market !== 'us') throw new Error('Pick the market this file is for.');
+  task?.progress(0, 'Checking the SKUs against the PIM…');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
+  task?.progress(0.15, "Reading the promotion's products…");
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
   const valid = rows.filter((r) => pimSkus.has(r.sku));
   const notInPim = rows.filter((r) => !pimSkus.has(r.sku)).map((r) => r.sku);
 
   const existing = await getPromotionPrices(promotion.id);
+  task?.progress(0.25);
   const bySku = new Map(existing.map((r) => [r.sku, r]));
   const inFile = new Set(valid.map((r) => r.sku));
   const priceKey = market === 'us' ? 'promo_price_usd' : 'promo_price_cad';
@@ -509,16 +539,21 @@ export async function addFileToPromotion(promotion, rows, market) {
       set_costs: withoutMarketCosts(prev.set_costs, market),
     }));
   }
+  const tickSave = batchTicker(task?.part(0.25, toDelete.length ? 0.9 : 1), upserts.length, 200, `Saving ${upserts.length} SKUs`);
   for (let i = 0; i < upserts.length; i += 200) {
+    tickSave(i);
     const { error } = await supabase
       .from('promotion_prices')
       .upsert(upserts.slice(i, i + 200), { onConflict: 'promotion_id,sku' });
     if (error) throw error;
   }
+  const tickDelete = batchTicker(task?.part(0.9, 1), toDelete.length, 200, `Removing ${toDelete.length} SKUs`);
   for (let i = 0; i < toDelete.length; i += 200) {
+    tickDelete(i);
     const { error } = await supabase.from('promotion_prices').delete().in('id', toDelete.slice(i, i + 200));
     if (error) throw error;
   }
+  task?.progress(1);
 
   const label = market === 'us' ? 'USA' : 'Canada';
   logActivity({
@@ -673,23 +708,29 @@ export async function deletePromotion(promotionId) {
 /**
  * Apply the promotion to the store pricing: for every member SKU with a CAD
  * promo price, set on_sale + sale_price_cad in the PIM. Does NOT push —
- * pushes are always a separate, manual step.
+ * pushes are always a separate, manual step. `task` (optional taskProgress
+ * reporter) counts the products.
  */
-export async function applyPromotion(promotion) {
+export async function applyPromotion(promotion, { task = null } = {}) {
+  task?.progress(0, "Reading the promotion's products…");
   const prices = await getPromotionPrices(promotion.id);
   const withCad = prices.filter((r) => r.promo_price_cad != null);
-  for (const row of withCad) {
+  const each = task?.part(0.05, 0.95);
+  for (const [i, row] of withCad.entries()) {
+    each?.count(i, withCad.length, `Product ${i + 1} of ${withCad.length} · ${row.sku}`);
     const { error } = await supabase
       .from('products')
       .update({ on_sale: true, sale_price_cad: row.promo_price_cad })
       .eq('sku', row.sku);
     if (error) throw error;
   }
+  task?.progress(0.95, 'Marking the promotion active…');
   const { error } = await supabase
     .from('promotions')
     .update({ status: 'active', activated_at: new Date().toISOString() })
     .eq('id', promotion.id);
   if (error) throw error;
+  task?.progress(1);
 
   logActivity({
     action: 'update',
@@ -703,22 +744,28 @@ export async function applyPromotion(promotion) {
 
 /**
  * End the promotion: clear on_sale/sale_price_cad on every member SKU.
- * Does NOT push — same manual rule.
+ * Does NOT push — same manual rule. `task` (optional taskProgress reporter)
+ * counts the products.
  */
-export async function endPromotion(promotion) {
+export async function endPromotion(promotion, { task = null } = {}) {
+  task?.progress(0, "Reading the promotion's products…");
   const prices = await getPromotionPrices(promotion.id);
-  for (const row of prices) {
+  const each = task?.part(0.05, 0.95);
+  for (const [i, row] of prices.entries()) {
+    each?.count(i, prices.length, `Product ${i + 1} of ${prices.length} · ${row.sku}`);
     const { error } = await supabase
       .from('products')
       .update({ on_sale: false, sale_price_cad: null })
       .eq('sku', row.sku);
     if (error) throw error;
   }
+  task?.progress(0.95, 'Marking the promotion ended…');
   const { error } = await supabase
     .from('promotions')
     .update({ status: 'ended', ended_at: new Date().toISOString() })
     .eq('id', promotion.id);
   if (error) throw error;
+  task?.progress(1);
 
   logActivity({
     action: 'update',
@@ -738,19 +785,24 @@ export async function endPromotion(promotion) {
  * updated (honors the 'promo_automation' switches; re-running overwrites the
  * previous schedule, so updates are safe). Only SKUs with a live Best Buy
  * offer in the latest snapshot are sent; the regular price rides along as the
- * PIM MAP so stale MAPs get corrected in the same import.
+ * PIM MAP so stale MAPs get corrected in the same import. `task` (optional
+ * taskProgress reporter) only says what it is doing: one Mirakl import has
+ * no share to measure, so the card keeps its moving stripe.
  */
-export async function autoScheduleBestBuyPromo(promotion) {
+export async function autoScheduleBestBuyPromo(promotion, { task = null } = {}) {
+  task?.step('Checking the automation switches…');
   const settings = await getAppSetting('promo_automation', {});
   if (settings.enabled === false || settings.bestbuy === false) return { skipped: 'automation off' };
 
   const window = promoWindow(promotion, 'ca');
   if (window.end < etToday()) return { skipped: 'past promotion' };
 
+  task?.step("Reading the promotion's Best Buy products…");
   const { rows: prices, excluded } = await promotionMembersFor(promotion, 'bestbuy');
   const members = prices.filter((r) => r.promo_price_cad != null);
   if (!members.length) return { skipped: excluded.length ? 'every member is excluded from Best Buy' : 'no CAD prices yet' };
 
+  task?.step('Reading the Best Buy offers and MAPs…');
   const { data: snap, error: snapErr } = await supabase
     .from('channel_health')
     .select('results')
@@ -803,8 +855,10 @@ export async function autoScheduleBestBuyPromo(promotion) {
   // them the day before this window, or on its first day.
   let res = null;
   if (updates.length || clears.length) {
+    task?.step(`Sending ${updates.length + clears.length} offer${updates.length + clears.length === 1 ? '' : 's'} to Best Buy…`);
     res = await pushBestBuyPrices([...updates, ...clears], { protectRunning: { start: window.start, end: window.end } });
   }
+  task?.step('Saving the schedule…');
   const kept = new Set(res?.kept_running ?? []);
 
   const report = {
@@ -915,13 +969,17 @@ export async function removeWalmartPromo(promotion, skus, { dryRun = false } = {
  * Marketplaces panel (preview first). The removal runs only once
  * walmart-push-promo knows the delete mode (a dry run answers `to_delete`).
  */
-export async function syncWalmartCaList(promotion, { leftSkus = [] } = {}) {
+// `task` (optional taskProgress reporter) only says what it is doing (the
+// card keeps its moving stripe: two calls to Walmart, nothing to count).
+export async function syncWalmartCaList(promotion, { leftSkus = [], task = null } = {}) {
   if (!leftSkus.length) return {};
   // An older walmart-push-promo reads mode "delete" as a push: its dry run
   // fails or answers without `to_delete` — nothing is sent either way.
+  task?.step(`Checking the Walmart Canada promo of ${leftSkus.length} SKU${leftSkus.length === 1 ? '' : 's'} that left the list…`);
   const probe = await removeWalmartPromo(promotion, leftSkus, { dryRun: true }).catch((err) => ({ probeError: err.message }));
   if (probe?.to_delete === undefined) return { skipped: probe?.probeError ?? 'walmart-push-promo has no delete mode yet' };
   if (!probe.to_delete) return { removed: probe };
+  task?.step(`Removing the promo from ${probe.to_delete} SKU${probe.to_delete === 1 ? '' : 's'} on Walmart Canada…`);
   return { removed: await removeWalmartPromo(promotion, leftSkus) };
 }
 

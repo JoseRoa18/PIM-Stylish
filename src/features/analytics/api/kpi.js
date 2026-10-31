@@ -20,15 +20,22 @@ export async function loadSnapshots(fromDate = addDays(new Date(), -16 * 7)) {
 /**
  * Take today's snapshot from the browser: PIM completeness per category and
  * channel coverage — the same rows the daily cron writes. Upsert, so running
- * it twice a day just refreshes today's row.
+ * it twice a day just refreshes today's row. `task` (optional taskProgress
+ * reporter) — the bar reaches 20% with the catalog read, 30% scored, 40%
+ * with the price reports, 45% with the Wayfair sync, 90% with the channel
+ * scores, then the save.
  */
-export async function takeSnapshot() {
+export async function takeSnapshot({ task = null } = {}) {
   const today = toDateKey(new Date());
+  task?.progress(0, 'Reading the catalog…');
   const { data: products, error } = await supabase
     .from('products')
     .select('sku, category, workflow_status, *, product_media (id, media_type, is_primary, image_role, language, document_type)')
     .neq('workflow_status', 'archived');
   if (error) throw error;
+  task?.progress(0.2);
+  // Scoring blocks the page: the card shows the step first.
+  if (task) await task.step(`Scoring ${(products ?? []).length} products…`);
   // The UPC check sees every non-archived product; obsolete ones are not
   // scored (user, 2026-10-16), the same as the daily cron.
   const ctx = completenessContext(products);
@@ -39,7 +46,10 @@ export async function takeSnapshot() {
   const rows = snapshotMetrics(scored, today);
 
   // Price alignment per Wix site (latest saved report) and Wayfair spec sync.
-  for (const site of Object.keys(WIX_SITES)) {
+  const sites = Object.keys(WIX_SITES);
+  const prices = task?.part(0.3, 0.4);
+  for (const [i, site] of sites.entries()) {
+    prices?.count(i, sites.length, `Reading the price alignment reports (${i + 1} of ${sites.length})`);
     try {
       const rep = await loadLatestAlignment(site);
       if (!rep) continue;
@@ -48,6 +58,7 @@ export async function takeSnapshot() {
       rows.push({ snapshot_date: today, scope: 'price', key: site, metrics: { total, aligned, pct: total ? Math.round((aligned / total) * 100) : 0 } });
     } catch { /* keep going */ }
   }
+  task?.progress(0.4, 'Reading the Wayfair spec sync…');
   for (const key of ['wayfair', 'wayfair_usa']) {
     try {
       const { data: wf } = await supabase.from('channel_health').select('total, in_sync, with_diffs, errors, run_at').eq('channel', key).order('run_at', { ascending: false }).limit(1).maybeSingle();
@@ -59,8 +70,9 @@ export async function takeSnapshot() {
   }
 
   // Channel coverage from the same pipeline the Listing Health tabs use.
+  task?.progress(0.45, 'Scoring the channels…');
   try {
-    const { perMarketplaceData } = await computeListingHealth();
+    const { perMarketplaceData } = await computeListingHealth({ task: task?.part(0.45, 0.9) });
     for (const [mkt, d] of Object.entries(perMarketplaceData)) {
       rows.push({
         snapshot_date: today,
@@ -73,6 +85,7 @@ export async function takeSnapshot() {
     // PIM rows still count; channel rows arrive with the next cron run.
   }
 
+  task?.progress(0.9, `Saving ${rows.length} rows…`);
   const takenAt = new Date().toISOString();
   const { error: upErr } = await supabase
     .from('kpi_snapshots')

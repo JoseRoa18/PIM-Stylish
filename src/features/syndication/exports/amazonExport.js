@@ -189,11 +189,14 @@ function reconcileUnits(values, pairs, labels, validValues) {
  * @param {string} templateStoragePath  path in the `templates` bucket
  * @param {Object[]} products           full product rows
  * @param {string} [fileName]
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (the
+ *   template 20%, the PIM's media, links and stock 30%, the rows 10%,
+ *   writing the file 40%)
  */
-export async function generateAmazonFromTemplate(templateStoragePath, products, fileName = 'Amazon_Export') {
+export async function generateAmazonFromTemplate(templateStoragePath, products, fileName = 'Amazon_Export', { task = null } = {}) {
   if (!products?.length) throw new Error('No products to export.');
 
-  const { zip, shared } = await openTemplate(templateStoragePath);
+  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.2) });
   const tplPath = await sheetPathByName(zip, 'Template');
   if (!tplPath) throw new Error('The file has no "Template" sheet — is this an Amazon flat file?');
   const sheetXml = await zip.file(tplPath).async('string');
@@ -201,7 +204,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
 
   const settings = parseSettings(grid[0]?.[0]);
   if (isListingsReport(settings)) {
-    return fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings, products, fileName, templateStoragePath });
+    return fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings, products, fileName, templateStoragePath, task });
   }
   const labelRow = Number(settings.labelRow ?? 4);
   const attributeRow = Number(settings.attributeRow ?? 5);
@@ -238,9 +241,16 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   const unitPairs = buildUnitPairs(grid[attributeRow - 1] || []);
 
   const skus = products.map((p) => p.sku);
+  task?.progress(0.2, `Loading images for ${skus.length} products…`);
   const imgBySku = await fetchImagesBySku(skus);
+  task?.progress(0.3, 'Loading documents…');
   const docBySku = await fetchDocsBySku(skus, AMAZON_DOC_TYPES, Object.keys(AMAZON_DOC_TYPES));
+  task?.progress(0.4, 'Loading Seller SKUs, stock and variants…');
   const [linkBySku, stock, variants] = await Promise.all([amazonLinks(skus, ctx.market), getStockFor(skus), colorVariantSkus(products)]);
+  if (task) {
+    task.progress(0.5);
+    await task.step(`Filling ${products.length} rows…`);
+  }
 
   const fill = createFillTracker();
   let rowsXml = '';
@@ -256,7 +266,7 @@ export async function generateAmazonFromTemplate(templateStoragePath, products, 
   });
 
   zip.file(tplPath, injectRows(sheetXml, rowsXml, dataRow - 1 + products.length));
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath), { task: task?.part(0.6, 1) });
 
   return { count: products.length, fillReport: fill.report(labels, products.length) };
 }
@@ -424,7 +434,7 @@ function buildAmazonValidValuesByType(grid) {
   return (pt) => ({ ...generic, ...(byType[pt] ?? {}) });
 }
 
-async function fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings, products, fileName, templateStoragePath }) {
+async function fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings, products, fileName, templateStoragePath, task = null }) {
   const labelRow = Number(settings.labelRow ?? 4);
   const attributeRow = Number(settings.attributeRow ?? 5);
   const dataRow = Number(settings.dataRow ?? 7);
@@ -452,14 +462,24 @@ async function fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings
   const unitPairs = buildUnitPairs(grid[attributeRow - 1] || []);
 
   const skus = products.map((p) => p.sku);
-  const [imgBySku, docBySku, linkBySku, stock, variants, prices] = await Promise.all([
+  // Six reads at once: the bar moves as each one settles.
+  const reads = [
     fetchImagesBySku(skus),
     fetchDocsBySku(skus, AMAZON_DOC_TYPES, Object.keys(AMAZON_DOC_TYPES)),
     amazonLinks(skus, market),
     getStockFor(skus),
     colorVariantSkus(products),
     expectedPricesFor({ priceField: market === 'us' ? 'map_usd' : 'map_cad', market, promoChannel: `amazon_${market}` }),
-  ]);
+  ];
+  const loading = task?.part(0.2, 0.5);
+  loading?.progress(0, `Loading media, Seller SKUs, stock and prices for ${skus.length} products…`);
+  let settled = 0;
+  const [imgBySku, docBySku, linkBySku, stock, variants, prices] = await Promise.all(reads.map((r) => Promise.resolve(r).then((v) => {
+    settled += 1;
+    loading?.count(settled, reads.length);
+    return v;
+  })));
+  if (task) await task.step(`Filling ${products.length} rows…`);
 
   const skipped = [];
   const fill = createFillTracker();
@@ -493,6 +513,6 @@ async function fillAmazonUpdate({ zip, shared, tplPath, sheetXml, grid, settings
   // The report's own rows go; Amazon's example row and the headers stay.
   const cleared = sheetXml.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (m, r) => (Number(r) >= dataRow ? '' : m));
   zip.file(tplPath, injectRows(cleared, rowsXml, dataRow - 1 + count));
-  await downloadZip(zip, fileName, templateExt(templateStoragePath));
+  await downloadZip(zip, fileName, templateExt(templateStoragePath), { task: task?.part(0.6, 1) });
   return { count, skipped, skippedReason: 'left out', fillReport: fill.report(labels, count) };
 }

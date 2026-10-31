@@ -210,15 +210,27 @@ export function pimExportSheets(products, mediaBySku = null) {
 
 /**
  * Export products into the PIM's category templates: one sectioned .xlsx,
- * one sheet per category (accessories split by kind).
+ * one sheet per category (accessories split by kind). `task` (optional
+ * taskProgress reporter): the media and value lists 35%, the sheets 10%,
+ * writing the workbook the rest.
  */
-export async function generatePimExport(products) {
+export async function generatePimExport(products, { task = null } = {}) {
   if (!products?.length) throw new Error('No products to export.');
   // the open fields' dropdowns list what the whole catalog uses
-  const [mediaBySku, suggestions] = await Promise.all([listMediaFor(products.map((p) => p.sku)), loadSuggestionLists()]);
+  const loading = task?.part(0, 0.35);
+  loading?.progress(0, `Loading images and value lists for ${products.length} products…`);
+  const [mediaBySku, suggestions] = await Promise.all([
+    listMediaFor(products.map((p) => p.sku), { task: loading?.part(0, 0.9) }),
+    loadSuggestionLists(),
+  ]);
+  if (task) {
+    task.progress(0.35);
+    await task.step(`Building the sheets for ${products.length} products…`);
+  }
   const sheets = pimExportSheets(products, mediaBySku);
+  task?.progress(0.45);
   const date = new Date().toISOString().slice(0, 10);
-  downloadBlob(await buildSectionedWorkbook(sheets, { validationFor: (h, kind) => excelValidationFor(h, kind, suggestions) }), `Stylish_PIM_Export_${date}.xlsx`);
+  downloadBlob(await buildSectionedWorkbook(sheets, { validationFor: (h, kind) => excelValidationFor(h, kind, suggestions), task: task?.part(0.45, 1) }), `Stylish_PIM_Export_${date}.xlsx`);
   return {
     count: products.length,
     files: 1,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { startTask } from '@/lib/taskProgress';
 import {
   computeListingHealth,
   persistHealthSummaries,
@@ -12,10 +13,16 @@ export function useListingHealth() {
 
   useEffect(() => {
     let active = true;
+    // The page's task card: the reads and the scoring (a run shared with
+    // another caller moves the same card). Leaving the page removes it.
+    const task = startTask('Listing Health', { silent: true, detail: 'Reading the catalog and channel snapshots…' });
+    let settled = false;
 
     (async () => {
       try {
-        const { enriched, perMarketplaceData } = await computeListingHealth();
+        const { enriched, perMarketplaceData } = await computeListingHealth({ task });
+        settled = true;
+        task.finish('Loaded');
 
         if (active) {
           setProducts(enriched);
@@ -26,6 +33,8 @@ export function useListingHealth() {
         // Fire-and-forget: keep the Dashboard's summary cache up to date.
         persistHealthSummaries(perMarketplaceData);
       } catch (err) {
+        settled = true;
+        task.fail(err);
         if (active) {
           setError(err);
           setLoading(false);
@@ -33,7 +42,10 @@ export function useListingHealth() {
       }
     })();
 
-    return () => { active = false; };
+    return () => {
+      active = false;
+      if (!settled) task.cancel();
+    };
   }, []);
 
   return { products, byMarketplace, loading, error };

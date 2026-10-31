@@ -24,11 +24,13 @@ const SKU_PICKERS = { strainer_model: STRAINER_TYPE, compatible_deck_plate: DECK
  * The product page's open fields (suggestFields.js) and every other text
  * field of the import, but FREE_TEXT; the part-number pickers list SKUs.
  * Returns { field: [values…] } (sorted, distinct), keyed by column or
- * attribute name.
+ * attribute name. `task` (optional taskProgress reporter): the stripe while
+ * the pages of 1,000 come in (their number is unknown up front), then full.
  */
-export async function loadSuggestionLists() {
+export async function loadSuggestionLists({ task = null } = {}) {
   const rows = [];
-  for (let from = 0; ; from += 1000) {
+  for (let from = 0, page = 1; ; from += 1000, page += 1) {
+    task?.step(page === 1 ? 'Reading the catalog’s values…' : `Reading the catalog’s values (page ${page})…`);
     const { data, error } = await supabase
       .from('products')
       .select(['sku', 'category', 'product_type', ...SUGGEST_COLUMNS, 'attributes'].join(', '))
@@ -39,6 +41,7 @@ export async function loadSuggestionLists() {
     rows.push(...(data ?? []));
     if (!data || data.length < 1000) break;
   }
+  task?.progress(1, `${rows.length} products read`);
   const valueOf = (r, field) => (field in r && field !== 'attributes' ? r[field] : r.attributes?.[field]);
   const collect = (field, keep = () => true) => [...new Set(rows.filter(keep)
     .map((r) => valueOf(r, field))

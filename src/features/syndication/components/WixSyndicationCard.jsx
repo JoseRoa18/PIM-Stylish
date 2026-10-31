@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useId } from 'react';
+import { useState, useEffect, useMemo, useId, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -32,6 +32,8 @@ import ProductHealthBadge from '@/features/dashboard/components/ProductHealthBad
 import { useAuth } from '@/features/auth/AuthContext';
 import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
 import { WIX_SITES, DEFAULT_WIX_SITE } from '../lib/wixSites';
+import { startTask } from '@/lib/taskProgress';
+import { useDockClearance } from '@/components/ui/useDockClearance';
 
 // Each group has an icon and a short summary string. Colors stay on the
 // brand palette — accents come from interaction state, not per-section hues.
@@ -131,6 +133,8 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
   const [openGroups, setOpenGroups] = useState(() => new Set());
   // Card expansion — collapsed by default; user expands to see/edit fields.
   const [cardExpanded, setCardExpanded] = useState(false);
+  // The sticky push footer keeps the progress cards above its buttons.
+  const footerRef = useRef(null);
 
   // Per-site link (wix_links table). The legacy products.wix_product_id
   // column doubles as the SinksDirect CA link, so that site renders linked
@@ -287,6 +291,8 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
     setBusy(true);
     setError(null);
     setSuccess(false);
+    // One edge-function call: the stripe moves until Wix answers.
+    const task = startTask(`Wix push · ${product.sku}`, { detail: `Waiting for ${cfg.label}…` });
     try {
       // Send form values directly to Wix — do NOT write to PIM.
       const result = await pushProductToWix(product.sku, form, undefined, cfg.key);
@@ -302,12 +308,15 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
       }
 
       if (result?.collections_error) {
+        task.fail(`Pushed, but categories sync failed: ${result.collections_error}`);
         setError(`Pushed, but categories sync failed: ${result.collections_error}`);
       } else {
+        task.finish(`Pushed to ${cfg.label}`);
         setSuccess(true);
         setTimeout(() => setSuccess(false), 2500);
       }
     } catch (err) {
+      task.fail(err);
       setError(err.message ?? String(err));
     } finally {
       setBusy(false);
@@ -319,6 +328,8 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
     setError(null);
     setSuccess(false);
   }
+
+  useDockClearance(footerRef, !linkLoading && linked && cardExpanded);
 
   return (
     <section className="rounded-2xl border border-outline-variant bg-surface overflow-hidden">
@@ -471,6 +482,8 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
                     if (!ok) return;
                     setMediaBusy(true);
                     setMediaMsg(null);
+                    // One edge-function call (~30 s of Wix ingesting): the stripe moves until it answers.
+                    const task = startTask(`Wix images · ${product.sku}`, { detail: `Sending ${count} image${count === 1 ? '' : 's'} to ${cfg.label}…` });
                     try {
                       const res = await pushMediaToWix(product.sku, cfg.key);
                       // The text set the site got (+ the Universal photos, which go with every set).
@@ -484,11 +497,14 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
                       const problems = [];
                       if (res.missing) problems.push(`${res.missing} did not land`);
                       if (failed) problems.push(`${failed} failed to upload: ${res.failed_uploads.map((f) => f.file).join(', ')}`);
+                      if (problems.length) task.fail(`${parts.join(' · ')} — ${problems.join('; ')}`);
+                      else task.finish(parts[0]);
                       setMediaMsg({
                         tone: problems.length ? 'error' : 'success',
                         text: problems.length ? `${parts.join(' · ')} — ${problems.join('; ')}` : parts.join(' · '),
                       });
                     } catch (err) {
+                      task.fail(err.message ?? 'Image push failed');
                       setMediaMsg({ tone: 'error', text: err.message ?? 'Image push failed' });
                     } finally {
                       setMediaBusy(false);
@@ -547,7 +563,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
           )}
 
           {/* Action footer */}
-          <footer className="sticky bottom-0 px-8 py-4 bg-surface/95 backdrop-blur-sm border-t border-outline-variant flex items-center justify-between gap-3 flex-wrap">
+          <footer ref={footerRef} className="sticky bottom-0 px-8 py-4 bg-surface/95 backdrop-blur-sm border-t border-outline-variant flex items-center justify-between gap-3 flex-wrap">
             <div className="text-body-sm text-on-surface-variant">
               {!dirty
                 ? 'No edits to push.'
@@ -855,6 +871,8 @@ function AiFormatButton({ value, pimValue, headline, onChange, disabled }) {
   async function run() {
     setBusy(true);
     setMsg(null);
+    // One edge-function call: the stripe moves until the formatter answers.
+    const task = startTask('Format description', { detail: 'Formatting the PIM description…' });
     try {
       const { data, error } = await supabase.functions.invoke('ai-format-html', {
         body: { text: source, headline },
@@ -868,8 +886,10 @@ function AiFormatButton({ value, pimValue, headline, onChange, disabled }) {
       if (data?.error) throw new Error(data.error);
       onChange(data.html);
       const n = data.fixes?.length ?? 0;
+      task.finish(n ? `Formatted · ${n} typo${n === 1 ? '' : 's'} fixed` : 'Formatted');
       setMsg(n ? `PIM description formatted — ${n} typo${n === 1 ? '' : 's'} fixed: ${data.fixes.join(', ')}` : 'PIM description, house-style layout.');
     } catch (err) {
+      task.fail(err);
       setMsg(err.message);
     } finally {
       setBusy(false);
@@ -1399,11 +1419,15 @@ function NotLinkedNotice({ product, site, canEdit, onLinked }) {
     });
     if (!ok) return;
     setBusy(true);
+    // One edge-function call: the stripe moves until Wix answers.
+    const task = startTask(`Create on Wix · ${product.sku}`, { detail: `Creating it on ${site.label}…` });
     try {
       const res = await createProductOnWix(product.sku, site.key);
+      task.finish(`Now on ${site.label}`);
       // The parent flips this card straight into the linked update/diff view.
       onLinked?.({ wix_product_id: res.id, wix_synced_at: new Date().toISOString() }, res.id);
     } catch (err) {
+      task.fail(err.message ?? 'Create failed');
       setError(err.message ?? 'Create failed');
       setBusy(false);
     }
