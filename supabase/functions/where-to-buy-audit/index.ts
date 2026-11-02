@@ -979,19 +979,75 @@ const SCRAPERAPI_MAX_IN_FLIGHT = 10;
 const SCRAPERAPI_OPTIONS: Record<string, { params: string; credits: number }> = {
   bbb_us: { params: "&ultra_premium=true", credits: 30 },
 };
-const scraperApi = { credits: 0, inFlight: 0 };
+// The month's credits last until the plan renews and are spent to the end
+// (user, 2026-11-02: "que cumplamos el mes justos, no sobrados" — a pass of
+// BB&B + Overstock took ~10,000 and eight were left with 69,265 credits).
+// Every Eastern day gets an allowance, fixed by its first call: a pass day of
+// the ScraperAPI stores (PASS_WEEKDAYS_FOR) an equal share of what is left —
+// the credits less SCRAPERAPI_RESERVE, divided by the passes left before the
+// renewal, that one included — and any other day SCRAPERAPI_OFF_DAY (new
+// links, retries). Once the day's allowance is spent the rest of its links
+// keep their verdict and wait for the next pass; each pass shares again what
+// is really left, so the month ends near zero.
+const SCRAPERAPI_BUDGET_KEY = "scraperapi_budget";
+const SCRAPERAPI_RESERVE = 1500;
+const SCRAPERAPI_OFF_DAY = 500;
+type ScraperBudget = { day: string; start: number; allowance: number; pass: boolean; passesLeft: number | null; renews: string | null };
+const scraperApi = { credits: 0, inFlight: 0, floor: 0, budget: null as ScraperBudget | null };
 async function refreshScraperCredits() {
   scraperApi.credits = 0;
+  scraperApi.floor = 0;
   if (!SCRAPERAPI_KEY) return;
+  let renews: Date | null = null;
   try {
     const r = await fetch(`https://api.scraperapi.com/account?api_key=${SCRAPERAPI_KEY}`, { signal: AbortSignal.timeout(10000) });
-    if (r.ok) scraperApi.credits = Number((await r.json()).creditsLeft ?? 0);
-  } catch { /* leave 0: ScraperAPI is skipped this call */ }
+    if (!r.ok) return;
+    const j = await r.json();
+    scraperApi.credits = Number(j.creditsLeft ?? 0);
+    renews = j.nextBillingDate ? new Date(j.nextBillingDate) : null;
+  } catch { return; /* leave 0: ScraperAPI is skipped this call */ }
+  try {
+    scraperApi.budget = await scraperBudgetFor(new Date(), renews);
+    scraperApi.floor = scraperApi.budget.start - scraperApi.budget.allowance;
+  } catch { scraperApi.floor = SCRAPERAPI_RESERVE; /* no budget read: keep the reserve */ }
+}
+// The ScraperAPI stores' passes from today (when today is one) until the plan renews.
+function scraperPassesLeft(now: Date, renews: Date | null): number {
+  const until = renews && renews > now ? renews : new Date(now.getTime() + 30 * 86400e3);
+  const today = eastern(now).day;
+  let n = 0;
+  for (let i = 0; i <= 40; i++) {
+    const day = shiftDay(today, i);
+    if (i > 0 && easternAt(day, PASS_HOUR) >= until) break;
+    if (passWeekdays("bbb_us").includes(new Date(`${day}T12:00:00Z`).getUTCDay())) n += 1;
+  }
+  return Math.max(1, n);
+}
+// Today's allowance: read, or fixed by the day's first call (from the credits
+// left then, so concurrent calls of the day share one floor).
+async function scraperBudgetFor(now: Date, renews: Date | null): Promise<ScraperBudget> {
+  const today = eastern(now).day;
+  const saved = (await rest<Array<{ value: ScraperBudget }>>(`app_settings?select=value&key=eq.${SCRAPERAPI_BUDGET_KEY}`))[0]?.value;
+  if (saved?.day === today) return saved;
+  const pass = passWeekdays("bbb_us").includes(eastern(now).weekday);
+  const free = Math.max(0, scraperApi.credits - SCRAPERAPI_RESERVE);
+  const passesLeft = pass ? scraperPassesLeft(now, renews) : null;
+  const budget: ScraperBudget = {
+    day: today, start: scraperApi.credits, pass, passesLeft, renews: renews?.toISOString() ?? null,
+    allowance: pass ? Math.floor(free / passesLeft!) : Math.min(SCRAPERAPI_OFF_DAY, free),
+  };
+  await rest("app_settings?on_conflict=key", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key: SCRAPERAPI_BUDGET_KEY, value: budget, updated_at: now.toISOString() }),
+  });
+  return budget;
 }
 async function viaScraperApi(row: DueRow): Promise<Outcome> {
   const url = row.url;
   const opt = SCRAPERAPI_OPTIONS[row.retailer] ?? { params: "", credits: 10 };
   if (scraperApi.credits < opt.credits + 15) return { kind: "none", via: "scraperapi", note: SCRAPERAPI_KEY ? "no credits left this month" : "not configured" };
+  if (scraperApi.credits - opt.credits < scraperApi.floor) return { kind: "none", via: "scraperapi", note: "ScraperAPI's share for today is used — waits for the next pass" };
   while (scraperApi.inFlight >= SCRAPERAPI_MAX_IN_FLIGHT) await new Promise((ok) => setTimeout(ok, 500));
   scraperApi.inFlight += 1;
   scraperApi.credits -= opt.credits;
@@ -2318,6 +2374,11 @@ Deno.serve(async (req) => {
       return json({ ok: true, ...(await promoReread({ asOf: body.asOf, dryRun: body.dryRun === true })) });
     }
     if (mode === "suggest") return json({ ok: true, ...(await suggest({ build: body.build === true, dryRun: body.dryRun === true })) });
+    // ScraperAPI's credits and today's allowance (reads the account; spends nothing).
+    if (mode === "budget") {
+      await refreshScraperCredits();
+      return json({ ok: true, credits: scraperApi.credits, floor: scraperApi.floor, usable_today: Math.max(0, scraperApi.credits - scraperApi.floor), budget: scraperApi.budget });
+    }
     // The publish queue on its own (cron every 5 minutes): a check call that
     // spends its whole budget on pages leaves no time to write the Stylish
     // pages (the queue barely moved on 2026-10-20 once the checks ran 20 pages
