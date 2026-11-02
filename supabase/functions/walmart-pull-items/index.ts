@@ -17,6 +17,7 @@
 // (the credential pair is multi-market; CA is selected via WM_MARKET).
 
 import { etToday, periodOfDay, promoWindow, windowContains, PROMO_DATE_COLUMNS, type PromoLike } from "../_shared/promoCalendar.ts";
+import { priceOff } from "../_shared/priceTolerance.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -171,7 +172,8 @@ Deno.serve(async (req) => {
           if (live) (monthly ? monthlyToday : dealToday).set(row.sku, Number(row.promo_price_cad));
         }
       }
-      const near = (a: unknown, b: unknown) => a != null && b != null && Math.abs(Number(a) - Number(b)) < 0.01;
+      // Within Price Alignment's margin (±10 from 200, else ±5): what the report would not flag.
+      const near = (a: unknown, b: unknown) => a != null && b != null && !priceOff(a, b);
       const liveOf = (r: Record<string, unknown>) => {
         if (r.discount_price == null) return r.price ?? null;
         const s = r.discount_start as string | null;

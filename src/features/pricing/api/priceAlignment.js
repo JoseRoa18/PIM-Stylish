@@ -3,6 +3,7 @@ import { etToday, promoWindow } from '../lib/promoCalendar';
 import { sharedLoad, loadExpectedPrices, loadPriceChangeDays, dropShared } from './expectedPrices';
 import { PAGE_STORES } from '../lib/pageStores';
 import { NLP_MIN_DISCOUNT, NLP_CATEGORIES, nlpDiscount } from '../lib/homeDepotCaNlp';
+import { priceOff } from '../lib/priceTolerance';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { pushProductToWix, refreshWixCatalog } from '@/features/syndication/api/wixSync';
 import { refreshBestBuyOffers, pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
@@ -223,7 +224,7 @@ async function loadOfferAlignment(cfg, task = null) {
       promo_kind: promo?.kind ?? null,
       promo_window: promo ? { start: promo.windowStart, end: promo.windowEnd } : null,
       no_promo: noPromo,
-      price_diff: noPromo || (expected != null && price != null && Math.abs(price - expected) > 0.01),
+      price_diff: noPromo || priceOff(price, expected),
     });
   }
   return classifySnapshot({ run_at: snapshot.run_at, results });
@@ -337,7 +338,7 @@ async function loadPageAlignment(cfg, task = null) {
       promo_period: promo?.period ?? null,
       promo_kind: promo?.kind ?? null,
       promo_window: promo ? { start: promo.windowStart, end: promo.windowEnd } : null,
-      price_diff: expected != null && Math.abs(r.price - expected) > 0.01,
+      price_diff: priceOff(r.price, expected),
       url: r.url,
       read_at: r.read_at,
       sku_check: r.sku_check,
@@ -391,7 +392,7 @@ export async function loadLatestAlignment(target = DEFAULT_WIX_SITE, { task = nu
       map: base,
       promo_period: promo?.period ?? null,
       promo_kind: promo?.kind ?? null,
-      price_diff: expected != null && r.price != null && Math.abs(r.price - expected) > 0.01,
+      price_diff: priceOff(r.price, expected),
     };
   });
   return classifySnapshot({ run_at: data[0].run_at, results }, outOfScope);

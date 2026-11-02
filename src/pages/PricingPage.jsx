@@ -62,6 +62,7 @@ import { getAppSetting } from '@/features/settings/api/appSettings';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import DealsOverview from '@/features/pricing/components/DealsOverview';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
+import { TOLERANCE_FROM, TOLERANCE_HIGH, TOLERANCE_LOW } from '@/features/pricing/lib/priceTolerance';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { startTask } from '@/lib/taskProgress';
 
@@ -659,6 +660,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                 : `Compares every linked product's base price against its ${cfg.priceShort} — this store
                    runs its own storefront sales, so percent-off discounts are not counted as drift.`}
             {cfg.kind !== 'page' && ' Reports save automatically twice a day; run a fresh one anytime.'}
+            {` A price within ±${cfg.symbol}${TOLERANCE_HIGH} of an expected price of ${cfg.symbol}${TOLERANCE_FROM} or more, or ±${cfg.symbol}${TOLERANCE_LOW} under ${cfg.symbol}${TOLERANCE_FROM}, counts as aligned.`}
           </p>
         </div>
         <button

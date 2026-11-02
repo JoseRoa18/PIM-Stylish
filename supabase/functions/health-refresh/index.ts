@@ -25,6 +25,7 @@ import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHeal
 import { completenessContext, inCompleteness, scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
 import { etToday, promoWindow, windowContains } from "../_shared/promoCalendar.ts";
 import { WIX_SITES, siteSells, type WixSite } from "../_shared/wixSites.ts";
+import { priceOff } from "../_shared/priceTolerance.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -201,7 +202,7 @@ async function refreshWix(site: WixSite) {
     const livePrice = site.promoAware ? (w.discountedPrice ?? w.price) : w.price;
     const promoPrice = promoBySku.get(p.sku);
     const expected = promoPrice ?? base;
-    const priceDiff = expected != null && livePrice != null && Math.abs(livePrice - expected) > 0.01;
+    const priceDiff = priceOff(livePrice, expected); // within ±10 / ±5 counts as aligned (_shared/priceTolerance.js)
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
     results.push({

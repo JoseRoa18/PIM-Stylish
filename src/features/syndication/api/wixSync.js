@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { insertSnapshot } from '@/features/syndication/lib/channels';
 import { etToday, promoWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
+import { priceOff } from '@/features/pricing/lib/priceTolerance';
 import { isExcluded, wixExclusionKey } from '../lib/marketplaces';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells } from '../lib/wixSites';
@@ -423,7 +424,7 @@ export async function refreshWixCatalog(site = DEFAULT_WIX_SITE) {
     const livePrice = cfg.promoAware ? (w.discountedPrice ?? w.price) : w.price;
     const promoPrice = promoBySku.get(p.sku);
     const expected = promoPrice ?? base;
-    const priceDiff = expected != null && livePrice != null && Math.abs(livePrice - expected) > 0.01;
+    const priceDiff = priceOff(livePrice, expected); // within ±10 / ±5 counts as aligned
     if (priceDiff) priceDiffs += 1;
     if (w.visible) inSync += 1;
     results.push({
