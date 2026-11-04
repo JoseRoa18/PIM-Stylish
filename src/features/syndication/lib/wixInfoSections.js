@@ -11,9 +11,11 @@
 // Rules (per the publish flow):
 //   - DIMENSIONS and FEATURES are rebuilt wholesale from PIM measurements /
 //     bullet_points (and appended if the listing doesn't have them yet).
-//   - DOCUMENTS keeps its structure; only the hrefs are repointed to the PIM's
-//     files. A link whose label matches no PIM document keeps its old URL.
-//   - Every other section (RECOMMENDED ACCESSORIES, VIDEOS, WARRANTY, …)
+//   - DOCUMENTS (DOCUMENTS TO DOWNLOAD, the Azuni store's TECHNICAL
+//     DOCUMENTS) is rebuilt wholesale from the PIM's documents, like the
+//     WHERE TO BUY links (user, 2026-11-04): a document the product does not
+//     have does not appear, and a product without any loses the section.
+//   - Every other section (RECOMMENDED ACCESSORIES, VIDEOS, WHERE TO BUY, …)
 //     passes through untouched.
 
 import { toFractionLength } from '@/features/products/lib/units';
@@ -90,127 +92,76 @@ export function buildFeaturesHtml(product) {
   return blocks.length ? blocks.join('') : null;
 }
 
-// Anchor label → PIM document_type. DXF is checked before CUT-OUT because a
-// "DXF CUT-OUT TEMPLATE" is the DXF file, not the PDF template.
-export function docTypeForLabel(label) {
-  const t = String(label ?? '').toUpperCase();
-  if (/SPARE|PARTS? DIAGRAM|EXPLODED/.test(t)) return 'spare_parts_diagram';
-  if (/DXF/.test(t)) {
-    if (/UNDERMOUNT/.test(t)) return 'dxf_undermount';
-    if (/DROP.?IN/.test(t)) return 'dxf_drop_in';
-    return 'dxf_file';
-  }
-  if (/CUT.?OUT|TEMPLATE/.test(t)) return 'cut_out_template';
-  if (/INSTALL/.test(t)) {
-    if (/UNDERMOUNT/.test(t)) return 'installation_undermount';
-    if (/DROP.?IN/.test(t)) return 'installation_drop_in';
-    if (/DUAL/.test(t)) return 'installation_dual_mount';
-    return 'installation_manual';
-  }
-  if (/SPEC/.test(t)) return 'spec_sheet';
-  if (/WARRANTY/.test(t)) return 'warranty_file';
-  return null;
-}
-
-// Some SKUs hold EN + FR copies of the same document type. Prefer the copy
-// whose filename matches the label's language (default: not French).
-function pickDoc(docs, type, label) {
-  const candidates = docs.filter((d) => d.document_type === type);
-  if (!candidates.length) return null;
-  const wantsFrench = /FRENCH|FRANC|_FR\b/i.test(String(label ?? ''));
-  const isFrench = (d) => /(_fr|french|francais)[^/]*$/i.test(d.storage_path ?? '');
-  return (
-    candidates.find((d) => (wantsFrench ? isFrench(d) : !isFrench(d))) ?? candidates[0]
-  );
-}
-
-// The file name a link points at ('…/C233_drop_in_installation.dxf?rlkey=…'
-// → 'c233_drop_in_installation.dxf').
-function linkFileName(href) {
-  try {
-    const path = new URL(href, 'https://x.invalid').pathname;
-    return decodeURIComponent(path.slice(path.lastIndexOf('/') + 1)).toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
-// The PIM document behind one link. A generic label ("INSTALLATION GUIDE",
-// "DXF FILE") says nothing about the mount, and most sinks only carry the
-// per-mount types — so the linked file tells: first a PIM file with the very
-// same name, then the mount its name mentions ("Azuni-dualmount-installation-
-// guide.pdf" → installation_dual_mount), then the family's only type.
-// Found 2026-09-29 on C233: both links still went to Dropbox after pushes.
-function docForLink(docs, label, href) {
-  const file = linkFileName(href);
-  if (file) {
-    const same = docs.find((d) => String(d.file_name ?? '').toLowerCase() === file);
-    if (same) return same;
-  }
-  const type = docTypeForLabel(label);
-  if (!type) return null;
-  const direct = pickDoc(docs, type, label);
-  if (direct || (type !== 'installation_manual' && type !== 'dxf_file')) return direct;
-  const family = type === 'dxf_file' ? 'dxf_' : 'installation_';
-  const mount = /under.?mount/.test(file) ? 'undermount' : /drop.?in/.test(file) ? 'drop_in' : /dual.?mount/.test(file) ? 'dual_mount' : null;
-  if (mount) {
-    const hinted = pickDoc(docs, `${family}${mount}`, label);
-    if (hinted) return hinted;
-  }
-  const types = [...new Set(docs.map((d) => d.document_type).filter((t) => t?.startsWith(family)))];
-  return types.length === 1 ? pickDoc(docs, types[0], label) : null;
-}
-
-// Repoint <a href> values inside the documents section at PIM files where a
-// matching document exists; leave everything else (labels, order, unmatched
-// links) exactly as it was. Returns { html, replaced, kept }.
-export function rewriteDocumentLinks(html, docs) {
-  if (typeof html !== 'string' || !html.trim()) return { html, replaced: 0, kept: 0 };
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const anchors = [...doc.body.querySelectorAll('a[href]')];
-  let replaced = 0;
-  let kept = 0;
-  for (const a of anchors) {
-    const match = docForLink(docs, a.textContent, a.getAttribute('href'));
-    if (match?.storage_path && /^https?:\/\//i.test(match.storage_path)) {
-      if (a.getAttribute('href') !== match.storage_path) replaced += 1;
-      a.setAttribute('href', match.storage_path);
-    } else {
-      kept += 1;
-    }
-  }
-  return { html: doc.body.innerHTML, replaced, kept };
-}
-
 const isDimensions = (t) => /DIMENSION/i.test(t);
 const isFeatures = (t) => /FEATURE/i.test(t);
 const isDocuments = (t) => /DOCUMENT|DOWNLOAD/i.test(t);
 
 // The faucets' Spare Parts Diagram goes to the Sinks Direct and Stylish
-// websites only (user, 2026-10-05) — the one document the PIM ADDS to a
-// listing's DOCUMENTS TO DOWNLOAD (the others are only repointed).
+// websites only (user, 2026-10-05).
 const SPARE_PARTS_SITES = new Set(['sinksdirect_ca', 'sinksdirect_us', 'stylish_ca', 'stylish_us']);
-const SPARE_PARTS_LABEL = 'SPARE PARTS DIAGRAM';
+const US_SITES = new Set(['sinksdirect_us', 'stylish_us']);
 
-// Add one <li><a> to the section's list when no link of that type is there
-// yet; it copies the attributes the existing links carry (target, rel).
-function addDocumentLink(html, type, label, url) {
-  const doc = new DOMParser().parseFromString(typeof html === 'string' ? html : '', 'text/html');
-  const anchors = [...doc.body.querySelectorAll('a[href]')];
-  if (anchors.some((a) => docTypeForLabel(a.textContent) === type)) return { html, added: false };
-  const a = doc.createElement('a');
-  for (const name of ['target', 'rel']) {
-    const v = anchors[0]?.getAttribute(name);
-    if (v) a.setAttribute(name, v);
-  }
-  a.setAttribute('href', url);
-  a.textContent = label;
-  const li = doc.createElement('li');
-  li.appendChild(a);
-  let ul = doc.body.querySelector('ul');
-  if (!ul) { ul = doc.createElement('ul'); doc.body.appendChild(ul); }
-  ul.appendChild(li);
-  return { html: doc.body.innerHTML, added: true };
+// The sink's mounting (attributes.installation_type) picks its own guide and
+// DXF first; a product without one takes the general file, then any.
+const mountOf = (product) => {
+  const t = [product?.attributes?.installation_type ?? []].flat().join(' ');
+  if (/dual/i.test(t)) return 'dual';
+  if (/under/i.test(t)) return 'under';
+  if (/top/i.test(t)) return 'top';
+  if (/drop/i.test(t)) return 'drop';
+  return null;
+};
+const INSTALL_KINDS = {
+  dual: ['installation_dual_mount', 'installation_undermount', 'installation_drop_in'],
+  under: ['installation_undermount'],
+  top: ['installation_top_mount', 'installation_drop_in'],
+  drop: ['installation_drop_in', 'installation_top_mount'],
+};
+const DXF_KINDS = {
+  dual: ['dxf_undermount', 'dxf_drop_in'],
+  under: ['dxf_undermount'],
+  top: ['dxf_top_mount', 'dxf_drop_in'],
+  drop: ['dxf_drop_in', 'dxf_top_mount'],
+};
+const ANY_INSTALL = ['installation_manual', 'installation_undermount', 'installation_dual_mount', 'installation_drop_in', 'installation_top_mount'];
+const ANY_DXF = ['dxf_file', 'dxf_undermount', 'dxf_drop_in', 'dxf_top_mount'];
+
+/**
+ * The DOCUMENTS section from the PIM's documents (user, 2026-11-04: as with
+ * the WHERE TO BUY links, a document the product does not have does not
+ * appear). One link per kind, in the stores' own order and words:
+ * INSTALLATION GUIDE, PDF CUT-OUT TEMPLATE, DXF FILE, SPEC. SHEET (the Azuni
+ * store writes SPEC SHEET), then the faucets' SPARE PARTS DIAGRAM on the
+ * Sinks Direct and Stylish websites. The brand warranty is not listed (it
+ * never was). Language: the Canada stores take the English + French file
+ * first, the USA ones the English one, then the other, then a
+ * language-neutral file; French-only or Spanish only when nothing else
+ * exists. Returns { html, count } — html null when the product has none.
+ */
+export function buildDocumentsHtml(product, docs, site = null) {
+  const langs = US_SITES.has(site) ? ['en', 'en_fr', null, 'en_es', 'fr'] : ['en_fr', 'en', null, 'fr', 'en_es'];
+  const pick = (kinds) => {
+    for (const kind of kinds) {
+      for (const lang of langs) {
+        const d = docs.find((x) => x.document_type === kind && (x.language ?? null) === lang && /^https?:\/\//i.test(x.storage_path ?? ''));
+        if (d) return d.storage_path;
+      }
+    }
+    return null;
+  };
+  const mount = mountOf(product);
+  const links = [
+    ['INSTALLATION GUIDE', pick([...(INSTALL_KINDS[mount] ?? []), ...ANY_INSTALL])],
+    ['PDF CUT-OUT TEMPLATE', pick(['cut_out_template'])],
+    ['DXF FILE', pick([...(DXF_KINDS[mount] ?? []), ...ANY_DXF])],
+    [site === 'azuni_ca' ? 'SPEC SHEET' : 'SPEC. SHEET', pick(['spec_sheet'])],
+    ['SPARE PARTS DIAGRAM', SPARE_PARTS_SITES.has(site) ? pick(['spare_parts_diagram']) : null],
+  ].filter(([, url]) => url);
+  if (!links.length) return { html: null, count: 0 };
+  return {
+    html: `<ul>${links.map(([label, url]) => `<li><a href="${esc(url).replaceAll('"', '&quot;')}" target="_blank">${esc(label)}</a></li>`).join('')}</ul>`,
+    count: links.length,
+  };
 }
 
 /**
@@ -221,7 +172,7 @@ function addDocumentLink(html, type, label, url) {
  * `site` is the Wix site the sections are for.
  *
  * Returns { sections, changes } where changes summarizes what happened:
- *   { dimensions: bool, features: bool, docsReplaced: n, docsKept: n, docsAdded: n }
+ *   { dimensions: bool, features: bool, docs: n links (null = untouched), docsRemoved: bool }
  */
 export function deriveWixSectionsFromPim(product, media, sections, site = null) {
   const docs = (media ?? []).filter(
@@ -229,11 +180,9 @@ export function deriveWixSectionsFromPim(product, media, sections, site = null) 
   );
   const dimensionsHtml = buildDimensionsHtml(product);
   const featuresHtml = buildFeaturesHtml(product);
-  const spareParts = SPARE_PARTS_SITES.has(site)
-    ? docs.find((d) => d.document_type === 'spare_parts_diagram' && /^https?:\/\//i.test(d.storage_path))
-    : null;
+  const documents = buildDocumentsHtml(product, docs, site);
 
-  const changes = { dimensions: false, features: false, docsReplaced: 0, docsKept: 0, docsAdded: 0 };
+  const changes = { dimensions: false, features: false, docs: null, docsRemoved: false };
   let sawDimensions = false;
   let sawFeatures = false;
   let sawDocuments = false;
@@ -251,22 +200,18 @@ export function deriveWixSectionsFromPim(product, media, sections, site = null) 
       return { ...section, description: featuresHtml };
     }
     if (isDocuments(title)) {
+      // One documents section, the PIM's; a second one or one with nothing
+      // the PIM has goes away.
+      if (sawDocuments || !documents.html) {
+        changes.docsRemoved = true;
+        return null;
+      }
       sawDocuments = true;
-      const { html, replaced, kept } = rewriteDocumentLinks(section?.description, docs);
-      changes.docsReplaced += replaced;
-      changes.docsKept += kept;
-      if (!spareParts) return { ...section, description: html };
-      const withDiagram = addDocumentLink(html, 'spare_parts_diagram', SPARE_PARTS_LABEL, spareParts.storage_path);
-      if (withDiagram.added) changes.docsAdded += 1;
-      return { ...section, description: withDiagram.html };
+      changes.docs = documents.count;
+      return { ...section, description: documents.html };
     }
     return section;
-  });
-
-  if (!sawDocuments && spareParts) {
-    out.push({ title: 'DOCUMENTS TO DOWNLOAD', description: `<ul><li><a href="${esc(spareParts.storage_path)}">${SPARE_PARTS_LABEL}</a></li></ul>` });
-    changes.docsAdded += 1;
-  }
+  }).filter(Boolean);
 
   // Listings that never had these sections get them appended.
   if (!sawDimensions && dimensionsHtml) {
@@ -276,6 +221,10 @@ export function deriveWixSectionsFromPim(product, media, sections, site = null) 
   if (!sawFeatures && featuresHtml) {
     out.push({ title: 'FEATURES', description: featuresHtml });
     changes.features = true;
+  }
+  if (!sawDocuments && documents.html) {
+    out.push({ title: site === 'azuni_ca' ? 'TECHNICAL DOCUMENTS' : 'DOCUMENTS TO DOWNLOAD', description: documents.html });
+    changes.docs = documents.count;
   }
 
   return { sections: out, changes };

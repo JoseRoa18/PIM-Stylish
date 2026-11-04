@@ -25,7 +25,6 @@ import {
   Copy as CopyIcon,
   Info,
   Download,
-  UploadCloud,
   Fingerprint,
   ExternalLink,
   Ban,
@@ -74,6 +73,7 @@ const WayfairProductCard = lazy(() => import('@/features/syndication/components/
 const WayfairAdditionCard = lazy(() => import('@/features/syndication/components/WayfairAdditionCard'));
 const WalmartProductCard = lazy(() => import('@/features/syndication/components/WalmartProductCard'));
 const WalmartAdditionCard = lazy(() => import('@/features/syndication/components/WalmartAdditionCard'));
+const ChannelPushBar = lazy(() => import('@/features/syndication/components/ChannelPushBar'));
 const ChannelExclusionsCard = lazy(() => import('@/features/syndication/components/ChannelExclusionsCard'));
 const AliasesTab = lazy(() => import('@/features/products/components/AliasesTab'));
 const WhereToBuyTab = lazy(() => import('@/features/products/components/WhereToBuyTab'));
@@ -1712,7 +1712,7 @@ function MediaTab({ sku, category, familyNumber, installationType, brand }) {
 }
 
 function MarketplacesTab({ product, media, onUpdate }) {
-  const confirm = useConfirm();
+  const { canEdit } = useAuth();
   // One marketplace at a time: the tiles are the menu, the panel below shows
   // only the chosen marketplace's options. Wix sites are separate stores
   // (own catalog, own price rule); keying the card by site remounts it.
@@ -1735,7 +1735,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
     return () => { active = false; };
   }, [product.sku]);
   const [autoLink, setAutoLink] = useState(null); // null | 'busy' | summary | Error
-  const [pushAll, setPushAll] = useState(null); // null | 'busy' | results | Error
+  // Bumped after a "Push <store>" so the store's card below reads it again.
+  const [pushTick, setPushTick] = useState(0);
 
   // One query answers "where is this product?" for every Wix site at once —
   // the strip below doubles as the overview and the site selector.
@@ -1750,33 +1751,12 @@ function MarketplacesTab({ product, media, onUpdate }) {
         if (active) setWixLinks(new Map((data ?? []).map((r) => [r.site, r])));
       });
     return () => { active = false; };
-  }, [product.sku]);
+  }, [product.sku, pushTick]);
 
-  // Same run that fires automatically on create/import — re-run it whenever
-  // the product has since appeared on a channel.
-  async function runPushAll(brand) {
-    const label = brand === 'stylish' ? 'Stylish (CA + US)' : 'SinksDirect (CA + US)';
-    const ok = await confirm({
-      title: `Push to ${label}?`,
-      message: 'Sends the PIM content (description, prices, weight) AND the images to the linked stores of this brand. The description goes out auto-formatted; the product name is never touched.',
-      confirmLabel: 'Push',
-    });
-    if (!ok) return;
-    setPushAll('busy');
-    const task = startTask(`Push to ${label}`, { detail: product.sku });
-    try {
-      const { pushProductToAllWixSites } = await import('@/features/syndication/api/wixSync');
-      const results = await pushProductToAllWixSites(product.sku, brand, { task });
-      // A store that failed keeps the card red; the line under the buttons says which.
-      const sent = Object.entries(results).filter(([, r]) => r.skipped !== 'excluded');
-      const failed = sent.filter(([, r]) => !r.ok).map(([k]) => WIX_SITES[k]?.label ?? k);
-      if (failed.length) task.fail(`Failed on ${failed.join(', ')}`);
-      else task.finish(`Pushed to ${sent.length} store${sent.length === 1 ? '' : 's'}`);
-      setPushAll(results);
-    } catch (err) {
-      task.fail(err);
-      setPushAll(err instanceof Error ? err : new Error(String(err)));
-    }
+  // A store's "Push" ran: its card and the tiles read the store again.
+  function afterPush() {
+    setPushTick((n) => n + 1);
+    onUpdate?.();
   }
 
   async function runAutoLink() {
@@ -1888,39 +1868,8 @@ function MarketplacesTab({ product, media, onUpdate }) {
           {autoLink === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
           Auto-link channels
         </button>
-        <button
-          type="button"
-          onClick={() => runPushAll('sinksdirect')}
-          disabled={pushAll === 'busy'}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
-          title="Pushes the PIM content to SinksDirect Canada + USA. The description goes out auto-formatted."
-        >
-          {pushAll === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
-          Push SinksDirect
-        </button>
-        {/* Brand rule: Azuni is never sold on the Stylish stores. */}
-        {wixSiteSells('stylish_ca', product) && (
-        <button
-          type="button"
-          onClick={() => runPushAll('stylish')}
-          disabled={pushAll === 'busy'}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
-          title="Pushes the PIM content to Stylish Canada + USA. The description goes out auto-formatted."
-        >
-          {pushAll === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
-          Push Stylish
-        </button>
-        )}
-        {pushAll && pushAll !== 'busy' && (
-          pushAll instanceof Error ? (
-            <span role="alert" className="text-body-sm text-error">{pushAll.message}</span>
-          ) : (
-            <span role="status" className="text-body-sm text-on-surface-variant">
-              {/* r.media is "ok (N live)", "warning: …" or "failed: …" (wixSync). */}
-              {Object.entries(pushAll).map(([k, r]) => `${WIX_SITES[k]?.label ?? k}: ${r.ok ? (String(r.media ?? '').startsWith('ok') ? r.media : String(r.media ?? '').startsWith('warning') ? `content ok, images ${r.media.replace(/^warning:\s*/, '')}` : `content ok, media ${r.media ?? 'failed'}`) : r.skipped === 'excluded' ? 'excluded, not sent' : 'failed'}`).join(' · ')}
-            </span>
-          )
-        )}
+        {/* "Push SinksDirect" / "Push Stylish" moved into each store's card
+            as "Push <store>" (user, 2026-11-04). */}
         {autoLink && autoLink !== 'busy' && (
           autoLink instanceof Error ? (
             <span role="alert" className="text-body-sm text-error">{autoLink.message}</span>
@@ -1943,16 +1892,34 @@ function MarketplacesTab({ product, media, onUpdate }) {
       {selected && selected !== 'templates' && isExcluded(product, WIX_SITES[selected] ? wixExclusionKey(selected) : selected) && (
         <ExcludedNotice product={product} label={WIX_SITES[selected]?.label ?? marketplaceLabel(selected)} />
       )}
+      {/* "Push <store>": everything the PIM has, accepted as it recommends it. */}
+      {canEdit && selected && selected !== 'templates'
+        && !isExcluded(product, WIX_SITES[selected] ? wixExclusionKey(selected) : selected)
+        && (!wixSite || wixSiteSells(wixSite, product)) && (
+        <ChannelPushBar
+          key={selected}
+          channel={selected}
+          product={product}
+          linked={
+            wixSite ? wixStatus(wixSite)
+              : selected === 'wayfair_ca' ? Boolean(product.wayfair_item_group_id)
+                : selected === 'wayfair_us' ? Boolean(product.wayfair_usa_item_group_id)
+                  : selected === 'walmart_us' ? (wmUs === undefined ? null : Boolean(wmUs))
+                    : null
+          }
+          onPushed={afterPush}
+        />
+      )}
       {wixSite && !isExcluded(product, wixExclusionKey(wixSite)) && (
         wixSiteSells(wixSite, product) ? (
-          <WixSyndicationCard key={wixSite} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
+          <WixSyndicationCard key={`${wixSite}-${pushTick}`} site={wixSite} product={product} media={media} onUpdate={onUpdate} />
         ) : (
           <p className="text-body-sm text-on-surface-variant">{product.brand} products are not sold on {WIX_SITES[wixSite].label}.</p>
         )
       )}
       {selected === 'wayfair_ca' && !isExcluded(product, 'wayfair_ca') && (
         <>
-          <WayfairProductCard product={product} onUpdate={onUpdate} />
+          <WayfairProductCard key={`wf-ca-${pushTick}`} product={product} onUpdate={onUpdate} />
           {/* New listings go to Wayfair CANADA only — Wayfair mirrors them to USA
               (user rule, 2026-09-15). */}
           <WayfairAdditionCard product={product} supplier="CAN" />

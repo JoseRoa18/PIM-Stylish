@@ -165,47 +165,10 @@ export async function pushProductToAllWixSites(sku, brand = null, { task = null 
   task?.progress(0.1);
   const order = [...sites];
   for (const site of sites) {
-    // One store's share of the bar: reading it 20%, the content to 55%, the images the rest.
     const i = order.indexOf(site);
     const store = task?.part(0.1 + (0.9 * i) / order.length, 0.1 + (0.9 * (i + 1)) / order.length);
     const say = (what) => `${siteLabel(site)}${order.length > 1 ? ` (${i + 1} of ${order.length})` : ''}: ${what}`;
-    store?.progress(0, say('reading the store…'));
-    // Accordion sections travel too (rule 2026-08-31): rebuilt from the PIM
-    // (Dimensions from measurements, Features from bullets, document links
-    // repointed at PIM files) on top of what the store currently shows, so
-    // unmatched sections are kept, never wiped.
-    let fields;
-    try {
-      const { snapshot } = await readWixProduct(sku, site);
-      const derived = deriveWixSectionsFromPim(p ?? {}, mediaRows ?? [], snapshot?.additional_info_sections ?? [], site);
-      if (derived.sections?.length) fields = { additional_info_sections: derived.sections };
-    } catch {
-      // store unreadable — push content without touching its sections
-    }
-    store?.progress(0.2, say('pushing the content…'));
-    try {
-      const r = await pushProductToWix(sku, fields, undefined, site);
-      results[site] = { ok: true, autoformat: r?.description_autoformat ?? null, sections: fields ? 'rebuilt' : 'kept' };
-    } catch (err) {
-      results[site] = { ok: false, error: err.message };
-      store?.progress(1);
-      continue;
-    }
-    // Images ride along (rule 2026-08-31): full gallery replace, with the
-    // per-brand main-picture rule applied by wix-push-media (gray hero on
-    // SinksDirect, white main on Stylish). The name is NEVER pushed.
-    store?.progress(0.55, say('pushing the images…'));
-    try {
-      const m = await pushMediaToWix(sku, site);
-      // The push verifies the gallery after attaching: "ok" only when every
-      // image is actually live on Wix.
-      results[site].media = m.missing || m.failed_uploads?.length
-        ? `warning: ${m.wix_media_now ?? 0} live, ${m.missing ?? 0} missing, ${m.failed_uploads?.length ?? 0} failed uploads`
-        : `ok (${m.wix_media_now ?? m.added ?? 0} live)`;
-    } catch (err) {
-      results[site].media = `failed: ${err.message}`;
-    }
-    store?.progress(1);
+    results[site] = await pushEverythingToSite(sku, site, p, mediaRows, store, say);
   }
   const okCount = Object.values(results).filter((r) => r.ok).length;
   logActivity({
@@ -217,6 +180,103 @@ export async function pushProductToAllWixSites(sku, brand = null, { task = null 
     metadata: { results },
   });
   return results;
+}
+
+/**
+ * One store's full push: the content (description auto-formatted, prices,
+ * weight; the name never) with the info sections rebuilt from the PIM, then
+ * the whole gallery. `store` is that store's slice of a progress card.
+ */
+async function pushEverythingToSite(sku, site, p, mediaRows, store, say) {
+  // One store's share of the bar: reading it 20%, the content to 55%, the images the rest.
+  store?.progress(0, say('reading the store…'));
+  // Accordion sections travel too (rule 2026-08-31): rebuilt from the PIM
+  // (Dimensions from measurements, Features from bullets, document links
+  // repointed at PIM files) on top of what the store currently shows, so
+  // unmatched sections are kept, never wiped.
+  let fields;
+  try {
+    const { snapshot } = await readWixProduct(sku, site);
+    const derived = deriveWixSectionsFromPim(p ?? {}, mediaRows ?? [], snapshot?.additional_info_sections ?? [], site);
+    if (derived.sections?.length) fields = { additional_info_sections: derived.sections };
+  } catch {
+    // store unreadable — push content without touching its sections
+  }
+  store?.progress(0.2, say('pushing the content…'));
+  let result;
+  try {
+    const r = await pushProductToWix(sku, fields, undefined, site);
+    result = { ok: true, autoformat: r?.description_autoformat ?? null, sections: fields ? 'rebuilt' : 'kept' };
+  } catch (err) {
+    store?.progress(1);
+    return { ok: false, error: err.message };
+  }
+  // Images ride along (rule 2026-08-31): full gallery replace, with the
+  // per-brand main-picture rule applied by wix-push-media (gray hero on
+  // SinksDirect, white main on Stylish). The name is NEVER pushed.
+  store?.progress(0.55, say('pushing the images…'));
+  try {
+    const m = await pushMediaToWix(sku, site);
+    // The push verifies the gallery after attaching: "ok" only when every
+    // image is actually live on Wix.
+    result.media = m.missing || m.failed_uploads?.length
+      ? `warning: ${m.wix_media_now ?? 0} live, ${m.missing ?? 0} missing, ${m.failed_uploads?.length ?? 0} failed uploads`
+      : `ok (${m.wix_media_now ?? m.added ?? 0} live)`;
+  } catch (err) {
+    result.media = `failed: ${err.message}`;
+  }
+  store?.progress(1);
+  return result;
+}
+
+/**
+ * "Push <store>" on the product page (user, 2026-11-04): everything the PIM
+ * has, to ONE Wix store, as the PIM recommends it. A product not on that
+ * store yet is created first (hidden — shown from its card when ready).
+ * Returns { ok, created?, media, error? }.
+ */
+export async function pushProductToWixSite(sku, site, { task = null } = {}) {
+  task?.step('Reading the product…');
+  const { data: p } = await supabase.from('products').select('*').eq('sku', sku).maybeSingle();
+  if (!p) throw new Error(`${sku} is not in the PIM.`);
+  if (!wixSiteSells(site, p)) throw new Error(`${p.brand} products are not sold on ${siteLabel(site)}.`);
+  if (isExcluded(p, wixExclusionKey(site))) throw new Error(`${sku} is excluded from ${siteLabel(site)}.`);
+  const { data: mediaRows } = await supabase
+    .from('product_media')
+    .select('media_type, document_type, storage_path, file_name, language')
+    .eq('sku', sku);
+  const { data: link } = await supabase.from('wix_links').select('site').eq('sku', sku).eq('site', site).maybeSingle();
+  const linked = Boolean(link) || (site === 'sinksdirect_ca' && Boolean(p.wix_product_id));
+  let created = false;
+  if (!linked) {
+    task?.progress(0.05, `${siteLabel(site)}: creating the product (hidden)…`);
+    await createProductOnWix(sku, site);
+    created = true;
+  }
+  const result = await pushEverythingToSite(sku, site, p, mediaRows, task?.part(0.15, 0.9), (what) => `${siteLabel(site)}: ${what}`);
+  // The WHERE TO BUY of the Stylish pages and of the Azuni store is the
+  // PIM's (only the working links): published with the same call as the
+  // Where to Buy tab's Save and publish.
+  if (result.ok && ['stylish_ca', 'stylish_us', 'azuni_ca'].includes(site)) {
+    task?.progress(0.9, `${siteLabel(site)}: publishing the Where to Buy links…`);
+    try {
+      const { publishWhereToBuy } = await import('@/features/products/api/whereToBuy');
+      const published = await publishWhereToBuy(p);
+      const failed = published.filter((r) => r.error);
+      result.whereToBuy = failed.length ? `failed: ${failed.map((r) => `${r.label} ${r.error}`).join('; ')}` : 'published';
+    } catch (err) {
+      result.whereToBuy = `failed: ${err.message}`;
+    }
+  }
+  logActivity({
+    action: 'push',
+    entityType: 'product',
+    entityId: sku,
+    target: 'wix',
+    summary: `Pushed everything of ${sku} to ${siteLabel(site)}${created ? ' (created hidden first)' : ''} — accepted as the PIM recommends`,
+    metadata: { site, created, ...result },
+  });
+  return { ...result, created };
 }
 
 export async function pushProductToWix(sku, fields = undefined, only = undefined, site = DEFAULT_WIX_SITE) {

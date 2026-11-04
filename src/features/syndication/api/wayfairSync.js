@@ -69,6 +69,30 @@ export async function pushWayfairMedia(sku, opts = {}) {
 }
 
 /**
+ * "Push Wayfair <market>" on the product page (user, 2026-11-04): everything
+ * Wayfair's API takes — the spec attributes, then the images, videos and
+ * documents — as the PIM recommends it, without the review step (the person
+ * accepted that first). Title, description, bullets and prices never travel.
+ * A spec refusal (a class without attribute rules) does not stop the media.
+ * Returns { specs: { ok, requestId?, error? }, media: [{ step, count, requestId, error }] }.
+ */
+export async function pushEverythingToWayfair(sku, { supplier = 'CAN', market, task = null } = {}) {
+  task?.progress(0.05, 'Sending the spec attributes…');
+  const out = { specs: null, media: [] };
+  try {
+    const r = await pushWayfairAttributes(sku, { validateOnly: false, supplier, market });
+    out.specs = { ok: true, requestId: r?.mutation?.requestId ?? null };
+  } catch (e) {
+    out.specs = { ok: false, error: e.message };
+  }
+  task?.progress(0.4, 'Sending the images, videos and documents…');
+  const r = await pushWayfairMedia(sku, { steps: { images: true, videos: true, documents: true }, supplier, market });
+  out.media = r?.results ?? [];
+  task?.progress(1);
+  return out;
+}
+
+/**
  * Push a kitchen sink's spec attributes (dimensions, gauge, basins, material,
  * finish, warranty…) to Wayfair. Returns a diff of current vs new values plus
  * the mutation requestId. Only supports Wayfair class 628 (Kitchen Sinks).

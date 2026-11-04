@@ -205,8 +205,8 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
   const baseline = wixBaseline ?? buildForm(product, fieldGroups);
 
   // What the listing's sections SHOULD say per the PIM: Dimensions from the
-  // measurement attributes, Features from bullet_points, document links
-  // repointed at the PIM's files (old URL kept when there's no match).
+  // measurement attributes, Features from bullet_points, the documents
+  // section from the PIM's documents (only those the product has).
   const derivedSections = useMemo(
     () =>
       deriveWixSectionsFromPim(
@@ -231,15 +231,12 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
     const parts = [];
     if (changes.dimensions) parts.push('Dimensions rebuilt');
     if (changes.features) parts.push('Features rebuilt from bullets');
-    if (changes.docsReplaced || changes.docsKept) {
-      parts.push(
-        `Documents: ${changes.docsReplaced} link${changes.docsReplaced === 1 ? '' : 's'} repointed to PIM files, ${changes.docsKept} kept`,
-      );
-    }
+    if (changes.docs != null) parts.push(`Documents: ${changes.docs} from the PIM`);
+    else if (changes.docsRemoved) parts.push('Documents section removed — the PIM has no document for it');
     setSectionsMsg(
       parts.length
         ? `${parts.join(' · ')} — review below, then Push.`
-        : 'Nothing to rebuild — this product has no PIM measurements, bullets, or matching documents.',
+        : 'Nothing to rebuild — this product has no PIM measurements, bullets, or documents.',
     );
   }
   const dirtyByGroup = useMemo(() => {
