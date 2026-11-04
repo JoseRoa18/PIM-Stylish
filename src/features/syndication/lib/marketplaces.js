@@ -8,7 +8,8 @@
 export const MARKETPLACES = [
   { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', wixSite: 'sinksdirect_ca', alwaysOn: true },
   { key: 'wix_stylish_ca', label: 'Stylish Canada', monogram: 'ST', market: 'ca', wixSite: 'stylish_ca', alwaysOn: true },
-  { key: 'wix_azuni_ca', label: 'Azuni Canada', monogram: 'AZ', market: 'ca', wixSite: 'azuni_ca' },
+  // Every Azuni product is always on the Azuni store, as every Stylish one is on the Stylish stores (user, 2026-11-04).
+  { key: 'wix_azuni_ca', label: 'Azuni Canada', monogram: 'AZ', market: 'ca', wixSite: 'azuni_ca', alwaysOn: true },
   { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca' },
   { key: 'bestbuy', label: 'Best Buy Canada', monogram: 'BB', market: 'ca' },
   { key: 'walmart_ca', label: 'Walmart Canada', monogram: 'WM', market: 'ca' },
