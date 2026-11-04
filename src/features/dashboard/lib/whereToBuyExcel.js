@@ -142,16 +142,17 @@ function triage(r) {
 /**
  * One row per product and store, from the PIM's lists and the audit's rows:
  * data = { products: [{ sku, model_name, category, brand, upc, is_obsolete }], pim: [{ sku, retailer, url }],
- *          audit: [where_to_buy_links rows of both Stylish sites], suggestions: [{ sku, retailer, url, checked_at }],
+ *          audit: [where_to_buy_links rows of the pages the PIM writes], suggestions: [{ sku, retailer, url, checked_at }],
  *          inventory: [{ market, sku, available }] — product_inventory; a missing row = not tracked,
  *          aliases, amazon, bestBuy — the stores' own codes (storeCodes) }.
- * Azuni is never on the Stylish websites, so its products are left out.
+ * Every product is in it: Stylish ones for the Stylish pages, Azuni ones for
+ * the Azuni store (its WHERE TO BUY is the PIM's since 2026-11-04).
  */
 export function whereToBuyRows({ products, pim, audit, suggestions, inventory = [], aliases = [], amazon = [], bestBuy = [] }) {
   const product = new Map(products.map((p) => [p.sku, p]));
   const codeOf = storeCodes({ aliases, amazon, bestBuy, pim });
   const stockOf = new Map(inventory.map((i) => [`${i.market}|${i.sku}`, Number(i.available ?? 0)]));
-  const stylish = (sku) => product.has(sku) && !/azuni/i.test(product.get(sku).brand ?? '');
+  const known = (sku) => product.has(sku);
   const linkOf = new Map(pim.map((l) => [`${l.sku}|${l.retailer}`, l.url]));
   // The audit's answer on the PIM's address (newest of the two sites), and
   // the stores either page reports missing.
@@ -174,7 +175,7 @@ export function whereToBuyRows({ products, pim, audit, suggestions, inventory = 
   for (const k of keys) {
     const [sku, retailer] = k.split('|');
     const store = WTB_RETAILERS.find((r) => r.key === retailer);
-    if (!store || !stylish(sku)) continue;
+    if (!store || !known(sku)) continue;
     const url = linkOf.get(k) ?? '';
     const check = checkOf.get(k) ?? null;
     const status = !url ? LINK_TO_ADD : check ? linkStatus(check).label : NOT_CHECKED;
@@ -287,11 +288,11 @@ export function whereToBuySheets(rows, date) {
           ['0. Where to start', '"To fix" and "Links to add" are sorted by Priority, and "What to Do" says what each row needs. 1 = the PIM already found the right link; 2 = we have the product in stock in that country; 3 = our stock is not tracked; 4 = we have no stock, so the store may have taken the product down — search once and move on. "Our Stock" is our own stock in the store\'s country. Out of stock links (the store shows the product sold out) are not in these lists: nothing to fix.'],
           ['Store Code', 'The product\'s own code on that store, to search it with: Home Depot Canada / USA = the item number (homedepot.ca/product/<code>, homedepot.com/p/<code>), Lowe\'s = the item #, Rona = the article #, BB&B / Overstock = the product number (the part before the dashes: bedbathandbeyond.com/<number>/product.html), Amazon.ca = the ASIN or our Seller SKU, Best Buy = the product id of our offer (bestbuy.ca/en-ca/product/<code>), Wayfair = the part number (TKJS…, the same on Wayfair.ca and Wayfair.com). It comes from the product\'s Aliases tab; empty where the PIM has none.'],
           ['1. Write the address', 'On "To fix", "Links to add" or "All links", write the store page of the product in the green "New Link" column. A "Suggested Link" is an address the PIM already opened and found right.'],
-          ['2. Remove a link', 'Write REMOVE in "New Link": the link leaves the product\'s list and both Stylish pages.'],
+          ['2. Remove a link', 'Write REMOVE in "New Link": the link leaves the product\'s list and its pages (both Stylish pages, or the Azuni store\'s).'],
           ['3. Keep a link', 'Leave "New Link" empty. Nothing else in the row is read, so the other columns can stay as they are.'],
           ['4. A store not listed', 'Add a row at the end of "All links" with the SKU, the Store (pick it from the list) and the New Link.'],
-          ['5. Upload', 'Listing Health → Where to Buy → Import links, choose this file and review the changes. "Save and publish" writes them into each product\'s list and both Stylish pages; the new links are opened within minutes, and a broken one leaves the pages by itself.'],
-          ['Note', 'An address must be a page of that store (a Wayfair.ca link on the Wayfair.ca row). Azuni products are never on the Stylish websites and are not in this file. Walmart USA is not covered yet: its links are only on "All links".'],
+          ['5. Upload', 'Listing Health → Where to Buy → Import links, choose this file and review the changes. "Save and publish" writes them into each product\'s list and its pages (both Stylish pages, or the Azuni store\'s); the new links are opened within minutes, and a broken one leaves the pages by itself.'],
+          ['Note', 'An address must be a page of that store (a Wayfair.ca link on the Wayfair.ca row). Walmart USA is not covered yet: its links are only on "All links".'],
         ],
       },
     ],
@@ -342,7 +343,6 @@ export function planWhereToBuyImport(rows, { products, current }) {
     const problem = (p) => problems.push({ where, sku: skuText, store: storeText, problem: p });
     if (!skuText) { problem('No SKU'); continue; }
     if (!product) { problem('Not a SKU of the PIM'); continue; }
-    if (/azuni/i.test(product.brand ?? '')) { problem('Azuni products are never on the Stylish websites'); continue; }
     if (!store) { problem(storeText ? 'Not a store of the list' : 'No store'); continue; }
     const k = `${product.sku}|${store.key}`;
     const from = linkOf.get(k) ?? '';

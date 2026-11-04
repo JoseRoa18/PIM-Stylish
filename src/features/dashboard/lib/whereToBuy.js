@@ -3,9 +3,11 @@
 
 import { WTB_RETAILERS as STORES } from '@/features/products/lib/whereToBuy';
 
+// The pages the PIM writes: both Stylish sites, and the Azuni store (2026-11-04).
 export const WTB_SITES = [
   { key: 'stylish_ca', label: 'Stylish Canada', short: 'Canada' },
   { key: 'stylish_us', label: 'Stylish USA', short: 'USA' },
+  { key: 'azuni_ca', label: 'Azuni Canada', short: 'Azuni' },
 ];
 
 // Column order on the grid: the stores the PIM keeps, Canada then USA — the

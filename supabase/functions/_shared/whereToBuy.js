@@ -49,12 +49,16 @@ export const WTB_MARKETS = [
   { key: 'us', heading: 'Online in USA', label: 'USA' },
 ];
 
-// The two Stylish sites that carry the section, and their order of blocks.
-// The Canada page opens with the store locator (a page element, not a link
-// the PIM keeps).
+// The sites that carry the section, and their order of blocks. The Stylish
+// Canada page opens with the store locator (a page element, not a link the
+// PIM keeps). The Azuni store's pages are the PIM's too since 2026-11-04
+// (user: "Sí, hazlo"), in their own words: "Click here to locate a Dealer
+// near you." (the "here" is underlined, not a link), then Online in Canada
+// and Online in USA.
 export const WTB_SITES = [
-  { key: 'stylish_ca', label: 'Stylish Canada', markets: ['ca', 'us'], locator: true },
-  { key: 'stylish_us', label: 'Stylish USA', markets: ['us', 'ca'], locator: false },
+  { key: 'stylish_ca', label: 'Stylish Canada', markets: ['ca', 'us'], locator: 'stylish' },
+  { key: 'stylish_us', label: 'Stylish USA', markets: ['us', 'ca'], locator: null },
+  { key: 'azuni_ca', label: 'Azuni Canada', markets: ['ca', 'us'], locator: 'azuni' },
 ];
 export const WTB_SECTION_TITLE = 'WHERE TO BUY';
 export const STORE_LOCATOR_URL = 'https://www.stylishkb.com/store-locator';
@@ -124,14 +128,16 @@ export const linksToShow = (links, hiddenUrls) => (links ?? []).filter((l) => l?
  */
 export function buildWhereToBuyHtml(links, siteKey, { allowEmpty = false } = {}) {
   const site = WTB_SITES.find((s) => s.key === siteKey);
-  if (!site) throw new Error(`Unknown Stylish site ${siteKey}`);
+  if (!site) throw new Error(`Unknown Where to Buy site ${siteKey}`);
   const byRetailer = new Map(links.filter((l) => l?.url).map((l) => [l.retailer, l.url]));
   const blocks = [];
-  if (site.locator) {
+  if (site.locator === 'stylish') {
     blocks.push(
       '<p><strong>In Stores in Canada:</strong></p>\n'
       + `<p>Click <a href="${STORE_LOCATOR_URL}" target="_blank">here</a> to locate a Dealer near you.&nbsp;</p>`,
     );
+  } else if (site.locator === 'azuni') {
+    blocks.push('<p>Click <u>here</u>&nbsp;to locate a Dealer near you.</p>');
   }
   let hasLink = false;
   for (const m of site.markets) {

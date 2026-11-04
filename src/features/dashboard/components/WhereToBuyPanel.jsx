@@ -230,7 +230,7 @@ export default function WhereToBuyPanel() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label="Stylish site">
+            <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label="Website">
               {WTB_SITES.map((s) => (
                 <button
                   key={s.key}
@@ -481,7 +481,7 @@ export default function WhereToBuyPanel() {
                               </tbody>
                             </table>
                             <p className="mt-2 text-body-sm text-on-surface-variant">
-                              Change the links in the product&apos;s <Link to={`/catalog/${encodeURIComponent(g.sku)}?tab=where_to_buy`} className="text-primary underline underline-offset-2">Where to Buy tab</Link> — the PIM writes both Stylish pages from it.
+                              Change the links in the product&apos;s <Link to={`/catalog/${encodeURIComponent(g.sku)}?tab=where_to_buy`} className="text-primary underline underline-offset-2">Where to Buy tab</Link> — the PIM writes the product&apos;s pages from it.
                             </p>
                           </td>
                         </tr>

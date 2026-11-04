@@ -84,7 +84,7 @@
 // Auth: `x-cron-secret` (cron) or a signed-in user's JWT. Deployed with
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
 
-import { resolveWixSite } from "../_shared/wixSites.ts";
+import { resolveWixSite, siteSells } from "../_shared/wixSites.ts";
 import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, isHiddenLink, withWhereToBuySection } from "../_shared/whereToBuy.js";
 import { readProductPage, menardsRead, lowesRecordRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
 import { normSku } from "../_shared/pageReaders/common.js";
@@ -109,7 +109,10 @@ const BRIGHTDATA_API_TOKEN = Deno.env.get("BRIGHTDATA_API_TOKEN") ?? "";
 const BRIGHTDATA_ZONE = Deno.env.get("BRIGHTDATA_ZONE") ?? "web_unlocker1";
 const SCRAPERAPI_KEY = Deno.env.get("SCRAPERAPI_KEY") ?? "";
 
-const SITES = ["stylish_ca", "stylish_us"];
+// The pages whose WHERE TO BUY the PIM writes: both Stylish sites, and the
+// Azuni store since 2026-11-04 (user). Each carries only its brands (siteSells).
+const SITES = ["stylish_ca", "stylish_us", "azuni_ca"];
+const sellsOn = (siteKey: string, brand: string | null | undefined) => siteSells(resolveWixSite(siteKey), brand);
 const SIGN_HOURS = 48;      // the gap between two soft signals
 const RETRY_HOURS = 3;      // no answer: again after 3 h, 6 h, … at most a day (within the pass day)
 const JOB_POLL_MIN = 10;    // Menards async job: first look after 10 minutes
@@ -479,13 +482,14 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
 
   // The PIM must know each page to write it (wix_links). A PIM product found
   // on the site without that link gets it by its SKU (user, 2026-10-20: 52
-  // Stylish USA pages had none and kept their hand-made section) — never an
-  // Azuni product, and never a Wix product already linked to another SKU.
+  // Stylish USA pages had none and kept their hand-made section) — only a
+  // product of a brand the site sells (never Azuni on Stylish, nor Stylish on
+  // Azuni), and never a Wix product already linked to another SKU.
   const known = await restAll<{ sku: string; wix_product_id: string }>(`wix_links?select=sku,wix_product_id&site=eq.${siteKey}`);
   const linkedSku = new Set(known.map((k) => k.sku));
   const linkedId = new Set(known.map((k) => k.wix_product_id));
   const newLinks = [...bestBySku.values()]
-    .filter(({ p, sku }) => p.id && pim.skus.has(sku) && !linkedSku.has(sku) && !linkedId.has(p.id) && !/azuni/i.test(pim.brands.get(sku) ?? ""))
+    .filter(({ p, sku }) => p.id && pim.skus.has(sku) && !linkedSku.has(sku) && !linkedId.has(p.id) && sellsOn(siteKey, pim.brands.get(sku)))
     .map(({ p, sku }) => ({ site: siteKey, sku, wix_product_id: p.id! }));
   for (const part of chunk(newLinks, 200)) await rest("wix_links", { method: "POST", body: JSON.stringify(part) });
 
@@ -497,6 +501,7 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
     // whose SKU the PIM does not have (spare parts like RSH-K107B, old
     // listings) is left out.
     if (!pim.skus.has(sku)) { counts.notInPim += 1; continue; }
+    if (!sellsOn(siteKey, pim.brands.get(sku))) continue; // a stale page of a brand the site does not sell
     counts.products += 1;
     const wtb = (p.additionalInfoSections ?? []).find((s) => /where\s*to\s*buy/i.test(s.title ?? ""));
     const live = liveLinks(wtb?.description ?? "");
@@ -557,7 +562,10 @@ async function syncSkus(skus: string[]) {
   const state = await readScanState();
   const out: Array<{ site: string; sku: string; links: number; missing: number }> = [];
   for (const siteKey of SITES) {
-    const onSite = await rest<Array<{ sku: string; wix_product_id: string }>>(`wix_links?select=sku,wix_product_id&site=eq.${siteKey}&sku=${inList(skus)}`);
+    // Only the brands the site sells: an Azuni product keeps stale links to
+    // pages of the Stylish sites (A906–A913, C122, C233) that it never has.
+    const onSite = (await rest<Array<{ sku: string; wix_product_id: string }>>(`wix_links?select=sku,wix_product_id&site=eq.${siteKey}&sku=${inList(skus)}`))
+      .filter((w) => sellsOn(siteKey, pim.brands.get(w.sku)));
     if (!onSite.length) continue;
     const prior = await priorState(onSite.map((x) => x.sku));
     const rows: Row[] = [];
@@ -672,7 +680,8 @@ async function probe(url: string): Promise<Probe> {
 }
 
 // ---------------------------------------------------------------- publish
-// The PIM writes the WHERE TO BUY section of the Stylish pages itself, with
+// The PIM writes the WHERE TO BUY section of the Stylish pages (and, since
+// 2026-11-04, of the Azuni store's) itself, with
 // every link of the product's list but the broken ones and the ones that open
 // another product or another option of it (user, 2026-10-20: "solo dejar los
 // OK" — such a link stays in the PIM to be fixed but leaves the website, and
@@ -722,8 +731,9 @@ async function publishSkus(skus: string[], deadline: number, maxPushes = PUBLISH
   let pushes = 0;
   let wixSaysWait = false;
   for (const sku of skus) {
-    if (!brand.has(sku) || /azuni/i.test(brand.get(sku) ?? "")) continue; // never on the Stylish sites
+    if (!brand.has(sku)) continue;
     for (const siteKey of SITES) {
+      if (!sellsOn(siteKey, brand.get(sku))) continue; // Azuni only on its store, Stylish only on theirs
       const id = linked.get(`${siteKey}|${sku}`);
       if (!id) { out.push({ sku, site: siteKey, status: "not_linked" }); continue; }
       if (wixSaysWait || pushes >= maxPushes || Date.now() + 8000 > deadline) { out.push({ sku, site: siteKey, status: "later" }); continue; }
@@ -1139,7 +1149,11 @@ async function checkScraper(store: ScraperStore, leads: DueRow[]): Promise<Array
         const rec = ownRecord(recs, row.url);
         const page = rec && !rec.error ? store.read(rec, recs.filter((x) => x !== rec)) : null;
         if (!rec) out.push({ row, o: { kind: "none", via: "scraper", note: `the ${store.label} scraper returned nothing for it` } });
-        else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "broken", via: "scraper", status: 404, note: `${store.label}: the product page is gone (404)` } });
+        // A scraper's "page gone" is a sign, not a verdict: on 2026-11-03
+        // Menards' answered dead_page for P-203's LIVE page (Model P-203, $82
+        // in the user's browser) and the link had left both Stylish pages.
+        // Broken only when it repeats (SOFT_RULE: Menards 4 times 6 h apart).
+        else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "soft", via: "scraper", status: 404, note: `${store.label}: the scraper found the product page gone (404)` } });
         else if (rec.error) out.push({ row, o: { kind: "none", via: "scraper", note: `${store.label} scraper: ${String(rec.error).slice(0, 80)}` } });
         else if (page?.gone) out.push({ row, o: { kind: "broken", via: "scraper", status: 200, note: page.note ?? `${store.label} no longer sells it`, page } });
         else if (page) out.push({ row, o: { kind: "ok", via: "scraper", status: 200, page } });
@@ -1846,8 +1860,8 @@ async function buildSuggestions(dryRun = false) {
   const ctx: SuggestCtx = { bySku: catalog.bySku, byUpc: catalog.byUpc, ids };
   const pim = new Map(pimRows.map((r) => [`${r.sku}|${r.retailer}`, r.url]));
   const fresh = (l: SugLink) => Boolean(l.read_at) && Date.now() - Date.parse(l.read_at!) < SUGGEST_FRESH_MS;
-  // The products on the Stylish pages (Azuni is never there).
-  const audited = new Set(links.map((l) => l.sku).filter((s) => productBySku.has(s) && !/azuni/i.test(productBySku.get(s)?.brand ?? "")));
+  // The products on the pages the PIM writes (Stylish and, since 2026-11-04, Azuni).
+  const audited = new Set(links.map((l) => l.sku).filter((s) => productBySku.has(s)));
 
   // What the pages already showed: store → product → an address that shows it
   // (its own link that reads as it, or another product's link that opens it).

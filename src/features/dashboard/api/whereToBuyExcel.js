@@ -11,7 +11,7 @@ import { latestSnapshot } from '@/features/syndication/lib/channels';
 import { whereToBuyRows, whereToBuySheets, whereToBuyValidation, scoreWhereToBuyHeader, planWhereToBuyImport } from '../lib/whereToBuyExcel';
 
 const PAGE = 1000;
-const SITES = ['stylish_ca', 'stylish_us'];
+const SITES = ['stylish_ca', 'stylish_us', 'azuni_ca']; // the pages the PIM writes (Azuni since 2026-11-04)
 
 // Every row of a query, page after page (the API returns at most 1,000), in a
 // unique order so no row is read twice or skipped.
