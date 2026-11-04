@@ -27,6 +27,7 @@ const Activity = lazy(ROUTE_IMPORTS.activity);
 const SettingsPage = lazy(ROUTE_IMPORTS.settings);
 const ComingSoon = lazy(ROUTE_IMPORTS.comingSoon);
 const Analytics = lazy(ROUTE_IMPORTS.analytics);
+const Scorecard = lazy(ROUTE_IMPORTS.scorecard);
 
 function PageFallback() {
   return (
@@ -47,6 +48,7 @@ const PAGE_TITLES = [
   ['/pricing', 'Pricing'],
   ['/listing-health', 'Listing Health'],
   ['/analytics', 'Analytics'],
+  ['/scorecard', 'EOS ScoreCard'],
   ['/import', 'Import'],
   ['/users', 'Users'],
   ['/activity', 'Activity Log'],
@@ -134,6 +136,7 @@ export default function App() {
           {/* Not built yet — show a friendly "Coming soon" instead of a dead redirect */}
           <Route path="/assets" element={<ComingSoon />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/scorecard" element={<Scorecard />} />
         </Route>
 
         {/* Catch-all → redirect to home */}

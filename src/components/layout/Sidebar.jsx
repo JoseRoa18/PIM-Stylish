@@ -14,6 +14,7 @@ import {
   Plus,
   X,
   DollarSign,
+  Target,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { to: '/pricing', icon: DollarSign, label: 'Pricing', prefetch: 'pricing' },
   { to: '/listing-health', icon: Activity, label: 'Listing Health', prefetch: 'listingHealth' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics', prefetch: 'analytics' },
+  { to: '/scorecard', icon: Target, label: 'EOS ScoreCard', prefetch: 'scorecard' },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true, prefetch: 'users' },
   { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true, prefetch: 'activity' },
   { to: '/settings', icon: Settings, label: 'Settings', adminOnly: true, prefetch: 'settings' },
