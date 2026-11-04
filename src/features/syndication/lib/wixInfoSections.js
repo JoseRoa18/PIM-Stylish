@@ -20,6 +20,9 @@
 
 import { toFractionLength } from '@/features/products/lib/units';
 import { isFaucetCategory } from '@/features/products/lib/categories';
+// The pages' section order (Dimensions, Features, documents, … WHERE TO BUY
+// last), shared with the WHERE TO BUY publish of the where-to-buy-audit.
+import { orderWixSections } from '../../../../supabase/functions/_shared/wixSectionOrder.js';
 
 function esc(text) {
   return String(text)
@@ -171,6 +174,7 @@ export function buildDocumentsHtml(product, docs, site = null) {
  *
  * `site` is the Wix site the sections are for.
  *
+ * The sections come back in the pages' order (orderWixSections).
  * Returns { sections, changes } where changes summarizes what happened:
  *   { dimensions: bool, features: bool, docs: n links (null = untouched), docsRemoved: bool }
  */
@@ -227,5 +231,6 @@ export function deriveWixSectionsFromPim(product, media, sections, site = null) 
     changes.docs = documents.count;
   }
 
-  return { sections: out, changes };
+  // Strictly Dimensions, Features, documents, … WHERE TO BUY last (user, 2026-11-04).
+  return { sections: orderWixSections(out), changes };
 }

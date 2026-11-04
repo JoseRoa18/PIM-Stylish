@@ -18,6 +18,8 @@
  * sends the visitor on to unrelated sites (an adult one among them).
  */
 
+import { orderWixSections } from './wixSectionOrder.js';
+
 export const WTB_RETAILERS = [
   // Online in Canada
   { key: 'sinksdirect_ca', label: 'SinksDirect.ca', market: 'ca', host: /(^|\.)sinksdirect\.ca$/ },
@@ -53,15 +55,20 @@ export const WTB_MARKETS = [
 // Canada page opens with the store locator (a page element, not a link the
 // PIM keeps). The Azuni store's pages are the PIM's too since 2026-11-04
 // (user: "Sí, hazlo"), in their own words: "Click here to locate a Dealer
-// near you." (the "here" is underlined, not a link), then Online in Canada
-// and Online in USA.
+// near you." — its "here" was underlined text going nowhere; it now opens
+// azuni.ca's own dealer page — then Online in Canada and Online in USA.
+// `locatorAlone`: with no store link the Stylish Canada page keeps its store
+// locator alone. `alwaysOwned`: the PIM's list rules the section of every
+// product of the site, so a product without a store link has NO section
+// (user, 2026-11-04: "si no hay link, no hay where to buy").
 export const WTB_SITES = [
-  { key: 'stylish_ca', label: 'Stylish Canada', markets: ['ca', 'us'], locator: 'stylish' },
+  { key: 'stylish_ca', label: 'Stylish Canada', markets: ['ca', 'us'], locator: 'stylish', locatorAlone: true },
   { key: 'stylish_us', label: 'Stylish USA', markets: ['us', 'ca'], locator: null },
-  { key: 'azuni_ca', label: 'Azuni Canada', markets: ['ca', 'us'], locator: 'azuni' },
+  { key: 'azuni_ca', label: 'Azuni Canada', markets: ['ca', 'us'], locator: 'azuni', alwaysOwned: true },
 ];
 export const WTB_SECTION_TITLE = 'WHERE TO BUY';
 export const STORE_LOCATOR_URL = 'https://www.stylishkb.com/store-locator';
+export const AZUNI_DEALERS_URL = 'https://www.azuni.ca/where-to-buy';
 
 const byKey = new Map(WTB_RETAILERS.map((r) => [r.key, r]));
 export const wtbRetailer = (key) => byKey.get(key) ?? null;
@@ -137,7 +144,7 @@ export function buildWhereToBuyHtml(links, siteKey, { allowEmpty = false } = {})
       + `<p>Click <a href="${STORE_LOCATOR_URL}" target="_blank">here</a> to locate a Dealer near you.&nbsp;</p>`,
     );
   } else if (site.locator === 'azuni') {
-    blocks.push('<p>Click <u>here</u>&nbsp;to locate a Dealer near you.</p>');
+    blocks.push(`<p>Click <a href="${AZUNI_DEALERS_URL}" target="_blank">here</a>&nbsp;to locate a Dealer near you.</p>`);
   }
   let hasLink = false;
   for (const m of site.markets) {
@@ -148,34 +155,44 @@ export function buildWhereToBuyHtml(links, siteKey, { allowEmpty = false } = {})
     hasLink = true;
     blocks.push(`<p><strong>${market.heading}:</strong></p>\n<ul>\n${items.join('\n')}\n</ul>`);
   }
-  return hasLink || (allowEmpty && site.locator) ? blocks.join('\n<p>&nbsp;</p>\n') : '';
+  return hasLink || (allowEmpty && site.locatorAlone) ? blocks.join('\n<p>&nbsp;</p>\n') : '';
 }
 
 /**
  * The sections to push to a site: the WHERE TO BUY section replaced (or
- * added at the end) and every other section exactly as Wix has it.
+ * added), every other section exactly as Wix has it, all in the pages' order
+ * (orderWixSections: Dimensions, Features, documents, WHERE TO BUY last).
  * Returns null when there is nothing to write. `owned`: the PIM has a list
  * for the product, so a section with nothing to show is emptied (Canada:
- * the store locator alone) or removed (USA) instead of left as it was.
+ * the store locator alone) or removed (USA) instead of left as it was; on a
+ * site whose section the PIM always owns (Azuni) a product without a store
+ * link has none.
  */
 export function withWhereToBuySection(sections, links, siteKey, { owned = false } = {}) {
-  const html = buildWhereToBuyHtml(links, siteKey, { allowEmpty: owned });
+  const site = WTB_SITES.find((s) => s.key === siteKey);
+  const own = owned || Boolean(site?.alwaysOwned);
+  const html = buildWhereToBuyHtml(links, siteKey, { allowEmpty: own });
   const list = (sections ?? []).map((s) => ({ title: s.title ?? '', description: s.description ?? '' }));
+  const titles = (l) => l.map((s) => s.title).join('\n');
+  const before = titles(list);
   const i = list.findIndex((s) => /where\s*to\s*buy/i.test(s.title));
+  let changed = false;
   if (!html) {
-    if (!owned || i < 0) return null;
-    list.splice(i, 1);
-    return list;
-  }
-  if (i >= 0) {
+    if (own && i >= 0) { list.splice(i, 1); changed = true; }
+  } else if (i >= 0) {
     // Wix stores the HTML with its own spacing between tags.
     const norm = (s) => s.replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
-    if (norm(list[i].description) === norm(html)) return null; // already up to date
-    list[i] = { title: list[i].title || WTB_SECTION_TITLE, description: html };
+    if (norm(list[i].description) !== norm(html)) {
+      list[i] = { title: list[i].title || WTB_SECTION_TITLE, description: html };
+      changed = true;
+    }
   } else {
     list.push({ title: WTB_SECTION_TITLE, description: html });
+    changed = true;
   }
-  return list;
+  const ordered = orderWixSections(list);
+  if (!changed && titles(ordered) === before) return null; // already up to date
+  return ordered;
 }
 
 /** The store links of a WHERE TO BUY section's HTML: [{ retailer, url, label }] (other links skipped). */
