@@ -34,6 +34,9 @@ import { deriveWixSectionsFromPim } from '../lib/wixInfoSections';
 import { WIX_SITES, DEFAULT_WIX_SITE } from '../lib/wixSites';
 import { startTask } from '@/lib/taskProgress';
 import { useDockClearance } from '@/components/ui/useDockClearance';
+import { loadExpectedPrices } from '@/features/pricing/api/expectedPrices';
+import { priceOff } from '@/features/pricing/lib/priceTolerance';
+import { expectedWhereToBuyHtml } from '@/features/products/api/whereToBuy';
 
 // Each group has an icon and a short summary string. Colors stay on the
 // brand palette — accents come from interaction state, not per-section hues.
@@ -200,6 +203,51 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
   }, [product.sku, linked, cfg.key]);
 
   const wixMissing = wixStatus === 'missing';
+
+  // Listing Health with the store's OWN definition (listingHealth MARKETPLACES,
+  // key = the site's channel). Sinks Direct Canada keeps 'wix', scored from
+  // the product's columns; every other store is scored like the daily
+  // snapshot does (`_wixSite`), here from the live read: Linked to Wix there
+  // is that store's link, not the Sinks Direct Canada id, and the Stylish /
+  // Azuni pages also measure their WHERE TO BUY (user, 2026-11-04).
+  const scoresLive = cfg.channel !== 'wix';
+  // What the PIM expects on this page: the selling price (the market's
+  // running monthly promotion on a promo-aware store, as the catalog refresh
+  // reads it) and, on the pages whose section the PIM writes, the WHERE TO
+  // BUY section ('' = none expected; undefined = not known yet).
+  const [expected, setExpected] = useState({ price: undefined, wtb: undefined });
+  useEffect(() => {
+    if (!scoresLive || !linked) return;
+    let active = true;
+    Promise.all([
+      loadExpectedPrices({ priceField: cfg.priceField, market: cfg.market, promoAware: cfg.promoAware })
+        .then(({ baseBySku, promoBySku }) => promoBySku.get(product.sku)?.price ?? baseBySku.get(product.sku) ?? null)
+        .catch(() => undefined),
+      expectedWhereToBuyHtml(product.sku, cfg.key).catch(() => undefined),
+    ]).then(([price, wtb]) => { if (active) setExpected({ price, wtb }); });
+    return () => { active = false; };
+  }, [product.sku, cfg, scoresLive, linked]);
+  const healthOverrides = useMemo(() => {
+    if (!scoresLive) return form;
+    // The same fingerprint wix-pull-catalog writes for the daily snapshot.
+    const images = (wixMedia ?? media ?? []).filter((m) => m.media_type === 'image');
+    const price = typeof form[cfg.priceField] === 'number' ? form[cfg.priceField] : null;
+    return {
+      _wixSite: {
+        state: form.visible_online === false ? 'hidden' : 'live',
+        name: form.model_name ?? '',
+        price,
+        price_diff: expected.price == null ? undefined : priceOff(price, expected.price),
+        description_length: String(form.description ?? '').replace(/<[^>]*>/g, '').trim().length,
+        image_count: images.length,
+        has_main_image: images.some((m) => m.is_primary),
+        section_titles: (form.additional_info_sections ?? []).map((s) => String(s?.title ?? '').trim()).filter(Boolean),
+      },
+      // Measured only while the PIM has links to show there ("si no hay link,
+      // no hay where to buy").
+      _wtbExpected: typeof expected.wtb === 'string' ? expected.wtb !== '' : undefined,
+    };
+  }, [scoresLive, form, wixMedia, media, cfg.priceField, expected]);
 
   // "Edited" = user changed something vs what Wix currently has
   const baseline = wixBaseline ?? buildForm(product, fieldGroups);
@@ -370,7 +418,8 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
           <ProductHealthBadge
             product={product}
             media={wixMedia ?? media}
-            overrides={form}
+            overrides={healthOverrides}
+            marketplace={cfg.channel}
           />
         </div>
       ) : null}

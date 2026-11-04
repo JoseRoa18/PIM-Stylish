@@ -62,7 +62,9 @@ const SEVERITY_DOT = {
   minor: 'bg-on-surface-variant',
 };
 
-export default function ProductHealthBadge({ product, media, overrides }) {
+// `marketplace`: the definition to score with (listingHealth MARKETPLACES) —
+// each Wix store card passes its own (Sinks Direct Canada = 'wix').
+export default function ProductHealthBadge({ product, media, overrides, marketplace = 'wix' }) {
   const [expanded, setExpanded] = useState(false);
 
   // When overrides are provided (e.g. live Wix data from the marketplace card),
@@ -74,8 +76,8 @@ export default function ProductHealthBadge({ product, media, overrides }) {
   );
 
   const result = useMemo(
-    () => scoreProduct(effectiveProduct, media),
-    [effectiveProduct, media],
+    () => scoreProduct(effectiveProduct, media, marketplace),
+    [effectiveProduct, media, marketplace],
   );
   const category = categorizeScore(result.score);
   const Icon = CATEGORY_ICONS[category];

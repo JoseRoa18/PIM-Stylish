@@ -5,7 +5,7 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WIX_SITES, wixSiteSells } from '@/features/syndication/lib/wixSites';
-import { WTB_SITES, cleanWtbUrl, wtbUrlProblem } from '../lib/whereToBuy';
+import { WTB_SITES, cleanWtbUrl, wtbUrlProblem, isHiddenLink, linksToShow, buildWhereToBuyHtml } from '../lib/whereToBuy';
 
 // A suggested link (table where_to_buy_suggestions, found and opened by the
 // audit's "suggest" mode — only "ready" ones: their page showed the product).
@@ -138,6 +138,33 @@ export async function applyWhereToBuySuggestions(suggestions, onProgress, { task
     each?.count(done, total);
   }
   return { done, errors, failures };
+}
+
+/**
+ * The WHERE TO BUY section the PIM writes on one page of the product (the
+ * publish's own rule — where-to-buy-audit `publishSkus`: the product's links
+ * minus the hidden ones, isHiddenLink), or '' when the page should have none
+ * or the PIM leaves it as it is (a Stylish product without any link). Null
+ * for a site whose section the PIM does not write (Sinks Direct).
+ */
+export async function expectedWhereToBuyHtml(sku, siteKey) {
+  const site = WTB_SITES.find((s) => s.key === siteKey);
+  if (!site) return null;
+  const [{ data: rows, error }, { data: hidden, error: e2 }] = await Promise.all([
+    supabase.from('product_where_to_buy').select('retailer, url').eq('sku', sku),
+    supabase
+      .from('where_to_buy_links')
+      .select('url, verdict, sku_check, in_stock')
+      .eq('sku', sku)
+      .not('url', 'is', null)
+      .or('verdict.eq.broken,sku_check.in.(variant,other),in_stock.is.false'),
+  ]);
+  if (error) throw error;
+  if (e2) throw e2;
+  const all = rows ?? [];
+  // An address hidden for this product on either page is hidden on both.
+  const hiddenUrls = new Set((hidden ?? []).filter((r) => isHiddenLink(r.verdict, r.sku_check, r.in_stock)).map((r) => r.url));
+  return buildWhereToBuyHtml(linksToShow(all, hiddenUrls), siteKey, { allowEmpty: all.length > 0 || Boolean(site.alwaysOwned) });
 }
 
 /** Set a suggestion aside: it is not suggested again. */

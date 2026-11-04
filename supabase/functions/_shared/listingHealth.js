@@ -236,6 +236,16 @@ const FIELDS = {
     label: 'Features Tab',
     check: (p) => wsSection(p, /feature|highlight|benefit/i),
   },
+  // The pages whose WHERE TO BUY the PIM writes (Stylish, Azuni): the section
+  // must be there while the PIM has links to show for the product, and is
+  // not measured without one (user, 2026-11-04: "si no hay link, no hay where
+  // to buy"). `_wtbExpected` is set by the caller that knows the links (the
+  // product page's store card); unknown = not measured.
+  ws_section_where_to_buy: {
+    label: 'Where to Buy Tab',
+    applies: (p) => p._wtbExpected === true,
+    check: (p) => wsSection(p, /where\s*to\s*buy/i),
+  },
   section_dimensions: { label: 'Dimensions Tab', check: (p) => hasInfoSection(p, /dimension|size|measurement/i) },
   section_documents: { label: 'Documents to Download Tab', check: (p) => hasInfoSection(p, /document|download|spec sheet|manual|installation/i) },
   section_features: { label: 'Features Tab', check: (p) => hasInfoSection(p, /feature|highlight|benefit/i) },
@@ -313,6 +323,7 @@ export const MARKETPLACES = {
       { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
       { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
       { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_where_to_buy', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
     ],
   },
   wix_stylish_us: {
@@ -336,6 +347,7 @@ export const MARKETPLACES = {
       { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
       { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
       { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_where_to_buy', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
     ],
   },
   // The Azuni brand store: only Azuni products belong to it.
@@ -360,6 +372,7 @@ export const MARKETPLACES = {
       { field: 'ws_section_dimensions', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
       { field: 'ws_section_documents', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
       { field: 'ws_section_features', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
+      { field: 'ws_section_where_to_buy', category: 'Info Tabs', weight: 8, severity: 'major', needsLink: true },
     ],
   },
   wayfair: {
@@ -552,6 +565,8 @@ export function scoreProduct(product, media, marketplace = 'wix') {
     const f = FIELDS[c.field];
     if (!f) continue;
     if (c.needsLink && !linked) continue;
+    // A check that does not apply to this product is left out of the score.
+    if (f.applies && !f.applies(enriched)) continue;
     total += c.weight;
     const entry = {
       key: c.field,
