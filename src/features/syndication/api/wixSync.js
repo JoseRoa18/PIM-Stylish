@@ -235,7 +235,7 @@ async function pushEverythingToSite(sku, site, p, mediaRows, store, say) {
  * store yet is created first (hidden — shown from its card when ready).
  * Returns { ok, created?, media, error? }.
  */
-export async function pushProductToWixSite(sku, site, { task = null } = {}) {
+export async function pushProductToWixSite(sku, site, { task = null, create = true } = {}) {
   task?.step('Reading the product…');
   const { data: p } = await supabase.from('products').select('*').eq('sku', sku).maybeSingle();
   if (!p) throw new Error(`${sku} is not in the PIM.`);
@@ -248,6 +248,8 @@ export async function pushProductToWixSite(sku, site, { task = null } = {}) {
   const { data: link } = await supabase.from('wix_links').select('site').eq('sku', sku).eq('site', site).maybeSingle();
   const linked = Boolean(link) || (site === 'sinksdirect_ca' && Boolean(p.wix_product_id));
   let created = false;
+  // A bulk push (the catalog's Push to Wix) never creates: create from the product page.
+  if (!linked && !create) throw new Error(`${sku} is not on ${siteLabel(site)} yet — create it from its page.`);
   if (!linked) {
     task?.progress(0.05, `${siteLabel(site)}: creating the product (hidden)…`);
     await createProductOnWix(sku, site);

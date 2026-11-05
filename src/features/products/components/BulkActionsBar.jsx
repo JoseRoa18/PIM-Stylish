@@ -23,6 +23,7 @@ import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDi
 import { listMediaFor } from '@/features/media/api/media';
 import { startTask } from '@/lib/taskProgress';
 import { useDockClearance } from '@/components/ui/useDockClearance';
+import WixStoresPushDialog from '@/features/syndication/components/WixStoresPushDialog';
 
 // The exporters, the PIM round-trip export and the Wix push load on click
 // (performance pass 2026-09-29) — they stay out of the Catalog's first download.
@@ -66,6 +67,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   const [result, setResult] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [editingFields, setEditingFields] = useState(false);
+  const [pushingStores, setPushingStores] = useState(false); // the store picker of Push to Wix
   // Post-export column readiness ([{file, rows, columns}] → dialog).
   const [readiness, setReadiness] = useState(null);
   // A marketplace with several kinds of template asks which one to fill.
@@ -257,19 +259,44 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     onChanged?.();
   }
 
-  async function handlePushAll() {
-    if (linkedSkus.length === 0) {
-      setResult({ type: 'error', message: 'None of the selected products are linked to Wix.' });
-      return;
+  // Push to Wix (user, 2026-11-05): it used to send only the content, only to
+  // Sinks Direct Canada. Now the person picks the stores (WixStoresPushDialog)
+  // and each product gets its full push on each — two at a time, one card.
+  function handlePushAll() {
+    setPushingStores(true);
+  }
+  async function runStorePushes(pairs) {
+    setPushingStores(false);
+    begin('push');
+    const stores = new Set(pairs.map((x) => x.site)).size;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : word.endsWith('h') ? 'es' : 's'}`;
+    const task = startTask('Push to Wix stores', { detail: `${plural(pairs.length, 'push')} to ${plural(stores, 'store')}…` });
+    setProgress({ done: 0, total: pairs.length });
+    const { pushProductToWixSite } = await loadWixSync();
+    const failures = [];
+    let done = 0;
+    for (let i = 0; i < pairs.length; i += 2) {
+      await Promise.all(pairs.slice(i, i + 2).map(async ({ sku, site }) => {
+        try {
+          const r = await pushProductToWixSite(sku, site, { create: false });
+          if (r?.ok === false) failures.push(`${sku} (${site}): ${r.error}`);
+        } catch (err) {
+          failures.push(`${sku} (${site}): ${err.message ?? err}`);
+        }
+        done += 1;
+        task.count(done, pairs.length, `${sku} → ${site}`);
+      }));
+      setProgress({ done, total: pairs.length });
     }
-    const ok = await confirm({
-      title: `Push ${linkedSkus.length} product${linkedSkus.length === 1 ? '' : 's'} to Wix?`,
-      message: 'This sends the current PIM values to each linked Wix product, overwriting what is in Wix.',
-      confirmLabel: 'Push to Wix',
-    });
-    if (!ok) return;
-    const { pushProductToWix } = await loadWixSync();
-    await runBatch(linkedSkus, (sku) => pushProductToWix(sku), 'push', 'Push to Wix');
+    const ok = pairs.length - failures.length;
+    const message = failures.length
+      ? `${ok} of ${plural(pairs.length, 'push')} done; failed: ${failures.slice(0, 4).join('; ')}${failures.length > 4 ? '…' : ''}`
+      : `${plural(ok, 'push')} done on ${plural(stores, 'store')}.`;
+    if (failures.length) task.fail(message);
+    else task.finish(message);
+    setBusy(null);
+    setResult({ type: failures.length ? 'error' : 'success', message });
+    onChanged?.();
   }
 
   async function handleRefreshAll() {
@@ -725,15 +752,12 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
                 <button
                   type="button"
                   onClick={handlePushAll}
-                  disabled={!!busy || linkedSkus.length === 0}
-                  title={linkedSkus.length === 0 ? 'No linked products selected' : `Push ${linkedSkus.length} to Wix`}
+                  disabled={!!busy}
+                  title="Push the selected products to the Wix stores you pick"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Send className="w-3.5 h-3.5" />
                   Push to Wix
-                  {linkedSkus.length > 0 && linkedSkus.length !== count && (
-                    <span className="text-on-surface-variant">({linkedSkus.length})</span>
-                  )}
                 </button>
 
                 <button
@@ -787,6 +811,9 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       </div>
     </div>
 
+    {pushingStores && (
+      <WixStoresPushDialog skus={selectedProducts.map((p) => p.sku)} onClose={() => setPushingStores(false)} onPush={runStorePushes} />
+    )}
     {editingFields && (
       <BulkEditDialog
         selectedSkus={selectedSkus}
