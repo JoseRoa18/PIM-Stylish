@@ -19,7 +19,10 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
   const scroller = useRef(null);
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el) el.scrollLeft = el.scrollWidth;
+    if (!el) return;
+    // Open on the current week (the coming ones, empty, sit after it).
+    const cur = el.querySelector('thead th[data-current]');
+    el.scrollLeft = cur ? Math.max(0, cur.offsetLeft + cur.offsetWidth - el.clientWidth) : el.scrollWidth;
   }, [weeks, board.key]);
   // The week header stays pinned while the page scrolls, under the page's
   // pinned controls (--sc-toolbar-h; user, 2026-11-05). When the 13 weeks fit,
@@ -50,13 +53,15 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
   }, [layout, fits]);
   const cols = 2 + weeks.length;
   const pinned = !fits && layout;
+  const nameCol = 'w-[17rem] min-w-[17rem] max-w-[17rem]';
+
   return (
     <div>
       {pinned && (
         <div ref={copy} aria-hidden className="sticky top-[var(--sc-toolbar-h,0px)] z-20 overflow-hidden rounded-t-2xl border-x border-t border-outline-variant" style={{ marginBottom: -(layout.height + 1) }}>
           <table className="border-separate border-spacing-0 text-body-sm" style={{ width: layout.width, tableLayout: 'fixed' }}>
             <colgroup>{layout.widths.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
-            <thead><HeaderRow weeks={weeks} thisWeek={thisWeek} mode="copy" height={layout.height} /></thead>
+            <thead><HeaderRow weeks={weeks} thisWeek={thisWeek} mode="copy" height={layout.height} nameCol={nameCol} /></thead>
           </table>
         </div>
       )}
@@ -69,7 +74,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
       <table className="min-w-full border-separate border-spacing-0 text-body-sm">
         <caption className="sr-only">{board.label} scorecard, weeks {weekTag(weeks[0])} to {weekTag(weeks.at(-1))}</caption>
         <thead ref={head}>
-          <HeaderRow weeks={weeks} thisWeek={thisWeek} mode={fits ? 'sticky' : 'static'} />
+          <HeaderRow weeks={weeks} thisWeek={thisWeek} mode={fits ? 'sticky' : 'static'} nameCol={nameCol} />
         </thead>
         {groups.map((g) => (
           <tbody key={g.key}>
@@ -81,7 +86,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
             </tr>
             {g.rows.map((m) => (
               <tr key={m.id} className="group">
-                <th scope="row" className="sticky left-0 z-10 bg-surface-container-lowest group-hover:bg-surface-container-low text-left font-normal pl-3 pr-2 py-1.5 border-b border-outline-variant w-[17rem] min-w-[17rem] max-w-[17rem]">
+                <th scope="row" className={`sticky left-0 z-10 bg-surface-container-lowest group-hover:bg-surface-container-low text-left font-normal pl-3 pr-2 py-1.5 border-b border-outline-variant ${nameCol}`}>
                   <div className="flex items-center gap-2 min-w-0">
                     <OwnerBadge label={m.owner_label} />
                     <span className="min-w-0 flex-1 truncate text-body-md text-on-surface" title={[m.name, m.owner_label && `Owner: ${m.owner_label}`, m.auto_key ? 'Filled by the PIM' : m.source && `Source: ${m.source}`].filter(Boolean).join('\n')}>
@@ -108,7 +113,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                     week={w}
                     row={values.get(`${m.id}|${w}`)}
                     current={w === thisWeek}
-                    editable={canWrite(m)}
+                    editable={canWrite(m) && w <= thisWeek}
                     onSave={onSave}
                   />
                 ))}
@@ -127,19 +132,19 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
  * fits); 'static' = the real header under its pinned copy; 'copy' = that copy.
  * The measurable's column stays pinned at the left in every mode.
  */
-function HeaderRow({ weeks, thisWeek, mode, height }) {
+function HeaderRow({ weeks, thisWeek, mode, height, nameCol }) {
   const top = mode === 'sticky' ? 'sticky top-[var(--sc-toolbar-h,0px)]' : '';
   return (
     <tr style={height ? { height } : undefined}>
-      <th scope="col" className={cn(top, 'sticky left-0', mode === 'sticky' ? 'z-[25]' : 'z-10', 'bg-surface-container-low text-left px-4 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant w-[17rem] min-w-[17rem] max-w-[17rem]')}>Measurable</th>
+      <th scope="col" className={cn(top, 'sticky left-0', mode === 'sticky' ? 'z-[25]' : 'z-10', 'bg-surface-container-low text-left px-4 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant', nameCol)}>Measurable</th>
       <th scope="col" className={cn(top, mode === 'sticky' && 'z-20', 'bg-surface-container-low text-right px-3 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant whitespace-nowrap')}>Goal</th>
       {/* A column holds the numbers of the week before it (W44 = Oct 25 – 31), so its dates are that week's. */}
       {weeks.map((w) => (
-        <th key={w} scope="col" title={`Numbers of ${weekRange(addWeeks(w, -1))}`} className={cn(top, mode === 'sticky' && 'z-20', 'px-2 py-2 text-right border-b border-outline-variant whitespace-nowrap min-w-[4rem]', w === thisWeek ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low text-on-surface-variant')}>
+        <th key={w} scope="col" data-current={w === thisWeek ? '' : undefined} title={`Numbers of ${weekRange(addWeeks(w, -1))}`} className={cn(top, mode === 'sticky' && 'z-20', 'px-2 py-2 text-right border-b border-outline-variant whitespace-nowrap min-w-[4rem]', w === thisWeek ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low text-on-surface-variant')}>
           <span className="block text-label-md">{weekTag(w)}</span>
           <span className="block text-label-sm font-normal">
             <span aria-hidden>{weekStartLabel(addWeeks(w, -1))}</span>
-            {mode !== 'copy' && <span className="sr-only">, numbers of {weekRange(addWeeks(w, -1))}{w === thisWeek ? ', this week' : ''}</span>}
+            {mode !== 'copy' && <span className="sr-only">, numbers of {weekRange(addWeeks(w, -1))}{w === thisWeek ? ', this week' : w > thisWeek ? ', upcoming' : ''}</span>}
           </span>
         </th>
       ))}
@@ -220,9 +225,14 @@ function ValueCell({ metric, week, row, current, editable, onSave }) {
 
   if (draft != null) {
     return (
-      <td className={cn('border-b border-outline-variant p-1', tone)}>
+      // The input takes the cell's own box (no minimum width, the button's
+      // height): typing a number never widens the column or moves the row
+      // (user, 2026-11-05). size={1}: an input's default 20-character width
+      // would otherwise count in the table's column sizing.
+      <td className={cn('border-b border-outline-variant p-0', tone)}>
         <input
           autoFocus
+          size={1}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
@@ -231,7 +241,7 @@ function ValueCell({ metric, week, row, current, editable, onSave }) {
             if (e.key === 'Escape') { e.preventDefault(); setDraft(null); }
           }}
           aria-label={`${label}${metric.unit === 'percent' ? ', in percent' : ''}`}
-          className={cn('w-full min-w-[5rem] px-2 py-1 rounded-md border border-primary bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30', isText ? 'text-left' : 'text-right tabular-nums')}
+          className={cn('block w-full min-w-0 h-[2.25rem] px-2 rounded-sm border border-primary bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary/30', isText ? 'text-left' : 'text-right tabular-nums')}
         />
       </td>
     );

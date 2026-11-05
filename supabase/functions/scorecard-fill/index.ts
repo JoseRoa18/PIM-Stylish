@@ -104,6 +104,7 @@ const SHIP_KEYS = ["on_time_ship", "late_ship_rate"];
 // (user, 2026-11-05; Monday–Friday, Eastern).
 const SHIP_BUSINESS_DAYS = 2;
 const SETTINGS_KEY = "scorecard_fill";
+const FIRST_COLUMN = "2026-11-01"; // W44: the scorecard starts there
 
 // ---- dates (Eastern) --------------------------------------------------------
 const DAY = 86400000;
@@ -664,7 +665,9 @@ Deno.serve(async (req) => {
     const refresh = Math.max(0, Math.min(backfill, Number(body.refresh) || 0));
     const today = etToday();
     const thisColumn = sundayOf(today);
-    const columns = Array.from({ length: backfill + 1 }, (_, i) => addDays(thisColumn, -7 * i)); // newest first
+    // Newest first, never before W44 — where the scorecard starts (FIRST_WEEK in
+    // src/features/scorecard/lib/weeks.js; user, 2026-11-05): older columns stay as they are.
+    const columns = Array.from({ length: backfill + 1 }, (_, i) => addDays(thisColumn, -7 * i)).filter((c, i) => i === 0 || c >= FIRST_COLUMN);
 
     const { data: metrics, error: mErr } = await admin
       .from("scorecard_metrics")

@@ -51,6 +51,13 @@ export function spanLabel(firstSunday, lastSunday) {
   return `${SHORT.format(toDate(firstSunday))} – ${SHORT.format(toDate(addDays(lastSunday, 6)))}`;
 }
 
+/**
+ * The scorecard starts at W44 (the column of Sunday Nov 1, 2026 — the numbers of
+ * Oct 25–31), where the PIM starts collecting (user, 2026-11-05). Earlier weeks
+ * (the workbook's history, the PIM's backfill) stay in the database, hidden.
+ */
+export const FIRST_WEEK = '2026-11-01';
+
 /** The `count` weeks ending with the week of `lastSunday`, oldest first. */
 export function weeksEnding(lastSunday, count = 13) {
   return Array.from({ length: count }, (_, i) => addWeeks(lastSunday, i - count + 1));

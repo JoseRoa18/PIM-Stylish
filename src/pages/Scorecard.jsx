@@ -5,7 +5,7 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { cn } from '@/lib/cn';
 import { etToday } from '@/features/pricing/lib/promoCalendar';
 import { BOARDS, BOARD_BY_KEY, MARKET_LABEL } from '@/features/scorecard/lib/boards';
-import { addWeeks, spanLabel, weekRange, weekStartOf, weekTag, weeksEnding } from '@/features/scorecard/lib/weeks';
+import { FIRST_WEEK, addWeeks, spanLabel, weekRange, weekStartOf, weekTag, weeksEnding } from '@/features/scorecard/lib/weeks';
 import { meetsGoal } from '@/features/scorecard/lib/format';
 import { computeAutoValues, isServerKey } from '@/features/scorecard/lib/autoMetrics';
 import { listMetrics, listPeople, listValues, refreshServerNumbers, saveAutoValues, saveValue } from '@/features/scorecard/api/scorecard';
@@ -27,7 +27,14 @@ export default function Scorecard() {
   const market = boardMarkets.includes(params.get('market')) ? params.get('market') : boardMarkets[0];
   const thisWeek = weekStartOf();
   const [endWeek, setEndWeek] = useState(thisWeek);
-  const weeks = useMemo(() => weeksEnding(endWeek, WEEKS_SHOWN), [endWeek]);
+  // Never before W44, where the scorecard starts (FIRST_WEEK). Until 13 weeks
+  // have passed the grid is W44 and the 12 weeks after it — the coming ones
+  // empty, filled week by week — so it keeps the EOS sheet's 13 columns
+  // (user, 2026-11-05: one column alone "se ve horrible"); then it slides.
+  const weeks = useMemo(() => {
+    const last = weeksEnding(endWeek, WEEKS_SHOWN);
+    return last[0] < FIRST_WEEK ? weeksEnding(addWeeks(FIRST_WEEK, WEEKS_SHOWN - 1), WEEKS_SHOWN) : last;
+  }, [endWeek]);
   const [metrics, setMetrics] = useState(null);
   const [values, setValues] = useState(() => new Map());
   const [error, setError] = useState(null);
@@ -178,9 +185,10 @@ export default function Scorecard() {
   const autoRows = metrics?.filter((m) => m.auto_key).length ?? 0;
 
   // The latest shown week at a glance: how many numbers are in, on and off goal.
+  // Never a coming week (until W56 the grid shows them, empty): this week then.
   const summary = (() => {
     if (!shown) return null;
-    const week = weeks.at(-1);
+    const week = weeks.at(-1) > thisWeek ? thisWeek : weeks.at(-1);
     const out = { week, total: 0, filled: 0, on: 0, off: 0, noGoal: 0, mineEmpty: 0 };
     for (const m of shown) {
       if (m.unit === 'text') continue;
@@ -202,7 +210,7 @@ export default function Scorecard() {
       <header className="mb-3 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-display-lg text-on-surface">EOS ScoreCard</h1>
-          <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, goal and the last {WEEKS_SHOWN} weeks, Sunday to Saturday.</p>
+          <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, goal and {WEEKS_SHOWN} weeks, Sunday to Saturday, from {weekTag(FIRST_WEEK)}.</p>
         </div>
         {isAdmin && (
           <button type="button" onClick={() => setEditing({ isNew: true })} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity">
@@ -235,11 +243,11 @@ export default function Scorecard() {
           ))}
         </div>
         <div className="flex items-center gap-1.5">
-          <button type="button" onClick={() => setEndWeek((w) => addWeeks(w, -WEEKS_SHOWN))} aria-label={`${WEEKS_SHOWN} weeks earlier`} title={`${WEEKS_SHOWN} weeks earlier`} className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors">
+          <button type="button" onClick={() => setEndWeek((w) => addWeeks(w, -WEEKS_SHOWN))} disabled={weeks[0] <= FIRST_WEEK} aria-label={`${WEEKS_SHOWN} weeks earlier`} title={`${WEEKS_SHOWN} weeks earlier`} className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             <ChevronLeft className="w-4 h-4" aria-hidden />
           </button>
           <span className="px-2 text-body-sm text-on-surface-variant tabular-nums whitespace-nowrap">
-            {weekTag(weeks[0])} – {weekTag(weeks.at(-1))} · {spanLabel(weeks[0], weeks.at(-1))}
+            {weeks.length > 1 ? `${weekTag(weeks[0])} – ${weekTag(weeks.at(-1))}` : weekTag(weeks[0])} · {spanLabel(weeks[0], weeks.at(-1))}
           </span>
           <button type="button" onClick={() => setEndWeek((w) => addWeeks(w, WEEKS_SHOWN))} disabled={endWeek >= thisWeek} aria-label={`${WEEKS_SHOWN} weeks later`} title={`${WEEKS_SHOWN} weeks later`} className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             <ChevronRight className="w-4 h-4" aria-hidden />
