@@ -5,11 +5,14 @@
 // (priceAlignment.js ALIGN_TARGETS) its MAP % reads. Lowe's is the USA
 // channel (its sheet said Canada, but its sales are in USD); BB&B and
 // Overstock share one sheet and one exclusion switch. `serverFill` boards
-// also get the server-side numbers (Odoo orders, stock, Activity Log).
+// also get the server-side numbers (Odoo orders, ShipStation labels, stock,
+// Activity Log) — every tab since 2026-11-05 (BOARDS in scorecard-fill says
+// how to find each one's orders in Odoo).
 export const BOARDS = [
   {
     key: 'amazon',
     label: 'Amazon',
+    serverFill: true,
     markets: {
       ca: { channels: ['amazon_ca'], align: ['amazon_ca'] },
       us: { channels: ['amazon_us'], align: ['amazon_us'] },
@@ -18,15 +21,16 @@ export const BOARDS = [
   {
     key: 'wayfair',
     label: 'Wayfair',
+    serverFill: true,
     markets: {
       ca: { channels: ['wayfair_ca'], align: ['wayfair_ca'] },
       us: { channels: ['wayfair_us'], align: ['wayfair_us'] },
     },
   },
-  { key: 'homedepot_ca', label: 'Home Depot', markets: { ca: { channels: ['homedepot_ca'], align: ['homedepot_ca'] } } },
-  { key: 'lowes', label: "Lowe's", markets: { us: { channels: ['lowes_us'], align: ['lowes_us'] } } },
-  { key: 'rona', label: 'Rona', markets: { ca: { channels: ['rona'], align: ['rona'] } } },
-  { key: 'bbb_overstock', label: 'BB&B / Overstock', markets: { us: { channels: ['bbb', 'overstock'], align: ['bbb_us', 'overstock_us'] } } },
+  { key: 'homedepot_ca', label: 'Home Depot', serverFill: true, markets: { ca: { channels: ['homedepot_ca'], align: ['homedepot_ca'] } } },
+  { key: 'lowes', label: "Lowe's", serverFill: true, markets: { us: { channels: ['lowes_us'], align: ['lowes_us'] } } },
+  { key: 'rona', label: 'Rona', serverFill: true, markets: { ca: { channels: ['rona'], align: ['rona'] } } },
+  { key: 'bbb_overstock', label: 'BB&B / Overstock', serverFill: true, markets: { us: { channels: ['bbb', 'overstock'], align: ['bbb_us', 'overstock_us'] } } },
   {
     key: 'sinksdirect',
     label: 'Sinks Direct',

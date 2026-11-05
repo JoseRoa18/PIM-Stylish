@@ -25,16 +25,38 @@ export const AUTO_KEYS = {
   flash_count: { label: '# flash deals of the week', unit: 'number' },
   event_count: { label: '# special events of the week', unit: 'number' },
   deal_count: { label: '# flash deals and special events of the week', unit: 'number' },
-  sales: { label: 'Sales before tax — Odoo orders of the week', unit: 'money', server: true },
-  orders: { label: '# orders — Odoo, not cancelled', unit: 'number', server: true },
-  units: { label: 'Units sold — PIM products in Odoo orders', unit: 'number', server: true },
-  cancel_rate: { label: 'Order cancelation rate — cancelled ÷ all Odoo orders', unit: 'percent', server: true },
+  // Odoo (user, 2026-11-05): a $0 order (a spare part, a warranty
+  // replacement, an open box sent free) is no sale; Sales keep the shipping
+  // charged, as Odoo's own sales report. Odoo records almost no cancellation
+  // (1 Sinks Direct order in 2026), so the cancelation rate is typed.
+  sales: { label: 'Sales before tax, shipping charged included — paid Odoo orders of the week', unit: 'money', server: true },
+  orders: { label: '# paid orders — Odoo, not cancelled, over $0', unit: 'number', server: true },
+  units: { label: 'Units sold — products sold with a price in paid Odoo orders (not shipping)', unit: 'number', server: true },
+  // From the store itself (Wix) and Odoo's deliveries / returns (user, 2026-11-05).
+  cancel_rate: { label: 'Order cancelation rate — the store\'s paid orders of the week cancelled (Wix)', unit: 'percent', server: true, store: true },
+  on_time_ship: { label: 'On-time shipping — paid orders whose ShipStation labels were all made by the 2nd business day', unit: 'percent', server: true },
+  late_ship_rate: { label: 'Late shipping rate — paid orders labelled after the 2nd business day, or still waiting past it (ShipStation)', unit: 'percent', server: true },
+  odr: { label: 'Order defect rate — paid orders of the week cancelled, refunded or returned (Wix + Odoo)', unit: 'percent', server: true, store: true },
+  returns_not_received: { label: '$ refunded in the week on orders whose goods never came back (Wix refunds, Odoo returns)', unit: 'money', server: true, store: true },
+  reviews_5plus: { label: '# products with more than 5 approved reviews on the store (Wix Reviews)', unit: 'number', server: true, store: true },
+  no_profit_skus: { label: '# SKUs priced on the store this week below Odoo\'s average cost + their real shipping cost per unit (ShipStation labels, 180 days)', unit: 'number', server: true, store: true },
   skus_not_sold_90d: { label: '# SKUs without a sale in 90 days — PIM products vs Odoo orders', unit: 'number', server: true },
   oos_loss: { label: 'Loss due to out of stock — products at 0 units × their weekly sales of the 8 weeks before', unit: 'money', server: true },
   obsolete_skus: { label: '# SKUs marked obsolete in the PIM', unit: 'number', server: true },
+  // The marketplace tabs (user, 2026-11-05): returns read over 4 weeks (bodega validates them in batches).
+  return_rate: { label: 'Return rate — orders with a return Odoo received in the last 4 weeks ÷ the paid orders placed in them', unit: 'percent', server: true },
+  returns_value: { label: '$ returned — weekly average value of the goods Odoo received back over the last 4 weeks', unit: 'money', server: true },
+  sales_usd_k: { label: 'Sales in thousands of USD — Odoo orders, USD ones as they are, others at today\'s rate', unit: 'number', server: true },
+  azuni_skus_sold: { label: '# Azuni SKUs sold in the week (Odoo orders)', unit: 'number', server: true },
   listings_updated: { label: '# listings updated — products the PIM pushed to the store that week', unit: 'number', server: true },
+  // Written by AI (Gemini) from the week's data only: the channel's top losers vs
+  // their 8-week average, the cause the PIM can see (no stock, store page sold
+  // out or broken) and the actions the PIM recorded (user, 2026-11-05).
+  losers_note: { label: 'Actions taken for top losers — note written by AI from the PIM\'s data (losers, causes, recorded actions)', unit: 'text', server: true },
 };
 export const isServerKey = (key) => Boolean(AUTO_KEYS[key]?.server);
+/** Keys read from a Wix store itself (its orders, reviews, prices): the Sinks Direct tab only. */
+export const isStoreKey = (key) => Boolean(AUTO_KEYS[key]?.store);
 
 const EXCLUSION_KEY = Object.fromEntries(PROMO_CHANNELS.map((c) => [c.key, c.exclusionKey ?? c.key]));
 const ALWAYS_ON = new Set(['wix_sinksdirect_ca', 'wix_sinksdirect_us']); // the websites carry every product

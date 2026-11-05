@@ -146,8 +146,8 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
           <label htmlFor={ids.auto} className="block text-label-md text-on-surface mb-1">Filled by the PIM</label>
           <select id={ids.auto} value={draft.auto_key} onChange={(e) => pickAuto(e.target.value)} className={field}>
             <option value="">No — its owner types it</option>
-            {/* the server's numbers (Odoo orders, stock…) exist only for boards it fills */}
-            {Object.entries(AUTO_KEYS).filter(([, a]) => !a.server || board.serverFill).map(([k, a]) => <option key={k} value={k}>{a.label}</option>)}
+            {/* the server's numbers (Odoo orders, stock…) exist only for boards it fills; a Wix store's own (its orders, reviews) only on Sinks Direct */}
+            {Object.entries(AUTO_KEYS).filter(([, a]) => (!a.server || board.serverFill) && (!a.store || board.key === 'sinksdirect')).map(([k, a]) => <option key={k} value={k}>{a.label}</option>)}
           </select>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
