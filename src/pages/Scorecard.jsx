@@ -37,6 +37,28 @@ export default function Scorecard() {
   const [editing, setEditing] = useState(null); // a measurable, or { isNew: true }
   const autoDone = useRef(new Set());
   const boardTabs = useRef(null);
+  // The pinned controls: their height (the table's week header pins under
+  // them) and whether they are pinned now (a line under them).
+  const toolbar = useRef(null);
+  const stickSentinel = useRef(null);
+  const [toolbarH, setToolbarH] = useState(0);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const el = toolbar.current;
+    if (!el) return undefined;
+    // Pinned from lg only: on a phone the controls wrap to a third of the screen.
+    const wide = window.matchMedia('(min-width: 1024px)');
+    const ro = new ResizeObserver(() => setToolbarH(wide.matches ? el.offsetHeight : 0));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const el = stickSentinel.current;
+    if (!el) return undefined;
+    const io = new IntersectionObserver(([entry]) => setStuck(!entry.isIntersecting), { root: document.getElementById('main-content') });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   // On a phone the tab row scrolls: keep the chosen marketplace in view.
   useEffect(() => {
@@ -176,8 +198,8 @@ export default function Scorecard() {
   })();
 
   return (
-    <div>
-      <header className="mb-6 flex items-end justify-between gap-4 flex-wrap">
+    <div style={{ '--sc-toolbar-h': `${toolbarH}px` }}>
+      <header className="mb-3 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-display-lg text-on-surface">EOS ScoreCard</h1>
           <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, goal and the last {WEEKS_SHOWN} weeks, Sunday to Saturday.</p>
@@ -190,7 +212,15 @@ export default function Scorecard() {
         )}
       </header>
 
-      <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+      {/* The controls stay pinned while the table scrolls (user, 2026-11-05:
+          "fijar los marketplaces … para poder cambiar rápido"): marketplace,
+          market, weeks and the week's summary — from lg (on a phone they wrap
+          to a third of the screen). Full width of the page's padding; a line
+          under it once it is pinned. Its height goes to --sc-toolbar-h (0
+          under lg) so the table's week header pins right under it. */}
+      <div ref={stickSentinel} aria-hidden className="h-px -mb-px" />
+      <div ref={toolbar} className={cn('lg:sticky lg:top-0 lg:z-30 -mx-4 px-4 sm:-mx-8 sm:px-8 pt-3 pb-3 mb-3 bg-background flex flex-col gap-3 transition-shadow', stuck && 'lg:border-b lg:border-outline-variant lg:shadow-sm')}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div ref={boardTabs} role="group" aria-label="Marketplace" className="flex gap-1 max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container-low p-1">
           {BOARDS.map((b) => (
             <button
@@ -219,25 +249,8 @@ export default function Scorecard() {
           )}
         </div>
       </div>
-
-      {error && (
-        <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
-          {error.message}
-        </div>
-      )}
-      {notice && (
-        <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
-          {notice.text}
-        </div>
-      )}
-
-      {!metrics && !error ? (
-        <div role="status" aria-label="Loading the scorecard" className="animate-pulse rounded-2xl bg-surface-container h-96" />
-      ) : metrics && (
-        <>
-          <div className="mb-3 flex items-center justify-between gap-3 flex-wrap text-body-sm text-on-surface-variant">
+      {metrics && (
+          <div className="flex items-center justify-between gap-3 flex-wrap text-body-sm text-on-surface-variant">
             <div className="flex items-center gap-3 flex-wrap">
               {boardMarkets.length > 1 && (
                 <div role="group" aria-label="Market" className="flex rounded-full border border-outline-variant p-0.5">
@@ -285,6 +298,26 @@ export default function Scorecard() {
               )}
             </div>
           </div>
+      )}
+      </div>
+
+      {error && (
+        <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
+          {error.message}
+        </div>
+      )}
+      {notice && (
+        <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
+          {notice.text}
+        </div>
+      )}
+
+      {!metrics && !error ? (
+        <div role="status" aria-label="Loading the scorecard" className="animate-pulse rounded-2xl bg-surface-container h-96" />
+      ) : metrics && (
+        <>
           {shown.length ? (
             <ScorecardTable
               board={board}
