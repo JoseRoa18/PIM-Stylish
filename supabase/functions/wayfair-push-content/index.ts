@@ -8,7 +8,9 @@
 //       images  → white main leads, gray SinksDirect hero stays out,
 //                 ONE language set (EN-FR, else EN + FR, else EN-ES — the
 //                 listing is shared by both markets) + the Universal photos
-//       videos  → the product family's .mp4 files
+//       videos  → the product family's .mp4 files: the ones without language
+//                 plus one language (EN-FR, else English, else EN-ES), never
+//                 French alone (user, 2026-11-06)
 //       documents → PDFs: spec sheet, installation, cut-out template, warranty;
 //                 one file per document type, EN-FR, else English, else EN-ES,
 //                 never French alone (user, 2026-11-06), as a new listing sends
@@ -108,8 +110,10 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
     url: m.storage_path, label: m.file_name || fileName(m.storage_path), kind: "image", language: m.language, lead: i === 0 && !!primary,
   }));
 
-  const videoItems: Item[] = media
-    .filter((m) => m.media_type === "video" && isHttp(m.storage_path) && /\.(mp4|mov)(\?|$)/i.test(m.storage_path))
+  const videos = media.filter((m) => m.media_type === "video" && isHttp(m.storage_path) && /\.(mp4|mov)(\?|$)/i.test(m.storage_path));
+  const videoLanguage = DOC_LANGUAGES.find((l) => l != null && videos.some((m) => m.language === l));
+  const videoItems: Item[] = videos
+    .filter((m) => m.language == null || m.language === videoLanguage)
     .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
     .slice(0, VIDEO_CAP)
     .map((m) => ({ url: m.storage_path, label: m.file_name || fileName(m.storage_path), kind: "video", language: m.language }));
