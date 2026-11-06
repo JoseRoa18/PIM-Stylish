@@ -1447,7 +1447,7 @@ function BrokenLinkNotice() {
 /**
  * The unlinked state doubles as the CREATE surface: the PIM comes first, and
  * whoever owns the Wix channel publishes each new product deliberately from
- * here. Created hidden — a later push flips visibility when it's ready. If
+ * here. Created visible and out of stock — Odoo gives it its stock. If
  * Wix already has the SKU (never linked), the function links instead of
  * duplicating, and this card flips straight into the update/diff view.
  */
@@ -1460,7 +1460,7 @@ function NotLinkedNotice({ product, site, canEdit, onLinked }) {
     setError(null);
     const ok = await confirm({
       title: `Create ${product.sku} on ${site.label}?`,
-      message: `The product is created HIDDEN on the site with the PIM's name, description, price (${site.priceLabel}), weight and brand — customers won't see it until you push it visible. If the site already has this SKU, it links to it instead of creating a duplicate.`,
+      message: `The product is created VISIBLE and OUT OF STOCK on the site with the PIM's name, description, price (${site.priceLabel}), weight and brand — customers see it but can't buy it until Odoo gives it stock. If the site already has this SKU, it links to it instead of creating a duplicate.`,
       confirmLabel: 'Create on Wix',
     });
     if (!ok) return;
@@ -1469,7 +1469,7 @@ function NotLinkedNotice({ product, site, canEdit, onLinked }) {
     const task = startTask(`Create on Wix · ${product.sku}`, { detail: `Creating it on ${site.label}…` });
     try {
       const res = await createProductOnWix(product.sku, site.key);
-      task.finish(`Now on ${site.label}`);
+      task.finish(res.warning ?? `Now on ${site.label}`);
       // The parent flips this card straight into the linked update/diff view.
       onLinked?.({ wix_product_id: res.id, wix_synced_at: new Date().toISOString() }, res.id);
     } catch (err) {
@@ -1488,7 +1488,7 @@ function NotLinkedNotice({ product, site, canEdit, onLinked }) {
             Not on {site.label} yet
           </p>
           <p className="text-body-sm text-on-secondary-container mt-1">
-            Create it from here (it starts hidden), or go to{' '}
+            Create it from here (visible and out of stock), or go to{' '}
             <Link to="/syndication" className="font-semibold underline hover:no-underline">
               Syndication
             </Link>{' '}

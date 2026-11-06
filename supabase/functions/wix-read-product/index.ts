@@ -34,6 +34,7 @@ interface WixProduct {
   costAndProfitData?: { itemCost?: number };
   discount?: { type?: "AMOUNT" | "PERCENT" | "NONE"; value?: number };
   visible?: boolean;
+  stock?: { trackInventory?: boolean; quantity?: number; inStock?: boolean; inventoryStatus?: string };
   collectionIds?: string[];
   additionalInfoSections?: Array<{ title?: string; description?: string }>;
   productPageUrl?: { base?: string; path?: string };
@@ -220,7 +221,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, sku, site: site.key, wix_product_id: wixProductId, snapshot }),
+      JSON.stringify({ ok: true, sku, site: site.key, wix_product_id: wixProductId, snapshot, stock: w.stock ?? null, visible: w.visible ?? null }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {

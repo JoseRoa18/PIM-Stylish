@@ -186,8 +186,9 @@ export async function pushProductToAllWixSites(sku, brand = null, { task = null 
  * One store's full push: the content (description auto-formatted, prices,
  * weight; the name never) with the info sections rebuilt from the PIM, then
  * the whole gallery. `store` is that store's slice of a progress card.
+ * `justCreated`: a new product stays visible whatever the PIM's flag says.
  */
-async function pushEverythingToSite(sku, site, p, mediaRows, store, say) {
+async function pushEverythingToSite(sku, site, p, mediaRows, store, say, { justCreated = false } = {}) {
   // One store's share of the bar: reading it 20%, the content to 55%, the images the rest.
   store?.progress(0, say('reading the store…'));
   // Accordion sections travel too (rule 2026-08-31): rebuilt from the PIM
@@ -202,11 +203,13 @@ async function pushEverythingToSite(sku, site, p, mediaRows, store, say) {
   } catch {
     // store unreadable — push content without touching its sections
   }
+  const rebuilt = Boolean(fields);
+  if (justCreated) fields = { ...fields, visible_online: true };
   store?.progress(0.2, say('pushing the content…'));
   let result;
   try {
     const r = await pushProductToWix(sku, fields, undefined, site);
-    result = { ok: true, autoformat: r?.description_autoformat ?? null, sections: fields ? 'rebuilt' : 'kept' };
+    result = { ok: true, autoformat: r?.description_autoformat ?? null, sections: rebuilt ? 'rebuilt' : 'kept' };
   } catch (err) {
     store?.progress(1);
     return { ok: false, error: err.message };
@@ -232,7 +235,7 @@ async function pushEverythingToSite(sku, site, p, mediaRows, store, say) {
 /**
  * "Push <store>" on the product page (user, 2026-11-04): everything the PIM
  * has, to ONE Wix store, as the PIM recommends it. A product not on that
- * store yet is created first (hidden — shown from its card when ready).
+ * store yet is created first, visible and out of stock (Odoo gives it its stock).
  * Returns { ok, created?, media, error? }.
  */
 export async function pushProductToWixSite(sku, site, { task = null, create = true } = {}) {
@@ -251,11 +254,10 @@ export async function pushProductToWixSite(sku, site, { task = null, create = tr
   // A bulk push (the catalog's Push to Wix) never creates: create from the product page.
   if (!linked && !create) throw new Error(`${sku} is not on ${siteLabel(site)} yet — create it from its page.`);
   if (!linked) {
-    task?.progress(0.05, `${siteLabel(site)}: creating the product (hidden)…`);
-    await createProductOnWix(sku, site);
-    created = true;
+    task?.progress(0.05, `${siteLabel(site)}: creating the product, out of stock…`);
+    created = !(await createProductOnWix(sku, site)).linked_existing;
   }
-  const result = await pushEverythingToSite(sku, site, p, mediaRows, task?.part(0.15, 0.9), (what) => `${siteLabel(site)}: ${what}`);
+  const result = await pushEverythingToSite(sku, site, p, mediaRows, task?.part(0.15, 0.9), (what) => `${siteLabel(site)}: ${what}`, { justCreated: created });
   // The WHERE TO BUY of the Stylish pages and of the Azuni store is the
   // PIM's (only the working links): published with the same call as the
   // Where to Buy tab's Save and publish.
@@ -275,7 +277,7 @@ export async function pushProductToWixSite(sku, site, { task = null, create = tr
     entityType: 'product',
     entityId: sku,
     target: 'wix',
-    summary: `Pushed everything of ${sku} to ${siteLabel(site)}${created ? ' (created hidden first)' : ''} — accepted as the PIM recommends`,
+    summary: `Pushed everything of ${sku} to ${siteLabel(site)}${created ? ' (created first: visible, out of stock)' : ''} — accepted as the PIM recommends`,
     metadata: { site, created, ...result },
   });
   return { ...result, created };
@@ -320,9 +322,10 @@ export async function pushProductToWix(sku, fields = undefined, only = undefined
 }
 
 /**
- * Create a PIM product on Wix (hidden — publishing is a later, deliberate
- * push). If Wix already has the SKU unlinked, the function links it instead
- * of duplicating. Returns { created?, linked_existing?, id, name }.
+ * Create a PIM product on Wix: visible and out of stock, Odoo gives it its
+ * stock later (user, 2026-11-06). If Wix already has the SKU unlinked, the
+ * function links it as it is instead of duplicating. Returns { created?,
+ * linked_existing?, id, name, visible?, out_of_stock?, warning? }.
  */
 export async function createProductOnWix(sku, site = DEFAULT_WIX_SITE) {
   const { data, error } = await supabase.functions.invoke('wix-create-product', { body: { sku, site } });
@@ -351,8 +354,8 @@ export async function createProductOnWix(sku, site = DEFAULT_WIX_SITE) {
     target: 'wix',
     summary: data.linked_existing
       ? `Linked ${sku} to its existing ${siteLabel(site)} product`
-      : `Created ${sku} on ${siteLabel(site)} (hidden)`,
-    metadata: { site, wix_product_id: data.id },
+      : `Created ${sku} on ${siteLabel(site)} (${data.visible ? 'visible' : 'hidden'}, out of stock)`,
+    metadata: { site, wix_product_id: data.id, visible: data.visible, out_of_stock: data.out_of_stock },
   });
   return data;
 }

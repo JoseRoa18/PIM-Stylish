@@ -2,8 +2,13 @@
 // publish flow (PIM first, then each marketplace by hand, channel by channel).
 //
 // Behavior the flow demands:
-//   - The product is created HIDDEN (visible:false) regardless of the PIM's
-//     visibility flag — publishing is a deliberate later push.
+//   - A new product goes up VISIBLE and OUT OF STOCK, whatever the PIM's
+//     visibility flag says (user, 2026-11-06: Odoo gives it its stock later).
+//     Wix's own stock default is not relied on: it is created hidden, set to
+//     0 units (the way the stores keep every product: quantity tracked) and
+//     read back, only then shown. It is never visible and in stock. If it can't
+//     be set to 0 it is deleted again and nothing is linked, so a retry starts
+//     clean. A product Wix already has is linked as it is, stock untouched.
 //   - If a Wix product with this SKU already exists but was never linked,
 //     LINK it instead of creating a duplicate ({ linked_existing: true }).
 //   - If the PIM row is already linked, refuse — that's an update, not a
@@ -31,6 +36,8 @@ const corsHeaders: Record<string, string> = {
 };
 
 const WIX_BASE = "https://www.wixapis.com";
+// A product without options has this one variant in Wix's inventory.
+const NO_OPTIONS_VARIANT = "00000000-0000-0000-0000-000000000000";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -57,7 +64,7 @@ interface PimRow {
 }
 
 // Same shapes as wix-push-product's buildProductPatch, minus visibility
-// (forced hidden on create) — keep the two in sync.
+// (hidden until it is out of stock) — keep the two in sync.
 function buildCreateBody(pim: PimRow, site: WixSite): Record<string, unknown> {
   const price = pim[site.priceField as keyof PimRow] as number | null;
   const product: Record<string, unknown> = {
@@ -133,8 +140,8 @@ Deno.serve(async (req) => {
     if (linkRow || (site.legacyColumns && pim.wix_product_id)) {
       return json({ error: `${sku} is already linked to ${site.label} — use Push to update it.` }, 409);
     }
-    // No price, no listing: a hidden $0 product is one careless visibility
-    // push away from being sold for nothing. Complete the PIM first.
+    // No price, no listing: a $0 product is one stock update away from being
+    // sold for nothing. Complete the PIM first.
     if (pim[site.priceField] == null) {
       return json({ error: `${sku} has no ${site.priceField.replace("_", " ").toUpperCase()} in the PIM — the ${site.label} selling price. Set its pricing first, then create it on Wix.` }, 400);
     }
@@ -197,7 +204,25 @@ Deno.serve(async (req) => {
       return json({ linked_existing: true, site: site.key, id: existing.id, name: existing.name });
     }
 
-    // --- create it, hidden --------------------------------------------------
+    // 0 units, quantity tracked. Returns an error text, or null once Wix reads it out of stock.
+    async function setOutOfStock(wixProductId: string): Promise<string | null> {
+      const res = await wix(`/stores/v2/inventoryItems/product/${wixProductId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ inventoryItem: { trackQuantity: true, variants: [{ variantId: NO_OPTIONS_VARIANT, quantity: 0 }] } }),
+      });
+      if (!res.ok) return `Wix inventory ${res.status}: ${(await res.text()).slice(0, 200)}`;
+      // The read can lag the write by a moment.
+      for (let i = 0; i < 5; i += 1) {
+        if (i) await new Promise((r) => setTimeout(r, 1000));
+        const read = await wix(`/stores/v1/products/${wixProductId}`);
+        if (!read.ok) continue;
+        const { product } = await read.json();
+        if (product?.stock?.inStock === false) return null;
+      }
+      return "Wix still reads it in stock";
+    }
+
+    // --- create it: hidden, out of stock, then shown --------------------------
     const createRes = await wix("/stores/v1/products", {
       method: "POST",
       body: JSON.stringify(buildCreateBody(pim as PimRow, site)),
@@ -207,6 +232,26 @@ Deno.serve(async (req) => {
     if (!createRes.ok || !id) {
       return json({ error: `Wix create failed (${createRes.status}): ${JSON.stringify(created).slice(0, 300)}` }, 502);
     }
+
+    const stockErr = await setOutOfStock(id);
+    if (stockErr) {
+      // Never left behind in stock: taken off again (only the product this call
+      // just made), nothing linked, and a retry creates it from the start.
+      const del = await wix(`/stores/v1/products/${id}`, { method: "DELETE" });
+      return json({
+        error: del.ok
+          ? `${sku} could not be set out of stock on ${site.label} (${stockErr}), so it was not created. Try again.`
+          : `${sku} could not be set out of stock on ${site.label} (${stockErr}) and could not be removed: hidden product ${id} is left on the store. Remove it in Wix before trying again.`,
+      }, 502);
+    }
+
+    // Out of stock is sure: now it can be seen. A failure here leaves it hidden
+    // and out of stock, which is safe; the page says so and a push shows it.
+    const showRes = await wix(`/stores/v1/products/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ product: { visible: true } }),
+    });
+    const visible = showRes.ok;
 
     const linkErrMsg = await writeLink(id);
     if (linkErrMsg) {
@@ -220,7 +265,9 @@ Deno.serve(async (req) => {
       site: site.key,
       id,
       name: created.product.name,
-      visible: created.product.visible,
+      visible,
+      out_of_stock: true,
+      ...(visible ? {} : { warning: `Created out of stock, but Wix did not show it (${showRes.status}): it stays hidden until the next push.` }),
       price: created.product.priceData?.price ?? null,
     });
   } catch (err) {
