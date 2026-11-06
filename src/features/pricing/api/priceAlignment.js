@@ -145,22 +145,26 @@ function classifySnapshot(snapshot, outOfScope = null) {
     // Rule (user, 2026-09-23): a product the store does not carry is not a
     // price problem — it stays out of the report and its score.
     if (r.state === 'missing') { notOnStore += 1; continue; }
-    total += 1;
+    // An uncounted row (BB&B / Overstock: read sold out or SKU not confirmed)
+    // is listed with the problems when it is one, but counts nowhere.
+    const counted = !r.uncounted;
+    const tally = (key) => { if (counted) counts[key] += 1; };
+    if (counted) total += 1;
     // Snapshots older than the expected-price rollout can't be classified.
     if (!('expected' in r)) { legacy = true; continue; }
     // A price read from the store's page carries where and when it was read.
     const page = r.url ? { url: r.url, read_at: r.read_at ?? null, unconfirmed: r.sku_check !== 'match', in_stock: r.in_stock ?? null, page_note: r.page_note ?? null } : {};
 
     if (r.expected == null) {
-      counts.no_map += 1;
+      tally('no_map');
       problems.push({ sku: r.sku, status: 'no_map', live: r.price ?? null, expected: null, source: null, ...page });
     } else if (!r.price_diff) {
-      counts[r.expected_source === 'promo' ? 'promo_ok' : 'map_ok'] += 1;
+      tally(r.expected_source === 'promo' ? 'promo_ok' : 'map_ok');
     } else if (r.expected_source === 'promo' && (r.no_promo || eq(r.price, r.map))) {
-      counts.promo_missing += 1;
+      tally('promo_missing');
       problems.push({ sku: r.sku, status: 'promo_missing', live: r.price ?? null, expected: r.expected, source: 'promo', map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null, ...page });
     } else {
-      counts.misaligned += 1;
+      tally('misaligned');
       problems.push({ sku: r.sku, status: 'misaligned', live: r.price, expected: r.expected, source: r.expected_source, map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null, ...page });
     }
   }
@@ -292,7 +296,9 @@ const etDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Am
  * in the other market's currency. A page that names no model at all is
  * compared but marked unconfirmed. Home Depot Canada keeps a kitchen sink at
  * MAP when its promo is under the 5% NLP minimum (the PIM's NLP workbook
- * leaves it out).
+ * leaves it out). On a store with `unsureUncounted` (BB&B, Overstock — user,
+ * 2026-11-06) a page read sold out or with its SKU not confirmed counts in
+ * no tile and no score; a price problem there is still listed.
  */
 async function loadPageAlignment(cfg, task = null) {
   const rows = (await pageReadings(task?.part(0, 0.6))).filter((r) => r.retailer === cfg.retailer);
@@ -339,6 +345,7 @@ async function loadPageAlignment(cfg, task = null) {
       promo_kind: promo?.kind ?? null,
       promo_window: promo ? { start: promo.windowStart, end: promo.windowEnd } : null,
       price_diff: priceOff(r.price, expected),
+      uncounted: Boolean(cfg.unsureUncounted && (r.in_stock === false || r.sku_check !== 'match')),
       url: r.url,
       read_at: r.read_at,
       sku_check: r.sku_check,

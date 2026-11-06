@@ -26,8 +26,11 @@ export const PAGE_STORES = [
   { key: 'homedepot_us', label: 'Home Depot USA', short: 'Home Depot US', market: 'us', promoChannel: 'homedepot_us' },
   { key: 'lowes_us', label: "Lowe's USA", short: "Lowe's", market: 'us', promoChannel: 'lowes_us' },
   { key: 'menards', label: 'Menards', short: 'Menards', market: 'us', promoChannel: 'menards' },
-  { key: 'bbb_us', label: 'Bed Bath & Beyond', short: 'BB&B', market: 'us', promoChannel: 'bbb', levelByKind: { flash: 'purple' } },
-  { key: 'overstock_us', label: 'Overstock', short: 'Overstock', market: 'us', promoChannel: 'overstock', levelByKind: { flash: 'purple' } },
+  // BB&B and Overstock keep a price in a sold-out page's data (user,
+  // 2026-11-06): a page read sold out or with its SKU not confirmed is still
+  // listed with the problems but counts in no tile and no score (`unsureUncounted`).
+  { key: 'bbb_us', label: 'Bed Bath & Beyond', short: 'BB&B', market: 'us', promoChannel: 'bbb', levelByKind: { flash: 'purple' }, unsureUncounted: true },
+  { key: 'overstock_us', label: 'Overstock', short: 'Overstock', market: 'us', promoChannel: 'overstock', levelByKind: { flash: 'purple' }, unsureUncounted: true },
   { key: 'kbauthority', label: 'Kitchen & Bath Authority', short: 'KBA', market: 'us', promoChannel: null },
   { key: 'warehouse_usa', label: 'Warehouse-USA', short: 'Warehouse USA', market: 'us', promoChannel: null },
   // Dealers that sell Stylish but are NOT on the Stylish pages' Where to Buy

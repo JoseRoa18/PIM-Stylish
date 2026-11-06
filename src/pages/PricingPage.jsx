@@ -633,34 +633,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
         <div>
           <h2 className="text-title-md text-on-surface font-semibold">Price Alignment — {cfg.label}</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5">
-            {cfg.kind === 'page'
-              ? `Compares the price each product's page on ${cfg.label} shows — read by the Where to Buy
-                 check when it opens the link, every 3 days, and again the morning a promotion of the
-                 product starts or ends — against its expected price: ${cfg.promoChannel
-                  ? `a flash deal or special event running on ${cfg.short}, else the active promo price for promo members`
-                  : 'the active promo price for promo members'}, the regular ${cfg.priceShort} for everyone else.
-                 Analysis only: the store sets its own price. A link that opens another product is left out
-                 (Listing Health → Where to Buy).`
-              : cfg.kind === 'bestbuy'
-              ? `Compares every Best Buy offer against its expected price — a flash deal or special
-                 event running on Best Buy, else the active promo price for promo members, the regular
-                 ${cfg.priceShort} for everyone else. Fixes update ONLY
-                 prices: stale MAPs correct the offer price, missing promos become a scheduled
-                 discount for the promo's dates.`
-              : cfg.kind === 'walmart'
-                ? `Compares every Walmart item with a price on file against its expected price — a
-                   flash deal or special event running on this Walmart, else the active promo price for
-                   promo members, the regular ${cfg.priceShort} for everyone else.
-                   Analysis only: regular prices are corrected in Seller Center; promotions are
-                   scheduled from the Promotions tab.`
-                : cfg.promoAware
-                ? `Compares every linked product's live store price against its expected price —
-                   a flash deal or special event running on this store, else the active promo price for
-                   promo members, the regular ${cfg.priceShort} for everyone else.`
-                : `Compares every linked product's base price against its ${cfg.priceShort} — this store
-                   runs its own storefront sales, so percent-off discounts are not counted as drift.`}
-            {cfg.kind !== 'page' && ' Reports save automatically twice a day; run a fresh one anytime.'}
-            {` A price within ±${cfg.symbol}${TOLERANCE_HIGH} of an expected price of ${cfg.symbol}${TOLERANCE_FROM} or more, or ±${cfg.symbol}${TOLERANCE_LOW} under ${cfg.symbol}${TOLERANCE_FROM}, counts as aligned.`}
+            {`A price within ±${cfg.symbol}${TOLERANCE_HIGH} of an expected price of ${cfg.symbol}${TOLERANCE_FROM} or more, or ±${cfg.symbol}${TOLERANCE_LOW} under ${cfg.symbol}${TOLERANCE_FROM}, counts as aligned.`}
           </p>
         </div>
         <button
