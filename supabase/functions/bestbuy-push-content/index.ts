@@ -28,6 +28,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { excludedSet } from "../_shared/exclusions.ts";
+import { submitContentImport } from "../_shared/bestbuyContentImport.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -35,7 +36,6 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const BASE = "https://marketplace.bestbuy.ca/api";
 const MAX_ROWS = 50;
 
 function json(body: unknown, status = 200) {
@@ -43,43 +43,6 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-// A report's lines as fields (;-separated, quoted, with line breaks inside quotes).
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') quoted = false; else cell += c;
-    } else if (c === '"') quoted = true;
-    else if (c === ";") { row.push(cell); cell = ""; } else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; } else if (c !== "\r") cell += c;
-  }
-  if (cell || row.length) { row.push(cell); rows.push(row); }
-  return rows;
-}
-
-// Only the SKU and the reason of each refused line: the report repeats the whole
-// row first, so its first 4,000 characters may not even reach the reason.
-function refusals(report: string): string {
-  const [head, ...lines] = parseCsv(report);
-  const sku = head?.indexOf("shop_sku") ?? -1;
-  const found = head?.findIndex((h) => /error/i.test(h)) ?? -1;
-  const reason = found >= 0 ? found : (head?.length ?? 1) - 1;
-  const out = lines.filter((l) => l.some(Boolean)).map((l) => `${sku >= 0 ? `${l[sku]}: ` : ""}${l[reason] ?? ""}`).join("\n");
-  return (out || report).slice(0, 4000);
-}
-
-// CSV in the shape the transformation accepts: ;-separated, all fields quoted.
-function toCsv(rows: Record<string, string>[]): string {
-  const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
-  const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [cols.map(q).join(";")];
-  for (const r of rows) lines.push(cols.map((c) => q(r[c] ?? "")).join(";"));
-  return lines.join("\n") + "\n";
 }
 
 Deno.serve(async (req) => {
@@ -129,52 +92,9 @@ Deno.serve(async (req) => {
       if (banned.length) return json({ error: `Row ${r.shop_sku}: ${banned.join(", ")} not allowed — prices are never pushed.` }, 400);
     }
 
-    // --- Submit the P41 import ----------------------------------------------
-    const csv = toCsv(rows);
-    const form = new FormData();
-    form.append("file", new Blob([csv], { type: "text/csv" }), "stylish-pim-content-push.csv");
-
-    const submit = await fetch(`${BASE}/products/imports`, {
-      method: "POST",
-      headers: { Authorization: apiKey },
-      body: form,
-    });
-    if (!submit.ok) {
-      return json({ error: `Mirakl rejected the import: ${submit.status} ${(await submit.text()).slice(0, 300)}` }, 502);
-    }
-    const { import_id } = await submit.json();
-
-    // --- Poll until the TRANSFORMATION settles (Best Buy's QC stays async) --
-    let status: Record<string, unknown> = {};
-    for (let i = 0; i < 12; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      const res = await fetch(`${BASE}/products/imports/${import_id}`, {
-        headers: { Authorization: apiKey, Accept: "application/json" },
-      });
-      status = await res.json();
-      const s = String(status.import_status ?? "");
-      const transformed = (status.transform_lines_read as number ?? 0) > 0 || s === "FAILED";
-      if (transformed || ["COMPLETE", "FAILED", "CANCELLED"].includes(s)) break;
-    }
-
-    const linesError = (status.transform_lines_in_error as number) ?? 0;
-    let transformationErrors: string | undefined;
-    if (linesError > 0) {
-      const rep = await fetch(`${BASE}/products/imports/${import_id}/transformation_error_report`, {
-        headers: { Authorization: apiKey },
-      });
-      if (rep.ok) transformationErrors = refusals(await rep.text());
-    }
-
-    return json({
-      ok: linesError === 0,
-      import_id,
-      status: status.import_status ?? "SENT",
-      lines_read: status.transform_lines_read ?? rows.length,
-      lines_ok: status.transform_lines_in_success ?? 0,
-      lines_error: linesError,
-      transformation_errors: transformationErrors,
-    });
+    // --- Submit the P41 import and wait for its transformation ------------------
+    const sent = await submitContentImport(apiKey, rows);
+    return json({ ok: sent.lines_error === 0, ...sent });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[bestbuy-push-content] FAILED:", message);

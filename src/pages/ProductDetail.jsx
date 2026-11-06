@@ -1725,6 +1725,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
   const [wmCa, setWmCa] = useState(undefined);
   const [wmUs, setWmUs] = useState(undefined);
   const [bbOffer, setBbOffer] = useState(undefined);
+  const [bbExtra, setBbExtra] = useState(null); // what the Best Buy card read: its push bar goes by it
   useEffect(() => {
     let active = true;
     // Just this SKU's item from each latest snapshot (the database picks it
@@ -1924,6 +1925,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
                     : selected === 'bestbuy' ? (bbOffer === undefined ? null : Boolean(bbOffer))
                     : null
           }
+          extra={selected === 'bestbuy' ? bbExtra : undefined}
           onPushed={afterPush}
         />
       )}
@@ -1943,7 +1945,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
         </>
       )}
       {selected === 'wayfair_us' && !isExcluded(product, 'wayfair_us') && <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />}
-      {selected === 'bestbuy' && !isExcluded(product, 'bestbuy') && <BestBuyProductCard key={pushTick} sku={product.sku} />}
+      {selected === 'bestbuy' && !isExcluded(product, 'bestbuy') && <BestBuyProductCard key={pushTick} sku={product.sku} onPlan={setBbExtra} />}
       {selected === 'walmart_ca' && !isExcluded(product, 'walmart_ca') && <WalmartProductCard market="ca" product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
       {selected === 'walmart_us' && !isExcluded(product, 'walmart_us') && (
         <>

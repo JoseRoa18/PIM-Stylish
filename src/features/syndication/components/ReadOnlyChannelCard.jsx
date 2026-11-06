@@ -20,7 +20,7 @@ const CHANNELS = {
       { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} price differences vs PIM MSRP` },
       { icon: OctagonX, tone: 'text-error', label: `${s.errors} out of stock` },
     ],
-    note: 'Offers, stock and prices are pulled from the Mirakl API. Content, prices and stock go out only from their own cards and from each product\'s Push Best Buy.',
+    note: 'Offers, stock and prices are pulled from the Mirakl API. Content, prices and stock go out only from their own cards and from each product\'s page, where a person also creates a new product and its offer.',
   },
   walmart_us: {
     label: 'Walmart USA',

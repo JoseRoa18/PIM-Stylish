@@ -10,7 +10,7 @@ import { WIX_SITES } from '../lib/wixSites';
 // ("se acepta que se suba todo tal cual como PIM lo recomienda"). What each
 // store takes differs; a store that takes nothing (or not yet) says why.
 
-function planFor(channel, product, linked) {
+function planFor(channel, product, linked, extra) {
   const sku = product.sku;
   if (WIX_SITES[channel]) {
     const label = WIX_SITES[channel].label;
@@ -59,17 +59,45 @@ function planFor(channel, product, linked) {
     };
   }
   if (channel === 'bestbuy') {
+    const content = [
+      'Title, short and long description',
+      'Up to 10 images: the EN-FR set and the photos with no text, main image first',
+      "The specs of its Best Buy category: colour, material, finish, series, sizes, weight, certifications, what's in the box, features…",
+    ];
+    // Not on Best Buy yet: this creates the product. Best Buy takes no offer until
+    // it has the product: the card's box asks for it, and it goes once approved.
+    if (!linked && !extra?.offer) {
+      const reviewing = extra?.listing?.status === 'in_review';
+      const disabled = !extra ? 'Checking Best Buy…'
+        : extra.mismatch ? 'Best Buy has this UPC as another product — see the card below.'
+          : extra.catalog ? 'Best Buy already has this product. Only the offer is missing: create it in the card below when you choose.'
+            : reviewing ? "It is in Best Buy's review. Its offer is in the card below."
+              : extra.problems?.length ? `It can't go yet: ${extra.problems.join('; ')}.` : null;
+      return {
+        label: 'Best Buy Canada',
+        travels: [
+          ...content,
+          'Into the category chosen in the card below; Best Buy reviews it before it exists',
+          ...(extra?.withOffer && !extra.plan?.problems?.length ? [`Then, once Best Buy approves it, its offer: C$${Number(extra.plan?.price ?? 0).toFixed(2)} (MAP Blue), warranty 0`] : []),
+        ],
+        never: [
+          ...(extra?.withOffer && !extra.plan?.problems?.length ? ['Stock: the offer starts at 0 units, Stock sync gives it its stock with the next Canada file'] : ['The offer: you create it yourself once Best Buy approves the product']),
+          'French text — Best Buy takes English only',
+        ],
+        disabled,
+        run: async ({ task }) => {
+          const { createBestBuyProduct } = await import('../api/bestbuySync');
+          const offer = Boolean(extra.withOffer && !extra.plan?.problems?.length);
+          const r = await createBestBuyProduct(sku, extra.category, { offer, task });
+          return `Sent to Best Buy as a new product (import ${r.importId}) — ${offer ? 'its offer goes once Best Buy approves it' : 'once its review approves it, create the offer below'}`;
+        },
+      };
+    }
     return {
       label: 'Best Buy Canada',
-      travels: [
-        'Title, short and long description',
-        'Up to 10 images: the EN-FR set and the photos with no text, main image first',
-        "The specs of its Best Buy category: colour, material, finish, series, sizes, weight, certifications, what's in the box, features…",
-      ],
+      travels: content,
       never: ['Prices, stock and the offer', 'French text — Best Buy takes English only', "Best Buy's category and UPC: they stay as Best Buy has them"],
-      disabled: linked == null
-        ? 'Checking Best Buy…'
-        : linked ? null : 'Not on Best Buy yet — only a product with an offer there can be pushed.',
+      disabled: null,
       run: async ({ task }) => {
         const { pushProductToBestBuy } = await import('../api/bestbuySync');
         const r = await pushProductToBestBuy(sku, { task });
@@ -104,8 +132,8 @@ function planFor(channel, product, linked) {
   return null;
 }
 
-export default function ChannelPushBar({ channel, product, linked, onPushed }) {
-  const plan = planFor(channel, product, linked);
+export default function ChannelPushBar({ channel, product, linked, extra, onPushed }) {
+  const plan = planFor(channel, product, linked, extra);
   const [asking, setAsking] = useState(false);
   const [state, setState] = useState(null); // null | 'busy' | { ok, text }
   if (!plan) return null;

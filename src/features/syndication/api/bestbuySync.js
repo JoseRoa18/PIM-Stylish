@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { insertSnapshot, latestSnapshotItem } from '@/features/syndication/lib/channels';
 import { isExcluded } from '../lib/marketplaces';
-import { buildBestBuyRow } from '../lib/bestbuyContent';
+import { buildBestBuyRow, defaultBestBuyCategory } from '../lib/bestbuyContent';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 // Best Buy Canada (Mirakl). Reads pull the seller's offers; writes are
@@ -123,7 +123,7 @@ async function imagesForSkus(skus, task = null) {
   const imagesBySku = new Map();
   const query = (part) => supabase
     .from('product_media')
-    .select('sku, storage_path, is_primary, display_order, language')
+    .select('sku, storage_path, is_primary, display_order, language, image_role')
     .eq('media_type', 'image')
     .in('sku', part)
     .order('is_primary', { ascending: false })
@@ -260,21 +260,74 @@ export async function pushBestBuyContent(candidates, { onProgress } = {}) {
 }
 
 /**
- * One product's content for Best Buy, for its card and its push: the offer in
- * the latest snapshot and the row the PIM would send. `offer` is null when the
- * product has no offer there.
+ * One product's content for Best Buy, for its card and its push. With an offer:
+ * the row a push would send. Without one (it may be newer than the snapshot, so
+ * Best Buy is asked): whether Best Buy's catalog already has its UPC, what the
+ * PIM proposes for the offer, and the row that would create the product in
+ * `category` (`defaultBestBuyCategory` unless the person chose another).
  */
-export async function loadBestBuyContent(sku) {
-  const [offer, { data: product, error: prodErr }, { data: images, error: mediaErr }] = await Promise.all([
+export async function loadBestBuyContent(sku, { category = null } = {}) {
+  const [snapshotOffer, { data: product, error: prodErr }, { data: images, error: mediaErr }, { data: listing, error: listingErr }] = await Promise.all([
     latestSnapshotItem('bestbuy', sku),
     supabase.from('products').select(PRODUCT_COLUMNS).eq('sku', sku).maybeSingle(),
-    supabase.from('product_media').select('storage_path, is_primary, display_order, language').eq('sku', sku).eq('media_type', 'image')
+    supabase.from('product_media').select('storage_path, is_primary, display_order, language, image_role').eq('sku', sku).eq('media_type', 'image')
       .order('is_primary', { ascending: false }).order('display_order', { ascending: true }),
+    supabase.from('bestbuy_new_listings').select('*').eq('sku', sku).maybeSingle(),
   ]);
   if (prodErr) throw prodErr;
   if (mediaErr) throw mediaErr;
+  if (listingErr) throw listingErr;
   if (!product) throw new Error(`${sku} is not in the PIM.`);
-  return { offer: offer ?? null, product, built: offer ? buildBestBuyRow(product, offer, images ?? []) : null };
+  const lookup = snapshotOffer ? null : await invokeFn('bestbuy-new-listing', { mode: 'lookup', sku });
+  const offer = snapshotOffer ?? lookup?.offer ?? null;
+  if (offer) return { offer, product, listing: listing ?? null, built: buildBestBuyRow(product, offer, images ?? []) };
+  const chosen = category ?? listing?.category_code ?? defaultBestBuyCategory(product);
+  return {
+    offer: null,
+    product,
+    listing: listing ?? null,
+    catalog: lookup.catalog,
+    mismatch: lookup.mismatch,
+    plan: lookup.plan,
+    category: chosen,
+    built: lookup.catalog ? null : buildBestBuyRow(product, { category_code: chosen, upc: product.attributes?.upc ?? null, product_brand: null }, images ?? []),
+  };
+}
+
+/**
+ * A person's click: the product into Best Buy's catalog, for its review. Best
+ * Buy takes no offer until it has the product: `offer` asks for it, and it goes
+ * at the first check after Best Buy approves it.
+ */
+export async function createBestBuyProduct(sku, category, { offer: withOffer = false, task = null } = {}) {
+  task?.progress(0.05, 'Reading the product…');
+  const { offer, product, built, catalog } = await loadBestBuyContent(sku, { category });
+  if (offer) throw new Error(`${sku} already has an offer on Best Buy: push it to update it.`);
+  if (catalog) throw new Error('Best Buy already has this product: only the offer is missing.');
+  if (isExcluded(product, 'bestbuy')) throw new Error(`${sku} is excluded from Best Buy Canada.`);
+  if (!built.row) throw new Error(`${sku} can't go to Best Buy yet: ${built.problems.join('; ')}.`);
+  task?.progress(0.2, 'Best Buy is checking the file…');
+  const data = await invokeFn('bestbuy-new-listing', { mode: 'create', sku, row: built.row, offer: withOffer });
+  if (!data.ok) throw new Error(`Best Buy refused it: ${data.note ?? `import ${data.import_id}`}`);
+  return { importId: data.import_id, status: data.status };
+}
+
+/** A person's click: the offer now, MAP Blue and warranty 0 (the function reads them from the PIM). */
+export async function createBestBuyOffer(sku) {
+  const data = await invokeFn('bestbuy-new-listing', { mode: 'offer', sku });
+  return { importId: data.import_id, status: data.status };
+}
+
+/** A product in Best Buy's review: ask for its offer once approved, or stop asking. */
+export const setBestBuyOfferWanted = (sku, want) => invokeFn('bestbuy-new-listing', { mode: 'want_offer', sku, want });
+
+/** Follows the listings under way: how Best Buy answered, and the offer that was asked for once approved. */
+export const checkBestBuyListings = (sku = null) => invokeFn('bestbuy-new-listing', { mode: 'check', ...(sku ? { sku } : {}) });
+
+/** Every PIM product with no offer on Best Buy, for the person to choose from. Reads only. */
+export async function loadBestBuyCandidates() {
+  const { candidates } = await invokeFn('bestbuy-new-listing', { mode: 'candidates' });
+  return candidates;
 }
 
 /**

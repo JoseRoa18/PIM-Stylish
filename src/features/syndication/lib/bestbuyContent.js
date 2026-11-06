@@ -12,10 +12,11 @@
 // - Best Buy takes English only: its import has no French field but the warranty
 //   URL. Prices, stock and the offer are not content (bestbuy-push-price,
 //   bestbuy-inventory).
-// - Left out on purpose: French Compliant (an N needs a Best Buy VP's approval,
-//   and the PIM does not say), the French warranty URL (our /fr/warranty page is
-//   still in English), Variant Group Code (it would merge listings on Best Buy),
-//   Sales Tax Code, Web Hierarchy Location.
+// - The same for every product (user, 2026-11-06): French Compliant Y, Energy Star
+//   Indicator N, Trim / Accent Material None (only Other Kitchen & Dining has it).
+// - Left out on purpose: the French warranty URL (our /fr/warranty page is still
+//   in English), Variant Group Code (it would merge listings on Best Buy), Sales
+//   Tax Code, Web Hierarchy Location.
 
 import { isFaucetCategory } from '@/features/products/lib/categories';
 
@@ -28,6 +29,22 @@ const sizes = (cat) => ({
   height: code('Height_15404', cat), heightIn: code('HeightInches_25131', cat),
 });
 
+// The categories a new product can go in, the ones the mapping knows.
+export const BB_CATEGORY_OPTIONS = [
+  { value: CAT.kitchen, label: 'Other Kitchen & Dining Products' },
+  { value: CAT.faucets, label: 'Bathroom Sink Faucets' },
+  { value: CAT.kitchenAccessories, label: 'Kitchen & Dining Accessories' },
+  { value: CAT.bathAccessories, label: 'Bathroom Accessories' },
+];
+
+/** Where a new product goes unless the person chooses otherwise: where its kind already is on Best Buy. */
+export function defaultBestBuyCategory(product) {
+  const c = String(product.category ?? '');
+  if (c === 'bathroom_faucet' || c === 'bathroom_sink') return CAT.faucets;
+  if (c !== 'accessory') return CAT.kitchen;
+  return /drain|plate|escutcheon|bathroom/i.test(`${product.model_name ?? ''} ${product.attributes?.general_title_en ?? ''}`) ? CAT.bathAccessories : CAT.kitchenAccessories;
+}
+
 // Each category's columns. An attribute can hang from the category or from its
 // parent (CAT_27316 Kitchen & Dining, CAT_35719 Bathroom); a list is every code
 // Best Buy offers for the same thing.
@@ -36,6 +53,7 @@ const COLUMNS = {
     condition: code('ProductCondition_20257570', CAT.kitchen),
     colour: code('Colour_5105', CAT.kitchen),
     material: code('Material_23642', CAT.kitchen),
+    trim: code('TrimAccentMaterial_30337', CAT.kitchen),
     finish: code('Finish_9214', CAT.kitchen),
     series: code('StyleSeries_29070', CAT.kitchen),
     type: code('Type_5984', CAT.kitchen),
@@ -114,6 +132,7 @@ const COLUMNS = {
 const LABELS = {
   title: 'Title', short: 'Short description', long: 'Long description', brand: 'Brand', upc: 'Primary UPC (Best Buy\'s)',
   model: 'Model number', mpn: "Manufacturer's part number", warrantyUrl: 'Warranty & repair URL', condition: 'Product condition',
+  frenchCompliant: 'French compliant', energyStar: 'Energy Star indicator', trim: 'Trim / accent material',
   colour: 'Colour', colourFamily: 'Colour family', material: 'Material', materialFamily: 'Bathroom material family', finish: 'Finish',
   series: 'Collection / series', type: 'Type', bathType: 'Type', accessoryType: 'Kitchen accessory type', country: 'Country of origin',
   pieces: 'Total number of pieces', piecesList: 'Pieces in set', care: 'Care instructions', features: 'Other features', box: "What's in the box",
@@ -231,9 +250,13 @@ function overallSizes(p) {
   return { width, depth: numberOf(d.width), height: numberOf(d.depth) ?? numberOf(d.height) };
 }
 
-/** One text set plus every Universal photo, Canada's order; main image first, at most 10 JPG / PNG. */
+/**
+ * One text set plus every Universal photo, Canada's order; the white main first,
+ * at most 10 JPG / PNG. The gray hero (image_role sinksdirect_main, Wix's main) never
+ * goes (user, 2026-11-06: "solo se envía la foto fondo blanco, la de Wix no").
+ */
 export function pickBestBuyImages(images) {
-  const usable = (images ?? []).filter((m) => /^https?:\/\//i.test(m.storage_path ?? '') && /\.(jpe?g|png)(\?|#|$)/i.test(m.storage_path));
+  const usable = (images ?? []).filter((m) => m.image_role !== 'sinksdirect_main' && /^https?:\/\//i.test(m.storage_path ?? '') && /\.(jpe?g|png)(\?|#|$)/i.test(m.storage_path));
   const set = [['en_fr'], ['en', 'fr'], ['en_es']].find((langs) => usable.some((m) => langs.includes(m.language)));
   const chosen = usable.filter((m) => m.language == null || set?.includes(m.language));
   return [...chosen.filter((m) => m.is_primary), ...chosen.filter((m) => !m.is_primary)].slice(0, 10).map((m) => m.storage_path);
@@ -250,13 +273,14 @@ export function buildBestBuyRow(product, offer, imageRows) {
   const problems = [];
   const notes = [];
   if (!columns) problems.push(`Best Buy category ${offer?.category_code ?? '(none)'} is not mapped yet`);
-  if (!offer?.upc) problems.push('no UPC on the Best Buy offer');
+  if (!offer?.upc) problems.push('no UPC');
   const title = text(a.general_title_en);
   if (!title) problems.push('no General Title (EN) in the PIM');
   const short = cutTo(prose(a.marketing_copy) || prose(product.description), 400);
   if (!short) problems.push('no description in the PIM');
   const images = pickBestBuyImages(imageRows);
   if (!images.length) problems.push('no JPG or PNG image in the PIM');
+  else if (!(imageRows ?? []).some((m) => m.is_primary && m.image_role !== 'sinksdirect_main' && images[0] === m.storage_path)) problems.push('no white main image in the PIM');
   if (problems.length) return { row: null, fields: [], images, leftOut: [], notes, problems };
 
   const values = {};
@@ -271,6 +295,9 @@ export function buildBestBuyRow(product, offer, imageRows) {
   values.mpn = product.sku;
   if (/^https?:\/\//i.test(a.warranty_url_ca ?? '')) values.warrantyUrl = a.warranty_url_ca;
   values.condition = 'Brand New';
+  values.frenchCompliant = 'Y';
+  values.energyStar = 'N';
+  values.trim = 'None';
 
   const colour = text(product.color) || text(product.finish);
   if (colour) values.colour = colour.replace(/\s+and\s+/gi, '; ');
@@ -360,6 +387,8 @@ export function buildBestBuyRow(product, offer, imageRows) {
   put('model', root('Model_Number'));
   put('mpn', root('Manufacturers_Part_Number'));
   put('warrantyUrl', root('Warranty_And_Repair_Disclosure_URL'));
+  put('frenchCompliant', root('French_Compliant'));
+  put('energyStar', root('Energy_Star_Indicator'));
   // The fields that describe a faucet say nothing of the bathroom sinks that share its category.
   const faucetOnly = new Set(['appEnabled', 'faucetType', 'outerHoles', 'valve', 'spoutType', 'spoutHeight', 'spoutReach', 'pullout', 'handles', 'flow', 'waterSaving']);
   for (const [key, target] of Object.entries(columns)) {

@@ -8,6 +8,7 @@ import WalmartBulkAdditionCard from '@/features/syndication/components/WalmartBu
 import StockSyncCard from '@/features/syndication/components/StockSyncCard';
 import BestBuyCatalogAuditCard from '@/features/syndication/components/BestBuyCatalogAuditCard';
 import BestBuyContentPushCard from '@/features/syndication/components/BestBuyContentPushCard';
+import BestBuyNewProductsCard from '@/features/syndication/components/BestBuyNewProductsCard';
 import { LIVE_CHANNELS } from '@/features/syndication/lib/channels';
 
 function WayfairWorkspace() {
@@ -25,6 +26,7 @@ function BestBuyWorkspace() {
       <ReadOnlyChannelCard channel="bestbuy" />
       <StockSyncCard channel="bestbuy" />
       <BestBuyContentPushCard />
+      <BestBuyNewProductsCard />
       <BestBuyCatalogAuditCard />
     </div>
   );
