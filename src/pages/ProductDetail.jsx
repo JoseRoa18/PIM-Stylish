@@ -2106,7 +2106,8 @@ function ExportTemplatesCard({ product, media }) {
       } else if (/lowe/i.test(marketplace)) {
         const { generateLowesSet, describeLowesExport } = await import('@/features/syndication/exports/lowesExport');
         const res = await generateLowesSet(set, [product], `Lowes_${base}`, { task, merchantEmail });
-        if (res.offList.length || res.forecast?.odooError) setError(describeLowesExport(res));
+        if (res.media.files) done = `Downloaded + ${res.media.files} product file${res.media.files === 1 ? '' : 's'}`;
+        if (res.offList.length || res.forecast?.odooError || res.media.failed.length) setError(describeLowesExport(res));
       } else if (/bb&b|bbb|overstock/i.test(marketplace)) {
         const { generateBBBFromTemplate } = await import('@/features/syndication/exports/bbbExport');
         await generateBBBFromTemplate(set[0].storage_path, product, media, { task });

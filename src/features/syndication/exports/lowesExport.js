@@ -14,6 +14,11 @@ import {
   excelSerial,
   setFormulaResults,
   recalcOnOpen,
+  fetchImagesBySku,
+  fetchDocsBySku,
+  fetchVideosBySku,
+  mediaFileName,
+  downloadMediaZip,
 } from './templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
 import { channelCategory, isFaucetCategory } from '@/features/products/lib/categories';
@@ -656,25 +661,79 @@ export async function generateLowesFreightFromTemplate(templateStoragePath, prod
 }
 
 /** What an export of the set should tell the person: where the forecast came from, what was left blank. */
-export function describeLowesExport({ forecast = null, offList = [] }) {
+export function describeLowesExport({ forecast = null, offList = [], media = null }) {
   const notes = [];
   if (forecast) notes.push(`52-week forecast: ${forecast.stock} from USA stock, ${forecast.odoo} from what is on order at Odoo's ${FORECAST_WAREHOUSE} warehouse, ${forecast.fallback} at ${FORECAST_DEFAULT}.`);
   if (forecast?.odooError) notes.push(`Odoo could not be read (${forecast.odooError}), so products without stock went at ${FORECAST_DEFAULT}.`);
   if (offList.length) notes.push(`Left blank, not on the template's lists: ${offList.slice(0, 6).join('; ')}${offList.length > 6 ? ` and ${offList.length - 6} more` : ''}.`);
+  if (media) {
+    notes.push(`Product files: ${media.images} images, ${media.documents} documents, ${media.videos} videos${media.parts > 1 ? `, across ${media.parts} ZIP files` : ''}.`);
+    if (media.noImages.length) notes.push(`No images in the PIM: ${media.noImages.join(', ')}.`);
+    if (media.failed.length) notes.push(`${media.failed.length} could not be downloaded (listed in _could_not_download.txt).`);
+  }
   return notes.join(' ');
+}
+
+// The language of everything in the ZIP (user, 2026-11-06): English-Spanish,
+// else English, else English-French; French alone never goes.
+const LANGUAGE_ORDER = ['en_es', 'en', 'en_fr'];
+const bestLanguage = (items, languageOf) => LANGUAGE_ORDER.find((l) => items.some((m) => languageOf(m) === l));
+// Photos and videos: one language's set plus the ones without language.
+const oneSet = (items) => {
+  const best = bestLanguage(items, (m) => m.language);
+  return items.filter((m) => m.language == null || m.language === best);
+};
+// Documents: one per type, in the best language; a file without language
+// (a DXF, the warranty) only where the type has none in those three.
+const oneDocPerType = (docs) => {
+  const byType = new Map();
+  for (const d of docs) byType.set(d.type, [...(byType.get(d.type) ?? []), d]);
+  return [...byType.values()].flatMap((list) => {
+    const best = bestLanguage(list, (d) => d.lang);
+    const doc = list.find((d) => (best ? d.lang === best : d.lang == null));
+    return doc ? [doc] : [];
+  });
+};
+
+// Everything is uploaded to Lowe's by hand, so a product's files come in the
+// set's ZIP (user, 2026-11-06), one folder per SKU: SKU.jpg first, then SKU_2.jpg
+// and on in the PIM's order; SKU_spec_sheet.pdf and the like, by document type;
+// SKU_video.mp4. The warranty is the brand's one PDF, copied into every folder.
+async function mediaEntries(products) {
+  const skus = products.map((p) => p.sku);
+  const [imagesBySku, docsBySku, videosBySku] = await Promise.all([fetchImagesBySku(skus), fetchDocsBySku(skus), fetchVideosBySku(skus)]);
+  const entries = [];
+  const noImages = [];
+  const counts = { images: 0, documents: 0, videos: 0 };
+  for (const p of products) {
+    const folder = p.sku;
+    const images = oneSet(imagesBySku[p.sku] ?? []);
+    const documents = oneDocPerType(docsBySku[p.sku] ?? []);
+    const videos = oneSet(videosBySku[p.sku] ?? []);
+    if (!images.length) noImages.push(p.sku);
+    images.forEach((m, i) => entries.push({ name: mediaFileName(p.sku, i, m.storage_path), url: m.storage_path, folder }));
+    documents.forEach((d) => entries.push({ name: mediaFileName(p.sku, 0, d.url, `_${d.type}`), url: d.url, folder }));
+    videos.forEach((m, i) => entries.push({ name: mediaFileName(p.sku, i, m.storage_path, '_video'), url: m.storage_path, folder }));
+    counts.images += images.length;
+    counts.documents += documents.length;
+    counts.videos += videos.length;
+  }
+  return { entries, noImages, counts };
 }
 
 /**
  * Lowe's new-item setup is a two-file package: the Item Template (.xlsm) and
  * the SOS Freight Analysis (.xlsx). Fill every uploaded file and download the
- * whole set as ONE ZIP, each file kept under its original Lowe's name.
+ * whole set as ONE ZIP, each file kept under its original Lowe's name, with each
+ * product's images, documents and video in Products/<SKU>/. Past ~600 MB they go
+ * on in more ZIP files (_part2 and on); the two files are always in the first.
  *
  * @param {Object[]} templates  Lowe's template rows ({ file_name, storage_path })
  * @param {Object[]} products
  * @param {string} [baseName]
  * @param {{ task?: object, merchantEmail?: string }} [options]  `task`: a
- *   taskProgress reporter (filling the files 60%, writing them 30%, the ZIP the
- *   rest); `merchantEmail`: the Item Template's Lowes Merchant Email
+ *   taskProgress reporter (filling the files 20%, writing them 5%, the product
+ *   files and the ZIP the rest); `merchantEmail`: the Item Template's Lowes Merchant Email
  */
 export async function generateLowesSet(templates, products, baseName = 'Lowes', { task = null, merchantEmail = '' } = {}) {
   const freightTpl = templates.find((t) => /freight|drop.?ship/i.test(t.file_name));
@@ -683,39 +742,37 @@ export async function generateLowesSet(templates, products, baseName = 'Lowes', 
     throw new Error("No Lowe's template matched — upload the Item Template and/or the SOS Freight Analysis file.");
   }
 
-  // Each file has its own slice of the bar (filling 0–60%, writing 60–90%)
-  // and says which file it is.
+  // Each file has its own slice of the bar (filling 0–20%, writing 20–25%)
+  // and says which file it is; the product files take the rest.
   const n = (itemTpl ? 1 : 0) + (freightTpl ? 1 : 0);
   const slice = (i, from, to) => labelTask(
     task?.part(from + ((to - from) * i) / n, from + ((to - from) * (i + 1)) / n),
     n > 1 ? `File ${i + 1} of ${n}` : '',
   );
   const parts = [];
-  if (itemTpl) parts.push({ name: itemTpl.file_name, ...(await fillItemTemplate(itemTpl.storage_path, products, slice(0, 0, 0.6), { merchantEmail })) });
-  if (freightTpl) parts.push({ name: freightTpl.file_name, ...(await fillFreightTemplate(freightTpl.storage_path, products, slice(parts.length, 0, 0.6))) });
+  if (itemTpl) parts.push({ name: itemTpl.file_name, ...(await fillItemTemplate(itemTpl.storage_path, products, slice(0, 0, 0.2), { merchantEmail })) });
+  if (freightTpl) parts.push({ name: freightTpl.file_name, ...(await fillFreightTemplate(freightTpl.storage_path, products, slice(parts.length, 0, 0.2))) });
 
   const JSZip = await loadJSZip();
   const bundle = new JSZip();
   for (const [i, part] of parts.entries()) {
-    const writing = slice(i, 0.6, 0.9);
+    const writing = slice(i, 0.2, 0.25);
     writing?.progress(0, `Writing ${part.name}…`);
     bundle.file(part.name, await part.zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }, writing ? (meta) => writing.progress(meta.percent / 100) : undefined));
   }
-  const zipping = task?.part(0.9, 1);
-  zipping?.progress(0, 'Writing the ZIP…');
-  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' }, zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined);
-  const url = URL.createObjectURL(out);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${baseName}_${new Date().toISOString().slice(0, 10)}.zip`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  const { entries, noImages, counts } = await mediaEntries(products);
+  const day = new Date().toISOString().slice(0, 10);
+  const downloaded = await downloadMediaZip(entries, baseName, {
+    task: task?.part(0.25, 1),
+    into: bundle,
+    root: 'Products',
+    partName: (part, only) => `${baseName}${only ? '' : `_part${part}`}_${day}.zip`,
+  });
 
   return {
     count: products.length,
     files: parts.length,
+    media: { ...downloaded, ...counts, noImages },
     forecast: parts.find((part) => part.forecast)?.forecast ?? null,
     offList: parts.flatMap((part) => part.offList ?? []),
   };

@@ -433,10 +433,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
       task.progress(0.1);
       const res = await generateLowesSet(templates, productList, undefined, { task: task.part(0.1, 1), merchantEmail });
-      task.finish(`Downloaded · ${res.files} file${res.files === 1 ? '' : 's'}, ${noun(res.count)}`);
+      task.finish(`Downloaded · ${res.files} file${res.files === 1 ? '' : 's'}, ${res.media.files} product file${res.media.files === 1 ? '' : 's'}, ${noun(res.count)}`);
       setResult({
         type: 'success',
-        message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — USD cost/MSRP/MAP included. ${describeLowesExport(res)}` +
+        message: `Exported the Lowe's set (${res.files} file(s) and the product files) for ${res.count} product(s) — USD cost/MSRP/MAP included. ${describeLowesExport(res)}` +
           (excludedSkus.length ? ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.` : ''),
       });
     } catch (err) {

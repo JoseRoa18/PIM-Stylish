@@ -459,8 +459,11 @@ export function mediaFileName(sku, index, url, suffix = '') {
 // than that; files that could not be fetched are listed in
 // _could_not_download.txt. `task` (optional taskProgress reporter) counts
 // the files fetched (95%) and follows the last part being written; a part
-// closed on the way says so in the detail.
-export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 1024 * 1024, task = null } = {}) {
+// closed on the way says so in the detail. `into` is a JSZip the first part
+// starts from (the files of Lowe's set), written even with no media; `root`, a
+// folder holding the media inside the bundle; `partName(part, isOnlyPart)`, the
+// downloaded name when it is not <fileName>_media.
+export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 1024 * 1024, task = null, into = null, root = '', partName = null } = {}) {
   const safeFolder = (f) => String(f).replace(/[\\/:*?"<>|\s]+/g, '-');
   const groups = new Map(); // folder ('' = top level) → [{ path, url }]
   const seen = new Set();
@@ -468,20 +471,20 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
   for (const e of entries) {
     if (!e?.name || !e?.url) continue;
     const folder = e.folder ? safeFolder(e.folder) : '';
-    const path = folder ? `${folder}/${e.name}` : e.name;
+    const path = `${root ? `${root}/` : ''}${folder ? `${folder}/` : ''}${e.name}`;
     if (seen.has(path)) continue;
     seen.add(path);
     uses.set(e.url, (uses.get(e.url) ?? 0) + 1);
     if (!groups.has(folder)) groups.set(folder, []);
     groups.get(folder).push({ path, url: e.url });
   }
-  if (!seen.size) return { files: 0, parts: 0, failed: [] };
+  if (!seen.size && !into) return { files: 0, parts: 0, failed: [] };
   const JSZip = await loadJSZip();
   const day = new Date().toISOString().slice(0, 10);
   const failed = [];
-  let zip = new JSZip();
+  let zip = into ?? new JSZip();
   let bytes = 0;
-  let inZip = 0;
+  let inZip = into ? 1 : 0;
   let part = 0;
   let files = 0;
   const total = seen.size;
@@ -496,7 +499,7 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
     if (!inZip && !(last && failed.length)) return;
     if (last && failed.length) zip.file('_could_not_download.txt', failed.map((f) => `${f.path}\t${f.url}`).join('\n'));
     part += 1;
-    const name = `${fileName}_media${last && part === 1 ? '' : `_part${part}`}_${day}.zip`;
+    const name = partName?.(part, last && part === 1) ?? `${fileName}_media${last && part === 1 ? '' : `_part${part}`}_${day}.zip`;
     // A part closed on the way keeps the bar where the downloads are.
     const report = last ? writing : null;
     if (last) writing?.progress(0, part === 1 ? 'Writing the .zip…' : `Writing part ${part}…`);
@@ -565,7 +568,7 @@ export async function fetchImagesBySku(skus) {
   for (let i = 0; i < skus.length; i += 40) {
     const { data } = await supabase
       .from('product_media')
-      .select('sku, storage_path, is_primary, display_order, image_role')
+      .select('sku, storage_path, is_primary, display_order, image_role, language')
       .in('sku', skus.slice(i, i + 40))
       .eq('media_type', 'image');
     for (const m of data ?? []) {
@@ -587,7 +590,7 @@ export async function fetchVideosBySku(skus) {
   for (let i = 0; i < skus.length; i += 40) {
     const { data } = await supabase
       .from('product_media')
-      .select('sku, storage_path, display_order')
+      .select('sku, storage_path, display_order, language')
       .in('sku', skus.slice(i, i + 40))
       .eq('media_type', 'video');
     for (const m of data ?? []) {
@@ -601,7 +604,7 @@ export async function fetchVideosBySku(skus) {
 
 // Documents per SKU. `typeMap` translates PIM document_type → marketplace label;
 // `priority` orders them (first match wins the low slots).
-export async function fetchDocsBySku(skus, typeMap, priority = []) {
+export async function fetchDocsBySku(skus, typeMap = null, priority = []) {
   const bySku = {};
   for (let i = 0; i < skus.length; i += 40) {
     const { data } = await supabase
@@ -610,7 +613,8 @@ export async function fetchDocsBySku(skus, typeMap, priority = []) {
       .in('sku', skus.slice(i, i + 40))
       .eq('media_type', 'document');
     for (const m of data ?? []) {
-      const mapped = typeMap[m.document_type];
+      // Without a map: every document, under its own type.
+      const mapped = typeMap ? typeMap[m.document_type] : m.document_type;
       if (mapped) (bySku[m.sku] = bySku[m.sku] || []).push({ url: m.storage_path, type: mapped, raw: m.document_type, lang: m.language ?? null });
     }
   }
