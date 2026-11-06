@@ -9,7 +9,9 @@
 //                 ONE language set (EN-FR, else EN + FR, else EN-ES — the
 //                 listing is shared by both markets) + the Universal photos
 //       videos  → the product family's .mp4 files
-//       documents → PDFs: spec sheet, installation, cut-out template, warranty
+//       documents → PDFs: spec sheet, installation, cut-out template, warranty;
+//                 one file per document type, EN-FR, else English, else EN-ES,
+//                 never French alone (user, 2026-11-06), as a new listing sends
 //     Spec attributes are pushed by wayfair-push-attributes (separate call).
 //   - mode "plan" returns the ordered steps and every item WITHOUT calling
 //     Wayfair — the review screen. mode "push" executes the chosen steps and
@@ -86,6 +88,7 @@ const fileName = (u: string) => decodeURIComponent(u.split("?")[0].split("/").po
 // text set plus every Universal (untagged) photo, which is language-neutral
 // and goes with whichever set is sent. PIM order is kept.
 const SET_ORDER = [["en_fr"], ["en", "fr"], ["en_es"]];
+const DOC_LANGUAGES: (string | null)[] = ["en_fr", "en", "en_es", null];
 function pickImages(all: MediaRow[], _lang: "ca" | "us") {
   for (const langs of SET_ORDER) {
     if (all.some((m) => m.language != null && langs.includes(m.language))) {
@@ -113,9 +116,16 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
 
   const docs = media.filter((m) => m.media_type === "document" && isHttp(m.storage_path) && /\.pdf(\?|$)/i.test(m.storage_path));
   const docItems: Item[] = [];
+  const sentDocs = new Set<string>();
   for (const [re, label] of DOC_ORDER) {
-    for (const m of docs.filter((d) => re.test(d.document_type ?? ""))) {
-      if (m.language === "en_es") continue;
+    const types = [...new Set(docs.filter((d) => re.test(d.document_type ?? "")).map((d) => d.document_type))];
+    for (const type of types) {
+      const rows = docs.filter((d) => d.document_type === type);
+      const language = DOC_LANGUAGES.find((l) => rows.some((r) => (r.language ?? null) === l));
+      const m = rows.find((r) => (r.language ?? null) === language);
+      // French alone never goes; the same PDF filed under two types goes once.
+      if (language === undefined || !m || sentDocs.has(m.storage_path)) continue;
+      sentDocs.add(m.storage_path);
       docItems.push({ url: m.storage_path, label: `${label}${m.language ? ` (${m.language.toUpperCase().replace("_", "-")})` : ""}`, kind: "document", language: m.language, docType: m.document_type });
     }
   }
@@ -124,7 +134,7 @@ function buildPlan(media: MediaRow[], lang: "ca" | "us") {
     steps: [
       { key: "images", label: "Images", items: imageItems, note: `${set === "en_fr" ? "EN-FR set" : set === "en+fr" ? "EN + FR sets" : set === "en_es" ? "EN-ES set" : set === "en" ? "EN set" : "Universal photos only"}${set !== "universal" ? " + Universal photos" : ""} · white main first · gray hero not sent${orderedImages.length > IMAGE_CAP ? ` · ${orderedImages.length - IMAGE_CAP} beyond the cap not sent` : ""}` },
       { key: "videos", label: "Videos", items: videoItems, note: videoItems.length ? "MP4 files of the product family" : "no video file in the PIM" },
-      { key: "documents", label: "Documents", items: docItems.slice(0, DOC_CAP), note: `PDF only · type and language are set in Partner Home after the upload${skippedDocs > 0 ? ` · ${skippedDocs} not sent (DXF, EN-ES or beyond the cap)` : ""}` },
+      { key: "documents", label: "Documents", items: docItems.slice(0, DOC_CAP), note: `PDF only · type and language are set in Partner Home after the upload${skippedDocs > 0 ? ` · ${skippedDocs} not sent (DXF or another language of the same document)` : ""}` },
     ],
     neverSent: ["Title", "Description (marketing copy)", "Feature bullets", "Prices"],
     // Canada and USA share the listing: media and specs pushed through one

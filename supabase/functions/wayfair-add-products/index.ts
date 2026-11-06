@@ -105,6 +105,16 @@ const DOC_TYPES: Record<string, string> = {
   cut_out_template: "Installation & Assembly",
   warranty_file: "Warranty Information",
 };
+// A listing carries one language, not all of them (user, 2026-11-06; Wayfair takes
+// at most 10 documents and C234L went with 13). Wayfair is one listing for both
+// markets, so its order is the one wayfair-push-content uses for images: EN-FR,
+// then English, then EN-ES. French alone never goes with a document.
+const DOC_LANGUAGES: (string | null)[] = ["en_fr", "en", "en_es", null];
+const IMAGE_SETS = [["en_fr"], ["en", "fr"], ["en_es"]];
+function oneImageSet<T extends { language: string | null; is_primary: boolean }>(images: T[]): T[] {
+  const langs = IMAGE_SETS.find((set) => images.some((m) => m.language != null && set.includes(m.language)));
+  return images.filter((m) => m.is_primary || m.language == null || !!langs?.includes(m.language));
+}
 
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 async function getToken(clientId: string, clientSecret: string): Promise<string> {
@@ -464,18 +474,24 @@ function buildProduct(
   if (!bullets.length) notes.push("no bullet points");
 
   // Media: white-background images (gray SinksDirect hero stays off Wayfair),
-  // primary first; documents (EN/universal PDFs) by type.
-  const images = media
-    .filter((m) => m.media_type === "image" && /^https?:\/\//i.test(m.storage_path ?? "") && m.image_role !== "sinksdirect_main")
+  // primary first, one language's set plus the photos without language; one PDF
+  // per document type, in the best language it has.
+  const images = oneImageSet(media
+    .filter((m) => m.media_type === "image" && /^https?:\/\//i.test(m.storage_path ?? "") && m.image_role !== "sinksdirect_main"))
     .sort((x, y) => Number(y.is_primary) - Number(x.is_primary) || (x.display_order ?? 0) - (y.display_order ?? 0))
     .slice(0, 16);
   images.forEach((m, i) => add("media::imageValue", m.storage_path, 1, i + 1));
   if (!images.length) notes.push("no images");
   let documents = 0;
+  const sentDocs = new Set<string>();
   if (opts.includeDocuments) {
-    for (const m of media) {
-      const type = DOC_TYPES[m.document_type ?? ""];
-      if (m.media_type !== "document" || !type || m.language === "fr" || !/\.pdf(\?|$)/i.test(m.storage_path ?? "")) continue;
+    for (const [docType, type] of Object.entries(DOC_TYPES)) {
+      const rows = media.filter((m) => m.media_type === "document" && m.document_type === docType && /\.pdf(\?|$)/i.test(m.storage_path ?? ""));
+      const language = DOC_LANGUAGES.find((l) => rows.some((m) => (m.language ?? null) === l));
+      const m = rows.find((r) => (r.language ?? null) === language);
+      // The same PDF filed under two types goes once (K-140G, P-211H).
+      if (language === undefined || !m || sentDocs.has(m.storage_path)) continue;
+      sentDocs.add(m.storage_path);
       documents += 1;
       add("media::documentValue", m.storage_path, 1, documents);
       add("media::documentType", type, 1, documents);
@@ -487,9 +503,10 @@ function buildProduct(
   const cost = num(p[opts.costKey]);
   if (cost) add("price::wholesalePrice", cost);
   else missingRequired.push("Base Cost (Wayfair cost)");
-  const msrp = num(opts.region === "US" ? p.msrp_usd : p.msrp_cad);
+  // Wayfair keeps MSRP = MAP (user, 2026-11-06, as in its price change files): both
+  // the market's MAP Blue, never the PIM's MSRP columns.
   const map = num(opts.region === "US" ? p.map_usd : p.map_cad);
-  add("price::manufacturerSuggestedRetailPrice", msrp);
+  add("price::manufacturerSuggestedRetailPrice", map);
   add("price::minimumAdvertizedPrice", map);
   add("shippingAndFulfillment::minimumOrderQuantity", "1");
   add("shippingAndFulfillment::forceQuantityMultiplier", "1");
@@ -526,7 +543,10 @@ function buildProduct(
         try { raw = rule(p, ctx); } catch { raw = ""; }
       }
     }
-    const values = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? "").trim()).filter(Boolean);
+    // "Does Not Apply" is no number: a number question stays unanswered (Faucet Hole
+    // Diameter on a kitchen sink, DECIMAL and optional, refused it on every one).
+    const isNumber = q.answerType === "DECIMAL" || q.answerType === "INTEGER";
+    const values = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? "").trim()).filter((v) => v && !(isNumber && /^does not apply$/i.test(v)));
     if (!values.length) {
       if (q.importanceType === "REQUIRED") missingRequired.push(q.displayName);
       continue;

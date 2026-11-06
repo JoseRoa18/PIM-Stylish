@@ -149,9 +149,12 @@ export const WAYFAIR_RULES = {
   Designer: () => 'Does Not Apply',
   'Amazon Seller SKU': () => '',
   // Pricing
-  'Base Cost': () => '', // wholesale — deferred
-  'Manufacturer Suggested Retail Price': (p) => p.msrp_cad || '',
-  'Minimum Advertised Price': () => '', // business-deferred
+  // Wayfair Canada's own USD cost (user, 2026-11-06), the one the API's new listing sends.
+  'Base Cost': (p) => p.cost_usd_wayfair_ca || '',
+  // Wayfair keeps MSRP = MAP (user, 2026-11-06), both the Canada MAP Blue: these
+  // templates are Wayfair Canada's, and the API's new listing sends the same.
+  'Manufacturer Suggested Retail Price': (p) => p.map_cad || '',
+  'Minimum Advertised Price': (p) => p.map_cad || '',
   'Everyday B2B Discount Rate': () => '',
   // Marketing
   'Marketing Copy': (p) => stripHtml(p.description),

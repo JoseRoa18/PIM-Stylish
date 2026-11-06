@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, ShieldCheck, PlusCircle, RefreshCw, ListChecks } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, Clock, ShieldCheck, PlusCircle, RefreshCw, ListChecks } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { submitWayfairAdditions, checkWayfairAdditionStatus } from '../api/wayfairSync';
+import { describeFlaws, describeNotes, resultHeadline, resultSummary, statusHeadline } from '../lib/wayfairMessages';
 import { useAuth } from '@/features/auth/AuthContext';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { startTask } from '@/lib/taskProgress';
 
 // Per-product "new listing" panel (Marketplaces tab): validate the PIM data
@@ -14,6 +16,7 @@ import { startTask } from '@/lib/taskProgress';
 const SUPPLIER_LABEL = { CAN: 'Canada', USA: 'USA' };
 export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
   const { canEdit } = useAuth();
+  const confirm = useConfirm();
   const hasSandbox = supplier !== 'CAN';
   const [sandbox, setSandbox] = useState(hasSandbox);
   const [busy, setBusy] = useState(null); // 'validate' | 'create' | 'status' | 'mapping' | null
@@ -24,12 +27,22 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
   const skipped = result?.skipped?.[0];
   // A preview only lists the mapping; it never unlocks Create.
   const clean = !!row && !result?.preview && !row.errors?.length && !row.missingRequired?.length && !row.unmapped?.length;
+  // Once it went to Wayfair, the same answer does not send it again.
+  const canCreate = clean && result?.validateOnly !== false;
+  const headline = row && result ? resultHeadline(row, result) : null;
 
   // mode: 'validate' | 'create' | 'mapping' (build only — every attribute the
   // PIM would send, with Wayfair's title; works for listed products too)
   async function run(mode) {
     const validateOnly = mode !== 'create';
-    if (mode === 'create' && !sandbox && !window.confirm(`Create ${product.sku} as a NEW Wayfair ${SUPPLIER_LABEL[supplier] ?? supplier} listing? This is the real catalog.`)) return;
+    if (mode === 'create' && !sandbox) {
+      const ok = await confirm({
+        title: `Create ${product.sku} on Wayfair ${SUPPLIER_LABEL[supplier] ?? supplier}?`,
+        message: `This creates a new listing in Wayfair's real catalog${supplier === 'CAN' ? ', and Wayfair mirrors it to USA' : ''}.`,
+        confirmLabel: 'Create listing',
+      });
+      if (!ok) return;
+    }
     setBusy(mode);
     setResult(null);
     setStatus(null);
@@ -102,8 +115,8 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
             <button
               type="button"
               onClick={() => run('create')}
-              disabled={!!busy || !clean}
-              title={clean ? undefined : 'Validate first — fix every issue before creating'}
+              disabled={!!busy || !canCreate}
+              title={canCreate ? undefined : 'Validate first — fix every issue before creating'}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
             >
               {busy === 'create' ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
@@ -119,7 +132,7 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
               {busy === 'mapping' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
               Mapped attributes
             </button>
-            {result?.requestId && !result.validateOnly && (
+            {result?.requestId && !result.preview && (
               <button
                 type="button"
                 onClick={refreshStatus}
@@ -150,22 +163,18 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
         {row && (
           <div className="rounded-lg border border-outline-variant divide-y divide-outline-variant text-body-sm">
             <div className="flex items-start gap-2 px-3 py-2">
-              {clean ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" />}
+              <HeadlineIcon tone={headline.tone} />
               <span className="min-w-0 break-words">
-                <span className="sr-only">{clean ? 'Ready. ' : 'Not ready. '}</span>
-                <span className="text-on-surface-variant">{result.env} · </span>
-                {row.className} (class {row.classId}) · {row.attributes} attributes · {row.images} images · {row.documents} documents
-                {row.listed ? ' · already on Wayfair' : ''}
-                {row.variant ? ` · ${row.variant}` : ''}
-                {row.status ? ` · ${row.status}` : ''}
-                {result.requestId && !result.validateOnly ? ` · request ${result.requestId}` : ''}
+                <span className="text-on-surface font-medium">{headline.title}</span>
+                {headline.detail ? ` ${headline.detail}` : ''}
+                <span className="block text-on-surface-variant">{resultSummary(row, result)}</span>
               </span>
             </div>
-            <IssueList label="Missing in PIM (required)" items={row.missingRequired} tone="error" />
-            <IssueList label="Not accepted by Wayfair" items={row.unmapped?.map((u) => `${u.title}: "${u.value}"`)} tone="error" titles={row.unmapped?.map((u) => (u.options?.length ? `Valid: ${u.options.join(' · ')}` : ''))} />
-            <IssueList label="Wayfair errors" items={row.errors?.map((e) => `${e.attributeId}: ${e.flaw}`)} tone="error" />
-            <IssueList label="Wayfair warnings" items={row.warnings?.map((e) => `${e.attributeId}: ${e.flaw}`)} tone="muted" />
-            <IssueList label="Notes" items={row.notes} tone="muted" />
+            <IssueList label="Fill these in the PIM" items={row.missingRequired} tone="error" />
+            <IssueList label="Wayfair does not accept these values" items={row.unmapped?.map((u) => `${u.title}: "${u.value}"`)} tone="error" titles={row.unmapped?.map((u) => (u.options?.length ? `Valid: ${u.options.join(' · ')}` : ''))} />
+            <IssueList label="Problems Wayfair found" items={describeFlaws(row.errors)} tone="error" />
+            <IssueList label="Wayfair suggests (it does not block the listing)" items={describeFlaws(row.warnings)} tone="muted" />
+            <IssueList label="Good to know" items={describeNotes(row.notes)} tone="muted" />
             <MappedTable rows={row.mapped} />
           </div>
         )}
@@ -175,25 +184,25 @@ export default function WayfairAdditionCard({ product, supplier = 'CAN' }) {
             {status.error ? (
               <span className="text-error">{status.error}</span>
             ) : (
-              (status.products ?? []).map((p) => (
-                <div key={p.sku} className="break-words space-y-1">
-                  <div>
-                    <span className="text-on-surface-variant">{p.sku}: </span>
-                    validation {p.validationStatus ?? '—'} · submission {p.submissionStatus ?? '—'}
-                    {p.errors?.length ? ` · ${p.errors.length} errors` : ''}
-                  </div>
-                  {p.errors?.length > 0 && (
-                    <ul className="ml-3 space-y-0.5 text-error">
-                      {p.errors.map((e, i) => <li key={i}>{e.attributeId}: {e.flaw}</li>)}
-                    </ul>
-                  )}
-                  {p.warnings?.length > 0 && (
-                    <ul className="ml-3 space-y-0.5 text-on-surface-variant">
-                      {p.warnings.map((e, i) => <li key={i}>{e.attributeId}: {e.flaw}</li>)}
-                    </ul>
-                  )}
-                </div>
-              ))
+              <>
+                {!status.products?.length && <span className="text-on-surface-variant">Wayfair has no result yet. Check again in a minute.</span>}
+                {(status.products ?? []).map((p) => {
+                  const line = statusHeadline(p, result?.validateOnly === false);
+                  return (
+                    <div key={p.sku} className="break-words space-y-2">
+                      <div className="flex items-start gap-2" title={`Wayfair: validation ${p.validationStatus ?? '—'}, submission ${p.submissionStatus ?? '—'}`}>
+                        <HeadlineIcon tone={line.tone} />
+                        <span className="min-w-0">
+                          <span className="text-on-surface font-medium">{line.title}</span> {line.detail}
+                        </span>
+                      </div>
+                      <IssueList label="Problems Wayfair found" items={describeFlaws(p.errors)} tone="error" flush />
+                      <IssueList label="Wayfair suggests (it does not block the listing)" items={describeFlaws(p.warnings)} tone="muted" flush />
+                    </div>
+                  );
+                })}
+                {result?.requestId && <p className="mt-2 text-label-sm text-on-surface-variant break-all">Wayfair reference: {result.requestId}</p>}
+              </>
             )}
           </div>
         )}
@@ -233,11 +242,18 @@ function MappedTable({ rows }) {
   );
 }
 
-function IssueList({ label, items, tone, titles }) {
+function HeadlineIcon({ tone }) {
+  if (tone === 'error') return <AlertCircle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" aria-hidden="true" />;
+  if (tone === 'waiting') return <Clock className="w-4 h-4 mt-0.5 text-on-surface-variant flex-shrink-0" aria-hidden="true" />;
+  if (tone === 'info') return <ListChecks className="w-4 h-4 mt-0.5 text-on-surface-variant flex-shrink-0" aria-hidden="true" />;
+  return <CheckCircle2 className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" aria-hidden="true" />;
+}
+
+function IssueList({ label, items, tone, titles, flush = false }) {
   if (!items?.length) return null;
   const cls = tone === 'error' ? 'text-error' : 'text-on-surface-variant';
   return (
-    <div className="px-3 py-2">
+    <div className={flush ? '' : 'px-3 py-2'}>
       <div className="text-label-sm text-on-surface-variant">{label}</div>
       <ul className={`mt-0.5 space-y-0.5 ${cls}`}>
         {items.map((it, i) => (
