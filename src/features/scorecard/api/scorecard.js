@@ -69,10 +69,11 @@ export async function saveValue(metric, week, parsed) {
 
 /**
  * The server-side numbers of a board (Odoo orders, stock, Activity Log) worked
- * out again now by the scorecard-fill edge function; the daily cron does the same.
+ * out again now by the scorecard-fill edge function, the week in progress
+ * included; the crons do the same (daily, and that week's column every 3 hours).
  */
 export async function refreshServerNumbers(board) {
-  const { data, error } = await supabase.functions.invoke('scorecard-fill', { body: { mode: 'fill', boards: [board] } });
+  const { data, error } = await supabase.functions.invoke('scorecard-fill', { body: { mode: 'fill', boards: [board], running: true } });
   if (error) {
     let message = error.message;
     try { message = (await error.context?.json())?.error ?? message; } catch { /* keep the generic message */ }

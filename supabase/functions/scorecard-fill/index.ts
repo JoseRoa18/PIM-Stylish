@@ -19,7 +19,11 @@
 // holds the numbers of the week BEFORE it (Oct 25–31), the week reviewed in
 // that week's meeting. Days are Eastern time (Cambridge, Ontario).
 //
-// Body: { mode: "fill" | "preview", boards?: string[], backfill?: number, refresh?: number }
+// Body: { mode: "fill" | "preview", boards?: string[], backfill?: number, refresh?: number, running?: true | "only" }
+//   running  — also the column of the week now running (its numbers so far,
+//              user 2026-11-06: updated every 3 hours by the cron), replaced
+//              every time; "only" = that column alone. Read-today rows (stock,
+//              reviews, profitability) and the AI note stay on this week's column.
 //   fill     — this week's column, replaced (the rows are the PIM's); with
 //              backfill N the N columns before it, written where they are
 //              still empty — or, within the `refresh` newest of them, where
@@ -665,9 +669,13 @@ Deno.serve(async (req) => {
     const refresh = Math.max(0, Math.min(backfill, Number(body.refresh) || 0));
     const today = etToday();
     const thisColumn = sundayOf(today);
+    // The week running now (its column is next Sunday's): numbers so far.
+    const running = body.running === true || body.running === "only";
+    const runColumn = addDays(thisColumn, 7);
     // Newest first, never before W44 — where the scorecard starts (FIRST_WEEK in
     // src/features/scorecard/lib/weeks.js; user, 2026-11-05): older columns stay as they are.
-    const columns = Array.from({ length: backfill + 1 }, (_, i) => addDays(thisColumn, -7 * i)).filter((c, i) => i === 0 || c >= FIRST_COLUMN);
+    const columns = body.running === "only" ? [] : Array.from({ length: backfill + 1 }, (_, i) => addDays(thisColumn, -7 * i)).filter((c, i) => i === 0 || c >= FIRST_COLUMN);
+    const loop = running ? [runColumn, ...columns] : columns;
 
     const { data: metrics, error: mErr } = await admin
       .from("scorecard_metrics")
@@ -683,7 +691,7 @@ Deno.serve(async (req) => {
         if (boards.includes(a.board) && SERVER_KEYS.includes(a.key)) metrics.push({ id: `assume-${i}`, board: a.board, market: a.market, name: `(assumed) ${a.key}`, auto_key: a.key });
       }
     }
-    if (!metrics?.length) return json({ ok: true, mode, columns, note: "No measurable of these boards is filled by the server.", values: [] });
+    if (!metrics?.length) return json({ ok: true, mode, columns: loop, note: "No measurable of these boards is filled by the server.", values: [] });
 
     // The PIM's products and how Odoo's codes map onto them.
     const { data: products, error: pErr } = await admin.from("products").select("sku, brand, model_name, workflow_status, is_obsolete, map_cad, map_usd, msrp_cad, msrp_usd, wix_product_id");
@@ -694,7 +702,8 @@ Deno.serve(async (req) => {
     const skuOf = (code: string | null) => (code == null ? null : exact.has(code) ? code : lower.get(code.toLowerCase()) ?? null);
 
     const odoo = await odooClient();
-    const oldest = columns.at(-1)!;
+    const oldest = loop.at(-1)!;
+    const newest = loop[0];
     const now = Date.now();
     const out: { metricId: string; board: string; market: string; name: string; key: string; week: string; value: number | null; note?: string | null }[] = [];
     const diagnostics: Record<string, Record<string, any>> = {};
@@ -709,7 +718,7 @@ Deno.serve(async (req) => {
         // Orders from the earliest window any key needs: 90 days before the
         // oldest column (SKUs without a sale), up to this column.
         const usdRate = await usdPerUnit(odoo, src.company);
-        const { orders, lines } = await loadOrders(odoo, src.odoo, addDays(oldest, -91), thisColumn, skuOf, usdRate ?? 0);
+        const { orders, lines } = await loadOrders(odoo, src.odoo, addDays(oldest, -91), newest, skuOf, usdRate ?? 0);
         const orderDate = new Map(orders.map((o) => [o.id, o.date]));
         const inDays = (iso: string, fromDay: string, toDay: string) => iso >= isoOf(etMidnightUtc(fromDay)) && iso < isoOf(etMidnightUtc(toDay));
         const paidOrderIds = new Set(lines.filter(isSale).map((l) => l.orderId));
@@ -799,7 +808,7 @@ Deno.serve(async (req) => {
             .select("entity_id, occurred_at, metadata")
             .eq("action", "push").eq("entity_type", "product").eq("target", "wix")
             .gte("occurred_at", isoOf(etMidnightUtc(addDays(oldest, -7))))
-            .lt("occurred_at", isoOf(etMidnightUtc(thisColumn)))
+            .lt("occurred_at", isoOf(etMidnightUtc(newest)))
             .limit(5000);
           if (error) throw error;
           const onSite = (md: Record<string, unknown> | null) => {
@@ -839,7 +848,7 @@ Deno.serve(async (req) => {
           diag.odooReturnsWithoutWixOrder = r.unmatched;
         }
 
-        for (const column of columns) {
+        for (const column of loop) {
           const from = addDays(column, -7); // the data week: the 7 days before the column's Sunday
           const week = orders.filter((o) => inDays(o.date, from, column));
           const sold = week.filter((o) => o.state !== "cancel");
@@ -992,10 +1001,11 @@ Deno.serve(async (req) => {
     if (mode === "fill") {
       const row = (v: typeof out[number]) => ({ metric_id: v.metricId, week_start: v.week, value: v.value, note: v.note ?? null, origin: "auto" });
       const filled = (v: typeof out[number]) => v.value != null || Boolean(v.note);
-      const current = out.filter((v) => v.week === thisColumn && filled(v)).map(row);
+      // This week's column and the running week's: always the PIM's.
+      const current = out.filter((v) => (v.week === thisColumn || (running && v.week === runColumn)) && filled(v)).map(row);
       // Past weeks: where nothing is stored yet — or, in the `refresh` newest
       // ones, where the PIM wrote the value. Typed / imported values stay.
-      const pastValues = out.filter((v) => v.week !== thisColumn && filled(v));
+      const pastValues = out.filter((v) => v.week !== thisColumn && v.week !== runColumn && filled(v));
       const refreshable = new Set(columns.slice(1, refresh + 1));
       // `replaceTyped` (user, 2026-11-05: "una sola fuente"): a PIM row's past
       // weeks become the PIM's numbers too, so its trend is one source; every
@@ -1033,9 +1043,9 @@ Deno.serve(async (req) => {
         if (error) throw error;
       }
       written = current.length + past.length;
-      await admin.from("app_settings").upsert({ key: SETTINGS_KEY, value: { at: new Date().toISOString(), ok: true, boards, column: thisColumn, backfill, refresh, values: written } }, { onConflict: "key" });
+      await admin.from("app_settings").upsert({ key: SETTINGS_KEY, value: { at: new Date().toISOString(), ok: true, boards, column: thisColumn, running: running ? body.running : false, backfill, refresh, values: written } }, { onConflict: "key" });
     }
-    return json({ ok: true, mode, column: thisColumn, dataWeek: [addDays(thisColumn, -7), addDays(thisColumn, -1)], backfill, refresh, written, replacedTyped: replacedCount, values: out, ...(mode === "preview" ? { diagnostics } : {}) });
+    return json({ ok: true, mode, column: thisColumn, dataWeek: [addDays(thisColumn, -7), addDays(thisColumn, -1)], ...(running ? { runningColumn: runColumn, runningSince: thisColumn } : {}), backfill, refresh, written, replacedTyped: replacedCount, values: out, ...(mode === "preview" ? { diagnostics } : {}) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await admin.from("app_settings").upsert({ key: SETTINGS_KEY, value: { at: new Date().toISOString(), ok: false, error: message } }, { onConflict: "key" });

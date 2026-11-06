@@ -1,11 +1,11 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Copy, Pencil, X, Loader2, MessageSquareText } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import Dialog from '@/components/ui/Dialog';
 import { formatValue, goalLabel, meetsGoal, parseInput, toInput } from '../lib/format';
 import { SECTIONS, sectionOf } from '../lib/sections';
-import { addWeeks, weekRange, weekStartLabel, weekTag } from '../lib/weeks';
+import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } from '../lib/weeks';
 
 // One market of a board as the EOS grid (user's layout choice, 2026-11-04):
 // rows grouped by theme, one line each — the owner's initials, the
@@ -16,12 +16,14 @@ import { addWeeks, weekRange, weekStartLabel, weekTag } from '../lib/weeks';
 // opens on the latest week.
 export default function ScorecardTable({ board, metrics, values, weeks, thisWeek, canWrite, isAdmin, onSave, onEditMetric }) {
   const groups = SECTIONS.map((s) => ({ ...s, rows: metrics.filter((m) => sectionOf(m) === s.key) })).filter((g) => g.rows.length);
+  // The column of the week in progress: the numbers so far (user, 2026-11-06).
+  const runningWeek = addWeeks(thisWeek, 1);
   const scroller = useRef(null);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    // Open on the current week (the coming ones, empty, sit after it).
-    const cur = el.querySelector('thead th[data-current]');
+    // Open on the week in progress, this week's column just before it (the coming ones, empty, sit after).
+    const cur = el.querySelector('thead th[data-running]') ?? el.querySelector('thead th[data-current]');
     el.scrollLeft = cur ? Math.max(0, cur.offsetLeft + cur.offsetWidth - el.clientWidth) : el.scrollWidth;
   }, [weeks, board.key]);
   // The week header stays pinned while the page scrolls, under the page's
@@ -51,6 +53,22 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
   useLayoutEffect(() => {
     if (copy.current && scroller.current) copy.current.scrollLeft = scroller.current.scrollLeft;
   }, [layout, fits]);
+  // Hovering a week's header shows the days its numbers cover (user,
+  // 2026-11-06), at once — a native title waits a second. Drawn in <body>,
+  // fixed under the header: the header boxes clip anything below them.
+  const [tip, setTip] = useState(null); // { week, x, y }
+  const showTip = (week, el) => {
+    if (!week) { setTip(null); return; }
+    const r = el.getBoundingClientRect();
+    setTip({ week, x: Math.min(Math.max(r.left + r.width / 2, 150), window.innerWidth - 150), y: r.bottom + 6 });
+  };
+  // Any scroll (the page, the table sideways) moves the header from under it.
+  useEffect(() => {
+    if (!tip) return undefined;
+    const hide = () => setTip(null);
+    document.addEventListener('scroll', hide, true);
+    return () => document.removeEventListener('scroll', hide, true);
+  }, [tip]);
   const cols = 2 + weeks.length;
   const pinned = !fits && layout;
   const nameCol = 'w-[17rem] min-w-[17rem] max-w-[17rem]';
@@ -61,7 +79,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
         <div ref={copy} aria-hidden className="sticky top-[var(--sc-toolbar-h,0px)] z-20 overflow-hidden rounded-t-2xl border-x border-t border-outline-variant" style={{ marginBottom: -(layout.height + 1) }}>
           <table className="border-separate border-spacing-0 text-body-sm" style={{ width: layout.width, tableLayout: 'fixed' }}>
             <colgroup>{layout.widths.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
-            <thead><HeaderRow weeks={weeks} thisWeek={thisWeek} mode="copy" height={layout.height} nameCol={nameCol} /></thead>
+            <thead><HeaderRow weeks={weeks} thisWeek={thisWeek} mode="copy" height={layout.height} nameCol={nameCol} onTip={showTip} /></thead>
           </table>
         </div>
       )}
@@ -74,7 +92,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
       <table className="min-w-full border-separate border-spacing-0 text-body-sm">
         <caption className="sr-only">{board.label} scorecard, weeks {weekTag(weeks[0])} to {weekTag(weeks.at(-1))}</caption>
         <thead ref={head}>
-          <HeaderRow weeks={weeks} thisWeek={thisWeek} mode={fits ? 'sticky' : 'static'} nameCol={nameCol} />
+          <HeaderRow weeks={weeks} thisWeek={thisWeek} mode={fits ? 'sticky' : 'static'} nameCol={nameCol} onTip={showTip} />
         </thead>
         {groups.map((g) => (
           <tbody key={g.key}>
@@ -113,6 +131,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                     week={w}
                     row={values.get(`${m.id}|${w}`)}
                     current={w === thisWeek}
+                    running={w === runningWeek}
                     editable={canWrite(m) && w <= thisWeek}
                     onSave={onSave}
                   />
@@ -123,6 +142,14 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
         ))}
       </table>
       </div>
+      {tip && createPortal(
+        <div aria-hidden className="fixed z-50 -translate-x-1/2 pointer-events-none rounded-lg bg-inverse-surface text-on-inverse-surface px-3 py-2 shadow-lg whitespace-nowrap text-center" style={{ left: tip.x, top: tip.y }}>
+          <div className="text-label-md font-semibold">{weekTag(tip.week)} · numbers of</div>
+          <div className="text-body-sm">{weekDays(addWeeks(tip.week, -1))}</div>
+          {tip.week > thisWeek && <div className="text-label-sm opacity-80">{tip.week === runningWeek ? 'In progress — numbers so far, updated every 3 hours' : 'Upcoming'}</div>}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -132,7 +159,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
  * fits); 'static' = the real header under its pinned copy; 'copy' = that copy.
  * The measurable's column stays pinned at the left in every mode.
  */
-function HeaderRow({ weeks, thisWeek, mode, height, nameCol }) {
+function HeaderRow({ weeks, thisWeek, mode, height, nameCol, onTip }) {
   const top = mode === 'sticky' ? 'sticky top-[var(--sc-toolbar-h,0px)]' : '';
   return (
     <tr style={height ? { height } : undefined}>
@@ -140,11 +167,11 @@ function HeaderRow({ weeks, thisWeek, mode, height, nameCol }) {
       <th scope="col" className={cn(top, mode === 'sticky' && 'z-20', 'bg-surface-container-low text-right px-3 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant whitespace-nowrap')}>Goal</th>
       {/* A column holds the numbers of the week before it (W44 = Oct 25 – 31), so its dates are that week's. */}
       {weeks.map((w) => (
-        <th key={w} scope="col" data-current={w === thisWeek ? '' : undefined} title={`Numbers of ${weekRange(addWeeks(w, -1))}`} className={cn(top, mode === 'sticky' && 'z-20', 'px-2 py-2 text-right border-b border-outline-variant whitespace-nowrap min-w-[4rem]', w === thisWeek ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low text-on-surface-variant')}>
+        <th key={w} scope="col" data-current={w === thisWeek ? '' : undefined} data-running={w === addWeeks(thisWeek, 1) ? '' : undefined} onMouseEnter={(e) => onTip?.(w, e.currentTarget)} onMouseLeave={() => onTip?.(null)} className={cn(top, mode === 'sticky' && 'z-20', 'px-2 py-2 text-right border-b border-outline-variant whitespace-nowrap min-w-[4rem]', w === thisWeek ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low text-on-surface-variant')}>
           <span className="block text-label-md">{weekTag(w)}</span>
           <span className="block text-label-sm font-normal">
             <span aria-hidden>{weekStartLabel(addWeeks(w, -1))}</span>
-            {mode !== 'copy' && <span className="sr-only">, numbers of {weekRange(addWeeks(w, -1))}{w === thisWeek ? ', this week' : w > thisWeek ? ', upcoming' : ''}</span>}
+            {mode !== 'copy' && <span className="sr-only">, numbers of {weekDays(addWeeks(w, -1))}{w === thisWeek ? ', this week' : w > thisWeek ? ', upcoming' : ''}</span>}
           </span>
         </th>
       ))}
@@ -175,12 +202,13 @@ function OwnerBadge({ label }) {
   );
 }
 
-function ValueCell({ metric, week, row, current, editable, onSave }) {
+function ValueCell({ metric, week, row, current, running, editable, onSave }) {
   const [draft, setDraft] = useState(null); // text while editing
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false); // a long note open in full
   const shown = formatValue(metric.unit, row);
-  const ok = meetsGoal(metric, row?.value);
+  // A week in progress is never judged against the goal: sales at mid-week would always miss it.
+  const ok = running ? null : meetsGoal(metric, row?.value);
   const tone = ok === true ? 'bg-success-container text-on-success-container' : ok === false ? 'bg-error-container text-on-error-container' : current ? 'bg-primary-container/25' : '';
   const isText = metric.unit === 'text' || (row?.value == null && row?.note);
   const longNote = isText && shown.length > 7;
@@ -213,15 +241,17 @@ function ValueCell({ metric, week, row, current, editable, onSave }) {
               <span className="sr-only">{shown}</span>
             </>
           ) : (
-            <span className={cn(isText ? 'text-left whitespace-nowrap' : 'tabular-nums')}>{shown}</span>
+            <span className={cn(isText ? 'text-left whitespace-nowrap' : 'tabular-nums', running && 'italic text-on-surface-variant')}>{shown}</span>
           )}
         </span>
       )}
       {ok != null && <span className="sr-only">{ok ? ' — meets the goal' : ' — misses the goal'}</span>}
       {row?.origin === 'auto' && <span className="sr-only"> — filled by the PIM</span>}
+      {running && row && <span className="sr-only"> — so far this week</span>}
     </>
   );
-  const title = [row?.note && row?.value != null ? row.note : isText ? shown : null, row?.origin === 'auto' ? 'Filled by the PIM' : null].filter(Boolean).join(' · ') || undefined;
+  const soFar = running && row ? `So far: ${weekSoFar(addWeeks(week, -1))} · updated ${new Date(row.updated_at).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : null;
+  const title = [soFar, row?.note && row?.value != null ? row.note : isText ? shown : null, row?.origin === 'auto' ? 'Filled by the PIM' : null].filter(Boolean).join(' · ') || undefined;
 
   if (draft != null) {
     return (

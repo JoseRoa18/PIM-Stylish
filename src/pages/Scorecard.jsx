@@ -26,7 +26,9 @@ export default function Scorecard() {
   const boardMarkets = Object.keys(board.markets);
   const market = boardMarkets.includes(params.get('market')) ? params.get('market') : boardMarkets[0];
   const thisWeek = weekStartOf();
-  const [endWeek, setEndWeek] = useState(thisWeek);
+  // The column of the week in progress (its numbers so far): the grid ends on it.
+  const runningWeek = addWeeks(thisWeek, 1);
+  const [endWeek, setEndWeek] = useState(runningWeek);
   // Never before W44, where the scorecard starts (FIRST_WEEK). Until 13 weeks
   // have passed the grid is W44 and the 12 weeks after it — the coming ones
   // empty, filled week by week — so it keeps the EOS sheet's 13 columns
@@ -95,36 +97,42 @@ export default function Scorecard() {
     listPeople().then(setPeople).catch(() => {});
   }, [isAdmin]);
 
-  // This week's browser-side PIM numbers (Price Alignment, promotions):
-  // worked out when an editor opens the board, again after 3 h. The
-  // server-side ones (Odoo orders, stock, Activity Log) come from the daily
-  // scorecard-fill run, or "Refresh PIM numbers". Returns how many were saved.
+  // The browser-side PIM numbers (Price Alignment, promotions) of this week's
+  // column and the week in progress: worked out when an editor opens the
+  // board, again after 3 h. The server-side ones (Odoo orders, stock, Activity
+  // Log) come from the scorecard-fill crons, or "Refresh PIM numbers".
+  // Returns how many were saved.
   const fillAuto = useCallback(async (ms, vals, { force = false, report = true } = {}) => {
-    const due = ms.filter((m) => {
+    const dueIn = (column) => ms.filter((m) => {
       if (!m.auto_key || isServerKey(m.auto_key)) return false;
-      const row = vals.get(`${m.id}|${thisWeek}`);
+      const row = vals.get(`${m.id}|${column}`);
       // The row is the PIM's: a number typed or imported this week is replaced.
       if (!row || row.origin !== 'auto') return true;
       return force || Date.now() - new Date(row.updated_at).getTime() > AUTO_FRESH_MS;
     });
-    if (!due.length) return 0;
-    if (report) setAuto({ state: 'running', text: `Working out ${due.length} number${due.length === 1 ? '' : 's'} from the PIM…` });
+    const plan = [thisWeek, runningWeek].map((column) => ({ column, due: dueIn(column) })).filter((p) => p.due.length);
+    if (!plan.length) return 0;
+    const count = plan.reduce((n, p) => n + p.due.length, 0);
+    if (report) setAuto({ state: 'running', text: `Working out ${count} number${count === 1 ? '' : 's'} from the PIM…` });
     try {
-      const computed = await computeAutoValues(boardKey, due, thisWeek, etToday());
-      const saved = await saveAutoValues(thisWeek, [...computed].map(([metricId, value]) => ({ metricId, value })));
+      const saved = [];
+      for (const { column, due } of plan) {
+        const computed = await computeAutoValues(boardKey, due, column, etToday());
+        saved.push(...await saveAutoValues(column, [...computed].map(([metricId, value]) => ({ metricId, value }))));
+      }
       setValues((prev) => {
         const next = new Map(prev);
         for (const v of saved) next.set(`${v.metric_id}|${v.week_start}`, v);
         return next;
       });
-      if (report) setAuto({ state: 'done', text: `${saved.length} number${saved.length === 1 ? '' : 's'} of ${weekTag(thisWeek)} filled from the PIM.` });
+      if (report) setAuto({ state: 'done', text: `${saved.length} number${saved.length === 1 ? '' : 's'} of ${weekTag(thisWeek)} and ${weekTag(runningWeek)} filled from the PIM.` });
       return saved.length;
     } catch (err) {
       if (!report) throw err;
       setAuto({ state: 'error', text: `The PIM's numbers could not be worked out: ${err.message}` });
       return 0;
     }
-  }, [boardKey, thisWeek]);
+  }, [boardKey, thisWeek, runningWeek]);
 
   // "Refresh PIM numbers": the server's (Odoo orders…) and the browser's.
   async function refreshAll() {
@@ -139,7 +147,7 @@ export default function Scorecard() {
         setValues(vals);
       }
       n += await fillAuto(metrics, vals, { force: true, report: false });
-      setAuto({ state: 'done', text: `${n} number${n === 1 ? '' : 's'} of ${weekTag(thisWeek)} filled from the PIM.` });
+      setAuto({ state: 'done', text: `${n} number${n === 1 ? '' : 's'} of ${weekTag(thisWeek)} and ${weekTag(runningWeek)} filled from the PIM.` });
     } catch (err) {
       setAuto({ state: 'error', text: `The PIM's numbers could not be worked out: ${err.message}` });
     }
@@ -249,11 +257,11 @@ export default function Scorecard() {
           <span className="px-2 text-body-sm text-on-surface-variant tabular-nums whitespace-nowrap">
             {weeks.length > 1 ? `${weekTag(weeks[0])} – ${weekTag(weeks.at(-1))}` : weekTag(weeks[0])} · {spanLabel(weeks[0], weeks.at(-1))}
           </span>
-          <button type="button" onClick={() => setEndWeek((w) => addWeeks(w, WEEKS_SHOWN))} disabled={endWeek >= thisWeek} aria-label={`${WEEKS_SHOWN} weeks later`} title={`${WEEKS_SHOWN} weeks later`} className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+          <button type="button" onClick={() => setEndWeek((w) => addWeeks(w, WEEKS_SHOWN))} disabled={endWeek >= runningWeek} aria-label={`${WEEKS_SHOWN} weeks later`} title={`${WEEKS_SHOWN} weeks later`} className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             <ChevronRight className="w-4 h-4" aria-hidden />
           </button>
-          {endWeek !== thisWeek && (
-            <button type="button" onClick={() => setEndWeek(thisWeek)} className="ml-1 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">This week</button>
+          {endWeek !== runningWeek && (
+            <button type="button" onClick={() => setEndWeek(runningWeek)} className="ml-1 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">This week</button>
           )}
         </div>
       </div>
@@ -342,7 +350,7 @@ export default function Scorecard() {
             <p className="rounded-2xl border border-outline-variant bg-surface-container-low px-6 py-5 text-body-md text-on-surface">No measurables here yet.</p>
           )}
           <p className="mt-3 text-body-sm text-on-surface-variant">
-            Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the goal, red with a cross misses it; a measurable without a goal is not colored. Percentages are typed as percent numbers (95 = 95%). Rows marked PIM fill themselves every week and can't be edited; a dot marks each number the PIM filled.
+            Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the goal, red with a cross misses it; a measurable without a goal is not colored. The week in progress shows its numbers so far, in italics, updated every 3 hours, and takes no color until it closes. Percentages are typed as percent numbers (95 = 95%). Rows marked PIM fill themselves every week and can't be edited; a dot marks each number the PIM filled.
             {isAdmin ? ' As an admin you can edit every other number; the pencil edits a measurable (owner, goal, theme) — turning "Filled by the PIM" off makes a row typed by hand again.' : ' Every other number is typed by its owner.'}
           </p>
         </>

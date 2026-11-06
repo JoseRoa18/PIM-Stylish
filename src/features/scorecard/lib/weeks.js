@@ -43,6 +43,23 @@ export function weekRange(sunday) {
   return sameMonth ? `${SHORT.format(a)} – ${b.getUTCDate()}` : `${SHORT.format(a)} – ${SHORT.format(b)}`;
 }
 
+const LONG = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+/** "Sun, Nov 1 – Sat, Nov 7, 2026" — every day of a week, its year (both years when it spans two). */
+export function weekDays(sunday) {
+  const a = toDate(sunday);
+  const b = toDate(addDays(sunday, 6));
+  const ya = a.getUTCFullYear();
+  const yb = b.getUTCFullYear();
+  return ya === yb ? `${LONG.format(a)} – ${LONG.format(b)}, ${yb}` : `${LONG.format(a)}, ${ya} – ${LONG.format(b)}, ${yb}`;
+}
+
+/** "Nov 1 – Nov 6" — a week's days up to today (its Saturday at most): what a week in progress has so far. */
+export function weekSoFar(sunday, today = etToday()) {
+  const end = addDays(sunday, 6);
+  const last = today < end ? today : end;
+  return last <= sunday ? SHORT.format(toDate(sunday)) : `${SHORT.format(toDate(sunday))} – ${SHORT.format(toDate(last))}`;
+}
+
 /** "Nov 1" — the week's Sunday, the short label of a week column. */
 export const weekStartLabel = (sunday) => SHORT.format(toDate(sunday));
 
