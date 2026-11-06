@@ -203,6 +203,23 @@ export function mergeRowXml(rowXml, newCellsByCol, keepStyle = false) {
   return `<row ${attrs}>${body}</row>`;
 }
 
+// A sheet's default style per column (its <cols>), by 1-based column index. A
+// cell written where the row has none takes no style from the column: it must
+// carry the column's own, or it loses the format the template sets there (and,
+// on a protected sheet, comes out locked — the default style is).
+export function columnStyles(sheetXml) {
+  const styles = new Map();
+  const cols = sheetXml.match(/<cols>[\s\S]*?<\/cols>/)?.[0] ?? '';
+  for (const [col] of cols.matchAll(/<col\b[^>]*>/g)) {
+    const style = col.match(/\bstyle="(\d+)"/)?.[1];
+    if (!style) continue;
+    const min = Number(col.match(/\bmin="(\d+)"/)?.[1]);
+    const max = Math.min(Number(col.match(/\bmax="(\d+)"/)?.[1]), 1024);
+    for (let c = min; c <= max; c++) styles.set(c, style);
+  }
+  return styles;
+}
+
 // Walk a sheet's XML once, splicing merged rows in ascending order. For
 // templates that ship with every data row already present (Lowe's, Home Depot
 // Canada) — injecting rows there would duplicate row numbers.

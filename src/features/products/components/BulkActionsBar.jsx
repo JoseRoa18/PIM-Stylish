@@ -20,6 +20,7 @@ import { bulkUpdateProducts, getProducts, deleteProducts, setProductsObsolete } 
 import { generateKeywords } from '../api/keywords';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind, purposesIn, templatePurpose } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
+import LowesMerchantDialog from '@/features/templates/components/LowesMerchantDialog';
 import { listMediaFor } from '@/features/media/api/media';
 import { startTask } from '@/lib/taskProgress';
 import { useDockClearance } from '@/components/ui/useDockClearance';
@@ -72,6 +73,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   const [readiness, setReadiness] = useState(null);
   // A marketplace with several kinds of template asks which one to fill.
   const [asking, setAsking] = useState(null); // { marketplace, purposes, templates }
+  const [askingMerchant, setAskingMerchant] = useState(null); // { marketplace, templates }
 
   const count = selectedSkus.size;
   // The progress cards sit above the bar instead of covering its buttons.
@@ -395,7 +397,14 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     if (purpose) templates = templates.filter((t) => templatePurpose(t) === purpose);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates, marketplace, task);
     if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates, task);
-    if (/lowe/i.test(marketplace)) return handleExportLowes(templates, marketplace, task);
+    if (/lowe/i.test(marketplace)) {
+      if (!templates.some((t) => templatePurpose(t) === 'new_listing')) return handleExportLowes(templates, marketplace, task);
+      // The merchant changes often: a new listing asks who it is, every time.
+      task.cancel();
+      setBusy(null);
+      setAskingMerchant({ marketplace, templates });
+      return undefined;
+    }
     if (/menards/i.test(marketplace)) return handleExportMenards(templates, marketplace, task);
     const message = `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B, Menards, Walmart, Home Depot and Lowe's are supported so far.`;
     task.fail(message);
@@ -405,14 +414,14 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
   // Lowe's new-item setup is a two-file package (Item Template + SOS Freight
   // Analysis); one Lowe's template covers every category, so no grouping.
-  async function handleExportLowes(templates, marketplace, task) {
+  async function handleExportLowes(templates, marketplace, task, merchantEmail = '') {
     begin('export');
     try {
       const productList = [];
       const excludedSkus = [];
       const exclusionKey = templateMarketplaceKey(marketplace);
       task.step(`Loading ${noun(count)}…`);
-      const [{ generateLowesSet }, loaded] = await Promise.all([loadExports.lowes(), getProducts([...selectedSkus])]);
+      const [{ generateLowesSet, describeLowesExport }, loaded] = await Promise.all([loadExports.lowes(), getProducts([...selectedSkus])]);
       for (const p of loaded) {
         // Marketplace exclusion (rule 2026-09-22): switched-off products stay out of the file.
         if (exclusionKey && isExcluded(p, exclusionKey)) { excludedSkus.push(p.sku); continue; }
@@ -423,11 +432,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       }
 
       task.progress(0.1);
-      const res = await generateLowesSet(templates, productList, undefined, { task: task.part(0.1, 1) });
+      const res = await generateLowesSet(templates, productList, undefined, { task: task.part(0.1, 1), merchantEmail });
       task.finish(`Downloaded · ${res.files} file${res.files === 1 ? '' : 's'}, ${noun(res.count)}`);
       setResult({
         type: 'success',
-        message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — USD cost/MSRP/MAP included; lead times, forecast and competitive URLs stay blank for the business.` +
+        message: `Exported the Lowe's set (${res.files} file(s), one ZIP) for ${res.count} product(s) — USD cost/MSRP/MAP included. ${describeLowesExport(res)}` +
           (excludedSkus.length ? ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.` : ''),
       });
     } catch (err) {
@@ -833,6 +842,17 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         purposes={asking.purposes}
         onPick={(purpose) => runMarketplaceExport(asking.marketplace, asking.templates, purpose)}
         onClose={() => setAsking(null)}
+      />
+    )}
+
+    {askingMerchant && (
+      <LowesMerchantDialog
+        onConfirm={(email) => {
+          const { marketplace, templates } = askingMerchant;
+          setAskingMerchant(null);
+          handleExportLowes(templates, marketplace, startTask(`${marketplace} export`, { detail: 'Loading products…' }), email);
+        }}
+        onClose={() => setAskingMerchant(null)}
       />
     )}
     </>

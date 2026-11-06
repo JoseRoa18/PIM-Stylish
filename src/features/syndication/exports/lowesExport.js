@@ -10,10 +10,15 @@ import {
   templateExt,
   mergeRows,
   labelTask,
+  columnStyles,
+  excelSerial,
+  setFormulaResults,
+  recalcOnOpen,
 } from './templateFiller';
 import { accessoryKind } from '@/features/templates/api/templates';
 import { channelCategory, isFaucetCategory } from '@/features/products/lib/categories';
 import { findCountry } from '@/features/products/lib/countries';
+import { getStockFor } from '@/features/pricing/api/inventory';
 import { supabase } from '@/lib/supabase';
 
 // Fills the Lowe's US Item Setup template ("Core" sheet) in place.
@@ -32,7 +37,7 @@ import { supabase } from '@/lib/supabase';
 // The Reference Data sheet is the closed-list source; category/brand/country
 // values below are exact strings from it ("Stylish"/"Azuni" both exist).
 //
-// Program values (lead times, merchant email, cost structure, MSRP=MAP) were
+// Program values (lead times, cost structure, MSRP=MAP) were
 // verified 2026-08-19 against the coordinator's completed examples
 // (108653_V4944896 item export + the SOS SDV188 July submission). Notables:
 //   - Lowe's "MSRP" is the competitive suggested retail = our MAP USD, NOT
@@ -40,8 +45,7 @@ import { supabase } from '@/lib/supabase';
 //   - Item Description is a SHORT name (max 33 chars, per the SOS
 //     instructions sheet) — not the long marketing description.
 //   - Non-applicable cost programs get 0.1 dummies; Freight Cost is 0.
-// Still manual: Like Product URL (PIM has no ASIN/channel URLs) and the
-// 53-ft truckload quantity.
+// Still manual: Like Product URL (PIM has no ASIN/channel URLs).
 
 const attr = (p) => p.attributes || {};
 const num = (v) => {
@@ -102,9 +106,10 @@ const isWoodBoard = (p) =>
   /wood|acacia|bamboo|teak|walnut/i.test(`${p.material ?? ''} ${attr(p).material ?? ''} ${attr(p).general_title_en ?? ''}`);
 
 // Lowe's program constants, straight from the coordinator's completed
-// examples. One place to update when the program terms change.
+// examples. One place to update when the program terms change. The merchant
+// email is not one: it changes often, so the export asks for it every time
+// (LowesMerchantDialog, user 2026-11-06).
 const LOWES_PROGRAM = {
-  merchantEmail: 'sydney.l.helms@lowes.com',
   customerOrderLeadTimeDays: 4, // Customer Order Lead Time (special order)
   initialLeadTimeDays: 1,
   processingDays: 1,
@@ -132,8 +137,78 @@ const shortDesc = (p) => {
   return out.slice(0, 33);
 };
 
-const usDate = (d = new Date()) =>
-  `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+// Today as a real Excel date: the column validates a date, its format shows it
+// as mm/dd/yyyy, and the template's Readiness Score only counts a cell that
+// passes its validation (text does not).
+const todaySerial = (d = new Date()) =>
+  excelSerial(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+
+// BI Full Truckload Quantity - 53-ft Trailer (user, 2026-11-06): how many of the
+// product's shipping boxes fit in a 53-ft dry van, by size alone. The best of
+// the box's six orientations, every box laid the same way. Inside the trailer,
+// in inches: length, width, height.
+const TRAILER_53FT_IN = [630, 100, 108];
+function truckloadQty(p) {
+  const box = attr(p).shipping_dimensions_in ?? {};
+  const [l, w, h] = [num(box.length), num(box.width), num(box.height)];
+  if (!(l > 0 && w > 0 && h > 0)) return '';
+  const [length, width, height] = TRAILER_53FT_IN;
+  const fit = ([a, b, c]) => Math.floor(length / a) * Math.floor(width / b) * Math.floor(height / c);
+  return Math.max(...[[l, w, h], [l, h, w], [w, l, h], [w, h, l], [h, l, w], [h, w, l]].map(fit)) || '';
+}
+
+// ---- The template's own lists ------------------------------------------------
+//
+// User rule (2026-11-06): a column with a closed list takes its value from the
+// file — its Reference Data sheet, its dropdowns — and a free column goes as the
+// PIM has it. The lists are read at every export, so a new version of the file
+// rules by itself. A value that is not on its list is left blank and reported.
+const REFERENCE_COLUMNS = {
+  subDivision: 'Subdivision',
+  productCat: 'Product Category',
+  brand: 'Brand Name',
+  countryofOrig: 'Country of Origin',
+  netContentUOM: 'Net Content UOM',
+  packagingType: 'Packaging Type',
+  shipFromVBU: 'Ship From VBU Number',
+};
+
+const decodeXml = (s) => s.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const listKey = (v) => String(v).trim().toLowerCase();
+const listIndex = (values) => new Map(values.map((v) => [listKey(v), v]));
+
+// 1-based column index → the values of its dropdown ("a,b,c" in the validation).
+function dropdownsOf(sheetXml) {
+  const out = new Map();
+  const from = sheetXml.indexOf('<dataValidations');
+  if (from === -1) return out;
+  for (const m of sheetXml.slice(from).matchAll(/<dataValidation\b([^>]*?)>\s*<formula1>([^<]*)<\/formula1>/g)) {
+    if (!/\btype="list"/.test(m[1])) continue;
+    const formula = decodeXml(m[2]);
+    if (!formula.startsWith('"')) continue;
+    const values = formula.slice(1, -1).split(',').map((v) => v.trim());
+    for (const part of (m[1].match(/\bsqref="([^"]+)"/)?.[1] ?? '').split(/\s+/)) {
+      const range = part.match(/^([A-Z]+)\d+(?::([A-Z]+)\d+)?$/);
+      if (!range) continue;
+      for (let c = colToIndex(range[1]); c <= colToIndex(range[2] ?? range[1]); c++) out.set(c, values);
+    }
+  }
+  return out;
+}
+
+async function referenceLists(zip, shared) {
+  const out = new Map();
+  const path = await sheetPathByName(zip, 'Reference Data');
+  if (!path) return out;
+  const grid = sheetToGrid(await zip.file(path).async('string'), shared);
+  const header = grid[0] ?? [];
+  for (const [tech, name] of Object.entries(REFERENCE_COLUMNS)) {
+    const ci = header.indexOf(name);
+    if (ci === -1) continue;
+    out.set(tech, grid.slice(1).map((row) => row?.[ci]).filter((v) => v !== '' && v != null));
+  }
+  return out;
+}
 
 // Keyed by the row-5 tech name. Repeated packaging blocks (.0/.1/.2 = inner
 // pack/case/pallet) are intentionally left untouched — we set up EACH only.
@@ -173,13 +248,14 @@ export const LOWES_RULES = {
   exclDirDelivery: () => 'No',
   specialOrderLeadTime: () => LOWES_PROGRAM.customerOrderLeadTimeDays,
   specialOrderLeadTimeUOM: () => 'Days',
-  orderMaxQty: () => 1,
-  availabilityStartDt: () => usDate(),
+  // AV Online - Customer Maximum Order Quantity stays blank (user, 2026-11-06).
+  availabilityStartDt: () => todaySerial(),
   intitialLeadTime: () => LOWES_PROGRAM.initialLeadTimeDays, // (sic — Lowe's typo)
   intitialLeadTimeUOM: () => 'Days',
   processingLeadTime: () => LOWES_PROGRAM.processingDays,
   processingLeadTimeUOM: () => 'Days',
-  lowesMerchEmail: () => LOWES_PROGRAM.merchantEmail,
+  lowesMerchEmail: (_p, { merchantEmail = '' } = {}) => merchantEmail,
+  containerQty53ft: truckloadQty,
   shipmentType: () => 'Floor Loaded',
   replenishMaxQty: () => 1,
   replenishMinQty: () => 1,
@@ -232,7 +308,7 @@ export const LOWES_RULES = {
  * @param {string} [fileName]
  * @param {object} [task]  a taskProgress reporter (optional)
  */
-async function fillItemTemplate(templateStoragePath, products, task = null) {
+async function fillItemTemplate(templateStoragePath, products, task = null, { merchantEmail = '' } = {}) {
   if (!products?.length) throw new Error('No products to export.');
 
   const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.75) });
@@ -254,13 +330,25 @@ async function fillItemTemplate(templateStoragePath, products, task = null) {
   if (!headerXml) throw new Error('Could not locate the Lowe\'s header rows (5-6).');
   const grid = sheetToGrid(headerXml, shared);
   const techNames = grid[4] || [];
+  const labels = grid[5] || [];
   if (!techNames.filter(Boolean).length) throw new Error('Could not read the Lowe\'s tech-name row.');
+
+  // Data rows hold only the pre-filled cells, so the format is the column's.
+  const styles = columnStyles(sheetXml);
+  const dropdowns = dropdownsOf(sheetXml);
+  const references = await referenceLists(zip, shared);
+  const listOf = new Map();
+  techNames.forEach((tech, ci) => {
+    const values = references.get(String(tech ?? '').trim()) ?? dropdowns.get(ci + 1);
+    if (values?.length) listOf.set(ci, listIndex(values));
+  });
 
   const DATA_ROW = 7;
   if (task) {
     task.progress(0.8);
     await task.step(`Filling ${products.length} rows…`);
   }
+  const offList = [];
   const cellsByRow = new Map();
   products.forEach((p, pi) => {
     const rowNum = DATA_ROW + pi;
@@ -269,23 +357,33 @@ async function fillItemTemplate(templateStoragePath, products, task = null) {
       const rule = tech && LOWES_RULES[String(tech).trim()];
       if (!rule) return;
       let v;
-      try { v = rule(p); } catch { v = ''; }
+      try { v = rule(p, { merchantEmail }); } catch { v = ''; }
       if (v === '' || v == null) return;
+      const list = listOf.get(ci);
+      if (list) {
+        const listed = list.get(listKey(v));
+        if (listed === undefined) {
+          offList.push(`${p.sku} ${labels[ci] ?? tech} "${v}"`);
+          return;
+        }
+        // The file's own spelling; a number stays a number (Subdivision).
+        if (typeof v !== 'number') v = listed;
+      }
       // 1-based column key — must match colToIndex() used for existing cells.
-      cells.set(ci + 1, buildCell(`${indexToCol(ci + 1)}${rowNum}`, v));
+      cells.set(ci + 1, buildCell(`${indexToCol(ci + 1)}${rowNum}`, v, styles.get(ci + 1) ?? null));
     });
     if (cells.size) cellsByRow.set(rowNum, cells);
   });
 
   zip.file(tplPath, mergeRows(sheetXml, cellsByRow));
   task?.progress(1);
-  return zip;
+  return { zip, offList };
 }
 
-export async function generateLowesFromTemplate(templateStoragePath, products, fileName = 'Lowes_Export') {
-  const zip = await fillItemTemplate(templateStoragePath, products);
+export async function generateLowesFromTemplate(templateStoragePath, products, fileName = 'Lowes_Export', { merchantEmail = '' } = {}) {
+  const { zip, offList } = await fillItemTemplate(templateStoragePath, products, null, { merchantEmail });
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
-  return { count: products.length };
+  return { count: products.length, offList };
 }
 
 // ---- SOS Drop Ship Freight Analysis (New Assortment V6) ---------------------
@@ -297,39 +395,100 @@ export async function generateLowesFromTemplate(templateStoragePath, products, f
 // way as the item template. The "Assortments" sheet lists every assortment
 // with its SDV and PG on the same row (header "Asst Name" ~row 664) — SDV and
 // PG names are looked up there from our chosen assortment so the trio always
-// agrees. Costs/MSRP/MAP auto-fill from the PIM's USD pricing, the
-// competitive block follows the team's conventions (Wayfair from the audit
-// snapshot, "Not Listed Yet" elsewhere), and the stated lead time is a
-// program constant. Only the 52-week forecast and the Wayfair URL remain
-// manual — plus the Additional_INFO contact/ship-point sheet.
+// agrees, and each is checked against the dropdown it goes in (they depend on
+// the Division above them). Costs/MSRP/MAP auto-fill from the PIM's USD pricing,
+// the competitive block follows the team's conventions (Wayfair from the audit
+// snapshot, "Not Listed Yet" elsewhere), and the stated lead time is a program
+// constant. The Wayfair URL and the Additional_INFO contact/ship-point sheet
+// remain manual.
 
 // Fixed V6 column letters on "Item Proposal" (verified against row 15 labels
 // and the July SDV188 submission). Cost structure per the instructions sheet:
 // BE Prepaid = base cost + freight (we don't offer it → 0), BF Collect =
 // base cost only (our Lowes/SOD/BBB cost). MSRP = MAP by Lowe's convention.
 // BJ-BR = competitive retails/links/item numbers ("Not Listed Yet" when the
-// product isn't on that channel — the team's own convention). BU-CA are
-// calculations and CB-CE are Décor-only: never write there.
+// product isn't on that channel — the team's own convention). BS Similar /
+// Same Match stays blank (user, 2026-11-06). BU-CA are calculations and CB-CE
+// are Décor-only: never write there.
 const FREIGHT_COLS = {
-  sdvName: 'A', pgName: 'D', asstName: 'F', marketing: 'G', gtin: 'H',
+  sdvName: 'A', sdvNum: 'B', pgNum: 'C', pgName: 'D', asstNum: 'E', asstName: 'F', marketing: 'G', gtin: 'H',
   model: 'J', desc: 'K', ltl: 'L', boxH: 'M', boxW: 'N', boxL: 'O', boxWgt: 'P',
-  prepaidCost: 'BE', collectCost: 'BF', msrp: 'BG', map: 'BH',
+  prepaidCost: 'BE', collectCost: 'BF', msrp: 'BG', map: 'BH', forecast: 'BI',
   hdRetail: 'BJ', wfRetail: 'BK', azRetail: 'BL',
   hdUrl: 'BM', wfUrl: 'BN', azUrl: 'BO',
   hdItem: 'BP', wfItem: 'BQ', azItem: 'BR',
-  match: 'BS', leadTime: 'BT',
+  leadTime: 'BT',
+  prepaidMargin: 'BW', collectMargin: 'BX', collectMarginAfterFreight: 'BY',
 };
 
-const gtin14 = (p) => {
-  const upc = String(attr(p).upc ?? p.upc ?? '').replace(/\D/g, '');
-  return upc ? upc.padStart(14, '0') : '';
-};
+const FREIGHT_DIVISION = 'KITCHENS & BATH';
 
-// Assortment per product — SOS (special order / drop-ship) assortments only.
+// The dropdowns of columns A, D, F and G read these blocks of "Assortments": a
+// header row with one column per parent value, the values under it. Rows and
+// depths are the ones in the template's own OFFSET formulas.
+const ASSORTMENT_BLOCKS = {
+  sdvByDivision: [18, 17],
+  pgBySdv: [37, 32],
+  assortmentByPg: [72, 72],
+  marketingByDivision: [162, 500],
+};
+function blockReader(grid, [headerRow, depth]) {
+  const header = grid[headerRow - 1] ?? [];
+  return (parent) => {
+    const ci = header.indexOf(parent);
+    if (ci === -1) return [];
+    const out = [];
+    for (let r = headerRow; r < headerRow + depth; r++) {
+      const v = grid[r]?.[ci];
+      if (v !== '' && v != null) out.push(String(v));
+    }
+    return out;
+  };
+}
+
+// GTIN = our UPC as it is (user, 2026-11-06); the column is text.
+const gtin = (p) => String(attr(p).upc ?? p.upc ?? '').trim();
+
+// 52 Week Unit Forecast (user, 2026-11-06): the USA stock; a product without
+// stock takes what is on order for Odoo's Atlanta warehouse (Inventory →
+// Reporting → Stock, warehouse ATL, Incoming); with neither, or if Odoo cannot
+// be read, the team's default.
+const FORECAST_WAREHOUSE = 'ATL';
+const FORECAST_DEFAULT = 10;
+async function loadForecasts(products) {
+  const skus = products.map((p) => p.sku);
+  const { us } = await getStockFor(skus);
+  const inStock = (sku) => Number(us[sku]?.available) > 0;
+  const noStock = skus.filter((sku) => !inStock(sku));
+  let odoo = {};
+  let odooError = null;
+  if (noStock.length) {
+    try {
+      const { data, error } = await supabase.functions.invoke('odoo-stock', { body: { skus: noStock, warehouse: FORECAST_WAREHOUSE } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      odoo = data?.stock ?? {};
+    } catch (err) {
+      odooError = err?.message ?? String(err);
+    }
+  }
+  const tally = { stock: 0, odoo: 0, fallback: 0, odooError };
+  const bySku = new Map();
+  for (const sku of skus) {
+    const ordered = Math.round(Number(odoo[sku]?.incoming) || 0);
+    if (inStock(sku)) { bySku.set(sku, Number(us[sku].available)); tally.stock += 1; }
+    else if (ordered > 0) { bySku.set(sku, ordered); tally.odoo += 1; }
+    else { bySku.set(sku, FORECAST_DEFAULT); tally.fallback += 1; }
+  }
+  return { bySku, tally };
+}
+
+// Assortment per product — SOS (special order / drop-ship) assortments, except
+// kitchen sinks: SS KITCHEN SINKS, PG KITCHEN SINKS, SDV 188 (user, 2026-11-06).
 const freightAssortment = (p) => {
   const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')}`;
   switch (channelCategory(p)) {
-    case 'kitchen_sink':
+    case 'kitchen_sink': return 'SS KITCHEN SINKS';
     case 'bar_prep_sink':
     case 'outdoor_sink':
     case 'laundry_sink': return 'SOS SINKS';
@@ -371,17 +530,25 @@ async function fillFreightTemplate(templateStoragePath, products, task = null) {
     throw new Error('Unexpected Freight Analysis layout — "Supplier Model Number" header not found.');
   }
 
-  // Assortment → { sdv, pg } from the Assortments sheet (same-row triples).
+  // Assortment → its SDV and PG, names and numbers, from the Assortments sheet
+  // (same-row triples), and the dropdowns the names have to be on.
   const asstInfo = new Map();
+  let aGrid = [];
   const aPath = await sheetPathByName(zip, 'Assortments');
   if (aPath) {
-    const aGrid = sheetToGrid(await zip.file(aPath).async('string'), shared);
+    aGrid = sheetToGrid(await zip.file(aPath).async('string'), shared);
     const headerIdx = aGrid.findIndex((r) => r?.[0] === 'Asst Name');
     for (let r = headerIdx + 1; r >= 1 && r < aGrid.length; r++) {
       const row = aGrid[r];
-      if (row?.[0]) asstInfo.set(String(row[0]), { sdv: row[2] ?? '', pg: row[4] ?? '' });
+      if (row?.[0]) asstInfo.set(String(row[0]), { asstNum: row[1], sdv: row[2] ?? '', sdvNum: row[3], pg: row[4] ?? '', pgNum: row[5] });
     }
   }
+  const sdvsOf = blockReader(aGrid, ASSORTMENT_BLOCKS.sdvByDivision);
+  const pgsOf = blockReader(aGrid, ASSORTMENT_BLOCKS.pgBySdv);
+  const assortmentsOf = blockReader(aGrid, ASSORTMENT_BLOCKS.assortmentByPg);
+  const divisionSdvs = sdvsOf(FREIGHT_DIVISION);
+  const marketingList = new Set(blockReader(aGrid, ASSORTMENT_BLOCKS.marketingByDivision)(FREIGHT_DIVISION));
+  const offList = [];
 
   const put = (cells, rowNum, col, value) => {
     if (value === '' || value == null) return;
@@ -399,13 +566,22 @@ async function fillFreightTemplate(templateStoragePath, products, task = null) {
     .limit(1);
   const onWayfair = new Set((wfSnap?.[0]?.results ?? []).map((r) => r.sku));
 
+  task?.progress(0.75, 'Reading the stock and what is on order…');
+  const forecasts = await loadForecasts(products);
+
   const cellsByRow = new Map();
   // Top block: supplier identity + division (labels sit in column A).
   const top3 = new Map(); put(top3, 3, 'B', 'Stylish USA INC'); cellsByRow.set(3, top3);
   const top4 = new Map(); put(top4, 4, 'B', 108653); cellsByRow.set(4, top4);
-  const top8 = new Map(); put(top8, 8, 'B', 'KITCHENS & BATH'); cellsByRow.set(8, top8);
+  const top8 = new Map(); put(top8, 8, 'B', FREIGHT_DIVISION); cellsByRow.set(8, top8);
 
   const DATA_ROW = 16;
+  // The file's cached formula results are empty and a workbook only recalculates
+  // when told to, so the numbers the names resolve to are written too.
+  const results = new Map([
+    [3, new Map([['G', products.length]])],
+    [11, new Map([['I', DATA_ROW + products.length - 1]])],
+  ]);
   if (task) {
     task.progress(0.85);
     await task.step(`Filling ${products.length} rows…`);
@@ -413,13 +589,23 @@ async function fillFreightTemplate(templateStoragePath, products, task = null) {
   products.forEach((p, pi) => {
     const rowNum = DATA_ROW + pi;
     const cells = new Map();
+    const rowResults = new Map();
     const asst = freightAssortment(p);
     const info = asstInfo.get(asst);
-    put(cells, rowNum, FREIGHT_COLS.sdvName, info?.sdv ?? '');
-    put(cells, rowNum, FREIGHT_COLS.pgName, info?.pg ?? '');
-    put(cells, rowNum, FREIGHT_COLS.asstName, asst);
-    put(cells, rowNum, FREIGHT_COLS.marketing, productCategory(p));
-    put(cells, rowNum, FREIGHT_COLS.gtin, gtin14(p));
+    if (info && divisionSdvs.includes(info.sdv) && pgsOf(info.sdv).includes(info.pg) && assortmentsOf(info.pg).includes(asst)) {
+      put(cells, rowNum, FREIGHT_COLS.sdvName, info.sdv);
+      put(cells, rowNum, FREIGHT_COLS.pgName, info.pg);
+      put(cells, rowNum, FREIGHT_COLS.asstName, asst);
+      rowResults.set(FREIGHT_COLS.sdvNum, Number(info.sdvNum));
+      rowResults.set(FREIGHT_COLS.pgNum, Number(info.pgNum));
+      rowResults.set(FREIGHT_COLS.asstNum, Number(info.asstNum));
+    } else {
+      offList.push(`${p.sku} Assortment "${asst}" (SDV "${info?.sdv ?? 'not found'}" under ${FREIGHT_DIVISION})`);
+    }
+    const marketing = productCategory(p);
+    if (marketingList.has(marketing)) put(cells, rowNum, FREIGHT_COLS.marketing, marketing);
+    else offList.push(`${p.sku} Marketing Category "${marketing}"`);
+    put(cells, rowNum, FREIGHT_COLS.gtin, gtin(p));
     put(cells, rowNum, FREIGHT_COLS.model, p.sku);
     put(cells, rowNum, FREIGHT_COLS.desc, shortDesc(p)); // max 33 chars
     const wgt = num(p.shipping_weight_lb ?? attr(p).shipping_weight_lb);
@@ -432,6 +618,14 @@ async function fillFreightTemplate(templateStoragePath, products, task = null) {
     put(cells, rowNum, FREIGHT_COLS.collectCost, num(p.cost_usd_lowes_sod_bbb));
     put(cells, rowNum, FREIGHT_COLS.msrp, num(p.map_usd)); // MSRP = MAP at Lowe's
     put(cells, rowNum, FREIGHT_COLS.map, num(p.map_usd));
+    put(cells, rowNum, FREIGHT_COLS.forecast, forecasts.bySku.get(p.sku));
+    const map = num(p.map_usd);
+    if (map > 0) {
+      const collect = Number(num(p.cost_usd_lowes_sod_bbb)) || 0;
+      rowResults.set(FREIGHT_COLS.prepaidMargin, 1); // Prepaid cost is 0
+      rowResults.set(FREIGHT_COLS.collectMargin, (map - collect) / map);
+      rowResults.set(FREIGHT_COLS.collectMarginAfterFreight, (map - collect) / map);
+    }
     const NOT_LISTED = 'Not Listed Yet';
     const wf = onWayfair.has(p.sku);
     put(cells, rowNum, FREIGHT_COLS.hdRetail, NOT_LISTED);
@@ -443,20 +637,31 @@ async function fillFreightTemplate(templateStoragePath, products, task = null) {
     put(cells, rowNum, FREIGHT_COLS.hdItem, NOT_LISTED);
     put(cells, rowNum, FREIGHT_COLS.wfItem, wf ? p.sku : NOT_LISTED);
     put(cells, rowNum, FREIGHT_COLS.azItem, NOT_LISTED);
-    if (wf) put(cells, rowNum, FREIGHT_COLS.match, 'Same Match');
     put(cells, rowNum, FREIGHT_COLS.leadTime, LOWES_PROGRAM.statedLeadTimeDays);
     cellsByRow.set(rowNum, cells);
+    results.set(rowNum, rowResults);
   });
 
-  zip.file(tplPath, mergeRows(sheetXml, cellsByRow));
+  // keepStyle: every row of this file is already formatted (currency, text…).
+  zip.file(tplPath, setFormulaResults(mergeRows(sheetXml, cellsByRow, true), results));
+  await recalcOnOpen(zip);
   task?.progress(1);
-  return zip;
+  return { zip, offList, forecast: forecasts.tally };
 }
 
 export async function generateLowesFreightFromTemplate(templateStoragePath, products, fileName = 'Lowes_Freight_Analysis') {
-  const zip = await fillFreightTemplate(templateStoragePath, products);
+  const { zip, offList, forecast } = await fillFreightTemplate(templateStoragePath, products);
   await downloadZip(zip, fileName, templateExt(templateStoragePath));
-  return { count: products.length };
+  return { count: products.length, offList, forecast };
+}
+
+/** What an export of the set should tell the person: where the forecast came from, what was left blank. */
+export function describeLowesExport({ forecast = null, offList = [] }) {
+  const notes = [];
+  if (forecast) notes.push(`52-week forecast: ${forecast.stock} from USA stock, ${forecast.odoo} from what is on order at Odoo's ${FORECAST_WAREHOUSE} warehouse, ${forecast.fallback} at ${FORECAST_DEFAULT}.`);
+  if (forecast?.odooError) notes.push(`Odoo could not be read (${forecast.odooError}), so products without stock went at ${FORECAST_DEFAULT}.`);
+  if (offList.length) notes.push(`Left blank, not on the template's lists: ${offList.slice(0, 6).join('; ')}${offList.length > 6 ? ` and ${offList.length - 6} more` : ''}.`);
+  return notes.join(' ');
 }
 
 /**
@@ -467,10 +672,11 @@ export async function generateLowesFreightFromTemplate(templateStoragePath, prod
  * @param {Object[]} templates  Lowe's template rows ({ file_name, storage_path })
  * @param {Object[]} products
  * @param {string} [baseName]
- * @param {{ task?: object }} [options]  `task`: a taskProgress reporter
- *   (filling the files 60%, writing them 30%, the ZIP the rest)
+ * @param {{ task?: object, merchantEmail?: string }} [options]  `task`: a
+ *   taskProgress reporter (filling the files 60%, writing them 30%, the ZIP the
+ *   rest); `merchantEmail`: the Item Template's Lowes Merchant Email
  */
-export async function generateLowesSet(templates, products, baseName = 'Lowes', { task = null } = {}) {
+export async function generateLowesSet(templates, products, baseName = 'Lowes', { task = null, merchantEmail = '' } = {}) {
   const freightTpl = templates.find((t) => /freight|drop.?ship/i.test(t.file_name));
   const itemTpl = templates.find((t) => t !== freightTpl && /item|template|\.xlsm$/i.test(t.file_name));
   if (!itemTpl && !freightTpl) {
@@ -485,8 +691,8 @@ export async function generateLowesSet(templates, products, baseName = 'Lowes', 
     n > 1 ? `File ${i + 1} of ${n}` : '',
   );
   const parts = [];
-  if (itemTpl) parts.push({ name: itemTpl.file_name, zip: await fillItemTemplate(itemTpl.storage_path, products, slice(0, 0, 0.6)) });
-  if (freightTpl) parts.push({ name: freightTpl.file_name, zip: await fillFreightTemplate(freightTpl.storage_path, products, slice(parts.length, 0, 0.6)) });
+  if (itemTpl) parts.push({ name: itemTpl.file_name, ...(await fillItemTemplate(itemTpl.storage_path, products, slice(0, 0, 0.6), { merchantEmail })) });
+  if (freightTpl) parts.push({ name: freightTpl.file_name, ...(await fillFreightTemplate(freightTpl.storage_path, products, slice(parts.length, 0, 0.6))) });
 
   const JSZip = await loadJSZip();
   const bundle = new JSZip();
@@ -507,5 +713,10 @@ export async function generateLowesSet(templates, products, baseName = 'Lowes', 
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 
-  return { count: products.length, files: parts.length };
+  return {
+    count: products.length,
+    files: parts.length,
+    forecast: parts.find((part) => part.forecast)?.forecast ?? null,
+    offList: parts.flatMap((part) => part.offList ?? []),
+  };
 }

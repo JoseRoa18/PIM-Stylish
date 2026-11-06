@@ -58,6 +58,7 @@ import VariantsSection from '@/features/products/components/VariantsSection';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct, purposesIn, templatePurpose, templatePurposeLabel } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
+import LowesMerchantDialog from '@/features/templates/components/LowesMerchantDialog';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useLengthUnit, toDisplayLength, withUnit, toFractionLength, weightUnitFor, toDisplayWeight } from '@/features/products/lib/units';
 import UnitToggle from '@/components/ui/UnitToggle';
@@ -1991,6 +1992,7 @@ function ExportTemplatesCard({ product, media }) {
   const [exporting, setExporting] = useState(null);
   const [error, setError] = useState(null);
   const [asking, setAsking] = useState(null); // { marketplace, purposes }
+  const [askingMerchant, setAskingMerchant] = useState(null); // { marketplace, files, purpose }
 
   // One action per marketplace. A marketplace can carry files for several
   // purposes (new listing, update, prices, promotions): with one purpose the
@@ -2042,8 +2044,13 @@ function ExportTemplatesCard({ product, media }) {
     runExport(entry.marketplace, entry.files, entry.purposes[0]?.value ?? 'new_listing');
   }
 
-  async function runExport(marketplace, files, purpose) {
+  async function runExport(marketplace, files, purpose, merchantEmail = '') {
     setAsking(null);
+    // The Lowe's merchant changes often: a new listing asks who it is, every time.
+    if (/lowe/i.test(marketplace) && purpose === 'new_listing' && !merchantEmail) {
+      setAskingMerchant({ marketplace, files, purpose });
+      return;
+    }
     setExporting(marketplace);
     setError(null);
     const task = startTask(`${marketplace} export`, { detail: product.sku });
@@ -2080,8 +2087,9 @@ function ExportTemplatesCard({ product, media }) {
         const { generateHomeDepotFromTemplate } = await import('@/features/syndication/exports/homeDepotExport');
         await generateHomeDepotFromTemplate(set[0].storage_path, [product], `HomeDepot_${base}`, { task });
       } else if (/lowe/i.test(marketplace)) {
-        const { generateLowesSet } = await import('@/features/syndication/exports/lowesExport');
-        await generateLowesSet(set, [product], `Lowes_${base}`, { task });
+        const { generateLowesSet, describeLowesExport } = await import('@/features/syndication/exports/lowesExport');
+        const res = await generateLowesSet(set, [product], `Lowes_${base}`, { task, merchantEmail });
+        if (res.offList.length || res.forecast?.odooError) setError(describeLowesExport(res));
       } else if (/bb&b|bbb|overstock/i.test(marketplace)) {
         const { generateBBBFromTemplate } = await import('@/features/syndication/exports/bbbExport');
         await generateBBBFromTemplate(set[0].storage_path, product, media, { task });
@@ -2156,6 +2164,16 @@ function ExportTemplatesCard({ product, media }) {
           purposes={asking.purposes}
           onPick={(purpose) => runExport(asking.marketplace, asking.files, purpose)}
           onClose={() => setAsking(null)}
+        />
+      )}
+      {askingMerchant && (
+        <LowesMerchantDialog
+          onConfirm={(email) => {
+            const { marketplace, files, purpose } = askingMerchant;
+            setAskingMerchant(null);
+            runExport(marketplace, files, purpose, email);
+          }}
+          onClose={() => setAskingMerchant(null)}
         />
       )}
     </section>
