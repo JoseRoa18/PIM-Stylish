@@ -45,6 +45,34 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// A report's lines as fields (;-separated, quoted, with line breaks inside quotes).
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') quoted = false; else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ";") { row.push(cell); cell = ""; } else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; } else if (c !== "\r") cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+// Only the SKU and the reason of each refused line: the report repeats the whole
+// row first, so its first 4,000 characters may not even reach the reason.
+function refusals(report: string): string {
+  const [head, ...lines] = parseCsv(report);
+  const sku = head?.indexOf("shop_sku") ?? -1;
+  const found = head?.findIndex((h) => /error/i.test(h)) ?? -1;
+  const reason = found >= 0 ? found : (head?.length ?? 1) - 1;
+  const out = lines.filter((l) => l.some(Boolean)).map((l) => `${sku >= 0 ? `${l[sku]}: ` : ""}${l[reason] ?? ""}`).join("\n");
+  return (out || report).slice(0, 4000);
+}
+
 // CSV in the shape the transformation accepts: ;-separated, all fields quoted.
 function toCsv(rows: Record<string, string>[]): string {
   const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
@@ -87,7 +115,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     let rows: Record<string, string>[] = Array.isArray(body.rows) ? body.rows : [];
     // Marketplace exclusion (rule 2026-09-22): products switched off for Best Buy are left out.
-    const rowSku = (r: Record<string, string>) => String(r.sku ?? r.SKU ?? r["Seller SKU"] ?? r.seller_sku ?? "");
+    const rowSku = (r: Record<string, string>) => String(r.shop_sku ?? r.sku ?? r.SKU ?? r["Seller SKU"] ?? r.seller_sku ?? "");
     const excludedBb = await excludedSet(admin, rows.map(rowSku).filter(Boolean), "bestbuy");
     const excluded = [...excludedBb].sort();
     if (excludedBb.size) rows = rows.filter((r) => !excludedBb.has(rowSku(r)));
@@ -135,7 +163,7 @@ Deno.serve(async (req) => {
       const rep = await fetch(`${BASE}/products/imports/${import_id}/transformation_error_report`, {
         headers: { Authorization: apiKey },
       });
-      if (rep.ok) transformationErrors = (await rep.text()).slice(0, 4000);
+      if (rep.ok) transformationErrors = refusals(await rep.text());
     }
 
     return json({

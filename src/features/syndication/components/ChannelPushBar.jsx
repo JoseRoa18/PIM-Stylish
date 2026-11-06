@@ -25,7 +25,7 @@ function planFor(channel, product, linked) {
         'The documents section: only the documents the PIM has',
         ...(wtb ? ['The WHERE TO BUY links the PIM keeps — only the working ones'] : []),
         "The whole image gallery, in the PIM's order",
-        ...(linked === false ? ['Not on this store yet: it is created first, hidden — show it from the card below when ready'] : []),
+        ...(linked === false ? ['Not on this store yet: it is created first, visible and out of stock — Odoo gives it its stock'] : []),
       ],
       never: ['The product name', ...(wtb ? [] : ["The WHERE TO BUY section — it stays as the store has it"])],
       run: async ({ task }) => {
@@ -34,7 +34,7 @@ function planFor(channel, product, linked) {
         if (!r.ok) throw new Error(r.error ?? 'The push failed.');
         const media = String(r.media ?? '');
         const wtb = r.whereToBuy ? ` · Where to Buy ${r.whereToBuy}` : '';
-        return `${r.created ? 'Created (hidden) and pushed' : 'Pushed'} · images ${media.startsWith('ok') ? media.replace(/^ok\s*/, '') : media.replace(/^(warning|failed):\s*/, '')}${wtb}`;
+        return `${r.created ? 'Created (visible, out of stock) and pushed' : 'Pushed'} · images ${media.startsWith('ok') ? media.replace(/^ok\s*/, '') : media.replace(/^(warning|failed):\s*/, '')}${wtb}`;
       },
     };
   }
@@ -55,6 +55,25 @@ function planFor(channel, product, linked) {
         const sent = r.media.filter((m) => !m.error).map((m) => `${m.count} ${m.step}`);
         if (!r.specs?.ok && !sent.length) throw new Error(`Wayfair refused it: ${refused.join(', ')}`);
         return `Sent to Wayfair${r.specs?.ok ? ' · specs' : ''}${sent.length ? ` · ${sent.join(', ')}` : ''}${refused.length ? ` · refused: ${refused.join(', ')}` : ''} — "Review push…" shows what Wayfair did`;
+      },
+    };
+  }
+  if (channel === 'bestbuy') {
+    return {
+      label: 'Best Buy Canada',
+      travels: [
+        'Title, short and long description',
+        'Up to 10 images: the EN-FR set and the photos with no text, main image first',
+        "The specs of its Best Buy category: colour, material, finish, series, sizes, weight, certifications, what's in the box, features…",
+      ],
+      never: ['Prices, stock and the offer', 'French text — Best Buy takes English only', "Best Buy's category and UPC: they stay as Best Buy has them"],
+      disabled: linked == null
+        ? 'Checking Best Buy…'
+        : linked ? null : 'Not on Best Buy yet — only a product with an offer there can be pushed.',
+      run: async ({ task }) => {
+        const { pushProductToBestBuy } = await import('../api/bestbuySync');
+        const r = await pushProductToBestBuy(sku, { task });
+        return `Sent to Best Buy (import ${r.importId}) — it shows once Best Buy's review has applied it`;
       },
     };
   }

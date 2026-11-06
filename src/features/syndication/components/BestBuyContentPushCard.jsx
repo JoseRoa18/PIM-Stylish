@@ -17,7 +17,7 @@ const norm = (s) =>
     .trim();
 
 /**
- * Manual content push: PIM → Best Buy (title, descriptions, images). The user
+ * Manual content push: PIM → Best Buy (lib/bestbuyContent.js). The user
  * picks the SKUs — nothing is preselected and nothing runs on a schedule.
  * Prices never travel this path (the edge function enforces it too).
  */
@@ -63,7 +63,7 @@ export default function BestBuyContentPushCard() {
     const preview = chosen.slice(0, 6).map((c) => c.sku).join(', ') + (chosen.length > 6 ? ` … +${chosen.length - 6} more` : '');
     const ok = await confirm({
       title: `Push PIM content to ${chosen.length} Best Buy listing${chosen.length === 1 ? '' : 's'}?`,
-      message: `${preview}. This sends the PIM's title, descriptions and images to Best Buy, overwriting their current content. Changes go through Best Buy's QC and appear asynchronously. Prices are not touched.`,
+      message: `${preview}. This sends the PIM's title, descriptions, images and the specs of each product's Best Buy category, overwriting their current content. Changes go through Best Buy's QC and appear asynchronously. Prices are not touched.`,
       confirmLabel: `Push ${chosen.length}`,
     });
     if (!ok) return;

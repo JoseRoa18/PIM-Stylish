@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
-import { insertSnapshot } from '@/features/syndication/lib/channels';
+import { insertSnapshot, latestSnapshotItem } from '@/features/syndication/lib/channels';
 import { isExcluded } from '../lib/marketplaces';
+import { buildBestBuyRow } from '../lib/bestbuyContent';
 import { logActivity } from '@/features/activity/api/activityLog';
 
 // Best Buy Canada (Mirakl). Reads pull the seller's offers; writes are
@@ -30,6 +31,9 @@ async function invokeFn(name, body = {}) {
   if (data?.error) throw new Error(data.error);
   return data;
 }
+
+// What buildBestBuyRow reads of a product.
+const PRODUCT_COLUMNS = 'sku, brand, model_name, category, color, finish, material, series, product_type, description, attributes, channel_exclusions';
 
 async function invokeBestBuy(body = {}) {
   return invokeFn('bestbuy-pull-offers', body);
@@ -105,29 +109,10 @@ export async function refreshBestBuyOffers({ task = null } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Content push (P41). Categories whose only extra requirement is Product
-// Condition — always "Brand New" for our regular catalog. Accessories
-// (CAT_314937) also demand accessory-type and dishwasher-safe values we can't
-// derive truthfully from the PIM, so they sit out of v1.
-const CONDITION_ONLY_CATS = new Set(['CAT_660943', 'CAT_37129', 'CAT_328963']);
+// Content push (P41): one row per product, built by lib/bestbuyContent.js from
+// the attributes Best Buy asks for in the offer's category.
 
-const stripHtml = (h) =>
-  String(h ?? '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-/**
- * Everything the push card needs: which listed products CAN be pushed (and
- * with what content), and which can't yet (with the reason). A product is
- * pushable when it has a Best Buy offer, a supported category, a UPC on the
- * offer (the identity anchor — deliberately Best Buy's, not the PIM's, so a
- * placeholder UPC in the PIM can't break the match), a PIM title, a
- * description and at least one image.
- */
-// Image URLs per SKU, primary first then display order. The API returns at
+// The image rows per SKU, primary first then display order. The API returns at
 // most 1,000 rows a query and the ~450 Best Buy offers carry ~5,300 images,
 // so a single query left most SKUs looking image-less and they were skipped
 // as "no images in the PIM" (found 2026-09-29). 20 SKUs a query stays under
@@ -138,7 +123,7 @@ async function imagesForSkus(skus, task = null) {
   const imagesBySku = new Map();
   const query = (part) => supabase
     .from('product_media')
-    .select('sku, storage_path, is_primary, display_order')
+    .select('sku, storage_path, is_primary, display_order, language')
     .eq('media_type', 'image')
     .in('sku', part)
     .order('is_primary', { ascending: false })
@@ -146,7 +131,7 @@ async function imagesForSkus(skus, task = null) {
   const add = (rows) => {
     for (const m of rows ?? []) {
       if (!imagesBySku.has(m.sku)) imagesBySku.set(m.sku, []);
-      imagesBySku.get(m.sku).push(m.storage_path);
+      imagesBySku.get(m.sku).push(m);
     }
   };
   const chunks = [];
@@ -169,7 +154,15 @@ async function imagesForSkus(skus, task = null) {
   return imagesBySku;
 }
 
-/** `task` (optional taskProgress reporter): the snapshot 30%, the PIM reads 70%. */
+/**
+ * Everything the push card needs: which listed products CAN be pushed (and
+ * with what content), and which can't yet (with the reason). A product is
+ * pushable when it has a Best Buy offer in a mapped category, a UPC on the
+ * offer (the identity anchor — deliberately Best Buy's, not the PIM's, so a
+ * placeholder UPC in the PIM can't break the match), a PIM title, a
+ * description and at least one image.
+ * `task` (optional taskProgress reporter): the snapshot 30%, the PIM reads 70%.
+ */
 export async function loadBestBuyPushCandidates({ task = null } = {}) {
   const { data: snaps, error: snapErr } = await supabase
     .from('channel_health')
@@ -189,7 +182,7 @@ export async function loadBestBuyPushCandidates({ task = null } = {}) {
   const [{ data: prods, error: prodErr }, imagesBySku] = await Promise.all([
     supabase
       .from('products')
-      .select('sku, brand, description, attributes, channel_exclusions')
+      .select(PRODUCT_COLUMNS)
       .in('sku', skus),
     imagesForSkus(skus, task?.part(0.3, 1)),
   ]);
@@ -206,37 +199,14 @@ export async function loadBestBuyPushCandidates({ task = null } = {}) {
 
     // Marketplace exclusion (rule 2026-09-22): switched-off products are never pushed.
     if (isExcluded(pim, 'bestbuy')) { skip('excluded from Best Buy Canada (product switch)'); continue; }
-    if (!CONDITION_ONLY_CATS.has(offer.category_code)) {
-      skip('accessory category — needs manual attributes (not in v1)');
-      continue;
-    }
-    if (!offer.upc) { skip('no UPC on the Best Buy offer'); continue; }
-    const title = pim.attributes?.general_title_en?.trim();
-    if (!title) { skip('no General Title (EN) in the PIM'); continue; }
-    const shortDesc = stripHtml(pim.attributes?.marketing_copy || pim.description).slice(0, 500);
-    if (!shortDesc) { skip('no description in the PIM'); continue; }
-    const images = imagesBySku.get(offer.sku) ?? [];
-    if (!images.length) { skip('no images in the PIM'); continue; }
+    const built = buildBestBuyRow(pim, offer, imagesBySku.get(offer.sku) ?? []);
+    if (!built.row) { skip(built.problems.join('; ')); continue; }
 
     pushable.push({
       sku: offer.sku,
       bbTitle: offer.product_title ?? '',
-      pimTitle: title,
-      row: {
-        BBYCat: offer.category_code,
-        shop_sku: offer.sku,
-        _Title_BB_Category_Root_EN: title,
-        _Short_Description_BB_Category_Root_EN: shortDesc,
-        _Long_Description_BB_Category_Root_EN: stripHtml(pim.description).slice(0, 4000),
-        _Brand_Name_Category_Root_EN: /azuni/i.test(pim.brand ?? '') ? 'AZUNI' : 'Stylish',
-        _Primary_UPC_Category_Root_EN: offer.upc,
-        _Model_Number_Category_Root_EN: offer.sku,
-        _Manufacturers_Part_Number_Category_Root_EN: offer.sku,
-        [`_ProductCondition_20257570_${offer.category_code}_EN`]: 'Brand New',
-        ...Object.fromEntries(
-          images.slice(0, 5).map((url, i) => [`_MP_Source_Image_URL_0${i + 1}_Category_Root_EN`, url]),
-        ),
-      },
+      pimTitle: built.fields.find((f) => f.key === 'title')?.value ?? '',
+      row: built.row,
     });
   }
 
@@ -245,8 +215,10 @@ export async function loadBestBuyPushCandidates({ task = null } = {}) {
 
 /**
  * Push content rows to Best Buy in chunks (the edge function caps 50/call).
- * Returns aggregate transformation results; Best Buy's own QC applies the
- * content asynchronously afterwards.
+ * Rows with the same columns travel together: a file has one set of columns,
+ * and an empty cell could wipe what Best Buy holds for a field the PIM has no
+ * value for. Returns aggregate transformation results; Best Buy's own QC
+ * applies the content asynchronously afterwards.
  */
 export async function pushBestBuyContent(candidates, { onProgress } = {}) {
   const CHUNK = 50;
@@ -255,14 +227,24 @@ export async function pushBestBuyContent(candidates, { onProgress } = {}) {
   let linesError = 0;
   let errorsText = '';
 
-  for (let i = 0; i < candidates.length; i += CHUNK) {
-    const chunk = candidates.slice(i, i + CHUNK);
-    const data = await invokeFn('bestbuy-push-content', { rows: chunk.map((c) => c.row) });
-    imports.push(data.import_id);
-    linesOk += data.lines_ok ?? 0;
-    linesError += data.lines_error ?? 0;
-    if (data.transformation_errors) errorsText += data.transformation_errors + '\n';
-    onProgress?.(Math.min(i + CHUNK, candidates.length), candidates.length);
+  const groups = new Map();
+  for (const c of candidates) {
+    const key = Object.keys(c.row).sort().join();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  let done = 0;
+  for (const group of groups.values()) {
+    for (let i = 0; i < group.length; i += CHUNK) {
+      const chunk = group.slice(i, i + CHUNK);
+      const data = await invokeFn('bestbuy-push-content', { rows: chunk.map((c) => c.row) });
+      imports.push(data.import_id);
+      linesOk += data.lines_ok ?? 0;
+      linesError += data.lines_error ?? 0;
+      if (data.transformation_errors) errorsText += data.transformation_errors + '\n';
+      done += chunk.length;
+      onProgress?.(done, candidates.length);
+    }
   }
 
   logActivity({
@@ -275,4 +257,47 @@ export async function pushBestBuyContent(candidates, { onProgress } = {}) {
   });
 
   return { imports, linesOk, linesError, errorsText };
+}
+
+/**
+ * One product's content for Best Buy, for its card and its push: the offer in
+ * the latest snapshot and the row the PIM would send. `offer` is null when the
+ * product has no offer there.
+ */
+export async function loadBestBuyContent(sku) {
+  const [offer, { data: product, error: prodErr }, { data: images, error: mediaErr }] = await Promise.all([
+    latestSnapshotItem('bestbuy', sku),
+    supabase.from('products').select(PRODUCT_COLUMNS).eq('sku', sku).maybeSingle(),
+    supabase.from('product_media').select('storage_path, is_primary, display_order, language').eq('sku', sku).eq('media_type', 'image')
+      .order('is_primary', { ascending: false }).order('display_order', { ascending: true }),
+  ]);
+  if (prodErr) throw prodErr;
+  if (mediaErr) throw mediaErr;
+  if (!product) throw new Error(`${sku} is not in the PIM.`);
+  return { offer: offer ?? null, product, built: offer ? buildBestBuyRow(product, offer, images ?? []) : null };
+}
+
+/**
+ * "Push Best Buy" on the product page: the product's content, as the PIM
+ * recommends it. Best Buy checks the file at once (a refusal comes back here)
+ * and its QC applies it later. Prices, stock and the offer never travel.
+ */
+export async function pushProductToBestBuy(sku, { task = null } = {}) {
+  task?.progress(0.05, 'Reading the product…');
+  const { offer, product, built } = await loadBestBuyContent(sku);
+  if (!offer) throw new Error(`${sku} has no offer on Best Buy.`);
+  if (isExcluded(product, 'bestbuy')) throw new Error(`${sku} is excluded from Best Buy Canada.`);
+  if (!built.row) throw new Error(`${sku} can't go to Best Buy yet: ${built.problems.join('; ')}.`);
+  task?.progress(0.2, 'Best Buy is checking the file…');
+  const data = await invokeFn('bestbuy-push-content', { rows: [built.row] });
+  if (!data.ok || (data.lines_error ?? 0) > 0) throw new Error(`Best Buy refused it: ${data.transformation_errors ?? `import ${data.import_id}`}`);
+  logActivity({
+    action: 'push',
+    entityType: 'product',
+    entityId: sku,
+    target: 'marketplace.bestbuy.ca',
+    summary: `Pushed the content of ${sku} to Best Buy (import ${data.import_id}) — accepted as the PIM recommends`,
+    metadata: { imports: [data.import_id], status: data.status, fields: built.fields.map((f) => f.key), images: built.images.length },
+  });
+  return { importId: data.import_id, status: data.status };
 }

@@ -73,6 +73,7 @@ const WixSyndicationCard = lazy(() => import('@/features/syndication/components/
 const WayfairProductCard = lazy(() => import('@/features/syndication/components/WayfairProductCard'));
 const WayfairAdditionCard = lazy(() => import('@/features/syndication/components/WayfairAdditionCard'));
 const WalmartProductCard = lazy(() => import('@/features/syndication/components/WalmartProductCard'));
+const BestBuyProductCard = lazy(() => import('@/features/syndication/components/BestBuyProductCard'));
 const WalmartAdditionCard = lazy(() => import('@/features/syndication/components/WalmartAdditionCard'));
 const ChannelPushBar = lazy(() => import('@/features/syndication/components/ChannelPushBar'));
 const ChannelExclusionsCard = lazy(() => import('@/features/syndication/components/ChannelExclusionsCard'));
@@ -1723,10 +1724,14 @@ function MarketplacesTab({ product, media, onUpdate }) {
   // (undefined = loading, null = absent).
   const [wmCa, setWmCa] = useState(undefined);
   const [wmUs, setWmUs] = useState(undefined);
+  const [bbOffer, setBbOffer] = useState(undefined);
   useEffect(() => {
     let active = true;
-    // Just this SKU's item from each latest Walmart snapshot (the database
-    // picks it out — no longer the whole per-SKU list on every tab switch).
+    // Just this SKU's item from each latest snapshot (the database picks it
+    // out — no longer the whole per-SKU list on every tab switch).
+    latestSnapshotItem('bestbuy', product.sku).then((item) => {
+      if (active) setBbOffer(item ?? null);
+    });
     latestSnapshotItem('walmart_ca', product.sku).then((item) => {
       if (active) setWmCa(item ?? null);
     });
@@ -1827,6 +1832,16 @@ function MarketplacesTab({ product, media, onUpdate }) {
           onClick={() => pick('wayfair_us')}
         />
         <ChannelTile
+          label="Best Buy Canada"
+          avatar="BB"
+          avatarClass="bg-brand-bestbuy/10 text-brand-bestbuy"
+          active={selected === 'bestbuy'}
+          linked={isExcluded(product, 'bestbuy') ? undefined : bbOffer === undefined ? null : Boolean(bbOffer)}
+          linkedText={isExcluded(product, 'bestbuy') ? 'Excluded' : 'Listed'}
+          notLinkedText="Not listed"
+          onClick={() => pick('bestbuy')}
+        />
+        <ChannelTile
           label="Walmart Canada"
           avatar="WM"
           avatarClass="bg-brand-walmart/10 text-brand-walmart"
@@ -1906,6 +1921,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
               : selected === 'wayfair_ca' ? Boolean(product.wayfair_item_group_id)
                 : selected === 'wayfair_us' ? Boolean(product.wayfair_usa_item_group_id)
                   : selected === 'walmart_us' ? (wmUs === undefined ? null : Boolean(wmUs))
+                    : selected === 'bestbuy' ? (bbOffer === undefined ? null : Boolean(bbOffer))
                     : null
           }
           onPushed={afterPush}
@@ -1927,6 +1943,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
         </>
       )}
       {selected === 'wayfair_us' && !isExcluded(product, 'wayfair_us') && <WayfairProductCard product={product} onUpdate={onUpdate} supplier="USA" />}
+      {selected === 'bestbuy' && !isExcluded(product, 'bestbuy') && <BestBuyProductCard key={pushTick} sku={product.sku} />}
       {selected === 'walmart_ca' && !isExcluded(product, 'walmart_ca') && <WalmartProductCard market="ca" product={product} row={wmCa ?? null} loading={wmCa === undefined} />}
       {selected === 'walmart_us' && !isExcluded(product, 'walmart_us') && (
         <>
