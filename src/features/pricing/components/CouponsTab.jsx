@@ -3,9 +3,9 @@ import { ChevronDown, Download, Loader2, Plus, Square, Tag, Trash2, Upload, X } 
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import DealsOverview from '@/features/pricing/components/DealsOverview';
-import { createCoupons, deleteCoupon, endCoupon, getCouponSkus, listCoupons, reviewCoupons } from '@/features/pricing/api/coupons';
-import { parseSkuList } from '@/features/pricing/api/promotions';
-import { COUPON_MARKETPLACES, couponDiscountText, couponProblem, downloadCouponTemplate, parseCouponFile, parseCouponValue } from '@/features/pricing/lib/couponTemplate';
+import { createCoupons, deleteCoupon, endCoupon, getCouponProducts, listCoupons, reviewCoupons } from '@/features/pricing/api/coupons';
+import { parsePriceList, parseSkuList } from '@/features/pricing/api/promotions';
+import { COUPON_MARKETPLACES, couponAmountText, couponDiscountText, couponProblem, downloadCouponTemplate, parseCouponFile, parseCouponValue } from '@/features/pricing/lib/couponTemplate';
 import { etToday } from '@/features/pricing/lib/promoCalendar';
 import { startTask } from '@/lib/taskProgress';
 
@@ -22,10 +22,23 @@ function stateOf(c, today) {
   return { word: 'Running', cls: 'bg-success-container text-on-success-container' };
 }
 
+// What the form could not put on a coupon, said after it is created.
+function leftOutNote(reviewed) {
+  const notes = [];
+  const missing = [...new Set(reviewed.flatMap((c) => c.notInPim))];
+  if (missing.length) notes.push(`Not in the PIM, left out: ${listOf(missing)}`);
+  for (const c of reviewed) {
+    if (c.exists) notes.push(`${label(c.marketplace)}: it already existed, not created again`);
+    else if (c.excluded.length) notes.push(`${label(c.marketplace)}: switched off, left out: ${listOf(c.excluded)}`);
+  }
+  return notes.join(' · ') || null;
+}
+
 /** Coupons on Amazon and Wayfair: several can run at once. */
 export default function CouponsTab({ canEdit, confirm }) {
   const [coupons, setCoupons] = useState(null);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [openId, setOpenId] = useState(null);
@@ -74,7 +87,8 @@ export default function CouponsTab({ canEdit, confirm }) {
           </button>
         </div>
       )}
-      {showNew && <NewCouponForm onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); reload(); }} />}
+      {notice && <p role="status" className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">{notice}</p>}
+      {showNew && <NewCouponForm onClose={() => setShowNew(false)} onCreated={(note) => { setShowNew(false); setNotice(note); reload(); }} />}
       {showUpload && <UploadDialog onClose={() => setShowUpload(false)} onCreated={() => { setShowUpload(false); reload(); }} />}
 
       {coupons === null && !error ? (
@@ -106,16 +120,16 @@ function CouponCard({ coupon, canEdit, confirm, open, onToggle, onChanged }) {
   const today = etToday();
   const state = stateOf(coupon, today);
   const over = state.word === 'Ended';
-  const [skus, setSkus] = useState(null);
+  const [products, setProducts] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!open || skus) return undefined;
+    if (!open || products) return undefined;
     let active = true;
-    getCouponSkus(coupon.id).then((list) => { if (active) setSkus(list); }).catch((err) => { if (active) setError(err.message); });
+    getCouponProducts(coupon.id).then((list) => { if (active) setProducts(list); }).catch((err) => { if (active) setError(err.message); });
     return () => { active = false; };
-  }, [open, skus, coupon.id]);
+  }, [open, products, coupon.id]);
 
   async function act(kind, fn, confirmOptions) {
     if (!(await confirm(confirmOptions))) return;
@@ -149,11 +163,16 @@ function CouponCard({ coupon, canEdit, confirm, open, onToggle, onChanged }) {
       {open && (
         <div className="px-5 pb-5 space-y-3">
           <div className="border-t border-outline-variant/60" />
-          {skus === null && !error ? (
+          {products === null && !error ? (
             <p className="text-body-sm text-on-surface-variant">Loading its products…</p>
           ) : (
             <ul className="flex flex-wrap gap-1.5" aria-label={`Products of ${coupon.name}`}>
-              {(skus ?? []).map((s) => <li key={s} className="px-2 py-0.5 rounded-full bg-surface-container text-label-md font-mono text-on-surface">{s}</li>)}
+              {(products ?? []).map((p) => (
+                <li key={p.sku} className="px-2 py-0.5 rounded-full bg-surface-container text-label-md text-on-surface">
+                  <span className="font-mono">{p.sku}</span>
+                  {p.discount_amount != null && <span className="ml-1.5 font-semibold tabular-nums">{couponAmountText(coupon.marketplace, p.discount_amount)}</span>}
+                </li>
+              ))}
             </ul>
           )}
           {canEdit && (
@@ -179,7 +198,7 @@ function CouponCard({ coupon, canEdit, confirm, open, onToggle, onChanged }) {
 
 function NewCouponForm({ onClose, onCreated }) {
   const [name, setName] = useState('');
-  const [marketplace, setMarketplace] = useState(null);
+  const [marketplaces, setMarketplaces] = useState([]); // one coupon per marketplace: each portal has its own
   const [type, setType] = useState('percent');
   const [value, setValue] = useState('');
   const [startsOn, setStartsOn] = useState('');
@@ -187,23 +206,32 @@ function NewCouponForm({ onClose, onCreated }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const list = useMemo(() => parseSkuList(text), [text]);
+  // A percentage is the whole coupon's; money is per product (user, 2026-11-09).
+  const money = type === 'amount';
+  const currency = [...new Set(marketplaces.map((k) => (k.endsWith('_ca') ? 'CAD' : 'USD')))].sort().join(' / ') || 'money';
+  const list = useMemo(() => {
+    if (!money) return parseSkuList(text);
+    const { rows, skipped } = parsePriceList(text);
+    const amounts = Object.fromEntries(rows.map((r) => [r.sku.toUpperCase(), r.price]));
+    return { skus: Object.keys(amounts), amounts, skipped };
+  }, [text, money]);
 
   async function create() {
     setBusy(true);
     setError(null);
     let task = null;
     try {
-      const coupon = { name: name.trim(), marketplace, discount_type: type, discount_value: parseCouponValue(value, type), starts_on: startsOn, ends_on: endsOn, skus: list.skus };
-      const problem = couponProblem(coupon);
+      const base = { name: name.trim(), discount_type: type, discount_value: money ? null : parseCouponValue(value, type), amounts: money ? list.amounts : null, starts_on: startsOn, ends_on: endsOn, skus: list.skus };
+      const problem = couponProblem({ ...base, marketplace: marketplaces[0] ?? null });
       if (problem) throw new Error(problem);
-      task = startTask('Create coupon', { detail: 'Checking the products…' });
-      const [reviewed] = await reviewCoupons([coupon]);
-      if (reviewed.exists) throw new Error('A coupon with that name, marketplace and first day already exists.');
-      if (!reviewed.skus.length) throw new Error('None of these products can go on this coupon: they are not in the PIM or are switched off for this marketplace.');
-      await createCoupons([reviewed], { task: task.part(0.3, 1) });
-      task.finish(plural(reviewed.skus.length, 'product'));
-      onCreated();
+      if (money && list.skipped.length) throw new Error(`These lines need a SKU and an amount: ${listOf(list.skipped, 5)}`);
+      task = startTask(marketplaces.length > 1 ? 'Create coupons' : 'Create coupon', { detail: 'Checking the products…' });
+      const reviewed = await reviewCoupons(marketplaces.map((marketplace) => ({ ...base, marketplace })));
+      if (reviewed.every((c) => c.exists)) throw new Error('A coupon with that name and first day already exists on the marketplaces picked.');
+      if (!reviewed.some((c) => c.skus.length && !c.exists)) throw new Error('None of these products can go on this coupon: they are not in the PIM or are switched off for the marketplaces picked.');
+      const made = await createCoupons(reviewed, { task: task.part(0.3, 1) });
+      task.finish(plural(made, 'coupon'));
+      onCreated(leftOutNote(reviewed));
     } catch (err) {
       task?.fail(err);
       setError(err.message);
@@ -224,23 +252,29 @@ function NewCouponForm({ onClose, onCreated }) {
           <span className="text-label-lg text-on-surface-variant">Name</span>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} className={input} />
         </label>
-        <div className="block min-w-0">
-          <span className="text-label-lg text-on-surface-variant">Dates</span>
-          <div className="mt-1 flex items-center gap-2">
-            <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} aria-label="First day" className={`${input} !mt-0 min-w-0 flex-1`} />
-            <span className="text-body-sm text-on-surface-variant">to</span>
-            <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} aria-label="Last day" className={`${input} !mt-0 min-w-0 flex-1`} />
-          </div>
+        <div className="grid grid-cols-2 gap-2 min-w-0">
+          <label className="block min-w-0">
+            <span className="text-label-lg text-on-surface-variant">Start day</span>
+            <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} className={input} />
+          </label>
+          <label className="block min-w-0">
+            <span className="text-label-lg text-on-surface-variant">End day</span>
+            <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className={input} />
+          </label>
         </div>
       </div>
       <div>
-        <span className="text-label-lg text-on-surface-variant">Marketplace</span>
-        <div className="mt-2 flex items-center gap-1.5 flex-wrap" role="group" aria-label="Marketplace">
-          {COUPON_MARKETPLACES.map((c) => (
-            <button key={c.key} type="button" aria-pressed={marketplace === c.key} onClick={() => setMarketplace(c.key)} className={`px-3 py-1 rounded-full text-label-md border transition-colors ${marketplace === c.key ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-outline-variant text-on-surface hover:bg-surface-container-low'}`}>
-              {c.label}
-            </button>
-          ))}
+        <span className="text-label-lg text-on-surface-variant">Marketplaces</span>
+        <p className="text-body-sm text-on-surface-variant mt-0.5">Pick one or several. Each one gets its own coupon, with the same discount, dates and products.</p>
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap" role="group" aria-label="Marketplaces">
+          {COUPON_MARKETPLACES.map((c) => {
+            const on = marketplaces.includes(c.key);
+            return (
+              <button key={c.key} type="button" aria-pressed={on} onClick={() => setMarketplaces(on ? marketplaces.filter((k) => k !== c.key) : [...marketplaces, c.key])} className={`px-3 py-1 rounded-full text-label-md border transition-colors ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-outline-variant text-on-surface hover:bg-surface-container-low'}`}>
+                {c.label}
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="flex items-end gap-4 flex-wrap">
@@ -251,14 +285,18 @@ function NewCouponForm({ onClose, onCreated }) {
             </button>
           ))}
         </div>
-        <label className="block w-40">
-          <span className="text-label-md text-on-surface-variant">{type === 'percent' ? 'Discount (%)' : `Discount (${marketplace?.endsWith('_ca') ? 'CAD' : marketplace ? 'USD' : 'money'})`}</span>
-          <input type="number" min="0" step="any" value={value} onChange={(e) => setValue(e.target.value)} className={input} />
-        </label>
+        {money ? (
+          <p className="text-body-sm text-on-surface-variant pb-2">Each product has its own amount: type it next to its SKU below.</p>
+        ) : (
+          <label className="block w-44">
+            <span className="text-label-md text-on-surface-variant">Discount (%), for the whole coupon</span>
+            <input type="number" min="0" max="99" step="any" value={value} onChange={(e) => setValue(e.target.value)} className={input} />
+          </label>
+        )}
       </div>
       <label className="block">
-        <span className="text-label-lg text-on-surface-variant">Products: one SKU per line</span>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder={'S-822H\nK-131NR\n…'} className={`${input} font-mono text-body-sm`} />
+        <span className="text-label-lg text-on-surface-variant">{money ? `Products: SKU and amount (${currency}), one per line` : 'Products: one SKU per line'}</span>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder={money ? 'S-822H 25\nK-131NR 40\n…' : 'S-822H\nK-131NR\n…'} className={`${input} font-mono text-body-sm`} />
       </label>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-body-sm text-on-surface-variant">{plural(list.skus.length, 'SKU')}{list.skipped.length > 0 ? ` · ${plural(list.skipped.length, 'line')} skipped` : ''}</p>

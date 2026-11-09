@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { listPromotions, getPromotionPrices, onMarketList } from '@/features/pricing/api/promotions';
+import { listCoupons } from '@/features/pricing/api/coupons';
 import { PROMO_CHANNELS } from '@/features/pricing/lib/promoChannels';
 import { promoWindow, windowContains } from '@/features/pricing/lib/promoCalendar';
 import { BOARD_BY_KEY } from './boards';
@@ -25,6 +26,8 @@ export const AUTO_KEYS = {
   flash_count: { label: '# flash deals of the week', unit: 'number' },
   event_count: { label: '# peak season events of the week', unit: 'number' },
   deal_count: { label: '# flash deals, MK events and peak season events of the week', unit: 'number' },
+  // Pricing → Coupons (user, 2026-11-09): Amazon and Wayfair, both countries.
+  coupon_count: { label: '# coupons of the week (Pricing, Coupons tab)', unit: 'number' },
   // Odoo (user, 2026-11-05): a $0 order (a spare part, a warranty
   // replacement, an open box sent free) is no sale; Sales keep the shipping
   // charged, as Odoo's own sales report. Odoo records almost no cancellation
@@ -102,7 +105,8 @@ export async function computeAutoValues(boardKey, metrics, column, today) {
   const promoDay = today < weekEnd ? today : weekEnd;
   const out = new Map();
 
-  const needsPromos = wanted.some((m) => m.auto_key !== 'map_pct');
+  const notDeals = new Set(['map_pct', 'coupon_count']);
+  const needsPromos = wanted.some((m) => !notDeals.has(m.auto_key));
   if (needsPromos) {
     const [promotions, exclusions] = await Promise.all([listPromotions(), loadExclusions()]);
     const pricesCache = new Map();
@@ -111,7 +115,7 @@ export async function computeAutoValues(boardKey, metrics, column, today) {
       return pricesCache.get(id);
     };
     for (const m of wanted) {
-      if (m.auto_key === 'map_pct') continue;
+      if (notDeals.has(m.auto_key)) continue;
       const { channels } = board.markets[m.market];
       if (m.auto_key === 'promo_skus') {
         const running = promotions.filter((p) => p.kind === 'monthly' && windowContains(promoWindow(p, m.market), promoDay) && !endedBy(p, promoDay));
@@ -131,6 +135,15 @@ export async function computeAutoValues(boardKey, metrics, column, today) {
       const skus = new Set();
       for (const p of deals) for (const s of membersOn(await pricesOf(p.id), m.market, channels, exclusions)) skus.add(s);
       out.set(m.id, skus.size);
+    }
+  }
+
+  const couponRows = wanted.filter((m) => m.auto_key === 'coupon_count');
+  if (couponRows.length) {
+    const coupons = await listCoupons();
+    for (const m of couponRows) {
+      const { channels } = board.markets[m.market];
+      out.set(m.id, coupons.filter((c) => channels.includes(c.marketplace) && c.starts_on <= weekEnd && c.ends_on >= week && !(day10(c.ended_at) != null && day10(c.ended_at) <= week)).length);
     }
   }
 

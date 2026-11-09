@@ -19,10 +19,11 @@ export async function listCoupons() {
   }));
 }
 
-export async function getCouponSkus(couponId) {
-  const { data, error } = await supabase.from('coupon_products').select('sku').eq('coupon_id', couponId).order('sku');
+/** The coupon's products: [{ sku, discount_amount }] (money coupons carry the amount per product). */
+export async function getCouponProducts(couponId) {
+  const { data, error } = await supabase.from('coupon_products').select('sku, discount_amount').eq('coupon_id', couponId).order('sku');
   if (error) throw error;
-  return (data ?? []).map((r) => r.sku);
+  return data ?? [];
 }
 
 const sameCoupon = (c) => `${c.name.toLowerCase()}|${c.marketplace}|${c.starts_on}`;
@@ -59,12 +60,12 @@ export async function createCoupons(reviewed, { task = null } = {}) {
     task?.count(i, list.length, `Coupon ${i + 1} of ${list.length} · ${c.name}`);
     const { data, error } = await supabase
       .from('coupons')
-      .insert({ name: c.name, marketplace: c.marketplace, discount_type: c.discount_type, discount_value: c.discount_value, starts_on: c.starts_on, ends_on: c.ends_on, created_by: getActivityActor()?.id ?? null })
+      .insert({ name: c.name, marketplace: c.marketplace, discount_type: c.discount_type, discount_value: c.discount_type === 'percent' ? c.discount_value : null, starts_on: c.starts_on, ends_on: c.ends_on, created_by: getActivityActor()?.id ?? null })
       .select('id')
       .single();
     if (error) throw error;
     for (let n = 0; n < c.skus.length; n += 200) {
-      const { error: rowsError } = await supabase.from('coupon_products').insert(c.skus.slice(n, n + 200).map((sku) => ({ coupon_id: data.id, sku })));
+      const { error: rowsError } = await supabase.from('coupon_products').insert(c.skus.slice(n, n + 200).map((sku) => ({ coupon_id: data.id, sku, discount_amount: c.amounts?.[sku] ?? null })));
       if (rowsError) throw rowsError;
     }
   }
