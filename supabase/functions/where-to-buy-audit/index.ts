@@ -1426,6 +1426,16 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
       // A link never verified yet is tried again on any day; one with an
       // answer later the same pass day, else at the next pass.
       const retry = new Date(Date.now() + Math.min(RETRY_HOURS * fails, 24) * 3600e3);
+      // BB&B: Bright Data's failure uses up the call, and an odd count means
+      // the next try starts with ScraperAPI, which opens those pages in ~5 s.
+      // It goes in 10 minutes, not hours (user, 2026-11-09: since 5 AM that day
+      // BB&B had turned Bright Data away and 32 good addresses sat waiting).
+      if (row.retailer === "bbb_us" && fails % 2 === 1) {
+        return {
+          fail_count: fails, ...clearJob, next_check_at: at(10 * 60e3),
+          ...(row.verdict === "pending" ? { note: `Not verified yet — ${o.note ?? "no answer"}`, checked_at: now } : {}),
+        };
+      }
       return {
         fail_count: fails, ...clearJob, next_check_at: row.verdict === "pending" ? retry.toISOString() : onPass(retry, row.retailer),
         ...(row.verdict === "pending" ? { note: `Not verified yet — ${o.note ?? "no answer"}`, checked_at: now } : {}),
