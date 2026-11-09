@@ -37,6 +37,14 @@ export const PROMO_CHANNELS = [
     how: 'Automatic. Promo MAP CAD goes live on the first Thursday.' },
   { key: 'wix_sinksdirect_us', label: 'Sinks Direct USA', monogram: 'SD', market: 'us', kind: 'api', stamp: 'us_applied_at',
     how: 'Automatic. Promo MAP USD goes live on the 1st.' },
+  // The Stylish stores take promotions only through special events (user,
+  // 2026-11-09), as a percentage or by price: stylish-event-discounts puts the
+  // discount on by the event's dates (lib/stylishDiscount.js). `kinds` = the
+  // promotion kinds a channel is offered for (none = every kind).
+  { key: 'wix_stylish_ca', label: 'Stylish Canada', monogram: 'ST', market: 'ca', kind: 'api', kinds: ['special'], discounts: true,
+    how: "Automatic: the event's discount goes on the store the first day and comes off when it ends. The MSRP stays as it is." },
+  { key: 'wix_stylish_us', label: 'Stylish USA', monogram: 'ST', market: 'us', kind: 'api', kinds: ['special'], discounts: true,
+    how: "Automatic: the event's discount goes on the store the first day and comes off when it ends. The MSRP stays as it is." },
   { key: 'bestbuy', label: 'Best Buy Canada', monogram: 'BB', market: 'ca', kind: 'api', stamp: 'bb_scheduled_at',
     how: 'Scheduled discounts sent when the list loads. Check the portal: API discounts have not shown up so far.' },
   { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca', kind: 'portal_file', filler: 'wayfair', priceStart: 'wayfair_price_start', priceChange: 'wayfair_price_change', savedStart: 'price_start', auditTarget: 'wayfair',

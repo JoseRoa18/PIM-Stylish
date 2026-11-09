@@ -5,6 +5,7 @@ import { pushProductToWix } from '@/features/syndication/api/wixSync';
 import { pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { batchTicker } from '../lib/fileProgress';
+import { discountFor, STYLISH_CHANNELS } from '../lib/stylishDiscount';
 
 /**
  * Monthly promotions. Promo prices come from the user's official lists (one
@@ -23,7 +24,7 @@ import { batchTicker } from '../lib/fileProgress';
 export async function listPromotions() {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, ca_applied_at, us_applied_at, wm_ca_scheduled_at, wm_ca_schedule, wm_us_scheduled_at, wm_us_schedule, file_tasks, promotion_prices(count), creator:profiles(full_name, email)')
+    .select('id, name, period, status, kind, marketplaces, stylish_discount, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, created_at, created_by, activated_at, ended_at, bb_scheduled_at, bb_schedule, ca_applied_at, us_applied_at, wm_ca_scheduled_at, wm_ca_schedule, wm_us_scheduled_at, wm_us_schedule, file_tasks, promotion_prices(count), creator:profiles(full_name, email)')
     .order('period', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -42,7 +43,7 @@ export async function listPromotions() {
 export async function refreshPromotion(promotion) {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, status, kind, marketplaces, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, file_tasks, bb_scheduled_at, wm_ca_scheduled_at, wm_us_scheduled_at')
+    .select('id, name, period, status, kind, marketplaces, stylish_discount, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, file_tasks, bb_scheduled_at, wm_ca_scheduled_at, wm_us_scheduled_at')
     .eq('id', promotion.id)
     .maybeSingle();
   if (error) throw error;
@@ -282,15 +283,23 @@ export async function setPromotionSkusFromLevel(promotion, skus, tier = promotio
   return { added: valid.length, removed: toRemove.length, notInPim, noLevel };
 }
 
+// A Stylish event goes only to the Stylish stores (user, 2026-11-09); the
+// database refuses the mix too (promotions_stylish_alone).
+function assertStylishAlone(portals) {
+  const stylish = portals.filter((key) => STYLISH_CHANNELS.includes(key));
+  if (stylish.length && stylish.length !== portals.length) throw new Error('An event for the Stylish stores goes only to them: take the other portals off.');
+}
+
 // `marketplaces` are the PROMO_CHANNELS keys the promotion is made for
 // (flash deals and special events go to the portals picked on creation,
 // one or several); empty/null means every marketplace (monthly).
 // `task` (optional taskProgress reporter): the level prices in batches of
 // 200, the promotion, its rows in batches of 200.
-export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [], task = null }) {
+export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [], stylish_discount = null, task = null }) {
   assertKindDates(kind, starts_on, ends_on);
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
   if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} is for.`);
+  assertStylishAlone(portals);
   const wanted = [...new Set(skus)];
   if (!wanted.length) throw new Error('Paste at least one SKU.');
   const level = tier ?? promotionLevel({ kind });
@@ -300,7 +309,7 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
   task?.progress(0.45, 'Creating the promotion…');
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), marketplaces: portals.length ? portals : null, created_by: getActivityActor()?.id ?? null })
+    .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), marketplaces: portals.length ? portals : null, stylish_discount, created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;
@@ -328,6 +337,7 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
 export async function updatePromotionMarketplaces(promotion, marketplaces) {
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
   if ((promotion.kind ?? 'monthly') !== 'monthly' && !portals.length) throw new Error('Keep at least one portal.');
+  assertStylishAlone(portals);
   const { error } = await supabase.from('promotions').update({ marketplaces: portals.length ? portals : null }).eq('id', promotion.id);
   if (error) throw error;
   logActivity({
@@ -338,6 +348,55 @@ export async function updatePromotionMarketplaces(promotion, marketplaces) {
     metadata: { before: promotion.marketplaces ?? [], after: portals },
   });
   return portals;
+}
+
+/** Every SKU a price-mode Stylish discount lists. */
+export const stylishPricedSkus = (discount) => (discount?.mode === 'price' ? [...new Set(Object.values(discount.prices ?? {}).flatMap((list) => Object.keys(list)))] : []);
+
+/**
+ * Refuses a Stylish price that cannot go (user's rule: store price = what the
+ * customer pays ÷ 0.3): a SKU the PIM does not have, or a store price that is
+ * not under the MSRP — a MAP typed by mistake lands there.
+ */
+export async function checkStylishDiscount(discount) {
+  const skus = stylishPricedSkus(discount);
+  if (!skus.length) return;
+  const found = new Map();
+  for (let i = 0; i < skus.length; i += 200) {
+    const { data, error } = await supabase.from('products').select('sku, msrp_cad, msrp_usd').in('sku', skus.slice(i, i + 200));
+    if (error) throw error;
+    for (const p of data ?? []) found.set(p.sku, p);
+  }
+  const missing = skus.filter((s) => !found.has(s));
+  if (missing.length) throw new Error(`Not in the PIM: ${missing.slice(0, 10).join(', ')}`);
+  const bad = [];
+  for (const [market, list] of Object.entries(discount.prices ?? {})) {
+    for (const sku of Object.keys(list)) {
+      const d = discountFor(discount, found.get(sku)[market === 'us' ? 'msrp_usd' : 'msrp_cad'], market, sku);
+      if (d.skip) bad.push(`${sku} (${market === 'us' ? 'USA' : 'Canada'}): ${d.skip}`);
+    }
+  }
+  if (bad.length) throw new Error(`These Stylish prices cannot go: ${bad.slice(0, 6).join(' · ')}${bad.length > 6 ? ` and ${bad.length - 6} more` : ''}`);
+}
+
+/** How a special event discounts the Stylish stores; the next run applies it. */
+export async function updatePromotionStylishDiscount(promotion, discount) {
+  await checkStylishDiscount(discount);
+  const { error } = await supabase.from('promotions').update({ stylish_discount: discount }).eq('id', promotion.id);
+  if (error) throw error;
+  const priced = stylishPricedSkus(discount);
+  if (priced.length) {
+    const current = (await getPromotionPrices(promotion.id)).map((r) => r.sku);
+    const have = new Set(current);
+    if (priced.some((s) => !have.has(s))) await setPromotionSkusFromLevel(promotion, [...current, ...priced]);
+  }
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    summary: `Stylish discount of "${promotion.name}" set to ${discount.mode === 'percent' ? `${discount.percent}% off` : `by price (${priced.length} products)`}`,
+    metadata: { before: promotion.stylish_discount ?? null, after: discount },
+  });
 }
 
 // Promotion kinds: 'monthly' follows the market calendar and is automated on

@@ -33,6 +33,8 @@ import {
   createPromotionFromFile,
   createPromotionFromLevels,
   updatePromotionMarketplaces,
+  checkStylishDiscount,
+  stylishPricedSkus,
   setPromotionSkusFromLevel,
   addFileToPromotion,
   autoScheduleBestBuyPromo,
@@ -61,6 +63,9 @@ import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promo
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import DealsOverview from '@/features/pricing/components/DealsOverview';
+import StylishDiscountFields, { PromoStylishDiscount } from '@/features/pricing/components/StylishDiscountFields';
+import { buildStylishDiscount, draftHasPrices, emptyStylishDraft, stylishMarkets } from '@/features/pricing/lib/stylishDraft';
+import { STYLISH_CHANNELS } from '@/features/pricing/lib/stylishDiscount';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 import { TOLERANCE_FROM, TOLERANCE_HIGH, TOLERANCE_LOW } from '@/features/pricing/lib/priceTolerance';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -832,21 +837,30 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
 // The marketplaces a flash deal / special event goes to: one chip per
 // channel, a row per market. Used by the new-promotion form and by the card
 // to change them later.
-function PortalPicker({ value, onChange }) {
+function PortalPicker({ value, onChange, kind }) {
+  // A Stylish event goes only to the Stylish stores (user, 2026-11-09): picking
+  // one switches every other portal off, and the reverse. The two stores can
+  // go together.
+  const isStylish = (key) => STYLISH_CHANNELS.includes(key);
+  const stylishOn = value.some(isStylish);
+  const othersOn = value.some((key) => !isStylish(key));
+  const offers = kind === 'special';
   return (
     <div className="space-y-2">
       {['ca', 'us'].map((m) => (
         <div key={m} role="group" aria-label={m === 'ca' ? 'Canada' : 'USA'} className="flex items-center gap-1.5 flex-wrap">
           <span className="w-14 text-label-md text-on-surface-variant">{m === 'ca' ? 'Canada' : 'USA'}</span>
-          {PROMO_CHANNELS.filter((ch) => ch.market === m).map((ch) => {
+          {PROMO_CHANNELS.filter((ch) => ch.market === m && (!ch.kinds || ch.kinds.includes(kind))).map((ch) => {
             const on = value.includes(ch.key);
+            const blocked = !on && (isStylish(ch.key) ? othersOn : stylishOn);
             return (
               <button
                 key={ch.key}
                 type="button"
                 aria-pressed={on}
+                disabled={blocked}
                 onClick={() => onChange(on ? value.filter((k) => k !== ch.key) : [...value, ch.key])}
-                className={`px-3 py-1 rounded-full text-label-md border transition-colors ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-outline-variant text-on-surface hover:bg-surface-container-low'}`}
+                className={`px-3 py-1 rounded-full text-label-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-outline-variant text-on-surface enabled:hover:bg-surface-container-low'}`}
               >
                 {ch.label}
               </button>
@@ -854,6 +868,8 @@ function PortalPicker({ value, onChange }) {
           })}
         </div>
       ))}
+      {offers && stylishOn && <p className="text-body-sm text-on-surface-variant">An event for the Stylish stores goes only to them, so the other portals are off.</p>}
+      {offers && othersOn && <p className="text-body-sm text-on-surface-variant">The Stylish stores go in an event of their own, so they are off while another portal is picked.</p>}
     </div>
   );
 }
@@ -885,7 +901,7 @@ function PromoPortals({ promo, canEdit, onChanged }) {
     return (
       <div className="space-y-2 text-body-sm">
         <span className="text-label-lg text-on-surface-variant">Portals</span>
-        <PortalPicker value={value} onChange={setValue} />
+        <PortalPicker value={value} onChange={setValue} kind={promo.kind} />
         <span className="inline-flex items-center gap-3">
           <button type="button" onClick={save} disabled={busy || !value.length} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
           <button type="button" onClick={() => { setValue(promo.marketplaces ?? []); setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
@@ -920,6 +936,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [endsOn, setEndsOn] = useState('');
   const [mode, setMode] = useState('file'); // 'file' | 'paste'
   const [portals, setPortals] = useState([]); // PROMO_CHANNELS keys — flash deals and special events go to the portals picked here
+  const [stylish, setStylish] = useState(emptyStylishDraft); // the Stylish stores' discount, when the event goes to one
+  const stylishStores = useMemo(() => stylishMarkets(portals), [portals]);
   const [text, setText] = useState('');
   // One file per market — memberships differ, so each market has its own
   // template and slot. Either alone is enough to create the promotion.
@@ -987,10 +1005,17 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       // (monthly rule 2026-10-02, applied by the database). A pasted SKU list
       // takes everything from the level.
       const fromFile = monthly && mode === 'file';
+      let stylishDiscount = null;
+      if (stylishStores.length) {
+        const built = buildStylishDiscount(stylish, stylishStores);
+        if (built.error) throw new Error(built.error);
+        stylishDiscount = built.discount;
+        await checkStylishDiscount(stylishDiscount);
+      }
       task = startTask(`Create ${PROMOTION_KINDS[kind].toLowerCase()}`, { detail: fromFile ? 'Checking the SKUs against the PIM…' : `Reading the ${levelLabel(KIND_LEVEL[kind])} prices…` });
       const res = fromFile
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows, task })
-        : await createPromotionFromLevels({ ...payload, skus: skuList.skus, marketplaces: monthly ? [] : portals, task });
+        : await createPromotionFromLevels({ ...payload, skus: [...new Set([...skuList.skus, ...stylishPricedSkus(stylishDiscount)])], marketplaces: monthly ? [] : portals, stylish_discount: stylishDiscount, task });
       const notes = [];
       if (res.notInPim.length) notes.push(`Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
       if (res.noLevel?.length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in the PIM: ${res.noLevel.join(', ')}`);
@@ -1004,7 +1029,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
-  const canCreate = !monthly ? skuList.skus.length > 0 && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : skuList.skus.length > 0;
+  const canCreate = !monthly ? (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : skuList.skus.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
   // those days makes no sense in a flash deal — warn before creating.
@@ -1136,8 +1161,13 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           <span className="text-label-lg text-on-surface-variant">Portals</span>
           <p className="text-body-sm text-on-surface-variant mt-0.5">Where this {PROMOTION_KINDS[kind].toLowerCase()} goes. Pick one or several.</p>
           <div className="mt-2">
-            <PortalPicker value={portals} onChange={setPortals} />
+            <PortalPicker value={portals} onChange={setPortals} kind={kind} />
           </div>
+          {stylishStores.length > 0 && (
+            <div className="mt-3">
+              <StylishDiscountFields draft={stylish} onChange={setStylish} markets={stylishStores} />
+            </div>
+          )}
         </div>
         )}
         {monthly && (
@@ -1172,7 +1202,13 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             placeholder={'S-822H\nK-131NR\n…'}
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
-          <span className="block mt-1 text-body-sm text-on-surface-variant">{`Prices come from each product's ${levelLabel(KIND_LEVEL[kind])} level (MAP and WC of that marketplace). Once created, generate its file or schedule it from the card.`}</span>
+          <span className="block mt-1 text-body-sm text-on-surface-variant">
+            {!stylishStores.length
+              ? `Prices come from each product's ${levelLabel(KIND_LEVEL[kind])} level (MAP and WC of that marketplace). Once created, generate its file or schedule it from the card.`
+              : stylish.mode === 'percent'
+                ? 'The Stylish discount above applies to these products.'
+                : 'Not needed by price: the products in the price boxes join the event by themselves.'}
+          </span>
         </label>
       ) : mode === 'file' ? (
         <div className="grid sm:grid-cols-2 gap-4">
@@ -1473,12 +1509,13 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
           {(promo.kind ?? 'monthly') !== 'monthly' && (
             <PromoPortals key={(promo.marketplaces ?? []).join(',')} promo={promo} canEdit={canEdit && promo.status !== 'ended'} onChanged={onChanged} />
           )}
+          <PromoStylishDiscount key={`stylish-${JSON.stringify(promo.stylish_discount)}`} promo={promo} canEdit={canEdit && promo.status !== 'ended'} onChanged={onChanged} />
 
           {canEdit && (
             <div className="flex items-center gap-2 flex-wrap">
               {promo.status === 'draft' && (
                 <>
-                  {(!promo.marketplaces?.length || promo.marketplaces.some((k) => k.startsWith('wix_'))) && (
+                  {(!promo.marketplaces?.length || promo.marketplaces.some((k) => k.startsWith('wix_') && !STYLISH_CHANNELS.includes(k))) && (
                   <ActionButton
                     icon={Play}
                     label="Apply to store pricing"
@@ -2232,6 +2269,21 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   const [market, setMarket] = useState('all');
   const [open, setOpen] = useState(defaultOpen);
 
+  // How many discounts of this event each Stylish store carries now.
+  const [stylishLive, setStylishLive] = useState({});
+  const goesToStylish = (promo.marketplaces ?? []).some((k) => STYLISH_CHANNELS.includes(k));
+  useEffect(() => {
+    if (!goesToStylish) return undefined;
+    let active = true;
+    supabase.from('stylish_event_discounts').select('site').eq('promotion_id', promo.id).eq('confirmed', true).then(({ data }) => {
+      if (!active) return;
+      const live = {};
+      for (const r of data ?? []) live[`wix_${r.site}`] = (live[`wix_${r.site}`] ?? 0) + 1;
+      setStylishLive(live);
+    });
+    return () => { active = false; };
+  }, [promo.id, goesToStylish]);
+
   useEffect(() => {
     let active = true;
     supabase
@@ -2311,6 +2363,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
   }
 
   const allRows = PROMO_CHANNELS
+    .filter((ch) => !ch.kinds || ch.kinds.includes(promo.kind ?? 'monthly'))
     .map((ch) => {
       const template = promoTemplateFor(ch, templates, promo.kind ?? 'monthly');
       const templatesAll = promoTemplatesFor(ch, templates, promo.kind ?? 'monthly');
@@ -2326,7 +2379,18 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       const pinnedLevel = channelLevelFor(ch, promo);
       if (pinnedLevel) detail = `${detail} ${pinnedLevel.charAt(0).toUpperCase() + pinnedLevel.slice(1)} level prices, read from the products when the file is generated.`.trim();
       if (ch.kind === 'api') {
-        if (ch.key === 'bestbuy') {
+        if (ch.discounts) {
+          // A Stylish store: what stylish-event-discounts has put on it.
+          const w = promoWindow(promo, ch.market);
+          const today = etToday();
+          const live = stylishLive[ch.key] ?? 0;
+          tone = 'muted';
+          if (!promo.stylish_discount) status = 'No discount set';
+          else if (promo.status === 'ended' || today > w.end) status = live ? `Taking off ${live}` : 'Back at MSRP';
+          else if (today < w.start) status = `Starts ${dayOf(w.start)}`;
+          else if (live) { status = `${live} live`; tone = 'ok'; }
+          else status = 'Going on…';
+        } else if (ch.key === 'bestbuy') {
           const sch = promo.bb_schedule;
           status = sch ? `${sch.scheduled} scheduled` : 'Not scheduled';
           tone = sch ? 'ok' : 'muted';
