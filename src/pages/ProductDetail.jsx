@@ -1665,7 +1665,7 @@ function PricingTab({ product, edit, onAddPricing }) {
               edit={edit}
               msrpKey="msrp_cad"
               columns={[
-                { label: 'MAP', help: 'All marketplaces. Blue is the base MAP; Orange the monthly-promotion level; Purple the flash deal / special event level.', keys: ['map_cad', 'map_orange_cad', 'map_purple_cad'] },
+                { label: 'MAP', help: 'All marketplaces. Blue is the base MAP; Orange the monthly-promotion level; Purple the flash deal / peak season level.', keys: ['map_cad', 'map_orange_cad', 'map_purple_cad'] },
                 { label: 'WC · Rona / Home Depot', keys: ['cost_cad_rona_hd', 'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple'] },
                 // Small Online Dealers only (user, 2026-10-06): Wayfair Canada is billed
                 // in USD from its own levels (the Wayfair Canada section below).
@@ -1679,7 +1679,7 @@ function PricingTab({ product, edit, onAddPricing }) {
               edit={edit}
               msrpKey="msrp_usd"
               columns={[
-                { label: 'MAP', help: 'Blue is the base MAP; Orange the monthly-promotion level; Purple the flash deal / special event level.', keys: ['map_usd', 'map_orange_usd', 'map_purple_usd'] },
+                { label: 'MAP', help: 'Blue is the base MAP; Orange the monthly-promotion level; Purple the flash deal / peak season level.', keys: ['map_usd', 'map_orange_usd', 'map_purple_usd'] },
                 { label: "WC · Lowe's / HD USA / Small Online / BB&B", keys: ['cost_usd_lowes_sod_bbb', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple'] },
                 { label: 'WC · Wayfair', keys: ['cost_usd_wayfair', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple'] },
                 { label: 'WC · Menards', keys: ['cost_usd_menards', 'cost_usd_menards_orange', 'cost_usd_menards_purple'] },
@@ -2585,7 +2585,7 @@ function BulletPointsEditor({ product, edit, attrKey = 'bullet_points' }) {
 const PRICE_TIERS = [
   { key: 'blue', label: 'Blue', hint: 'Base', dot: 'bg-[#4a8ee6]' },
   { key: 'orange', label: 'Orange', hint: 'Monthly promotion', dot: 'bg-[#f0b27a]' },
-  { key: 'purple', label: 'Purple', hint: 'Flash deal / special event', dot: 'bg-[#7e3fbd]' },
+  { key: 'purple', label: 'Purple', hint: 'Flash deal / peak season', dot: 'bg-[#7e3fbd]' },
 ];
 function PriceTierTable({ product, edit, msrpKey, columns }) {
   const { isEditing, form, setField } = edit;
@@ -2618,7 +2618,7 @@ function PriceTierTable({ product, edit, msrpKey, columns }) {
         <table className="w-full text-body-sm">
           <thead>
             <tr className="text-label-sm text-on-surface-variant">
-              <th className="text-left font-medium pb-2 pr-4 w-56">Level<HelpTip text="WC = wholesale cost per channel. Blue is the base level; Orange the monthly promotion; Purple flash deals and special events." /></th>
+              <th className="text-left font-medium pb-2 pr-4 w-56">Level<HelpTip text="WC = wholesale cost per channel. Blue is the base level; Orange the monthly promotion; Purple flash deals and peak season events." /></th>
               {columns.map((c) => (
                 <th key={c.label} className="text-right font-medium pb-2 pl-4 whitespace-nowrap">
                   {c.label}{c.help ? <HelpTip text={c.help} /> : null}

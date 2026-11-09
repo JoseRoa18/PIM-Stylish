@@ -1,0 +1,93 @@
+import { supabase } from '@/lib/supabase';
+import { logActivity, getActivityActor } from '@/features/activity/api/activityLog';
+import { excludedSkus } from './promotions';
+
+// Coupons on Amazon and Wayfair (user, 2026-11-09): a record kept in the PIM,
+// by percentage or by money, each with its products. Nothing here reaches a
+// marketplace or changes an expected price.
+
+export async function listCoupons() {
+  const { data, error } = await supabase
+    .from('coupons')
+    .select('id, name, marketplace, discount_type, discount_value, starts_on, ends_on, ended_at, created_at, coupon_products(count), creator:profiles(full_name, email)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((c) => ({
+    ...c,
+    sku_count: c.coupon_products?.[0]?.count ?? 0,
+    created_by_name: c.creator?.full_name || c.creator?.email || null,
+  }));
+}
+
+export async function getCouponSkus(couponId) {
+  const { data, error } = await supabase.from('coupon_products').select('sku').eq('coupon_id', couponId).order('sku');
+  if (error) throw error;
+  return (data ?? []).map((r) => r.sku);
+}
+
+const sameCoupon = (c) => `${c.name.toLowerCase()}|${c.marketplace}|${c.starts_on}`;
+
+/**
+ * What can really be created from a list of coupons: each comes back with its
+ * `skus` reduced to the PIM's products that are not switched off for that
+ * marketplace, what was left out (`notInPim`, `excluded`) and `exists` when a
+ * coupon of that name, marketplace and first day is already there.
+ */
+export async function reviewCoupons(list) {
+  const all = [...new Set(list.flatMap((c) => c.skus))];
+  const known = new Set();
+  for (let i = 0; i < all.length; i += 200) {
+    const { data, error } = await supabase.from('products').select('sku').in('sku', all.slice(i, i + 200));
+    if (error) throw error;
+    for (const p of data ?? []) known.add(p.sku);
+  }
+  const { data: existing, error } = await supabase.from('coupons').select('name, marketplace, starts_on').in('name', [...new Set(list.map((c) => c.name))]);
+  if (error) throw error;
+  const taken = new Set((existing ?? []).map(sameCoupon));
+  return Promise.all(list.map(async (c) => {
+    const inPim = c.skus.filter((s) => known.has(s));
+    const off = inPim.length ? await excludedSkus(c.marketplace, inPim) : new Set();
+    return { ...c, skus: inPim.filter((s) => !off.has(s)), notInPim: c.skus.filter((s) => !known.has(s)), excluded: [...off].sort(), exists: taken.has(sameCoupon(c)) };
+  }));
+}
+
+/** Creates the coupons of a reviewed list. `task` (optional) counts them. */
+export async function createCoupons(reviewed, { task = null } = {}) {
+  const list = reviewed.filter((c) => c.skus.length && !c.exists);
+  if (!list.length) throw new Error('There is no coupon to create.');
+  for (const [i, c] of list.entries()) {
+    task?.count(i, list.length, `Coupon ${i + 1} of ${list.length} · ${c.name}`);
+    const { data, error } = await supabase
+      .from('coupons')
+      .insert({ name: c.name, marketplace: c.marketplace, discount_type: c.discount_type, discount_value: c.discount_value, starts_on: c.starts_on, ends_on: c.ends_on, created_by: getActivityActor()?.id ?? null })
+      .select('id')
+      .single();
+    if (error) throw error;
+    for (let n = 0; n < c.skus.length; n += 200) {
+      const { error: rowsError } = await supabase.from('coupon_products').insert(c.skus.slice(n, n + 200).map((sku) => ({ coupon_id: data.id, sku })));
+      if (rowsError) throw rowsError;
+    }
+  }
+  task?.progress(1);
+  logActivity({
+    action: 'create',
+    entityType: 'promotion',
+    entityId: 'coupons',
+    summary: `Created ${list.length} coupon${list.length === 1 ? '' : 's'}: ${list.map((c) => c.name).slice(0, 5).join(', ')}${list.length > 5 ? '…' : ''}`,
+    metadata: { coupons: list.map((c) => ({ name: c.name, marketplace: c.marketplace, type: c.discount_type, value: c.discount_value, starts_on: c.starts_on, ends_on: c.ends_on, skus: c.skus.length })) },
+  });
+  return list.length;
+}
+
+/** Over before its last day (the marketplace's coupon was stopped). */
+export async function endCoupon(coupon) {
+  const { error } = await supabase.from('coupons').update({ ended_at: new Date().toISOString() }).eq('id', coupon.id);
+  if (error) throw error;
+  logActivity({ action: 'update', entityType: 'promotion', entityId: 'coupons', summary: `Ended coupon "${coupon.name}"`, metadata: { id: coupon.id } });
+}
+
+export async function deleteCoupon(coupon) {
+  const { error } = await supabase.from('coupons').delete().eq('id', coupon.id);
+  if (error) throw error;
+  logActivity({ action: 'delete', entityType: 'promotion', entityId: 'coupons', summary: `Deleted coupon "${coupon.name}"`, metadata: { id: coupon.id, marketplace: coupon.marketplace, starts_on: coupon.starts_on, ends_on: coupon.ends_on } });
+}

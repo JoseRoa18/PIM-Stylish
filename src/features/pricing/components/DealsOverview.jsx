@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { CalendarClock, ChevronLeft, ChevronRight, Clock, CheckCircle2, Radio } from 'lucide-react';
 import { PROMO_CHANNELS } from '@/features/pricing/lib/promoChannels';
 import { promoWindow, etToday } from '@/features/pricing/lib/promoCalendar';
-import { PROMOTION_KINDS } from '@/features/pricing/api/promotions';
+import { KIND_NOUN } from '@/features/pricing/api/promotions';
 
 // Flash deals / special events at a glance (asked for 2026-10-01): what runs
 // on each marketplace today and when it ends, and the history of a month, a
@@ -65,13 +65,13 @@ function endsText(daysLeft) {
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
- * @param kind        'flash' | 'special'
+ * @param kind        'flash' | 'mk_event' | 'special' | 'coupon'
  * @param promotions  this kind's promotions (listPromotions rows)
  * @param onOpen      (promoId) => void — opens the deal's card below
  */
 export default function DealsOverview({ kind, promotions, onOpen }) {
   const today = etToday();
-  const noun = PROMOTION_KINDS[kind].toLowerCase();
+  const noun = KIND_NOUN[kind];
 
   const deals = useMemo(
     () => promotions.map((promo) => {

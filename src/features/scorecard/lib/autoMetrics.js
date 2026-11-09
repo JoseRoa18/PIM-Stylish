@@ -21,10 +21,10 @@ export const AUTO_KEYS = {
   map_pct: { label: 'MAP % — share of priced products at the expected price (Price Alignment)', unit: 'percent' },
   promo_skus: { label: '# SKUs in the monthly promotion of the week', unit: 'number' },
   flash_skus: { label: '# SKUs in flash deals of the week', unit: 'number' },
-  event_skus: { label: '# SKUs in special events of the week', unit: 'number' },
+  event_skus: { label: '# SKUs in peak season events of the week', unit: 'number' },
   flash_count: { label: '# flash deals of the week', unit: 'number' },
-  event_count: { label: '# special events of the week', unit: 'number' },
-  deal_count: { label: '# flash deals and special events of the week', unit: 'number' },
+  event_count: { label: '# peak season events of the week', unit: 'number' },
+  deal_count: { label: '# flash deals, MK events and peak season events of the week', unit: 'number' },
   // Odoo (user, 2026-11-05): a $0 order (a spare part, a warranty
   // replacement, an open box sent free) is no sale; Sales keep the shipping
   // charged, as Odoo's own sales report. Odoo records almost no cancellation
@@ -120,7 +120,7 @@ export async function computeAutoValues(boardKey, metrics, column, today) {
         out.set(m.id, skus.size);
         continue;
       }
-      const kinds = { flash_skus: ['flash'], flash_count: ['flash'], event_skus: ['special'], event_count: ['special'], deal_count: ['flash', 'special'] }[m.auto_key];
+      const kinds = { flash_skus: ['flash', 'mk_event'], flash_count: ['flash', 'mk_event'], event_skus: ['special'], event_count: ['special'], deal_count: ['flash', 'mk_event', 'special'] }[m.auto_key];
       const deals = promotions.filter((p) => {
         if (!kinds.includes(p.kind) || endedBy(p, week)) return false;
         if (!(p.marketplaces ?? []).some((c) => channels.includes(c))) return false;

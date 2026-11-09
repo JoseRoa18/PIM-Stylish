@@ -785,7 +785,7 @@ Deno.serve(async (req) => {
               if (live) {
                 const map = Number(mk === "us" ? prod?.map_usd : prod?.map_cad) || null;
                 // BB&B and Overstock take flash deals at a level the promotion's row does not hold.
-                const expected = running ? (running.kind === "flash" && boardKey === "bbb_overstock" ? null : promoPrice > 0 ? promoPrice : null) : map;
+                const expected = running ? ((running.kind === "flash" || running.kind === "mk_event") && boardKey === "bbb_overstock" ? null : promoPrice > 0 ? promoPrice : null) : map;
                 if (expected != null && priceOff(Number(live.price), expected)) todo.push(`the store shows ${money(Number(live.price))} against the expected ${money(expected)}: correct the price`);
                 if (running) todo.push("review its images, title and reviews");
                 else {

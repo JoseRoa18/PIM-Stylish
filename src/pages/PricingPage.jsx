@@ -52,7 +52,7 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
-import { PROMOTION_KINDS, monthlyOverlap, KIND_LEVEL, levelLabel, promotionLevel, onMarketList } from '@/features/pricing/api/promotions';
+import { PROMOTION_KINDS, KIND_NOUN, monthlyOverlap, KIND_LEVEL, levelLabel, promotionLevel, onMarketList } from '@/features/pricing/api/promotions';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
@@ -63,6 +63,7 @@ import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promo
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import DealsOverview from '@/features/pricing/components/DealsOverview';
+import CouponsTab from '@/features/pricing/components/CouponsTab';
 import StylishDiscountFields, { PromoStylishDiscount } from '@/features/pricing/components/StylishDiscountFields';
 import { buildStylishDiscount, draftHasPrices, emptyStylishDraft, stylishMarkets } from '@/features/pricing/lib/stylishDraft';
 import { STYLISH_CHANNELS } from '@/features/pricing/lib/stylishDiscount';
@@ -190,12 +191,12 @@ export default function PricingPage() {
   const confirm = useConfirm();
   const location = useLocation();
   const navigate = useNavigate();
-  // 'monthly' | 'flash' | 'special' — one section per promotion kind — and 'alignment'.
+  // 'monthly' | 'flash' | 'mk_event' | 'special' — one section per promotion kind — and 'coupons', 'alignment'.
   // The Dashboard's Price Alignment card lands on the alignment tab, on the
   // channel picked there (router state { pricingTab, alignSite }).
   const [tab, setTab] = useState(() => (location.state?.pricingTab === 'alignment' ? 'alignment' : 'monthly'));
   const [alignSite] = useState(() => location.state?.alignSite ?? null);
-  const kindTab = tab !== 'alignment';
+  const kindTab = tab !== 'alignment' && tab !== 'coupons';
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
@@ -248,24 +249,30 @@ export default function PricingPage() {
     <div className="max-w-5xl space-y-6">
       <div>
         <h1 className="text-display-lg text-on-surface">Pricing</h1>
-        <p className="text-body-md text-on-surface-variant mt-1">
+        <p className="text-body-md text-on-surface-variant mt-3">
           {tab === 'monthly' && 'Monthly promotions for all marketplaces: the market calendar drives them and the boundaries run on their own.'}
           {tab === 'flash' && 'Flash deals: short promotions on their own dates, pushed and exported by hand from here.'}
-          {tab === 'special' && 'Special events: promotions on their own dates for a sale event, pushed and exported by hand from here.'}
+          {tab === 'mk_event' && 'MK events: promotions on their own dates at the Orange level (Bed Bath & Beyond and Overstock at Purple), pushed and exported by hand from here.'}
+          {tab === 'special' && 'Peak season events: Way Day, Prime Day, Black Friday, Boxing Day. On their own dates at the Purple level, pushed and exported by hand from here.'}
+          {tab === 'coupons' && 'Coupons on Amazon and Wayfair, by percentage or by money. Several can run at once, each with its products.'}
           {tab === 'alignment' && 'What each marketplace shows against the PIM price, promo aware.'}
         </p>
       </div>
 
-      <div className="inline-flex max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container p-1" role="tablist" aria-label="Pricing sections">
-        {[['monthly', 'Monthly Promotions'], ['flash', 'Flash Deals'], ['special', 'Special Events'], ['alignment', 'Price Alignment']].map(([key, label]) => (
+      {/* Page sections: tabs on a rule, like Listing Health's channels (the pill
+          track was the page's own gray, so the tabs looked adrift). The rule is
+          an inset shadow: this row scrolls sideways on a phone, and a border
+          pulled over it with a negative margin would be clipped. */}
+      <div className="flex max-w-full overflow-x-auto scrollbar-hide shadow-[inset_0_-1px_0_0_var(--color-outline-variant)]" role="tablist" aria-label="Pricing sections">
+        {[['monthly', 'Monthly Promotions'], ['flash', 'Flash Deals'], ['mk_event', 'MK Events'], ['special', 'Peak Season Events'], ['coupons', 'Coupons'], ['alignment', 'Price Alignment']].map(([key, label]) => (
           <button
             key={key}
             type="button"
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`px-4 sm:px-5 py-2 rounded-full text-label-lg font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
-              tab === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+            className={`px-4 py-3 text-body-md whitespace-nowrap flex-shrink-0 border-b-2 transition-colors focus-visible:outline-offset-[-2px]! ${
+              tab === key ? 'border-primary text-primary font-semibold' : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
             }`}
           >
             {label}
@@ -281,6 +288,8 @@ export default function PricingPage() {
 
       {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} initialSite={alignSite} />}
 
+      {tab === 'coupons' && <CouponsTab canEdit={canEdit} confirm={confirm} />}
+
       {kindTab && canEdit && (
         <div>
           <button
@@ -290,7 +299,7 @@ export default function PricingPage() {
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
           >
             <Plus className="w-4 h-4" />
-            New {PROMOTION_KINDS[tab].toLowerCase()}
+            New {KIND_NOUN[tab]}
           </button>
         </div>
       )}
@@ -327,9 +336,9 @@ export default function PricingPage() {
           <div className="inline-flex w-12 h-12 items-center justify-center rounded-xl bg-surface-container mb-3">
             <Tag className="w-6 h-6 text-on-surface-variant" strokeWidth={1.5} />
           </div>
-          <p className="text-title-md text-on-surface font-medium">No {PROMOTION_KINDS[tab].toLowerCase()}s yet</p>
+          <p className="text-title-md text-on-surface font-medium">No {KIND_NOUN[tab]}s yet</p>
           <p className="text-body-md text-on-surface-variant mt-1 max-w-md mx-auto">
-            {tab === 'monthly' ? "Create the month's promotion from its SKU list — every price comes from the products' Orange level in Pricing." : `Create a ${PROMOTION_KINDS[tab].toLowerCase()} with its dates, its SKUs and the portal it goes to. Prices come from the ${levelLabel(KIND_LEVEL[tab])} level.`}
+            {tab === 'monthly' ? "Create the month's promotion from its SKU list — every price comes from the products' Orange level in Pricing." : `Create a new ${KIND_NOUN[tab]} with its dates, its SKUs and the portal it goes to. Prices come from the ${levelLabel(KIND_LEVEL[tab])} level.`}
           </p>
         </div>
       ) : (
@@ -770,7 +779,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                           {p.expected != null ? (
                             <span className={`px-2 py-0.5 rounded-full text-label-md font-medium ${p.source === 'promo' ? 'bg-tertiary-container/60 text-on-tertiary-container' : 'bg-surface-container text-on-surface-variant'}`}>
                               {p.source === 'promo'
-                                ? (p.promo_kind === 'flash' ? 'Flash deal' : p.promo_kind === 'special' ? 'Special event' : 'Promo')
+                                ? (p.promo_kind && p.promo_kind !== 'monthly' ? PROMOTION_KINDS[p.promo_kind] ?? 'Promo' : 'Promo')
                                 : (cfg.priceField.startsWith('map') ? 'MAP' : 'MSRP')}
                             </span>
                           ) : (
@@ -1012,7 +1021,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         stylishDiscount = built.discount;
         await checkStylishDiscount(stylishDiscount);
       }
-      task = startTask(`Create ${PROMOTION_KINDS[kind].toLowerCase()}`, { detail: fromFile ? 'Checking the SKUs against the PIM…' : `Reading the ${levelLabel(KIND_LEVEL[kind])} prices…` });
+      task = startTask(`Create ${KIND_NOUN[kind]}`, { detail: fromFile ? 'Checking the SKUs against the PIM…' : `Reading the ${levelLabel(KIND_LEVEL[kind])} prices…` });
       const res = fromFile
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows, task })
         : await createPromotionFromLevels({ ...payload, skus: [...new Set([...skuList.skus, ...stylishPricedSkus(stylishDiscount)])], marketplaces: monthly ? [] : portals, stylish_discount: stylishDiscount, task });
@@ -1101,7 +1110,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
       <div className="flex items-center justify-between">
-        <h2 className="text-title-md text-on-surface font-semibold">New {PROMOTION_KINDS[kind].toLowerCase()}</h2>
+        <h2 className="text-title-md text-on-surface font-semibold">New {KIND_NOUN[kind]}</h2>
         <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant">
           <X className="w-4 h-4" />
         </button>
@@ -1159,7 +1168,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         {!monthly && (
         <div className="block sm:col-span-3">
           <span className="text-label-lg text-on-surface-variant">Portals</span>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">Where this {PROMOTION_KINDS[kind].toLowerCase()} goes. Pick one or several.</p>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">Where this {KIND_NOUN[kind]} goes. Pick one or several.</p>
           <div className="mt-2">
             <PortalPicker value={portals} onChange={setPortals} kind={kind} />
           </div>
@@ -1300,7 +1309,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       )}
       {overlap?.skus?.length > 0 && (
         <p className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">
-          {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). A {PROMOTION_KINDS[kind].toLowerCase()} adds nothing for them.
+          {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). This {KIND_NOUN[kind]} adds nothing for them.
         </p>
       )}
       {error && <p role="alert" className="text-body-sm text-on-error-container bg-error-container/60 rounded-lg px-3 py-2">{error}</p>}
@@ -1852,7 +1861,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         {busy === 'skus' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save SKUs
                       </button>
                       <button type="button" onClick={() => setEditingSkus(false)} disabled={busy === 'skus'} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
-                      <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take their {levelLabel(promotionLevel(promo))} prices, removed ones leave the {PROMOTION_KINDS[promo.kind]?.toLowerCase() ?? 'promotion'}.</span>
+                      <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take their {levelLabel(promotionLevel(promo))} prices, removed ones leave the {KIND_NOUN[promo.kind] ?? 'promotion'}.</span>
                     </div>
                   </div>
                 )}

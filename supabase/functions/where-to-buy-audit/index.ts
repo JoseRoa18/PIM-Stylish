@@ -1779,7 +1779,7 @@ async function dealReread(opts: { asOf?: string; run: "morning" | "afternoon"; d
   const morning = opts.run === "morning";
   const since = prevPeriod(prevPeriod(periodOfDay(today)));
   const [deals, saved] = await Promise.all([
-    rest<PromoRow[]>(`promotions?select=id,name,kind,status,period,marketplaces,${PROMO_DATE_COLUMNS},promotion_prices(sku,in_ca,in_us,promo_price_cad,promo_price_usd)&kind=in.(flash,special)&period=gte.${since}`),
+    rest<PromoRow[]>(`promotions?select=id,name,kind,status,period,marketplaces,${PROMO_DATE_COLUMNS},promotion_prices(sku,in_ca,in_us,promo_price_cad,promo_price_usd)&kind=in.(flash,mk_event,special)&period=gte.${since}`),
     rest<Array<{ value: DealReads }>>(`app_settings?select=value&key=eq.${DEAL_READS_KEY}`),
   ]);
   const before = saved[0]?.value ?? {};

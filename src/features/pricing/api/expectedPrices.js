@@ -24,6 +24,9 @@ export function sharedLoad(key, loader) {
   return promise;
 }
 
+// The kinds that run on their own dates on the marketplaces picked for them.
+const DEAL_KINDS = ['flash', 'mk_event', 'special'];
+
 // The day a flash deal / special event reaches the store. BB&B and Overstock
 // switch at ~10-11 PM of the start date (`dealStartsAtNight` in pageStores.js),
 // so their deal is expected from the next day: the pages read on the start
@@ -85,7 +88,7 @@ export async function loadExpectedPrices(cfg) {
       const { data, error } = await supabase
         .from('promotions')
         .select(`name, kind, period, status, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku, ${promoField}, in_ca, in_us)`)
-        .in('kind', ['flash', 'special'])
+        .in('kind', DEAL_KINDS)
         .neq('status', 'ended')
         .contains('marketplaces', [cfg.promoChannel]);
       if (error) throw error;
@@ -140,7 +143,7 @@ export async function loadPriceChangeDays(cfg) {
     const { data, error } = await supabase
       .from('promotions')
       .select(`period, status, ${PROMO_DATE_COLUMNS}, promotion_prices(sku, ${promoField}, in_ca, in_us)`)
-      .in('kind', ['flash', 'special'])
+      .in('kind', DEAL_KINDS)
       .contains('marketplaces', [cfg.promoChannel])
       .gte('period', since);
     if (error) throw error;

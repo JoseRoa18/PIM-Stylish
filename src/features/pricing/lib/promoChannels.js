@@ -25,7 +25,7 @@ import { templatePurpose } from '@/features/templates/api/templates';
  * level columns instead of the promotion's rows (see channelLevelFor and
  * promotionLevel).
  */
-const BEYOND_LEVELS = { flash: 'purple' };
+const BEYOND_LEVELS = { flash: 'purple', mk_event: 'purple' };
 
 /** The price level a channel pins this promotion's kind to, or null (the kind's usual level, see KIND_LEVEL in api/promotions). */
 export function channelLevelFor(channel, promotion) {

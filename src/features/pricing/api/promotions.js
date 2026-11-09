@@ -191,7 +191,7 @@ export const LEVEL_FIELDS = {
 //     from the level, and a level change in Pricing refreshes those rows.
 // Each market keeps its own list (in_ca / in_us). The same levels live in
 // KIND_LEVEL here and in promotion_level_of() there — keep them in step.
-export const KIND_LEVEL = { monthly: 'orange', flash: 'orange', special: 'purple' };
+export const KIND_LEVEL = { monthly: 'orange', flash: 'orange', mk_event: 'orange', special: 'purple' };
 export const levelLabel = (tier) => (tier === 'purple' ? 'Purple' : 'Orange');
 export function promotionLevel(promotion, channel = null) {
   const kind = promotion?.kind ?? 'monthly';
@@ -298,7 +298,7 @@ function assertStylishAlone(portals) {
 export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [], stylish_discount = null, task = null }) {
   assertKindDates(kind, starts_on, ends_on);
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
-  if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} is for.`);
+  if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${KIND_NOUN[kind] ?? kind} is for.`);
   assertStylishAlone(portals);
   const wanted = [...new Set(skus)];
   if (!wanted.length) throw new Error('Paste at least one SKU.');
@@ -327,7 +327,7 @@ export async function createPromotionFromLevels({ name, period, kind = 'flash', 
     action: 'create',
     entityType: 'promotion',
     entityId: String(promo.id),
-    summary: `Created ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} "${name}" from the ${level} level (${valid.length} SKUs${portals.length ? `, for ${portals.join(', ')}` : ''})`,
+    summary: `Created ${KIND_NOUN[kind] ?? kind} "${name}" from the ${level} level (${valid.length} SKUs${portals.length ? `, for ${portals.join(', ')}` : ''})`,
     metadata: { period, kind, tier: level, marketplaces: portals, skus: valid.length, not_in_pim: notInPim.length, no_level: noLevel.length },
   });
   return { promotion: promo, added: valid.length, notInPim, noLevel };
@@ -402,9 +402,12 @@ export async function updatePromotionStylishDiscount(promotion, discount) {
 // Promotion kinds: 'monthly' follows the market calendar and is automated on
 // its boundaries; 'flash' (flash deal) and 'special' (special event) always run
 // on their own dates and are pushed / exported by hand from their sections.
-export const PROMOTION_KINDS = { monthly: 'Monthly promotion', flash: 'Flash deal', special: 'Special event' };
+// 'special' keeps its key; people read Peak Season Events (user, 2026-11-09).
+export const PROMOTION_KINDS = { monthly: 'Monthly promotion', flash: 'Flash deal', mk_event: 'MK event', special: 'Peak season event' };
+/** The word inside a sentence (MK keeps its capitals). `coupon`: the Coupons tab's overview. */
+export const KIND_NOUN = { monthly: 'monthly promotion', flash: 'flash deal', mk_event: 'MK event', special: 'peak season event', coupon: 'coupon' };
 function assertKindDates(kind, starts_on, ends_on) {
-  if (kind !== 'monthly' && !(starts_on && ends_on)) throw new Error(`A ${PROMOTION_KINDS[kind]?.toLowerCase() ?? kind} needs a first and a last day.`);
+  if (kind !== 'monthly' && !(starts_on && ends_on)) throw new Error(`This ${KIND_NOUN[kind] ?? kind} needs a first and a last day.`);
 }
 // Dates are per country (rule 2026-09-30): a monthly promotion created with
 // custom dates gets them on both markets (each is changed on its card) and
