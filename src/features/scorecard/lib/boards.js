@@ -27,7 +27,15 @@ export const BOARDS = [
       us: { channels: ['wayfair_us'], align: ['wayfair_us'] },
     },
   },
-  { key: 'homedepot_ca', label: 'Home Depot', serverFill: true, markets: { ca: { channels: ['homedepot_ca'], align: ['homedepot_ca'] } } },
+  {
+    key: 'homedepot_ca', // the key stays: the tab holds both countries since 2026-11-09
+    label: 'Home Depot',
+    serverFill: true,
+    markets: {
+      ca: { channels: ['homedepot_ca'], align: ['homedepot_ca'] },
+      us: { channels: ['homedepot_us'], align: ['homedepot_us'] },
+    },
+  },
   { key: 'lowes', label: "Lowe's", serverFill: true, markets: { us: { channels: ['lowes_us'], align: ['lowes_us'] } } },
   { key: 'menards', label: 'Menards', serverFill: true, markets: { us: { channels: ['menards'], align: ['menards'] } } },
   { key: 'bestbuy', label: 'Best Buy', serverFill: true, markets: { ca: { channels: ['bestbuy'], align: ['bestbuy'] } } },

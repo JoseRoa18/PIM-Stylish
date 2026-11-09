@@ -86,7 +86,11 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
     ca: { odoo: sold([MP.wayfair], CA), company: CA, stock: "ca", listed: { wayfair: "ca" }, promo: ["wayfair_ca"], pages: ["wayfair_ca"] },
     us: { odoo: sold([MP.wayfair], US), company: US, stock: "us", listed: { wayfair: "us" }, promo: ["wayfair_us"], pages: ["wayfair_us"] },
   },
-  homedepot_ca: { ca: { odoo: sold([MP.homedepot], CA), company: CA, stock: "ca", listed: { alias: "Home Depot CA" }, promo: ["homedepot_ca"], pages: ["homedepot_ca"] } },
+  // The key stays homedepot_ca: the tab holds both countries since 2026-11-09.
+  homedepot_ca: {
+    ca: { odoo: sold([MP.homedepot], CA), company: CA, stock: "ca", listed: { alias: "Home Depot CA" }, promo: ["homedepot_ca"], pages: ["homedepot_ca"] },
+    us: { odoo: sold([MP.homedepot], US), company: US, stock: "us", listed: { alias: "Home Depot US" }, promo: ["homedepot_us"], pages: ["homedepot_us"] },
+  },
   lowes: { us: { odoo: sold([MP.lowes], US), company: US, stock: "us", listed: { alias: "Lowe's US" }, promo: ["lowes_us"], pages: ["lowes_us"] } },
   // Menards has no aliases in the PIM: what it lists = the products with a Menards link.
   menards: { us: { odoo: sold([MP.menards], US), company: US, stock: "us", listed: { wtb: "menards" }, promo: ["menards"], pages: ["menards"] } },
