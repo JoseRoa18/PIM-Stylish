@@ -29,8 +29,11 @@ export const PAGE_STORES = [
   // BB&B and Overstock keep a price in a sold-out page's data (user,
   // 2026-11-06): a page read sold out or with its SKU not confirmed is still
   // listed with the problems but counts in no tile and no score (`unsureUncounted`).
-  { key: 'bbb_us', label: 'Bed Bath & Beyond', short: 'BB&B', market: 'us', promoChannel: 'bbb', levelByKind: { flash: 'purple' }, unsureUncounted: true },
-  { key: 'overstock_us', label: 'Overstock', short: 'Overstock', market: 'us', promoChannel: 'overstock', levelByKind: { flash: 'purple' }, unsureUncounted: true },
+  // Their deals go live at ~10-11 PM of the start day (user, 2026-11-06), so the
+  // audit's deal reads begin the next morning and Price Alignment expects the
+  // deal's price from that day (`dealStartsAtNight`).
+  { key: 'bbb_us', label: 'Bed Bath & Beyond', short: 'BB&B', market: 'us', promoChannel: 'bbb', levelByKind: { flash: 'purple' }, unsureUncounted: true, dealStartsAtNight: true },
+  { key: 'overstock_us', label: 'Overstock', short: 'Overstock', market: 'us', promoChannel: 'overstock', levelByKind: { flash: 'purple' }, unsureUncounted: true, dealStartsAtNight: true },
   { key: 'kbauthority', label: 'Kitchen & Bath Authority', short: 'KBA', market: 'us', promoChannel: null },
   { key: 'warehouse_usa', label: 'Warehouse-USA', short: 'Warehouse USA', market: 'us', promoChannel: null },
   // Dealers that sell Stylish but are NOT on the Stylish pages' Where to Buy

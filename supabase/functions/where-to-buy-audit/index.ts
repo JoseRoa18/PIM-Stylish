@@ -88,7 +88,8 @@ import { resolveWixSite, siteSells } from "../_shared/wixSites.ts";
 import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, isHiddenLink, withWhereToBuySection } from "../_shared/whereToBuy.js";
 import { readProductPage, menardsRead, lowesRecordRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
 import { normSku } from "../_shared/pageReaders/common.js";
-import { PAGE_STORES } from "../_shared/pageStores.js";
+import { PAGE_STORES, readingCounts } from "../_shared/pageStores.js";
+import { priceOff } from "../_shared/priceTolerance.js";
 import { etToday, periodOfDay, prevPeriod, promoWindow, shiftDay, PROMO_DATE_COLUMNS, type Market } from "../_shared/promoCalendar.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -131,8 +132,8 @@ const NEVER = "2999-01-01T00:00:00.000Z"; // scan-time verdicts are never probed
 // Wednesday or Friday, and the check calls (every 10 minutes) work through
 // them that day; one that got no answer is tried again later the same day,
 // else at the next pass. A link never verified yet (new or changed — checked
-// right away) and the promotion-day re-read (promoReread) go on any day
-// (user's choice the same day). Before: OK every 3 days, broken every 2.
+// right away) and the promotion re-reads (promoReread, dealReread) go on any
+// day (user's choice the same day). Before: OK every 3 days, broken every 2.
 const PASS_TZ = "America/Toronto"; // Cambridge, Ontario
 const PASS_WEEKDAYS = [1, 3, 5];   // Monday, Wednesday, Friday
 const PASS_HOUR = 1;               // from 1:00 AM
@@ -1625,18 +1626,18 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
 }
 
 // ---------------------------------------------------------------- promotion days
-// The morning a promotion starts or ends for a market — a monthly promotion
-// for its members of that market, a flash deal / special event on each
-// marketplace it runs on — the store pages of its products are read again
-// (cron where-to-buy-promo-reread-daily, 13:10 UTC = 9:10 Eastern, once the
-// stores have switched their prices), so Price Alignment compares them with
-// the new expected price that same day instead of leaving them out until
-// their 3-day turn (user, 2026-10-20: "esto hay que hacerlo sí o sí"). Only
-// the stores Price Alignment reads from their pages (PAGE_STORES), only OK
-// or not-yet-verified links, and not a page read in the last 6 hours. The
-// checks themselves run in the usual batches (every 10 minutes).
+// The morning a monthly promotion starts or ends for a market, the store pages
+// of its members of that market are read again (cron
+// where-to-buy-promo-reread-daily, 13:10 UTC = 9:10 Eastern, once the stores
+// have switched their prices), so Price Alignment compares them with the new
+// expected price that same day instead of leaving them out until their turn
+// (user, 2026-10-20: "esto hay que hacerlo sí o sí"). Only the stores Price
+// Alignment reads from their pages (PAGE_STORES), only OK or not-yet-verified
+// links, and not a page read in the last 6 hours. The checks themselves run in
+// the usual batches (every 10 minutes). Flash deals and special events have
+// their own runs (dealReread).
 interface PromoRow {
-  name: string | null; kind: string | null; status: string | null; period: string; marketplaces: string[] | null;
+  id: number; name: string | null; kind: string | null; status: string | null; period: string; marketplaces: string[] | null;
   starts_on: string | null; ends_on: string | null; ca_starts_on: string | null; ca_ends_on: string | null; us_starts_on: string | null; us_ends_on: string | null;
   promotion_prices: Array<{ sku: string; in_ca: boolean | null; in_us: boolean | null; promo_price_cad: number | null; promo_price_usd: number | null }>;
 }
@@ -1654,18 +1655,15 @@ async function promoReread(opts: { asOf?: string; dryRun?: boolean } = {}) {
   const due = new Map<string, Set<string>>(); // retailer → SKUs
   const changes: string[] = [];
   for (const p of promos) {
-    const monthly = (p.kind ?? "monthly") === "monthly";
-    // A monthly promotion counts once activated (as its expected prices do);
-    // a flash deal or special event by its dates (it stays "draft" while the
-    // portal runs it).
-    if (monthly && p.status !== "active" && p.status !== "ended") continue;
+    if ((p.kind ?? "monthly") !== "monthly") continue;
+    // A monthly promotion counts once activated (as its expected prices do).
+    if (p.status !== "active" && p.status !== "ended") continue;
     for (const market of ["ca", "us"] as Market[]) {
       const w = promoWindow(p, market);
       const starts = w.start === today;
       const ends = shiftDay(w.end, 1) === today;
       if (!starts && !ends) continue;
-      const stores = PAGE_STORES.filter((s: { market: string; promoChannel: string | null }) => s.market === market
-        && (monthly || (s.promoChannel !== null && (p.marketplaces ?? []).includes(s.promoChannel))));
+      const stores = PAGE_STORES.filter((s: { market: string }) => s.market === market);
       const members = (p.promotion_prices ?? []).filter((r) => (market === "us" ? r.in_us : r.in_ca) ?? ((market === "us" ? r.promo_price_usd : r.promo_price_cad) !== null)).map((r) => r.sku);
       if (!stores.length || !members.length) continue;
       changes.push(`${p.name ?? p.period} ${starts ? "starts" : "ended yesterday"} (${market === "ca" ? "Canada" : "USA"}, ${members.length} products, ${stores.map((s: { key: string }) => s.key).join(", ")})`);
@@ -1689,6 +1687,141 @@ async function promoReread(opts: { asOf?: string; dryRun?: boolean } = {}) {
   }
   if (changes.length && !opts.dryRun) console.log(`[where-to-buy] promotion day ${today}: ${changes.join("; ")}`);
   return { day: today, dryRun: Boolean(opts.dryRun), changes, stores, rows: Object.values(stores).reduce((a, s) => a + s.rows, 0) };
+}
+
+// ---------------------------------------------------------------- flash deals and special events
+// Their store pages are read at 7 AM and 3 PM Eastern, and only when there is
+// something new to see (cron where-to-buy-deal-reread; user, 2026-11-06: "si
+// no se agregó ningún flash deal nuevo, no hay que revisar nada", and a deal
+// that starts next week is not read yet). A deal reaches a store some time
+// after its start date begins, at an hour nobody knows — BB&B and Overstock at
+// ~10-11 PM of that day (`dealStartsAtNight`: their first read is the next
+// morning). So a product's page is read at the first run with the deal in
+// force, again at the next runs while it does not show the deal's price, and
+// not after the next morning's run: 3 reads at most, then its ordinary pass.
+// A product that joins a running deal gets the same turn from that day
+// (DEAL_READS_KEY keeps the day each one was first looked at). The morning
+// after a deal's last day its pages are read once, for the regular price. A
+// deal runs by its dates (it stays "draft" while the portal runs it); only an
+// "ended" one is over early.
+const DEAL_READS_KEY = "where_to_buy_deal_reads";
+type DealReads = Record<string, Record<string, string>>; // "<deal>:<store>:<start>" → SKU → first looked at
+interface DealLink {
+  id: string; sku: string; url: string; price: number | null; currency: string | null; read_at: string | null;
+  sku_check: string | null; page_model: string | null; in_stock: boolean | null;
+}
+interface DealStore { key: string; market: string; promoChannel: string | null; levelByKind?: Record<string, string>; dealStartsAtNight?: boolean }
+
+async function dealLinks(retailer: string, skus: string[]): Promise<DealLink[]> {
+  const out: DealLink[] = [];
+  for (const part of chunk(skus, 100)) {
+    out.push(...await rest<DealLink[]>(`where_to_buy_links?select=id,sku,url,price,currency,read_at,sku_check,page_model,in_stock&retailer=eq.${retailer}&sku=${inList(part)}&url=not.is.null&verdict=in.(ok,pending)`));
+  }
+  return out;
+}
+// What a deal should show on that store, as Price Alignment expects it: the
+// level's MAP where the store pins the kind to a level (BB&B and Overstock
+// flash deals at Purple), else the deal's own row.
+async function dealPrices(deal: PromoRow, store: DealStore, skus: string[]): Promise<Map<string, number | null>> {
+  const usd = store.market === "us";
+  const level = store.levelByKind?.[deal.kind ?? ""];
+  if (!level) return new Map((deal.promotion_prices ?? []).map((r) => [r.sku, usd ? r.promo_price_usd : r.promo_price_cad]));
+  const column = `map_${level}_${usd ? "usd" : "cad"}`;
+  const prices = new Map<string, number | null>();
+  for (const part of chunk(skus, 100)) {
+    for (const p of await rest<Array<Record<string, unknown>>>(`products?select=sku,${column}&sku=${inList(part)}`)) prices.set(String(p.sku), p[column] as number | null);
+  }
+  return prices;
+}
+// These reads don't wait for a pass day's share of ScraperAPI's credits: what
+// they may spend is added to today's allowance, and the next pass shares what
+// is really left.
+async function addToScraperAllowance(credits: number) {
+  if (!credits) return;
+  await refreshScraperCredits(); // fixes today's allowance when this is the day's first call
+  const b = scraperApi.budget;
+  if (!b) return;
+  const allowance = Math.min(b.allowance + credits, Math.max(0, b.start - SCRAPERAPI_RESERVE));
+  if (allowance <= b.allowance) return;
+  await rest("app_settings?on_conflict=key", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key: SCRAPERAPI_BUDGET_KEY, value: { ...b, allowance }, updated_at: new Date().toISOString() }),
+  });
+}
+
+async function dealReread(opts: { asOf?: string; run: "morning" | "afternoon"; dryRun?: boolean }) {
+  const today = opts.asOf && /^\d{4}-\d{2}-\d{2}$/.test(opts.asOf) ? opts.asOf : etToday();
+  const morning = opts.run === "morning";
+  const since = prevPeriod(prevPeriod(periodOfDay(today)));
+  const [deals, saved] = await Promise.all([
+    rest<PromoRow[]>(`promotions?select=id,name,kind,status,period,marketplaces,${PROMO_DATE_COLUMNS},promotion_prices(sku,in_ca,in_us,promo_price_cad,promo_price_usd)&kind=in.(flash,special)&period=gte.${since}`),
+    rest<Array<{ value: DealReads }>>(`app_settings?select=value&key=eq.${DEAL_READS_KEY}`),
+  ]);
+  const before = saved[0]?.value ?? {};
+  const after: DealReads = {};
+  const readRecently = (l: DealLink) => l.read_at !== null && Date.parse(l.read_at) > Date.now() - 6 * 3600e3;
+  const due = new Map<string, DealLink & { retailer: string }>();
+  const changes: string[] = [];
+  for (const deal of deals) {
+    for (const market of ["ca", "us"] as Market[]) {
+      const skus = (deal.promotion_prices ?? [])
+        .filter((r) => (market === "us" ? r.in_us : r.in_ca) ?? ((market === "us" ? r.promo_price_usd : r.promo_price_cad) !== null))
+        .map((r) => r.sku);
+      if (!skus.length) continue;
+      const w = promoWindow(deal, market);
+      const stores = (PAGE_STORES as DealStore[]).filter((s) => s.market === market && s.promoChannel !== null && (deal.marketplaces ?? []).includes(s.promoChannel));
+      for (const store of stores) {
+        const links: DealLink[] = [];
+        if (shiftDay(w.end, 1) === today) {
+          if (morning) links.push(...(await dealLinks(store.key, skus)).filter((l) => !readRecently(l)));
+        } else {
+          const goLive = store.dealStartsAtNight ? shiftDay(w.start, 1) : w.start;
+          if (deal.status === "ended" || today < goLive || today > w.end) continue;
+          const key = `${deal.id}:${store.key}:${w.start}`;
+          const firstLook = Object.fromEntries(skus.map((sku) => [sku, before[key]?.[sku] ?? today]));
+          after[key] = firstLook;
+          const inTurn = skus.filter((sku) => firstLook[sku] === today || (morning && shiftDay(firstLook[sku], 1) === today));
+          if (!inTurn.length) continue;
+          const prices = await dealPrices(deal, store, inTurn);
+          const currency = market === "us" ? "USD" : "CAD";
+          const live = easternAt(goLive, 0).getTime();
+          for (const l of await dealLinks(store.key, inTurn)) {
+            const readSince = l.read_at !== null && Date.parse(l.read_at) >= live;
+            // Read with the deal in force and nothing more to learn: it shows
+            // the price, or the page can't be compared with it.
+            const done = readSince && (!readingCounts(l) || l.in_stock === false || (l.currency !== null && l.currency !== currency) || !priceOff(l.price, prices.get(l.sku)));
+            if (!done && !readRecently(l)) links.push(l);
+          }
+        }
+        if (links.length) changes.push(`${deal.name ?? deal.id} on ${store.key}: ${links.length} links`);
+        for (const l of links) due.set(l.id, { ...l, retailer: store.key });
+      }
+    }
+  }
+  const rows = [...due.values()];
+  const stores: Record<string, { products: number; rows: number }> = {};
+  for (const retailer of new Set(rows.map((r) => r.retailer))) {
+    const own = rows.filter((r) => r.retailer === retailer);
+    stores[retailer] = { products: new Set(own.map((r) => r.sku)).size, rows: own.length };
+  }
+  let credits = 0;
+  for (const retailer of SCRAPERAPI_FIRST) {
+    credits += new Set(rows.filter((r) => r.retailer === retailer).map((r) => r.url)).size * (SCRAPERAPI_OPTIONS[retailer]?.credits ?? 10);
+  }
+  if (!opts.dryRun) {
+    for (const part of chunk(rows.map((r) => r.id), 100)) {
+      await rest(`where_to_buy_links?id=${inList(part)}`, { method: "PATCH", body: JSON.stringify({ next_check_at: new Date().toISOString() }) });
+    }
+    await addToScraperAllowance(credits);
+    await rest("app_settings?on_conflict=key", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ key: DEAL_READS_KEY, value: after, updated_at: new Date().toISOString() }),
+    });
+    if (changes.length) console.log(`[where-to-buy] deals ${today} ${opts.run}: ${changes.join("; ")}`);
+  }
+  return { day: today, run: opts.run, dryRun: Boolean(opts.dryRun), changes, stores, rows: rows.length, scraperCredits: credits };
 }
 
 // ---------------------------------------------------------------- suggestions
@@ -2386,6 +2519,14 @@ Deno.serve(async (req) => {
       // (EDT or EST) runs.
       if (kind === "cron" && !body.asOf && eastern(new Date()).hour !== 9) return json({ ok: true, skipped: "runs at 9:10 AM Eastern" });
       return json({ ok: true, ...(await promoReread({ asOf: body.asOf, dryRun: body.dryRun === true })) });
+    }
+    if (mode === "deal-reread") {
+      // The cron fires at 11, 12, 19 and 20 UTC; the calls at 7 AM and 3 PM
+      // Eastern (EDT or EST) run.
+      const hour = eastern(new Date()).hour;
+      if (kind === "cron" && !body.asOf && hour !== 7 && hour !== 15) return json({ ok: true, skipped: "runs at 7 AM and 3 PM Eastern" });
+      const run = body.run === "morning" || body.run === "afternoon" ? body.run : hour < 12 ? "morning" : "afternoon";
+      return json({ ok: true, ...(await dealReread({ asOf: body.asOf, run, dryRun: body.dryRun === true })) });
     }
     if (mode === "suggest") return json({ ok: true, ...(await suggest({ build: body.build === true, dryRun: body.dryRun === true })) });
     // ScraperAPI's credits and today's allowance (reads the account; spends nothing).

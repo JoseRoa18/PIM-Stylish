@@ -24,6 +24,13 @@ export function sharedLoad(key, loader) {
   return promise;
 }
 
+// The day a flash deal / special event reaches the store. BB&B and Overstock
+// switch at ~10-11 PM of the start date (`dealStartsAtNight` in pageStores.js),
+// so their deal is expected from the next day: the pages read on the start
+// date still show the price before it (user, 2026-11-09: Black Friday's start
+// date took their scores to 66 and 64 with every page right).
+const dealLiveDay = (cfg, w) => (cfg.dealStartsAtNight ? shiftDay(w.start, 1) : w.start);
+
 /**
  * What every product SHOULD sell at on a target, read from the PIM right
  * now: the target's regular price field, and the market's active monthly
@@ -86,7 +93,7 @@ export async function loadExpectedPrices(cfg) {
     });
     const running = (deals ?? [])
       .map((deal) => ({ deal, w: promoWindow(deal, cfg.market) }))
-      .filter(({ w }) => windowContains(w, todayET))
+      .filter(({ w }) => windowContains({ start: dealLiveDay(cfg, w), end: w.end }, todayET))
       .sort((a, b) => a.w.start.localeCompare(b.w.start)); // overlapping deals: the later start wins
     for (const { deal, w } of running) {
       // A marketplace that pins this kind to a level (BB&B and Overstock run
@@ -146,7 +153,7 @@ export async function loadPriceChangeDays(cfg) {
     for (const row of promo.promotion_prices ?? []) {
       const member = 'in_us' in row ? ((cfg.market === 'us' ? row.in_us : row.in_ca) ?? row[promoField] != null) : row[promoField] != null;
       if (!member) continue;
-      mark(row.sku, w.start);
+      mark(row.sku, deals.includes(promo) ? dealLiveDay(cfg, w) : w.start);
       mark(row.sku, shiftDay(w.end, 1));
     }
   }
