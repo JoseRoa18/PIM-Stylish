@@ -91,9 +91,9 @@ function Cell({ links }) {
   );
 }
 
-export default function WhereToBuyPanel() {
+export default function WhereToBuyPanel({ sites = WTB_SITES }) {
   const { canEdit } = useAuth();
-  const [site, setSite] = useState(WTB_SITES[0].key);
+  const [site, setSite] = useState(sites[0].key);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -230,20 +230,22 @@ export default function WhereToBuyPanel() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label="Website">
-              {WTB_SITES.map((s) => (
-                <button
-                  key={s.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={site === s.key}
-                  onClick={() => setSite(s.key)}
-                  className={`px-3.5 py-1.5 rounded-full text-label-lg transition-colors ${site === s.key ? 'bg-surface text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'}`}
-                >
-                  {s.short}
-                </button>
-              ))}
-            </div>
+            {sites.length > 1 && (
+              <div className="inline-flex rounded-full bg-surface-container p-1" role="tablist" aria-label="Website">
+                {sites.map((s) => (
+                  <button
+                    key={s.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={site === s.key}
+                    onClick={() => setSite(s.key)}
+                    className={`px-3.5 py-1.5 rounded-full text-label-lg transition-colors ${site === s.key ? 'bg-surface text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'}`}
+                  >
+                    {s.short}
+                  </button>
+                ))}
+              </div>
+            )}
             {rows.length > 0 && <WhereToBuySuggestions skus={siteSkus} onApplied={() => reload()} />}
             <WhereToBuyExcel onImported={() => reload()} />
             {canEdit && (

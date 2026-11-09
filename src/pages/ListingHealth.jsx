@@ -12,6 +12,7 @@ import ListingHealthOverview from '@/features/dashboard/components/ListingHealth
 import ListingHealthActions from '@/features/dashboard/components/ListingHealthActions';
 import PimCompletenessPanel from '@/features/dashboard/components/PimCompletenessPanel';
 import WhereToBuyPanel from '@/features/dashboard/components/WhereToBuyPanel';
+import { WTB_SITES } from '@/features/dashboard/lib/whereToBuy';
 import {
   categorizeScore,
   MARKETPLACES,
@@ -29,6 +30,11 @@ import { startTask } from '@/lib/taskProgress';
 const PIM_TAB = 'pim';
 // Stylish brand sites only: the WHERE TO BUY link audit (own table, no score).
 const WTB_TAB = 'where_to_buy';
+// Each brand's links sit under its own store (user, 2026-11-09: Azuni's "no
+// puede estar dentro de stylish").
+const WTB_AZUNI_TAB = 'where_to_buy_azuni';
+const STYLISH_WTB_SITES = WTB_SITES.filter((s) => s.key !== 'azuni_ca');
+const AZUNI_WTB_SITES = WTB_SITES.filter((s) => s.key === 'azuni_ca');
 
 const SOURCE_STYLES = {
   wix_cache: { label: 'Wix cache', class: 'bg-tertiary/25 text-on-tertiary-container border border-tertiary/40' },
@@ -147,12 +153,12 @@ export default function ListingHealth() {
   // (used by the Syndication channel workspaces).
   const initialTab = new URLSearchParams(window.location.search).get('tab');
   const [marketplace, setMarketplace] = useState(
-    initialTab === PIM_TAB || initialTab === WTB_TAB || API_MARKETPLACE_KEYS.includes(initialTab) ? initialTab : PIM_TAB,
+    initialTab === PIM_TAB || initialTab === WTB_TAB || initialTab === WTB_AZUNI_TAB || API_MARKETPLACE_KEYS.includes(initialTab) ? initialTab : PIM_TAB,
   );
   const isPim = marketplace === PIM_TAB;
-  const isWtb = marketplace === WTB_TAB;
+  const isWtb = marketplace === WTB_TAB || marketplace === WTB_AZUNI_TAB;
   const isChannel = !isPim && !isWtb;
-  const TAB_KEYS = [PIM_TAB, WTB_TAB, ...API_MARKETPLACE_KEYS];
+  const TAB_KEYS = [PIM_TAB, WTB_TAB, WTB_AZUNI_TAB, ...API_MARKETPLACE_KEYS];
   // Store family → its markets, in display order. Channels the map doesn't
   // know form a family of their own so a new connector still shows up.
   const CHANNEL_GROUPS = useMemo(() => {
@@ -180,6 +186,7 @@ export default function ListingHealth() {
     const stylish = sorted.find((g) => g.name === 'Stylish');
     if (stylish) stylish.items.push({ key: WTB_TAB, market: 'Where to Buy' });
     else sorted.push({ name: 'Stylish', items: [{ key: WTB_TAB, market: 'Where to Buy' }] });
+    sorted.find((g) => g.name === 'Azuni')?.items.push({ key: WTB_AZUNI_TAB, market: 'Where to Buy' });
     return sorted;
   }, []);
   const [search, setSearch] = useState('');
@@ -375,7 +382,7 @@ export default function ListingHealth() {
       })()}
 
       {isPim && <PimCompletenessPanel />}
-      {isWtb && <WhereToBuyPanel />}
+      {isWtb && <WhereToBuyPanel key={marketplace} sites={marketplace === WTB_AZUNI_TAB ? AZUNI_WTB_SITES : STYLISH_WTB_SITES} />}
 
       {isChannel && loading && (
         <div role="status" aria-label="Loading catalog health" className="animate-pulse space-y-6">

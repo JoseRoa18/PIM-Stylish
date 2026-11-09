@@ -1294,7 +1294,7 @@ const SIGN_FORGOTTEN_MS = 7 * 86400e3;
 //     read as nothing — a store that changed its pages — where it is not
 //     counted.
 type Judged = Outcome & { check?: { check: string; model: string | null } | null };
-function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalog>, unreadable: Set<string>, bestBuy: BestBuySoldOut): Judged {
+function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalog>, unreadable: Set<string>, bestBuy: BestBuySoldOut, beyondAliases: Map<string, Set<string>>): Judged {
   if (o.kind === "broken" && row.retailer === "bestbuy_ca") {
     const off = bestBuy.get(row.sku);
     if (off && new RegExp(`(^|\\D)${off.productId}(\\D|$)`).test(row.url)) {
@@ -1310,7 +1310,11 @@ function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalo
       : o;
   }
   if (o.page.gone) return { ...o, kind: "broken", note: o.page.note ?? "The store no longer sells it" };
-  const check = skuCheck(o.page, row.sku, catalog);
+  let check = skuCheck(o.page, row.sku, catalog);
+  // Overstock writes one model number per listing, so a page on another color
+  // names none; its full SKU is that option's own, and the PIM keeps it as the
+  // BB&B / Overstock alias (10 of 10 pages agreed, 2026-11-09).
+  if (check?.check === "unknown" && !check.model && o.page.subSku && beyondAliases.get(row.sku)?.has(o.page.subSku)) check = { check: "match", model: row.sku };
   if (check?.check === "other") return { ...o, kind: "soft", check, note: `Opens another product: ${check.model}` };
   return { ...o, check };
 }
@@ -1574,9 +1578,16 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
   })]);
   // Each row of an address gets the answer judged for its own SKU.
   const catalog = pimCatalog(answers.some(({ o }) => o.page) ? await restAll<{ sku: string; upc: string | null; family_number: number | null }>("products?select=sku,upc:attributes->>upc,family_number") : []);
+  const beyondAliases = new Map<string, Set<string>>();
+  if (answers.some(({ row, o }) => row.retailer === "overstock_us" && o.page)) {
+    for (const a of await restAll<{ sku: string; alias: string }>(`product_aliases?select=sku,alias&marketplace=eq.${encodeURIComponent("BB&B / Overstock")}`)) {
+      if (!beyondAliases.has(a.sku)) beyondAliases.set(a.sku, new Set());
+      beyondAliases.get(a.sku)!.add(a.alias);
+    }
+  }
   const unreadable = await unreadableStores(answers);
   const bestBuy: BestBuySoldOut = answers.some(({ row, o }) => row.retailer === "bestbuy_ca" && o.kind === "broken") ? await bestBuySoldOut() : new Map();
-  const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o: judgedFor(r, o, catalog, unreadable, bestBuy) })));
+  const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o: judgedFor(r, o, catalog, unreadable, bestBuy, beyondAliases) })));
 
   const now = new Date().toISOString();
   const groups = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
