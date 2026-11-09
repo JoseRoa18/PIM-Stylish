@@ -54,6 +54,7 @@ type Listed = { alias: string } | { amazon: Market } | { wayfair: Market } | { w
 interface MarketSource {
   odoo: unknown[];      // Odoo domain on sale.order selecting the channel's orders
   company: number;      // Odoo company whose costs and currency apply (2 = Stylish International, CAD; 1 = Stylish USA, USD)
+  wholesale?: { blue: string; orange: string; purple: string }; // the price levels the marketplace pays us (products columns)
   stock?: Market;       // product_inventory market of the stock it sells from (none: Amazon FBA's stock is Amazon's)
   listed?: Listed;      // the SKUs it lists (none: no list in the PIM — Amazon.com)
   wix?: string;         // Sinks Direct: WIX_SITES key of the store (its orders, reviews, price)
@@ -96,7 +97,7 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
     us: { odoo: sold([MP.walmart], US), company: US, stock: "us", listed: { wtb: "walmart_us" }, promo: ["walmart_us"], pages: ["walmart_us"] },
   },
   rona: { ca: { odoo: sold([MP.rona], CA), company: CA, stock: "ca", listed: { alias: "Rona" }, promo: ["rona"], pages: ["rona"] } },
-  bbb_overstock: { us: { odoo: sold([MP.bbb, MP.overstock], US), company: US, stock: "us", listed: { alias: "BB&B / Overstock" }, promo: ["bbb", "overstock"], pages: ["bbb_us", "overstock_us"] } },
+  bbb_overstock: { us: { odoo: sold([MP.bbb, MP.overstock], US), company: US, stock: "us", listed: { alias: "BB&B / Overstock" }, promo: ["bbb", "overstock"], pages: ["bbb_us", "overstock_us"], wholesale: { blue: "cost_usd_lowes_sod_bbb", orange: "cost_usd_lowes_sod_bbb_orange", purple: "cost_usd_lowes_sod_bbb_purple" } } },
 };
 /** The same domain read from another model: sale.order fields under `prefix` (order_id., sale_id.). */
 const via = (domain: unknown[], prefix: string) => domain.map((leaf) => (Array.isArray(leaf) ? [`${prefix}${leaf[0]}`, leaf[1], leaf[2]] : leaf));
@@ -108,11 +109,13 @@ const SERVER_KEYS = [
   "return_rate", "returns_value", "sales_usd_k", "azuni_skus_sold",
   // 2026-11-09: the sales of a tab's own list of SKUs (app_settings.scorecard_top_losers, by board).
   "top_losers_sales",
+  // 2026-11-09, BB&B / Overstock: what comes back in the week, and the reviews that are new on the store pages.
+  "returns_note", "reviews_new",
   // The "Actions taken for top losers" note, written by AI from the week's data (user, 2026-11-05).
   "losers_note",
 ];
 // Read from today's state (stock, marks, reviews, prices): only this week's column gets them.
-const SNAPSHOT_KEYS = new Set(["oos_loss", "obsolete_skus", "reviews_5plus", "no_profit_skus", "losers_note"]);
+const SNAPSHOT_KEYS = new Set(["oos_loss", "obsolete_skus", "reviews_5plus", "no_profit_skus", "losers_note", "reviews_new"]);
 const WIX_KEYS = ["cancel_rate", "odr", "returns_not_received"];
 const SHIP_KEYS = ["on_time_ship", "late_ship_rate"];
 // On time = fully shipped by the end of the 2nd business day after the order
@@ -386,11 +389,11 @@ async function shipCostPerUnit(odoo: Odoo, admin: Admin, pickDomain: unknown[], 
  * batches, so a week alone jumps (0 %, 58 %…): callers read them over 4 weeks
  * (user, 2026-11-05).
  */
-async function receivedReturns(odoo: Odoo, pickDomain: unknown[], sinceDay: string): Promise<{ at: string; orderId: number; value: number }[]> {
+async function receivedReturns(odoo: Odoo, pickDomain: unknown[], sinceDay: string): Promise<{ at: string; orderId: number; value: number; items: { code: string | null; qty: number; value: number }[] }[]> {
   const rets = await odoo("stock.picking", "search_read", [[...pickDomain, ["return_id", "!=", false], ["picking_type_code", "=", "incoming"], ["state", "=", "done"], ["date_done", ">=", etMidnightUtc(sinceDay)]]], { fields: ["sale_id", "date_done", "move_ids"] }) as { sale_id: [number, string] | false; date_done: string; move_ids: number[] }[];
   const moveIds = rets.flatMap((r) => r.move_ids ?? []);
-  const moves: { id: number; quantity: number; product_uom_qty: number; sale_line_id: [number, string] | false; origin_returned_move_id: [number, string] | false }[] = [];
-  for (let i = 0; i < moveIds.length; i += 400) moves.push(...await odoo("stock.move", "read", [moveIds.slice(i, i + 400)], { fields: ["quantity", "product_uom_qty", "sale_line_id", "origin_returned_move_id"] }));
+  const moves: { id: number; product_id: [number, string] | false; quantity: number; product_uom_qty: number; sale_line_id: [number, string] | false; origin_returned_move_id: [number, string] | false }[] = [];
+  for (let i = 0; i < moveIds.length; i += 400) moves.push(...await odoo("stock.move", "read", [moveIds.slice(i, i + 400)], { fields: ["product_id", "quantity", "product_uom_qty", "sale_line_id", "origin_returned_move_id"] }));
   // A return move names its sale line, or the delivery move it returns does.
   const originIds = moves.filter((m) => !m.sale_line_id && m.origin_returned_move_id).map((m) => (m.origin_returned_move_id as [number, string])[0]);
   const originLine = new Map<number, number>();
@@ -411,9 +414,16 @@ async function receivedReturns(odoo: Odoo, pickDomain: unknown[], sinceDay: stri
   }
   for (const l of rawLines) lines.set(l.id, { unit: l.product_uom_qty > 0 ? (Number(l.price_subtotal) || 0) / l.product_uom_qty / (rate.get(l.order_id[0]) ?? 1) : 0, orderId: l.order_id[0] });
   const moveById = new Map(moves.map((m) => [m.id, m]));
+  const codeOf = new Map<number, string | null>();
+  const productIds = [...new Set(moves.map((m) => (m.product_id ? m.product_id[0] : 0)).filter(Boolean))];
+  for (let i = 0; i < productIds.length; i += 400) {
+    for (const p of await odoo("product.product", "read", [productIds.slice(i, i + 400)], { fields: ["default_code"] }) as { id: number; default_code: string | false }[]) codeOf.set(p.id, p.default_code || null);
+  }
+  const moveLine = (m: typeof moves[number]) => { const line = lines.get(lineOf(m) as number); const qty = Number(m.quantity) || Number(m.product_uom_qty) || 0; return { code: m.product_id ? codeOf.get(m.product_id[0]) ?? null : null, qty, value: line ? qty * line.unit : 0 }; };
   return rets.filter((r) => r.sale_id).map((r) => ({
     at: isoOf(r.date_done),
     orderId: (r.sale_id as [number, string])[0],
+    items: (r.move_ids ?? []).map((id) => moveById.get(id)).filter(Boolean).map((m) => moveLine(m as typeof moves[number])),
     value: (r.move_ids ?? []).reduce((s, id) => {
       const m = moveById.get(id);
       const line = m ? lines.get(lineOf(m) as number) : null;
@@ -466,75 +476,32 @@ async function shippedWixOrders(odoo: Odoo, wixIds: string[]): Promise<Set<strin
 }
 
 // ---- "Actions taken for top losers", written by AI (user, 2026-11-05) ----------
-interface LoserFact { sku: string; model: string | null; units: number; sales: number; avgUnits: number; avgSales: number; facts: string[]; brief: string[]; todo: string[] }
+interface LoserFact { sku: string; model: string | null; units: number; sales: number; avgUnits: number; avgSales: number; brief: string[]; todo: string[]; stock: string; promo: string | null }
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
-const SKU_TOKEN = /\b[A-Z]{1,3}-?\d{2,4}[A-Z0-9]*(?:-\d)?\b/g;
-
-/** Gemini (the key the description formatter uses) — plain text, or null when it cannot answer. */
-async function geminiText(prompt: string): Promise<string | null> {
-  const key = Deno.env.get("GEMINI_API_KEY");
-  if (!key) return null;
-  try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 } }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!r.ok) return null;
-    const j = await r.json();
-    const text = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
-    return text || null;
-  } catch {
-    return null;
-  }
-}
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const shorten = (t: string, max = 150) => (t.length <= max ? t : `${t.slice(0, t.lastIndexOf(" ", max))}…`);
 
 /**
- * The week's note: the channel's top losers (sales under their 8-week weekly
- * average), what the PIM's data shows about each (our stock, the store page,
- * the promotion) and the actions the PIM recorded that week. Gemini writes it
- * from those facts only; a text naming a SKU it was not given, or too long, is
- * thrown away for the same facts as a plain sentence — never an invented action.
+ * The week's note (user, 2026-11-09: it read as one messy paragraph): a block
+ * per top loser, one fact per line, then what the PIM recorded. Built straight
+ * from the data; the note's dialog shows each block as a card and Copy gives
+ * this same text. The only causes are our stock at 0, a store page sold out or
+ * a broken link: a price or a promotion is never a cause.
  */
-async function writeLosersNote(where: string, weekLabel: string, currency: string, losers: LoserFact[], actions: string[], diag: Record<string, any>): Promise<string> {
-  const recorded = actions.length ? `Recorded in the PIM: ${actions.slice(0, 4).join("; ")}.` : "No action recorded in the PIM this week.";
-  const plain = () => [
-    ...losers.map((l) => `${l.sku}: down ${money(l.avgSales - l.sales)} vs its 8-week average (${l.units} units, usually ${l.avgUnits.toFixed(1)} a week)${l.brief.length ? `; ${l.brief.join(", ")}` : ""}. To recover sales: ${l.todo.join("; ")}.`),
-    recorded,
-  ].join("\n");
+function writeLosersNote(losers: LoserFact[], actions: string[]): string {
   if (!losers.length) return "No SKU sold under its 8-week average this week.";
-  const facts = losers.map((l) => [
-    `SKU ${l.sku}${l.model ? ` (${l.model})` : ""}: this week ${l.units} units, ${money(l.sales)}; 8-week average ${l.avgUnits.toFixed(1)} units, ${money(l.avgSales)} a week; drop ${money(l.avgSales - l.sales)}.`,
-    ...l.facts.map((f) => `  - ${f}`),
-    ...l.todo.map((t) => `  - TO DO: ${t}`),
-  ].join("\n")).join("\n");
-  const prompt = `You write one cell of a weekly EOS scorecard: "Actions taken for top losers" for ${where}, week ${weekLabel}, amounts in ${currency}. The team reads it to decide what to do to bring these sales back.
-Use ONLY the facts below. Plain text, no markdown. One line per SKU, then one last line. At most 1,800 characters.
-- Each SKU line starts with the SKU, then: its weekly drop and its units this week against its usual units; its stock and the promotion it is on, when given; the cause; then "To recover sales:" and every one of its TO DO items, keeping their amounts, dates and promotion names exactly.
-- The only causes you may state are: our warehouse stock at 0, the store page sold out, the store page a broken link. If none applies to a SKU, say the PIM's data shows no cause for it. Never present a price or a promotion as a cause.
-- A TO DO item is a recommendation, not something already done: never write it as done. Add no recommendation that is not in TO DO.
-- The last line summarizes ACTIONS, starting with "Recorded in the PIM:". If ACTIONS is empty, write exactly: No action recorded in the PIM this week.
-- Never invent actions, causes, SKUs, dates or numbers.
-
-TOP LOSERS:
-${facts}
-
-ACTIONS:
-${actions.length ? actions.map((a) => `- ${a}`).join("\n") : "(none)"}`;
-  const text = await geminiText(prompt);
-  const allowed = new Set([...losers.flatMap((l) => [l.sku, ...`${l.todo.join(" ")} ${l.facts.join(" ")}`.match(SKU_TOKEN) ?? []]), ...actions.flatMap((a) => a.match(SKU_TOKEN) ?? [])]);
-  const named = (text ?? "").match(SKU_TOKEN) ?? [];
-  const saysNone = /no action recorded/i.test(text ?? "");
-  // A recommendation only helps with its figures: an amount, date or promotion dropped from it sends the note to the plain version.
-  const keepMissing = Boolean(text) && losers.some((l) => l.todo.join(" ").match(/\$[\d,]+|\d{4}-\d{2}-\d{2}|"[^"]+"/g)?.some((k) => !text!.includes(k.replace(/"/g, ""))));
-  if (text) diag.noteDraft = text.slice(0, 2500);
-  if (!text || text.length > 2400 || named.some((s) => !allowed.has(s)) || !losers.every((l) => text.includes(l.sku)) || !/to recover sales/i.test(text) || keepMissing || saysNone !== (actions.length === 0)) {
-    diag.noteFallback = text ? "rejected" : "no answer";
-    return plain();
-  }
-  diag.noteBy = "gemini";
-  return text.replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
+  const blocks = losers.map((l) => [
+    `${l.sku} — down ${money(l.avgSales - l.sales)}`,
+    `Sold: ${l.units} ${l.units === 1 ? "unit" : "units"} (usually ${l.avgUnits.toFixed(1)} a week)`,
+    `Stock: ${l.stock}`,
+    ...(l.promo ? [`Promotion: ${l.promo}`] : []),
+    `Cause: ${l.brief.length ? cap(l.brief.join("; ")) : "None visible in the PIM"}`,
+    "To do:",
+    ...l.todo.map((t) => `• ${cap(t)}`),
+  ].join("\n"));
+  blocks.push(actions.length ? ["Recorded in the PIM", ...actions.slice(0, 6).map((a) => `• ${a}`)].join("\n") : "No action recorded in the PIM this week.");
+  return blocks.join("\n\n");
 }
 
 /** USD per unit of the company's currency (Stylish USA: 1), Odoo's rate of today; null when unknown. */
@@ -711,11 +678,16 @@ Deno.serve(async (req) => {
     if (!metrics?.length) return json({ ok: true, mode, columns: loop, note: "No measurable of these boards is filled by the server.", values: [] });
 
     // The PIM's products and how Odoo's codes map onto them.
-    const { data: products, error: pErr } = await admin.from("products").select("sku, brand, model_name, workflow_status, is_obsolete, map_cad, map_usd, msrp_cad, msrp_usd, wix_product_id");
+    const { data: products, error: pErr } = await admin.from("products").select("sku, brand, model_name, workflow_status, is_obsolete, map_cad, map_usd, msrp_cad, msrp_usd, wix_product_id, cost_usd_lowes_sod_bbb, cost_usd_lowes_sod_bbb_orange, cost_usd_lowes_sod_bbb_purple");
     if (pErr) throw pErr;
     const live = (products ?? []).filter((p) => p.workflow_status !== "archived");
     const { data: topLosersRow } = await admin.from("app_settings").select("value").eq("key", "scorecard_top_losers").maybeSingle();
     const topLosers = (topLosersRow?.value ?? {}) as Record<string, string[]>;
+    // The review count of each store listing at the last run: new reviews are the week's difference.
+    type ReviewState = { column: string; prev: Record<string, number> | null; first: Record<string, number> };
+    const { data: reviewRow } = await admin.from("app_settings").select("value").eq("key", "scorecard_review_counts").maybeSingle();
+    const reviewState = (reviewRow?.value ?? {}) as Record<string, ReviewState>;
+    let reviewsChanged = false;
     const exact = new Set((products ?? []).map((p) => p.sku));
     const lower = new Map((products ?? []).map((p) => [p.sku.toLowerCase(), p.sku]));
     const skuOf = (code: string | null) => (code == null ? null : exact.has(code) ? code : lower.get(code.toLowerCase()) ?? null);
@@ -747,7 +719,7 @@ Deno.serve(async (req) => {
         if (population) diag.listedSkus = population.length;
         const brandOf = new Map((products ?? []).map((p) => [p.sku, String(p.brand ?? "").toLowerCase()]));
 
-        // The week's "Actions taken for top losers" note (AI, from the facts below).
+        // The week's "Actions taken for top losers" note, from the facts below.
         const losersNoteFor = async (boardKey: string, mk: Market, s: MarketSource, fromDay: string, toDay: string): Promise<string> => {
           // Top losers: sales of the week under the SKU's weekly average of the 8 weeks before.
           const now = new Map<string, { units: number; sales: number }>();
@@ -787,14 +759,10 @@ Deno.serve(async (req) => {
           const onBoard = (p: { marketplaces?: string[] | null }) => (p.marketplaces ?? []).some((c) => s.promo.includes(c));
           const losers: LoserFact[] = top.map((x) => {
             const prod = (products ?? []).find((p) => p.sku === x.sku);
-            const facts: string[] = [];
             const brief: string[] = [];
             const st = (inv ?? []).find((r) => r.sku === x.sku);
-            facts.push(st ? `our ${mk.toUpperCase()} warehouse stock now: ${st.available} units${st.available <= 0 && st.eta ? ` (next arrival ${st.eta})` : ""}` : `not tracked in our ${mk.toUpperCase()} stock`);
             if (st && st.available <= 0) brief.push(`0 in our ${mk.toUpperCase()} stock`);
-            if (s.ships?.length) facts.push("Amazon FBA stock is not in the PIM");
             for (const pg of (pages ?? []).filter((r) => r.sku === x.sku)) {
-              facts.push(`${pg.retailer} store page (read ${String(pg.read_at ?? "").slice(0, 10)}): ${pg.verdict === "broken" ? "broken link" : pg.in_stock === false ? "sold out" : "live, in stock"}`);
               if (pg.verdict === "broken") brief.push("store link broken"); else if (pg.in_stock === false) brief.push("sold out on the store");
             }
             // What could bring the sales back, from these same facts: the note
@@ -807,8 +775,6 @@ Deno.serve(async (req) => {
             const onHand = st ? Number(st.available) : null;
             const running = dealsHere.filter(({ w, p }: any) => windowContains(w, today) && memberOf(p, x.sku)).sort((a: any, b: any) => b.w.start.localeCompare(a.w.start))[0]?.p ?? monthlyNow.find((p: any) => memberOf(p, x.sku)) ?? null;
             const promoPrice = running ? Number(memberOf(running, x.sku)?.[priceField] ?? NaN) : NaN;
-            if (running) facts.push(`on promotion now: "${running.name}"${promoPrice > 0 ? ` at ${money(promoPrice)}` : ""}`);
-            if (onHand !== null && onHand > 0 && x.avgUnits > 0) facts.push(`about ${Math.round(onHand / x.avgUnits)} weeks of stock at its usual pace`);
             if (onHand !== null && onHand <= 0 && !s.ships?.length) {
               todo.push(st?.eta ? `stock is due ${st.eta}: plan a promotion for when it arrives` : "there is no arrival date: confirm the purchase order");
             } else {
@@ -821,7 +787,7 @@ Deno.serve(async (req) => {
                 // BB&B and Overstock take flash deals at a level the promotion's row does not hold.
                 const expected = running ? (running.kind === "flash" && boardKey === "bbb_overstock" ? null : promoPrice > 0 ? promoPrice : null) : map;
                 if (expected != null && priceOff(Number(live.price), expected)) todo.push(`the store shows ${money(Number(live.price))} against the expected ${money(expected)}: correct the price`);
-                if (running) todo.push(`it is already on "${running.name}": review its images, title and reviews`);
+                if (running) todo.push("review its images, title and reviews");
                 else {
                   const next = nextDeals[0];
                   if (next && memberOf(next.p, x.sku)) todo.push(`it is in "${next.p.name}" from ${next.w.start}: confirm it is loaded on the store`);
@@ -831,7 +797,11 @@ Deno.serve(async (req) => {
               }
             }
             if (!todo.length) todo.push("review the listing on this store");
-            return { ...x, model: prod?.model_name ?? null, facts, brief, todo };
+            const stockText = s.ships?.length ? "FBA stock is not in the PIM"
+              : onHand === null ? "Not tracked"
+              : onHand > 0 ? `${onHand} ${onHand === 1 ? "unit" : "units"}${x.avgUnits > 0 ? ` (about ${Math.round(onHand / x.avgUnits)} weeks)` : ""}`
+              : `0 units${st?.eta ? ` (due ${st.eta})` : ""}`;
+            return { ...x, model: prod?.model_name ?? null, brief, todo, stock: stockText, promo: running?.name ?? null };
           });
           // What the PIM recorded that week for this channel or these SKUs.
           // A Wix push counts for this store only (the Wix target is shared by the five stores).
@@ -841,19 +811,18 @@ Deno.serve(async (req) => {
           const actions = [
             ...(promos ?? []).filter((p) => onBoard(p) && inDays(String(p.created_at).replace("T", " ").slice(0, 19), fromDay, toDay)).map((p) => `${String(p.created_at).slice(5, 10)}: created ${p.kind} "${p.name}"`),
             ...(log ?? []).filter((r) => (targets.has(r.target) || (skus.includes(r.entity_id) && r.target === "pim")) && !/^Where to Buy/i.test(String(r.summary ?? "")) && (r.target !== "wix" || thisStore(r)))
-              .map((r) => `${String(r.occurred_at).slice(5, 10)}: ${String(r.summary ?? "").replace(/\s+/g, " ").slice(0, 120)}`),
+              .map((r) => `${String(r.occurred_at).slice(5, 10)}: ${String(r.summary ?? "").replace(/\s+/g, " ")}`),
           ];
-          const uniq = [...new Set(actions)].slice(0, 8);
+          const uniq = [...new Set(actions)].slice(0, 8).map((a) => {
+            const m = a.match(/^(\d\d)-(\d\d): (.*)$/);
+            return m ? `${MONTHS[Number(m[1]) - 1]} ${Number(m[2])}: ${shorten(cap(m[3]))}` : shorten(a);
+          });
           diag.noteLosers = losers.map((l) => l.sku).join(", ");
           diag.noteActions = uniq;
-          const [y1, m1, d1] = fromDay.split("-").map(Number);
-          const end = addDays(toDay, -1).split("-").map(Number);
-          const mon = (m: number) => ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
-          const label = `${mon(m1)} ${d1} – ${mon(end[1])} ${end[2]}, ${y1}`;
-          return writeLosersNote(`${BOARD_LABEL[boardKey] ?? boardKey} ${mk === "ca" ? "Canada" : "USA"}`, label, s.company === CA ? "CAD" : "USD", losers, uniq, diag);
+          return writeLosersNote(losers, uniq);
         };
         // Returns Odoo received for the channel (read over 4 weeks).
-        const returns = keys.has("return_rate") || keys.has("returns_value") ? await receivedReturns(odoo, via(src.odoo, "sale_id."), addDays(oldest, -35)) : null;
+        const returns = keys.has("return_rate") || keys.has("returns_value") || keys.has("returns_note") ? await receivedReturns(odoo, via(src.odoo, "sale_id."), addDays(oldest, -35)) : null;
         if (returns) diag.returnsReceived = returns.length;
 
         let stock: Map<string, number> | null = null;
@@ -950,6 +919,19 @@ Deno.serve(async (req) => {
             const placed = orders.filter((o) => paidOrderIds.has(o.id) && inDays(o.date, start, column)).length;
             value.return_rate = ratio(new Set(inWindow.map((r) => r.orderId)).size, placed);
             value.returns_value = round2(inWindow.reduce((s, r) => s + r.value, 0) / 4);
+            if (keys.has("returns_note")) {
+              // The note reads only what came back in this data week.
+              const back = new Map<string, { qty: number; value: number }>();
+              for (const it of returns.filter((r) => inDays(r.at, from, column)).flatMap((r) => r.items)) {
+                const key = skuOf(it.code) ?? it.code ?? "Unknown SKU";
+                const cur = back.get(key) ?? { qty: 0, value: 0 };
+                cur.qty += it.qty;
+                cur.value += it.value;
+                back.set(key, cur);
+              }
+              const list = [...back].sort((a, b) => b[1].value - a[1].value).map(([sku, x]) => `${sku} (${x.qty} ${x.qty === 1 ? "unit" : "units"}, ${money(x.value)})`);
+              notes.returns_note = list.length ? `Received back this week: ${list.join(", ")}. Total ${money([...back.values()].reduce((t, x) => t + x.value, 0))}.` : "No returns this week.";
+            }
           }
           if (keys.has("listings_updated")) {
             value.listings_updated = new Set(pushes.filter((p) => p.occurred_at >= isoOf(etMidnightUtc(from)) && p.occurred_at < isoOf(etMidnightUtc(column))).map((p) => p.entity_id)).size;
@@ -1042,6 +1024,57 @@ Deno.serve(async (req) => {
               diag.belowCost = below.join(", ");
               value.no_profit_skus = below.length;
             }
+            if (keys.has("no_profit_skus") && src.wholesale && population) {
+              // What the marketplace pays us this week against Odoo's average cost
+              // (user, 2026-11-09). The marketplace pays the shipping, so none is added.
+              // Level: Purple while a deal on this channel has the SKU, else Orange in the monthly promotion, else Blue.
+              const priceKey = market === "us" ? "promo_price_usd" : "promo_price_cad";
+              const { data: promos, error } = await admin.from("promotions")
+                .select(`kind, status, marketplaces, period, ${PROMO_DATE_COLUMNS}, promotion_prices(sku, in_ca, in_us, promo_price_cad, promo_price_usd)`)
+                .gte("period", prevPeriod(periodOfDay(today))).neq("status", "ended");
+              if (error) throw error;
+              const level = new Map<string, "orange" | "purple">();
+              for (const p of (promos ?? []) as any[]) {
+                const monthly = p.kind === "monthly";
+                if (monthly ? p.status !== "active" : !(p.marketplaces ?? []).some((c: string) => src.promo.includes(c))) continue;
+                if (!windowContains(promoWindow(p, market as Market), today)) continue;
+                for (const r of p.promotion_prices ?? []) {
+                  if (!((market === "us" ? r.in_us : r.in_ca) ?? r[priceKey] != null)) continue;
+                  if (!monthly) level.set(r.sku, "purple"); else if (!level.has(r.sku)) level.set(r.sku, "orange");
+                }
+              }
+              const costs = await costsBySku(odoo, src.company, population.map((p) => p.sku));
+              const below: string[] = [];
+              for (const p of population as Record<string, any>[]) {
+                const paid = p[src.wholesale[level.get(p.sku) ?? "blue"]];
+                const cost = costs.get(p.sku);
+                if (paid == null || cost == null) continue;
+                if (Number(paid) < cost) below.push(`${p.sku} ${paid} < ${round2(cost)}`);
+              }
+              diag.belowCost = below.join(", ");
+              value.no_profit_skus = below.length;
+            }
+            if (keys.has("reviews_new")) {
+              // New reviews of a column's data week: each listing's count when this
+              // column opened (the week just ended) against when the column before
+              // opened. A listing seen for the first time adds nothing.
+              const items: Record<string, number> = {};
+              for (let from_ = 0; ; from_ += 1000) {
+                const { data, error } = await admin.from("where_to_buy_links").select("retailer, page_item_id, review_count").in("retailer", src.pages).not("review_count", "is", null).not("page_item_id", "is", null).range(from_, from_ + 999);
+                if (error) throw error;
+                for (const r of data ?? []) { const k = `${r.retailer}:${r.page_item_id}`; items[k] = Math.max(items[k] ?? 0, Number(r.review_count)); }
+                if ((data ?? []).length < 1000) break;
+              }
+              const key = `${board}:${market}`;
+              const saved = reviewState[key];
+              const sameColumn = saved?.column === column;
+              const first = sameColumn && Object.keys(saved.first).length ? saved.first : items;
+              const prev = sameColumn ? saved.prev : saved?.first ?? null;
+              if (prev && Object.keys(prev).length) value.reviews_new = Object.keys(first).reduce((t, k) => t + (k in prev ? Math.max(0, first[k] - prev[k]) : 0), 0);
+              reviewState[key] = { column, prev, first };
+              reviewsChanged = true;
+              diag.reviewListings = Object.keys(items).length;
+            }
             if (keys.has("losers_note")) {
               // Written once per column (a closed week), again only on request
               // (`regenerate`) — a preview always writes it.
@@ -1066,6 +1099,7 @@ Deno.serve(async (req) => {
     let written = 0;
     let replacedCount = 0;
     if (mode === "fill") {
+      if (reviewsChanged) await admin.from("app_settings").upsert({ key: "scorecard_review_counts", value: reviewState, updated_at: new Date().toISOString() }, { onConflict: "key" });
       const row = (v: typeof out[number]) => ({ metric_id: v.metricId, week_start: v.week, value: v.value, note: v.note ?? null, origin: "auto" });
       const filled = (v: typeof out[number]) => v.value != null || Boolean(v.note);
       // This week's column and the running week's: always the PIM's.

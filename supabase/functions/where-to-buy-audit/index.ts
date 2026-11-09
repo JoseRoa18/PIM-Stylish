@@ -311,6 +311,7 @@ interface Reading {
   page_model: string | null; page_item_id: string | null; sku_check: string | null; page_note: string | null;
   price: number | null; was_price: number | null; currency: string | null; in_stock: boolean | null; read_at: string | null;
   page_options: OptionLink[] | null;
+  review_count?: number | null; // kept when a later read has no answer: only a page that shows it writes it
 }
 const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null, page_options: null };
 interface Row extends Reading {
@@ -324,7 +325,7 @@ interface Row extends Reading {
 }
 // The checker's state on a link, carried over by URL when a scan rebuilds the rows.
 type LinkState = Pick<Row, "verdict" | "http_status" | "final_url" | "note" | "checked_at" | "next_check_at" | "checked_via" | "fail_count" | "signal_count" | "signal_at" | "job_id" | "job_at" | keyof Reading>;
-const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,signal_at,job_id,job_at,page_model,page_item_id,sku_check,page_note,price,was_price,currency,in_stock,read_at,page_options";
+const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,signal_at,job_id,job_at,page_model,page_item_id,sku_check,page_note,price,was_price,currency,in_stock,read_at,page_options,review_count";
 type Base = { site: string; sku: string; wix_product_id: string | null; scanned_at: string };
 type Link = { retailer: string; url: string };
 interface PimLinks { skus: Set<string>; brands: Map<string, string>; links: Map<string, Link[]> }
@@ -870,7 +871,7 @@ interface OptionLink { model: string | null; name: string | null; subSku: string
 interface PageRead {
   ids: string[]; options: string[]; gtins: string[]; price: number | null; wasPrice: number | null; currency: string | null;
   inStock: boolean | null; itemId: string | null; source: string | null; optionDefaulted: boolean; gone: boolean; note: string | null;
-  subSku: string | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
+  subSku: string | null; reviewCount?: number | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
 }
 interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string; soldOut?: string }
 
@@ -1388,6 +1389,7 @@ function readingFor(o: Judged, now: string): Partial<Reading> {
   const model = {
     page_model: o.check?.model ?? o.page.ids[0] ?? null, page_item_id: o.page.itemId, sku_check: o.check?.check ?? null, page_note: o.page.note,
     page_options: o.page.optionLinks?.length ? o.page.optionLinks : null,
+    ...(o.page.reviewCount != null ? { review_count: o.page.reviewCount } : {}),
   };
   if (o.priceBlind) return model; // the last price read stays as it was
   return { ...model, price: o.page.price, was_price: o.page.wasPrice, currency: o.page.currency, in_stock: o.page.inStock, read_at: now };

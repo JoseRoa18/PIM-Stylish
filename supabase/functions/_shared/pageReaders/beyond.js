@@ -140,10 +140,20 @@ function fromMarkup(html, url) {
   };
 }
 
+// The listing's own review count: the page's top-level JSON-LD Product (never a
+// carousel's). A product page with no rating block has no reviews yet.
+function reviewsOf(html) {
+  const product = jsonLd(html).flat().find((x) => x?.['@type'] === 'Product');
+  if (!product) return null;
+  const n = Number(product.aggregateRating?.reviewCount ?? product.aggregateRating?.ratingCount ?? 0);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 function readBeyond(html, url) {
   html = String(html ?? '');
   if (!/bedbathandbeyond|overstock|ostkcdn/i.test(html) || /<title>\s*Access Denied/i.test(html)) return null; // Akamai block page
-  return fromNextData(html, url) ?? fromFlight(html, url) ?? fromMarkup(html, url);
+  const read = fromNextData(html, url) ?? fromFlight(html, url) ?? fromMarkup(html, url);
+  return read ? { ...read, reviewCount: reviewsOf(html) } : null;
 }
 
 export const readers = { bbb_us: readBeyond, overstock_us: readBeyond };

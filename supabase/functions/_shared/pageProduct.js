@@ -148,6 +148,7 @@ function clean(read) {
     inStock: typeof read.inStock === "boolean" ? read.inStock : null,
     itemId: read.itemId ? String(read.itemId).slice(0, 40) : null,
     subSku: read.subSku ? String(read.subSku).slice(0, 40) : null,
+    reviewCount: Number.isInteger(read.reviewCount) ? read.reviewCount : null,
     optionLinks: optionLinksOf(read.optionLinks),
     canonical: /^https?:\/\//i.test(String(read.canonical ?? "")) ? String(read.canonical).slice(0, 500) : null,
     source: read.source ? String(read.source).slice(0, 120) : null,

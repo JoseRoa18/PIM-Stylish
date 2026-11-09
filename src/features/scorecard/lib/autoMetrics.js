@@ -39,7 +39,7 @@ export const AUTO_KEYS = {
   odr: { label: 'Order defect rate — paid orders of the week cancelled, refunded or returned (Wix + Odoo)', unit: 'percent', server: true, store: true },
   returns_not_received: { label: '$ refunded in the week on orders whose goods never came back (Wix refunds, Odoo returns)', unit: 'money', server: true, store: true },
   reviews_5plus: { label: '# products with more than 5 approved reviews on the store (Wix Reviews)', unit: 'number', server: true, store: true },
-  no_profit_skus: { label: '# SKUs priced on the store this week below Odoo\'s average cost + their real shipping cost per unit (ShipStation labels, 180 days)', unit: 'number', server: true, store: true },
+  no_profit_skus: { label: '# SKUs priced on the store this week below Odoo\'s average cost + their real shipping cost per unit (ShipStation labels, 180 days)', unit: 'number', server: true, store: true, alsoOn: ['bbb_overstock'] },
   skus_not_sold_90d: { label: '# SKUs without a sale in 90 days — PIM products vs Odoo orders', unit: 'number', server: true },
   oos_loss: { label: 'Loss due to out of stock — products at 0 units × their weekly sales of the 8 weeks before', unit: 'money', server: true },
   obsolete_skus: { label: '# SKUs marked obsolete in the PIM', unit: 'number', server: true },
@@ -48,6 +48,8 @@ export const AUTO_KEYS = {
   returns_value: { label: '$ returned — weekly average value of the goods Odoo received back over the last 4 weeks', unit: 'money', server: true },
   sales_usd_k: { label: 'Sales in thousands of USD — Odoo orders, USD ones as they are, others at today\'s rate', unit: 'number', server: true },
   azuni_skus_sold: { label: '# Azuni SKUs sold in the week (Odoo orders)', unit: 'number', server: true },
+  returns_note: { label: 'Return actions — what came back in the week, by SKU (Odoo returns)', unit: 'text', server: true },
+  reviews_new: { label: 'New reviews — what the store listings gained since the last week (their pages)', unit: 'number', server: true },
   top_losers_sales: { label: 'Sales of the tab\'s list of top losers — products only, Odoo orders of the week (BB&B / Overstock)', unit: 'money', server: true },
   listings_updated: { label: '# listings updated — products the PIM pushed to the store that week', unit: 'number', server: true },
   // Written by AI (Gemini) from the week's data only: the channel's top losers vs

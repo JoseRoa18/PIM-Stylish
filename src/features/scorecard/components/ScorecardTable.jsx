@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Copy, Pencil, X, Loader2, MessageSquareText } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -315,6 +315,53 @@ function ValueCell({ metric, week, row, current, running, editable, onSave }) {
 }
 
 /**
+ * A note the PIM writes in blocks (a blank line between them): one card per
+ * block, its first line as the heading, "Label: value" lines aligned and "• "
+ * lines as a list. Any other note (a typed one) stays plain text.
+ */
+function NoteBody({ text }) {
+  const blocks = text.split(/\n\s*\n/).map((b) => b.split('\n'));
+  if (blocks.length < 2) return <p className="whitespace-pre-wrap select-text text-body-md text-on-surface leading-relaxed">{text}</p>;
+  return (
+    <div className="space-y-3 select-text">
+      {blocks.map((lines, i) => {
+        if (lines.length === 1) return <p key={i} className="text-body-md text-on-surface-variant">{lines[0]}</p>;
+        const [title, drop] = lines[0].split(' — ');
+        const fields = lines.slice(1).map((l) => l.match(/^([A-Z][A-Za-z ]+):\s*(.*)$/)).filter((m) => m && !m[0].startsWith('•') && m[2]);
+        const bullets = lines.slice(1).filter((l) => l.startsWith('• ')).map((l) => l.slice(2));
+        const listLabel = lines.slice(1).find((l) => /^[A-Z][A-Za-z ]+:$/.test(l))?.slice(0, -1);
+        return (
+          <section key={i} className="rounded-xl border border-outline-variant bg-surface-container-low p-3">
+            <h3 className="flex items-baseline justify-between gap-3 text-label-lg font-semibold text-on-surface">
+              <span>{title}</span>
+              {drop && <span className="text-error whitespace-nowrap">{drop}</span>}
+            </h3>
+            {fields.length > 0 && (
+              <dl className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1 text-body-sm">
+                {fields.map((m) => (
+                  <Fragment key={m[1]}>
+                    <dt className="text-on-surface-variant">{m[1]}</dt>
+                    <dd className="text-on-surface">{m[2]}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+            )}
+            {bullets.length > 0 && (
+              <div className="mt-2 text-body-sm">
+                {listLabel && <p className="text-on-surface-variant">{listLabel}</p>}
+                <ul className="mt-0.5 list-disc pl-4 space-y-0.5 text-on-surface">
+                  {bullets.map((b) => <li key={b}>{b}</li>)}
+                </ul>
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * A note in full: easy to read and to copy. In a portal (inside the <td> the
  * cell's tooltip showed over the text) into <main>, not <body>: there the
  * dialog's header became a second banner landmark.
@@ -355,7 +402,7 @@ function NoteDialog({ title, subtitle, text, onClose, onEdit }) {
         </>
       )}
     >
-      <p className="whitespace-pre-wrap select-text text-body-md text-on-surface leading-relaxed">{text}</p>
+      <NoteBody text={text} />
     </Dialog>,
     document.getElementById('main-content') ?? document.body,
   );
