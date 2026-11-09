@@ -123,14 +123,19 @@ function fromMarkup(html, url) {
   const optSku = [ld?.sku, utag?.full_sku].find((s) => /-\d{3}-\d{3}$/.test(s ?? '')) ?? null; // "38831304-000-001"
   const box = id ? html.match(new RegExp(`data-testid="product-pricing-${id}"[\\s\\S]{0,400}?data-testid="product-price-amount"[^>]*>([^<]+)<`)) : null;
   const today = html.match(/data-testid="current-price"[\s\S]{0,600}?data-price="domestic">([^<]+)</); // BB&B "Today $97.00"
-  const price = offer?.price ?? (optSku ? money(box?.[1] ?? today?.[1] ?? utag?.product_price?.[0]) : null);
+  const other = optSku && !isBase(optSku); // the listing's number is the base option's
+  const shownPrice = optSku ? money(box?.[1] ?? today?.[1] ?? utag?.product_price?.[0]) : null;
+  // BB&B's JSON-LD offer is the LISTING's (its lowest price, another finish on sale: K-107NR read 128, its Chrome
+  // option's, on a $158 page, 2026-11-09). With another option selected only what the page shows for it counts;
+  // Overstock's offer is the selected option's own.
+  const listingOffer = other && /bedbathandbeyond\.com/i.test(String(url ?? ''));
+  const price = listingOffer ? shownPrice : offer?.price ?? shownPrice;
   const models = uniq([ld?.mpn, html.match(/>Model Number<\/(?:td|div)>\s*<(?:td|div)[^>]*>([^<]+)</)?.[1]].map(decode));
   if (!models.length && price === null) return null;
-  const other = optSku && !isBase(optSku); // the listing's number is the base option's
   return {
     ids: other ? [] : models, options: other ? models : [], price, wasPrice: null,
     currency: offer?.currency ?? utag?.order_currency ?? null,
-    inStock: offer?.inStock ?? (utag?.product_in_stock ? utag.product_in_stock === '1' : null),
+    inStock: (listingOffer ? null : offer?.inStock) ?? (utag?.product_in_stock ? utag.product_in_stock === '1' : null),
     itemId: id, subSku: optSku, source: `${offer ? 'jsonld' : utag && !box && !today ? 'utag' : 'html'}${optSku ? ` · option ${optSku}` : ''}`,
   };
 }

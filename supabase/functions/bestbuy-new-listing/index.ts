@@ -102,7 +102,19 @@ Deno.serve(async (req) => {
       actor_id: caller.id, actor_email: caller.email, actor_name: caller.id ? null : "PIM automation",
       action: "push", entity_type: "product", entity_id: sku, target: "marketplace.bestbuy.ca", summary, metadata,
     });
-    const save = (sku: string, fields: Record<string, unknown>) => admin.from("bestbuy_new_listings").upsert({ sku, checked_at: new Date().toISOString(), ...fields }, { onConflict: "sku" });
+    // A row's first save carries the upc and via the table requires. Any later
+    // save is an UPDATE: an upsert of only the changed fields fails those NOT
+    // NULL checks even when the row exists, and that error went unread, so the
+    // status never moved and `check` sent the same offers every hour (60 times
+    // each, 2026-11-06 to 11-09).
+    const save = async (sku: string, fields: Record<string, unknown>) => {
+      const row = { checked_at: new Date().toISOString(), ...fields };
+      const table = admin.from("bestbuy_new_listings");
+      const { error } = "upc" in fields && "via" in fields
+        ? await table.upsert({ sku, ...row }, { onConflict: "sku" })
+        : await table.update(row).eq("sku", sku);
+      if (error) throw new Error(`Could not save ${sku}: ${error.message}`);
+    };
     const catalogInfo = (l: Record<string, any> | null) => (l ? { bb_product_id: l.product_sku ?? null, title: l.product_title ?? null, category_code: l.category_code ?? null, category_label: l.category_label ?? null } : null);
     // The same shape as an offer of the channel_health snapshot.
     const offerShape = (o: Record<string, any>) => ({
