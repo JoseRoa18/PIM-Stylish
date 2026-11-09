@@ -49,7 +49,7 @@ const json = (body: unknown, status = 200) =>
 
 type Market = "ca" | "us";
 /** Which SKUs a channel lists, for "# SKU not sold": the PIM's ids for it. */
-type Listed = { alias: string } | { amazon: Market } | { wayfair: Market } | "catalog";
+type Listed = { alias: string } | { amazon: Market } | { wayfair: Market } | { wtb: string } | "catalog";
 interface MarketSource {
   odoo: unknown[];      // Odoo domain on sale.order selecting the channel's orders
   company: number;      // Odoo company whose costs and currency apply (2 = Stylish International, CAD; 1 = Stylish USA, USD)
@@ -61,9 +61,9 @@ interface MarketSource {
   promo: string[];      // its promotion channel keys (promotions.marketplaces) — for the AI note
   pages: string[];      // its store-page retailer keys (where_to_buy_readings) — for the AI note
 }
-const BOARD_LABEL: Record<string, string> = { sinksdirect: "Sinks Direct", amazon: "Amazon", wayfair: "Wayfair", homedepot_ca: "Home Depot", lowes: "Lowe's", rona: "Rona", bbb_overstock: "BB&B / Overstock" };
+const BOARD_LABEL: Record<string, string> = { sinksdirect: "Sinks Direct", amazon: "Amazon", wayfair: "Wayfair", homedepot_ca: "Home Depot", lowes: "Lowe's", menards: "Menards", rona: "Rona", bbb_overstock: "BB&B / Overstock" };
 // Odoo's marketplaces (marketplace.master) and companies.
-const MP = { wayfair: 4, homedepot: 5, rona: 6, lowes: 7, bbb: 8, amazonFbm: 10, amazonFba: 13, overstock: 17 };
+const MP = { wayfair: 4, homedepot: 5, rona: 6, lowes: 7, bbb: 8, amazonFbm: 10, menards: 12, amazonFba: 13, overstock: 17 };
 const CA = 2;
 const US = 1;
 const sold = (ids: number[], company: number) => [["marketplace_name", "in", ids], ["company_id", "=", company]];
@@ -86,6 +86,8 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
   },
   homedepot_ca: { ca: { odoo: sold([MP.homedepot], CA), company: CA, stock: "ca", listed: { alias: "Home Depot CA" }, promo: ["homedepot_ca"], pages: ["homedepot_ca"] } },
   lowes: { us: { odoo: sold([MP.lowes], US), company: US, stock: "us", listed: { alias: "Lowe's US" }, promo: ["lowes_us"], pages: ["lowes_us"] } },
+  // Menards has no aliases in the PIM: what it lists = the products with a Menards link.
+  menards: { us: { odoo: sold([MP.menards], US), company: US, stock: "us", listed: { wtb: "menards" }, promo: ["menards"], pages: ["menards"] } },
   rona: { ca: { odoo: sold([MP.rona], CA), company: CA, stock: "ca", listed: { alias: "Rona" }, promo: ["rona"], pages: ["rona"] } },
   bbb_overstock: { us: { odoo: sold([MP.bbb, MP.overstock], US), company: US, stock: "us", listed: { alias: "BB&B / Overstock" }, promo: ["bbb", "overstock"], pages: ["bbb_us", "overstock_us"] } },
 };
@@ -425,6 +427,7 @@ async function listedSkus(admin: Admin, listed: Listed): Promise<Set<string> | n
   };
   if ("alias" in listed) await page("product_aliases", "sku", (q) => q.eq("marketplace", listed.alias), (r) => r.sku);
   else if ("amazon" in listed) await page("amazon_links", "sku", (q) => q.eq("marketplace", listed.amazon), (r) => r.sku);
+  else if ("wtb" in listed) await page("product_where_to_buy", "sku", (q) => q.eq("retailer", listed.wtb), (r) => r.sku);
   else await page("products", "sku, wayfair_item_group_id, wayfair_usa_item_group_id", (q) => q, (r) => ((listed.wayfair === "ca" ? r.wayfair_item_group_id : r.wayfair_usa_item_group_id) ? r.sku : null));
   return out;
 }

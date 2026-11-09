@@ -1312,9 +1312,10 @@ function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalo
   if (o.page.gone) return { ...o, kind: "broken", note: o.page.note ?? "The store no longer sells it" };
   let check = skuCheck(o.page, row.sku, catalog);
   // Overstock writes one model number per listing, so a page on another color
-  // names none; its full SKU is that option's own, and the PIM keeps it as the
-  // BB&B / Overstock alias (10 of 10 pages agreed, 2026-11-09).
-  if (check?.check === "unknown" && !check.model && o.page.subSku && beyondAliases.get(row.sku)?.has(o.page.subSku)) check = { check: "match", model: row.sku };
+  // names none or the listing's own (B-102C's reads B-102N); its full SKU is
+  // that option's, and the PIM keeps it as the BB&B / Overstock alias (10 of
+  // 10 pages agreed, 2026-11-09). The alias settles it, whatever the model.
+  if (check && check.check !== "match" && o.page.subSku && beyondAliases.get(row.sku)?.has(o.page.subSku)) check = { check: "match", model: row.sku };
   if (check?.check === "other") return { ...o, kind: "soft", check, note: `Opens another product: ${check.model}` };
   return { ...o, check };
 }

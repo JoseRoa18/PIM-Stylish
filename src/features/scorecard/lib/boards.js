@@ -29,6 +29,7 @@ export const BOARDS = [
   },
   { key: 'homedepot_ca', label: 'Home Depot', serverFill: true, markets: { ca: { channels: ['homedepot_ca'], align: ['homedepot_ca'] } } },
   { key: 'lowes', label: "Lowe's", serverFill: true, markets: { us: { channels: ['lowes_us'], align: ['lowes_us'] } } },
+  { key: 'menards', label: 'Menards', serverFill: true, markets: { us: { channels: ['menards'], align: ['menards'] } } },
   { key: 'rona', label: 'Rona', serverFill: true, markets: { ca: { channels: ['rona'], align: ['rona'] } } },
   { key: 'bbb_overstock', label: 'BB&B / Overstock', serverFill: true, markets: { us: { channels: ['bbb', 'overstock'], align: ['bbb_us', 'overstock_us'] } } },
   {
