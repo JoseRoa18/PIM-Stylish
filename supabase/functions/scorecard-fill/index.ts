@@ -106,6 +106,8 @@ const SERVER_KEYS = [
   "cancel_rate", "on_time_ship", "late_ship_rate", "odr", "returns_not_received", "reviews_5plus", "no_profit_skus",
   // 2026-11-05, the marketplace tabs: returns over 4 weeks, sales in thousands of USD, Azuni SKUs sold.
   "return_rate", "returns_value", "sales_usd_k", "azuni_skus_sold",
+  // 2026-11-09: the sales of a tab's own list of SKUs (app_settings.scorecard_top_losers, by board).
+  "top_losers_sales",
   // The "Actions taken for top losers" note, written by AI from the week's data (user, 2026-11-05).
   "losers_note",
 ];
@@ -712,6 +714,8 @@ Deno.serve(async (req) => {
     const { data: products, error: pErr } = await admin.from("products").select("sku, brand, model_name, workflow_status, is_obsolete, map_cad, map_usd, msrp_cad, msrp_usd, wix_product_id");
     if (pErr) throw pErr;
     const live = (products ?? []).filter((p) => p.workflow_status !== "archived");
+    const { data: topLosersRow } = await admin.from("app_settings").select("value").eq("key", "scorecard_top_losers").maybeSingle();
+    const topLosers = (topLosersRow?.value ?? {}) as Record<string, string[]>;
     const exact = new Set((products ?? []).map((p) => p.sku));
     const lower = new Map((products ?? []).map((p) => [p.sku.toLowerCase(), p.sku]));
     const skuOf = (code: string | null) => (code == null ? null : exact.has(code) ? code : lower.get(code.toLowerCase()) ?? null);
@@ -927,6 +931,11 @@ Deno.serve(async (req) => {
           value.orders = paidOrders.size;
           value.units = paidLines.reduce((s, l) => s + l.qty, 0);
           value.azuni_skus_sold = new Set(paidLines.filter((l) => l.sku && brandOf.get(l.sku) === "azuni").map((l) => l.sku)).size;
+          // Products only (no shipping), the same paid lines as Orders and Units.
+          if (topLosers[board]) {
+            const watched = new Set(topLosers[board]);
+            value.top_losers_sales = round2(paidLines.filter((l) => l.sku && watched.has(l.sku)).reduce((s, l) => s + l.subtotal, 0));
+          }
           if (keys.has("skus_not_sold_90d") && population) {
             // The SKUs the channel lists (its ids in the PIM; Sinks Direct: every product) without a sale in 90 days.
             const soldSkus = new Set(linesIn(addDays(column, -90), column).filter((l) => isSale(l) && l.sku).map((l) => l.sku));

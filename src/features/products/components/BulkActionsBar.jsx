@@ -36,6 +36,7 @@ const loadExports = {
   walmart: () => import('@/features/syndication/exports/walmartExport'),
   homeDepot: () => import('@/features/syndication/exports/homeDepotExport'),
   homeDepotCa: () => import('@/features/syndication/exports/homeDepotCaExport'),
+  rona: () => import('@/features/syndication/exports/ronaExport'),
   lowes: () => import('@/features/syndication/exports/lowesExport'),
   pim: () => import('@/features/syndication/exports/pimExport'),
 };
@@ -396,7 +397,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     task ??= startTask(`${marketplace} export`, { detail: 'Loading products…' });
     if (purpose) templates = templates.filter((t) => templatePurpose(t) === purpose);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates, marketplace, task);
-    if (/wayfair|amazon|walmart|home ?depot/i.test(marketplace)) return handleExportGrouped(marketplace, templates, task);
+    if (/wayfair|amazon|walmart|home ?depot|rona/i.test(marketplace)) return handleExportGrouped(marketplace, templates, task);
     if (/lowe/i.test(marketplace)) {
       if (!templates.some((t) => templatePurpose(t) === 'new_listing')) return handleExportLowes(templates, marketplace, task);
       // The merchant changes often: a new listing asks who it is, every time.
@@ -604,6 +605,8 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         ? (await loadExports.amazon()).generateAmazonFromTemplate
         : /walmart/i.test(marketplace)
           ? (await loadExports.walmart()).generateWalmartFromTemplate
+          : /rona/i.test(marketplace)
+            ? (await loadExports.rona()).generateRonaFromTemplate
           : /home ?depot.*(\bca\b|canada)/i.test(marketplace)
             ? (await loadExports.homeDepotCa()).generateHomeDepotCaFromTemplate
             : /home ?depot/i.test(marketplace)
@@ -640,6 +643,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       const reports = [];
       let warnings = 0;
       const leftOut = []; // products an exporter could not write (e.g. no Home Depot Canada item number)
+      const missingData = []; // written, but with required fields the PIM lacks (Rona)
       const media = { files: 0, parts: 0, failed: 0 }; // Home Depot Canada's media .zip
       const { labelTask } = await loadTemplateFiller();
       const groups = [...byTemplate.values()];
@@ -649,6 +653,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         const res = await generate(tmpl.storage_path, productList, `${prefix}_${label.replace(/[^a-z0-9_]+/gi, '_')}`, { task: slice });
         warnings += res.warnings?.length ?? 0;
         if (res.skipped?.length) leftOut.push(`${res.skipped.join(', ')} (${res.skippedReason ?? 'not written'})`);
+        if (res.missingData?.length) missingData.push(...res.missingData);
         if (res.fillReport) reports.push({ file: `${marketplace} — ${label}`, ...res.fillReport });
         parts.push(`${label}: ${res.count} product(s)${res.families != null ? ` / ${res.families} group(s)` : ''}`);
         media.files += res.media?.files ?? 0;
@@ -665,10 +670,11 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       if (excludedSkus.length) message += ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.`;
       if (warnings) message += ` ⚠ ${warnings} variant(s) share a finish — set a 2nd Variant Grouping in Excel (see console).`;
       if (leftOut.length) message += ` ⚠ Left out: ${leftOut.join('; ')}.`;
+      if (missingData.length) message += ` ⚠ Missing in the file: ${missingData.join(' · ')}.`;
       task.finish(`Downloaded · ${parts.length} file${parts.length === 1 ? '' : 's'}` +
         (media.parts ? ` + ${media.files} media file${media.files === 1 ? '' : 's'} in ${media.parts} .zip${media.parts === 1 ? '' : 's'}` : '') +
         (media.failed ? ` · ${media.failed} could not be fetched` : ''));
-      setResult({ type: noTemplate.length || warnings || leftOut.length ? 'error' : 'success', message });
+      setResult({ type: noTemplate.length || warnings || leftOut.length || missingData.length ? 'error' : 'success', message });
     } catch (err) {
       task.fail(err);
       setResult({ type: 'error', message: err.message ?? `${marketplace} export failed` });

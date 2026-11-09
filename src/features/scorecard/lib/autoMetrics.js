@@ -48,6 +48,7 @@ export const AUTO_KEYS = {
   returns_value: { label: '$ returned — weekly average value of the goods Odoo received back over the last 4 weeks', unit: 'money', server: true },
   sales_usd_k: { label: 'Sales in thousands of USD — Odoo orders, USD ones as they are, others at today\'s rate', unit: 'number', server: true },
   azuni_skus_sold: { label: '# Azuni SKUs sold in the week (Odoo orders)', unit: 'number', server: true },
+  top_losers_sales: { label: 'Sales of the tab\'s list of top losers — products only, Odoo orders of the week (BB&B / Overstock)', unit: 'money', server: true },
   listings_updated: { label: '# listings updated — products the PIM pushed to the store that week', unit: 'number', server: true },
   // Written by AI (Gemini) from the week's data only: the channel's top losers vs
   // their 8-week average, the cause the PIM can see (no stock, store page sold

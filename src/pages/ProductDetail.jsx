@@ -2098,6 +2098,10 @@ function ExportTemplatesCard({ product, media }) {
       } else if (/walmart/i.test(marketplace)) {
         const { generateWalmartFromTemplate } = await import('@/features/syndication/exports/walmartExport');
         await generateWalmartFromTemplate(set[0].storage_path, [product], `Walmart_${base}`, { task });
+      } else if (/rona/i.test(marketplace)) {
+        const { generateRonaFromTemplate } = await import('@/features/syndication/exports/ronaExport');
+        const res = await generateRonaFromTemplate(set[0].storage_path, [product], `Rona_${base}`, { task });
+        if (res.missingData.length) setError(`Downloaded. Missing in the file: ${res.missingData.join(' · ')}`);
       } else if (/home ?depot.*(\bca\b|canada)/i.test(marketplace)) {
         const { generateHomeDepotCaFromTemplate } = await import('@/features/syndication/exports/homeDepotCaExport');
         const res = await generateHomeDepotCaFromTemplate(set[0].storage_path, [product], `HomeDepotCA_${base}`, { task });
