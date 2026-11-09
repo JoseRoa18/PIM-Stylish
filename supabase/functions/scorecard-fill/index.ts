@@ -38,7 +38,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { isServiceRole } from "../_shared/serviceRole.ts";
 import { WIX_SITES } from "../_shared/wixSites.ts";
-import { promoWindow, windowContains } from "../_shared/promoCalendar.ts";
+import { priceOff } from "../_shared/priceTolerance.js";
+import { promoWindow, windowContains, prevPeriod, periodOfDay, PROMO_DATE_COLUMNS } from "../_shared/promoCalendar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -61,9 +62,9 @@ interface MarketSource {
   promo: string[];      // its promotion channel keys (promotions.marketplaces) — for the AI note
   pages: string[];      // its store-page retailer keys (where_to_buy_readings) — for the AI note
 }
-const BOARD_LABEL: Record<string, string> = { sinksdirect: "Sinks Direct", amazon: "Amazon", wayfair: "Wayfair", homedepot_ca: "Home Depot", lowes: "Lowe's", menards: "Menards", rona: "Rona", bbb_overstock: "BB&B / Overstock" };
+const BOARD_LABEL: Record<string, string> = { sinksdirect: "Sinks Direct", amazon: "Amazon", wayfair: "Wayfair", homedepot_ca: "Home Depot", lowes: "Lowe's", menards: "Menards", rona: "Rona", bbb_overstock: "BB&B / Overstock", bestbuy: "Best Buy", walmart: "Walmart" };
 // Odoo's marketplaces (marketplace.master) and companies.
-const MP = { wayfair: 4, homedepot: 5, rona: 6, lowes: 7, bbb: 8, amazonFbm: 10, menards: 12, amazonFba: 13, overstock: 17 };
+const MP = { walmart: 3, wayfair: 4, homedepot: 5, rona: 6, lowes: 7, bbb: 8, amazonFbm: 10, bestbuy: 11, menards: 12, amazonFba: 13, overstock: 17 };
 const CA = 2;
 const US = 1;
 const sold = (ids: number[], company: number) => [["marketplace_name", "in", ids], ["company_id", "=", company]];
@@ -88,6 +89,12 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
   lowes: { us: { odoo: sold([MP.lowes], US), company: US, stock: "us", listed: { alias: "Lowe's US" }, promo: ["lowes_us"], pages: ["lowes_us"] } },
   // Menards has no aliases in the PIM: what it lists = the products with a Menards link.
   menards: { us: { odoo: sold([MP.menards], US), company: US, stock: "us", listed: { wtb: "menards" }, promo: ["menards"], pages: ["menards"] } },
+  // The same: what each lists = the products with its Where to Buy link.
+  bestbuy: { ca: { odoo: sold([MP.bestbuy], CA), company: CA, stock: "ca", listed: { wtb: "bestbuy_ca" }, promo: ["bestbuy"], pages: ["bestbuy_ca"] } },
+  walmart: {
+    ca: { odoo: sold([MP.walmart], CA), company: CA, stock: "ca", listed: { wtb: "walmart_ca" }, promo: ["walmart_ca"], pages: ["walmart_ca"] },
+    us: { odoo: sold([MP.walmart], US), company: US, stock: "us", listed: { wtb: "walmart_us" }, promo: ["walmart_us"], pages: ["walmart_us"] },
+  },
   rona: { ca: { odoo: sold([MP.rona], CA), company: CA, stock: "ca", listed: { alias: "Rona" }, promo: ["rona"], pages: ["rona"] } },
   bbb_overstock: { us: { odoo: sold([MP.bbb, MP.overstock], US), company: US, stock: "us", listed: { alias: "BB&B / Overstock" }, promo: ["bbb", "overstock"], pages: ["bbb_us", "overstock_us"] } },
 };
@@ -457,7 +464,7 @@ async function shippedWixOrders(odoo: Odoo, wixIds: string[]): Promise<Set<strin
 }
 
 // ---- "Actions taken for top losers", written by AI (user, 2026-11-05) ----------
-interface LoserFact { sku: string; model: string | null; units: number; sales: number; avgUnits: number; avgSales: number; facts: string[]; brief: string[] }
+interface LoserFact { sku: string; model: string | null; units: number; sales: number; avgUnits: number; avgSales: number; facts: string[]; brief: string[]; todo: string[] }
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const SKU_TOKEN = /\b[A-Z]{1,3}-?\d{2,4}[A-Z0-9]*(?:-\d)?\b/g;
 
@@ -489,21 +496,24 @@ async function geminiText(prompt: string): Promise<string | null> {
  * thrown away for the same facts as a plain sentence — never an invented action.
  */
 async function writeLosersNote(where: string, weekLabel: string, currency: string, losers: LoserFact[], actions: string[], diag: Record<string, any>): Promise<string> {
-  const plain = () => {
-    const parts = losers.map((l) => `${l.sku} −${money(l.avgSales - l.sales)}${l.brief.length ? ` (${l.brief.join(", ")})` : ""}`);
-    return `Top losers vs their 8-week average: ${parts.join(", ")}. ${actions.length ? `Recorded in the PIM: ${actions.slice(0, 4).join("; ")}.` : "No action recorded in the PIM this week."}`;
-  };
+  const recorded = actions.length ? `Recorded in the PIM: ${actions.slice(0, 4).join("; ")}.` : "No action recorded in the PIM this week.";
+  const plain = () => [
+    ...losers.map((l) => `${l.sku}: down ${money(l.avgSales - l.sales)} vs its 8-week average (${l.units} units, usually ${l.avgUnits.toFixed(1)} a week)${l.brief.length ? `; ${l.brief.join(", ")}` : ""}. To recover sales: ${l.todo.join("; ")}.`),
+    recorded,
+  ].join("\n");
   if (!losers.length) return "No SKU sold under its 8-week average this week.";
   const facts = losers.map((l) => [
     `SKU ${l.sku}${l.model ? ` (${l.model})` : ""}: this week ${l.units} units, ${money(l.sales)}; 8-week average ${l.avgUnits.toFixed(1)} units, ${money(l.avgSales)} a week; drop ${money(l.avgSales - l.sales)}.`,
     ...l.facts.map((f) => `  - ${f}`),
+    ...l.todo.map((t) => `  - TO DO: ${t}`),
   ].join("\n")).join("\n");
-  const prompt = `You write one cell of a weekly EOS scorecard: "Actions taken for top losers" for ${where}, week ${weekLabel}, amounts in ${currency}.
-Use ONLY the facts below. Write 2 to 4 short sentences, at most 450 characters, plain text (no markdown, no bullet points).
-- Name EVERY top-loser SKU by its SKU (never by its model name alone) with its weekly drop.
-- The only causes you may state are: our warehouse stock at 0, the store page sold out, the store page a broken link. If none of those facts applies to a SKU, say the PIM's data shows no cause for it. Never present a price or a promotion as a cause.
-- Then summarize the actions in ACTIONS, starting with "Recorded in the PIM:" — all of them were recorded in the PIM this week for this channel. If ACTIONS is empty, write exactly: No action recorded in the PIM this week.
-- Never invent actions, causes, SKUs or numbers.
+  const prompt = `You write one cell of a weekly EOS scorecard: "Actions taken for top losers" for ${where}, week ${weekLabel}, amounts in ${currency}. The team reads it to decide what to do to bring these sales back.
+Use ONLY the facts below. Plain text, no markdown. One line per SKU, then one last line. At most 1,800 characters.
+- Each SKU line starts with the SKU, then: its weekly drop and its units this week against its usual units; its stock and the promotion it is on, when given; the cause; then "To recover sales:" and every one of its TO DO items, keeping their amounts, dates and promotion names exactly.
+- The only causes you may state are: our warehouse stock at 0, the store page sold out, the store page a broken link. If none applies to a SKU, say the PIM's data shows no cause for it. Never present a price or a promotion as a cause.
+- A TO DO item is a recommendation, not something already done: never write it as done. Add no recommendation that is not in TO DO.
+- The last line summarizes ACTIONS, starting with "Recorded in the PIM:". If ACTIONS is empty, write exactly: No action recorded in the PIM this week.
+- Never invent actions, causes, SKUs, dates or numbers.
 
 TOP LOSERS:
 ${facts}
@@ -511,16 +521,18 @@ ${facts}
 ACTIONS:
 ${actions.length ? actions.map((a) => `- ${a}`).join("\n") : "(none)"}`;
   const text = await geminiText(prompt);
-  const allowed = new Set([...losers.map((l) => l.sku), ...actions.flatMap((a) => a.match(SKU_TOKEN) ?? [])]);
+  const allowed = new Set([...losers.flatMap((l) => [l.sku, ...`${l.todo.join(" ")} ${l.facts.join(" ")}`.match(SKU_TOKEN) ?? []]), ...actions.flatMap((a) => a.match(SKU_TOKEN) ?? [])]);
   const named = (text ?? "").match(SKU_TOKEN) ?? [];
   const saysNone = /no action recorded/i.test(text ?? "");
-  if (text) diag.noteDraft = text.slice(0, 500);
-  if (!text || text.length > 700 || named.some((s) => !allowed.has(s)) || !losers.every((l) => text.includes(l.sku)) || saysNone !== (actions.length === 0)) {
+  // A recommendation only helps with its figures: an amount, date or promotion dropped from it sends the note to the plain version.
+  const keepMissing = Boolean(text) && losers.some((l) => l.todo.join(" ").match(/\$[\d,]+|\d{4}-\d{2}-\d{2}|"[^"]+"/g)?.some((k) => !text!.includes(k.replace(/"/g, ""))));
+  if (text) diag.noteDraft = text.slice(0, 2500);
+  if (!text || text.length > 2400 || named.some((s) => !allowed.has(s)) || !losers.every((l) => text.includes(l.sku)) || !/to recover sales/i.test(text) || keepMissing || saysNone !== (actions.length === 0)) {
     diag.noteFallback = text ? "rejected" : "no answer";
     return plain();
   }
   diag.noteBy = "gemini";
-  return text.replace(/\s+/g, " ").trim();
+  return text.replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
 }
 
 /** USD per unit of the company's currency (Stylish USA: 1), Odoo's rate of today; null when unknown. */
@@ -753,6 +765,15 @@ Deno.serve(async (req) => {
             .slice(0, 5);
           const skus = top.map((x) => x.sku);
           const stockMarket: Market = s.stock ?? (s.company === CA ? "ca" : "us");
+          const today = etToday();
+          const priceField = mk === "us" ? "promo_price_usd" : "promo_price_cad";
+          const { data: promotionsNow } = skus.length
+            ? await admin.from("promotions").select(`name, kind, status, period, marketplaces, ${PROMO_DATE_COLUMNS}, promotion_prices(sku, in_ca, in_us, promo_price_cad, promo_price_usd)`).gte("period", prevPeriod(periodOfDay(today))).neq("status", "ended").in("promotion_prices.sku", skus)
+            : { data: [] };
+          const dealsHere = (promotionsNow ?? []).filter((p: any) => p.kind !== "monthly" && (p.marketplaces ?? []).some((c: string) => s.promo.includes(c))).map((p: any) => ({ p, w: promoWindow(p, mk) }));
+          const monthlyNow = (promotionsNow ?? []).filter((p: any) => p.kind === "monthly" && p.status === "active" && windowContains(promoWindow(p, mk), today));
+          const memberOf = (p: any, sku: string) => (p.promotion_prices ?? []).find((r: any) => r.sku === sku && ((mk === "us" ? r.in_us : r.in_ca) ?? r[priceField] != null));
+          const nextDeals = dealsHere.filter(({ w }: any) => w.start > today).sort((a: any, b: any) => a.w.start.localeCompare(b.w.start));
           const [{ data: inv }, { data: pages }, { data: promos }, { data: log }] = await Promise.all([
             skus.length ? admin.from("product_inventory").select("sku, available, eta").eq("market", stockMarket).in("sku", skus) : Promise.resolve({ data: [] }),
             skus.length ? admin.from("where_to_buy_readings").select("retailer, sku, verdict, in_stock, price, read_at").in("retailer", s.pages).in("sku", skus) : Promise.resolve({ data: [] }),
@@ -772,7 +793,41 @@ Deno.serve(async (req) => {
               facts.push(`${pg.retailer} store page (read ${String(pg.read_at ?? "").slice(0, 10)}): ${pg.verdict === "broken" ? "broken link" : pg.in_stock === false ? "sold out" : "live, in stock"}`);
               if (pg.verdict === "broken") brief.push("store link broken"); else if (pg.in_stock === false) brief.push("sold out on the store");
             }
-            return { ...x, model: prod?.model_name ?? null, facts, brief };
+            // What could bring the sales back, from these same facts: the note
+            // may only recommend what is listed here.
+            const todo: string[] = [];
+            const own = (pages ?? []).filter((r) => r.sku === x.sku);
+            const isBroken = own.some((r) => r.verdict === "broken");
+            const soldOut = own.some((r) => r.verdict !== "broken" && r.in_stock === false);
+            const live = own.find((r) => r.verdict !== "broken" && r.in_stock !== false && r.price != null);
+            const onHand = st ? Number(st.available) : null;
+            const running = dealsHere.filter(({ w, p }: any) => windowContains(w, today) && memberOf(p, x.sku)).sort((a: any, b: any) => b.w.start.localeCompare(a.w.start))[0]?.p ?? monthlyNow.find((p: any) => memberOf(p, x.sku)) ?? null;
+            const promoPrice = running ? Number(memberOf(running, x.sku)?.[priceField] ?? NaN) : NaN;
+            if (running) facts.push(`on promotion now: "${running.name}"${promoPrice > 0 ? ` at ${money(promoPrice)}` : ""}`);
+            if (onHand !== null && onHand > 0 && x.avgUnits > 0) facts.push(`about ${Math.round(onHand / x.avgUnits)} weeks of stock at its usual pace`);
+            if (onHand !== null && onHand <= 0 && !s.ships?.length) {
+              todo.push(st?.eta ? `stock is due ${st.eta}: plan a promotion for when it arrives` : "there is no arrival date: confirm the purchase order");
+            } else {
+              if (s.ships?.length) todo.push("check its FBA stock, which the PIM cannot see");
+              if (soldOut && onHand !== null && onHand > 0) todo.push(`we have ${onHand} units but the store shows it sold out: send the stock to the store or ask it to reactivate the item`);
+              if (isBroken) todo.push("fix or replace the broken store link");
+              if (!own.length) todo.push("confirm the listing is live on this store");
+              if (live) {
+                const map = Number(mk === "us" ? prod?.map_usd : prod?.map_cad) || null;
+                // BB&B and Overstock take flash deals at a level the promotion's row does not hold.
+                const expected = running ? (running.kind === "flash" && boardKey === "bbb_overstock" ? null : promoPrice > 0 ? promoPrice : null) : map;
+                if (expected != null && priceOff(Number(live.price), expected)) todo.push(`the store shows ${money(Number(live.price))} against the expected ${money(expected)}: correct the price`);
+                if (running) todo.push(`it is already on "${running.name}": review its images, title and reviews`);
+                else {
+                  const next = nextDeals[0];
+                  if (next && memberOf(next.p, x.sku)) todo.push(`it is in "${next.p.name}" from ${next.w.start}: confirm it is loaded on the store`);
+                  else if (next) todo.push(`add it to "${next.p.name}", which starts ${next.w.start}`);
+                  else todo.push("add it to the next promotion");
+                }
+              }
+            }
+            if (!todo.length) todo.push("review the listing on this store");
+            return { ...x, model: prod?.model_name ?? null, facts, brief, todo };
           });
           // What the PIM recorded that week for this channel or these SKUs.
           // A Wix push counts for this store only (the Wix target is shared by the five stores).
