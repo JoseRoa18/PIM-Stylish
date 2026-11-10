@@ -47,7 +47,7 @@ export default function TeamActivity({ activity, prevActivity, week, onOpen, scr
       {rows.length === 0 ? (
         <div className="px-6 py-10 text-center text-body-sm text-on-surface-variant">No activity recorded in this week.</div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={0}>
           <table className="w-full min-w-[640px]">
             <thead>
               <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">

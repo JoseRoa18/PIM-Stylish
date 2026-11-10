@@ -421,7 +421,7 @@ function LanguageGroup({ docType, linkedLangs, children }) {
               <span
                 key={l.id}
                 title={`${l.label} — missing`}
-                className="px-1 py-px rounded-sm border border-outline-variant text-on-surface-variant/70 text-[10px] leading-4 tracking-wide"
+                className="px-1 py-px rounded-sm border border-outline-variant text-on-surface-variant text-[10px] leading-4 tracking-wide"
               >
                 {l.short}
                 <span className="sr-only"> missing</span>
@@ -544,7 +544,7 @@ export function DocumentRow({ label, name = label, description, doc, canEdit, ca
   return (
     <div
       {...dropProps}
-      className={`rounded-lg border bg-surface-container-low transition-colors ${dragOver ? 'border-primary ring-2 ring-primary/40' : 'border-outline-variant'}`}
+      className={`relative rounded-lg border bg-surface-container-low transition-colors ${dragOver ? 'border-primary ring-2 ring-primary/40' : 'border-outline-variant'}`}
     >
       <div className="flex items-center gap-3 p-2.5">
         <div className="w-9 h-9 rounded-md flex items-center justify-center flex-shrink-0 bg-primary-container text-on-primary-container">

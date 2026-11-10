@@ -3,6 +3,7 @@ import { insertSnapshot, latestSnapshotItem } from '@/features/syndication/lib/c
 import { isExcluded } from '../lib/marketplaces';
 import { buildBestBuyRow, defaultBestBuyCategory } from '../lib/bestbuyContent';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { priceOff } from '@/features/pricing/lib/priceTolerance';
 
 // Best Buy Canada (Mirakl). Reads pull the seller's offers; writes are
 // product CONTENT via bestbuy-push-content (P41 import) and — since the
@@ -78,19 +79,19 @@ export async function refreshBestBuyOffers({ task = null } = {}) {
   if (task) await task.step('Pulling the Best Buy offers…');
   const { total, offers } = await invokeBestBuy();
 
-  // Enrich the snapshot with PIM MSRPs so price mismatches are self-contained.
+  // Enrich the snapshot with the PIM's MAP CAD — what Best Buy sells at — so price
+  // mismatches are self-contained (they were measured against the MSRP until 2026-11-10).
   task?.progress(0.7, `Reading the PIM prices for ${offers.length} offers…`);
-  const { data: prods, error } = await supabase.from('products').select('sku, msrp_cad');
+  const { data: prods, error } = await supabase.from('products').select('sku, map_cad');
   if (error) throw error;
-  const msrpBySku = new Map((prods ?? []).map((p) => [p.sku, p.msrp_cad]));
+  const mapBySku = new Map((prods ?? []).map((p) => [p.sku, p.map_cad]));
 
   const results = offers.map((o) => ({
     ...o,
-    msrp: msrpBySku.get(o.sku) ?? null,
+    map: mapBySku.get(o.sku) ?? null,
   }));
-  const priceMismatches = results.filter(
-    (o) => o.msrp != null && o.price != null && Math.abs(o.price - o.msrp) > 0.01,
-  ).length;
+  // `origin_price`: the offer's own price; `price` is the discounted one while a promotion runs.
+  const priceMismatches = results.filter((o) => o.map != null && (o.origin_price ?? o.price) != null && priceOff(Number(o.origin_price ?? o.price), Number(o.map))).length;
 
   task?.progress(0.85, 'Saving the snapshot…');
   await insertSnapshot({

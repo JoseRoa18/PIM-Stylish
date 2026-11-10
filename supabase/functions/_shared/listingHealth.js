@@ -1,3 +1,5 @@
+import { priceOff } from './priceTolerance.js';
+
 /**
  * Listing Health — multi-marketplace readiness scoring.
  *
@@ -163,12 +165,17 @@ const FIELDS = {
     label: 'In Stock',
     check: (p) => !p._bbOffer || (p._bbOffer.quantity ?? 0) > 0,
   },
+  // Best Buy sells at MAP CAD, within Price Alignment's margin. A promotion
+  // goes as a discount: Mirakl's `price` is then the discounted one and
+  // `origin_price` the offer's own, which is what stays at MAP. It was
+  // measured against the MSRP until 2026-11-10, failing almost every offer.
   bb_price_matches: {
-    label: 'Price Matches PIM MSRP',
+    label: 'Price Matches PIM MAP',
     check: (p) => {
       const o = p._bbOffer;
-      if (!o || o.price == null || o.msrp == null) return true;
-      return Math.abs(o.price - o.msrp) <= 0.01;
+      const base = o?.origin_price ?? o?.price;
+      if (!o || base == null || o.map == null) return true;
+      return !priceOff(Number(base), Number(o.map));
     },
   },
   // Walmart US item checks — fed by the read-only items snapshot.

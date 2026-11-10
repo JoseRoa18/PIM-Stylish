@@ -7,14 +7,23 @@ import { WIX_SITES } from '@/features/syndication/lib/wixSites';
 import { toDateKey, addDays } from '../lib/weekly';
 
 /** Every snapshot row since `fromDate` (default: 16 weeks back). */
+// The API answers at most 1,000 rows: 16 weeks are ~3,200 (29 a day), and
+// reading only the first 1,000 left Analytics three weeks behind (2026-11-10).
 export async function loadSnapshots(fromDate = addDays(new Date(), -16 * 7)) {
-  const { data, error } = await supabase
-    .from('kpi_snapshots')
-    .select('snapshot_date, scope, key, metrics, taken_at')
-    .gte('snapshot_date', toDateKey(fromDate))
-    .order('snapshot_date', { ascending: true });
-  if (error) throw error;
-  return data ?? [];
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('kpi_snapshots')
+      .select('snapshot_date, scope, key, metrics, taken_at')
+      .gte('snapshot_date', toDateKey(fromDate))
+      .order('snapshot_date', { ascending: true })
+      .order('scope', { ascending: true })
+      .order('key', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) return rows;
+  }
 }
 
 /**

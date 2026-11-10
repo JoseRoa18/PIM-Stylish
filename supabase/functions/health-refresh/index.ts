@@ -98,16 +98,18 @@ async function latestSnapshotMap(channel: string) {
 
 async function refreshBestBuy() {
   const { total, offers } = await invokeFn("bestbuy-pull-offers");
-  const prods = await restSelect("products?select=sku,msrp_cad");
-  const msrpBySku = new Map(prods.map((p: { sku: string; msrp_cad: number }) => [p.sku, p.msrp_cad]));
+  // Best Buy sells at MAP CAD (its MSRP was the reference until 2026-11-10 and
+  // nearly every offer read as a price difference).
+  const prods = await restSelect("products?select=sku,map_cad");
+  const mapBySku = new Map(prods.map((p: { sku: string; map_cad: number }) => [p.sku, p.map_cad]));
 
   const results = offers.map((o: { sku: string; price: number | null }) => ({
     ...o,
-    msrp: msrpBySku.get(o.sku) ?? null,
+    map: mapBySku.get(o.sku) ?? null,
   }));
   const priceMismatches = results.filter(
-    (o: { msrp: number | null; price: number | null }) =>
-      o.msrp != null && o.price != null && Math.abs(o.price - o.msrp) > 0.01,
+    // `origin_price`: the offer's own price; `price` is the discounted one while a promotion runs.
+    (o: { map: number | null; price: number | null; origin_price?: number | null }) => o.map != null && (o.origin_price ?? o.price) != null && priceOff(Number(o.origin_price ?? o.price), Number(o.map)),
   ).length;
 
   await restInsert("channel_health", [{

@@ -232,7 +232,7 @@ export default function ImportProducts() {
     <div className="max-w-6xl">
       <Link
         to="/catalog"
-        className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"
+        className="inline-flex items-center gap-1 min-h-6 sm:min-h-0 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to Catalog

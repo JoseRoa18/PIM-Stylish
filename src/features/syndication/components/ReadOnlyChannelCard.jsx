@@ -17,7 +17,7 @@ const CHANNELS = {
     refresh: refreshBestBuyOffers,
     counters: (s) => [
       { icon: CheckCircle2, tone: 'text-success', label: `${s.in_sync} active offers` },
-      { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} price differences vs PIM MSRP` },
+      { icon: AlertCircle, tone: 'text-warning', label: `${s.with_diffs} price differences vs PIM MAP` },
       { icon: OctagonX, tone: 'text-error', label: `${s.errors} out of stock` },
     ],
     note: 'Offers, stock and prices are pulled from the Mirakl API. Content, prices and stock go out only from their own cards and from each product\'s page, where a person also creates a new product and its offer.',

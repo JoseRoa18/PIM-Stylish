@@ -109,7 +109,7 @@ export default function WalmartAdditionCard({ product }) {
     <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       <div className="px-8 py-5 border-b border-outline-variant flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-brand-walmart/10 text-brand-walmart flex items-center justify-center text-label-lg font-bold flex-shrink-0">WM</div>
+          <div className="w-9 h-9 rounded-lg bg-brand-walmart/10 text-brand-walmart-ink flex items-center justify-center text-label-lg font-bold flex-shrink-0">WM</div>
           <div>
             <h2 className="text-title-lg text-on-surface leading-tight">Walmart USA · New listing</h2>
             <p className="text-body-sm text-on-surface-variant mt-0.5">

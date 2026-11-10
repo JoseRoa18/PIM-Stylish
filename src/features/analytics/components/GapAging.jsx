@@ -18,7 +18,7 @@ export default function GapAging({ index }) {
         <h3 className="text-title-md text-on-surface">How old the gaps are</h3>
         <p className="text-body-sm text-on-surface-variant mt-0.5">Products missing each field and for how long, from {days} daily snapshot{days === 1 ? '' : 's'}. Ages grow as the history does.</p>
       </header>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" tabIndex={0}>
         <table className="w-full min-w-[640px]">
           <thead>
             <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">

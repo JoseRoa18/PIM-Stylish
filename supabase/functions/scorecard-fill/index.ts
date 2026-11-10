@@ -189,15 +189,27 @@ async function odooClient(): Promise<Odoo> {
   const user = Deno.env.get("ODOO_USER")!;
   const key = Deno.env.get("ODOO_API_KEY")!;
   let id = 0;
+  // The crons send every tab at once and Odoo refuses some of those requests
+  // ("http2 … refused stream": 4 of 10 tabs at 10:00 and 13:15 UTC on
+  // 2026-11-10), so a request that does not get through is sent again after
+  // a growing, random pause. An answer from Odoo itself (an error it gives) is
+  // never retried.
   const rpc = async (service: string, method: string, args: unknown[]) => {
-    const r = await fetch(`${url}/jsonrpc`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", method: "call", params: { service, method, args }, id: ++id }),
-    });
-    const j = await r.json();
-    if (j.error) throw new Error(`Odoo: ${j.error.data?.message ?? j.error.message}`);
-    return j.result;
+    const body = JSON.stringify({ jsonrpc: "2.0", method: "call", params: { service, method, args }, id: ++id });
+    for (let attempt = 1; ; attempt++) {
+      let j: { error?: { message?: string; data?: { message?: string } }; result?: unknown };
+      try {
+        const r = await fetch(`${url}/jsonrpc`, { method: "POST", headers: { "content-type": "application/json" }, body });
+        if (r.status === 429 || r.status >= 500) throw new Error(`Odoo answered ${r.status}`);
+        j = await r.json();
+      } catch (err) {
+        if (attempt >= 5) throw err;
+        await new Promise((ok) => setTimeout(ok, 700 * 2 ** (attempt - 1) + Math.random() * 600));
+        continue;
+      }
+      if (j.error) throw new Error(`Odoo: ${j.error.data?.message ?? j.error.message}`);
+      return j.result;
+    }
   };
   const uid = await rpc("common", "authenticate", [db, user, key, {}]);
   if (!uid) throw new Error("Odoo refused the PIM's login (ODOO_USER / ODOO_API_KEY).");

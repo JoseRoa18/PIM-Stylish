@@ -754,7 +754,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
               {/* Inner scroll + sticky header (bg on each th — that's the
                   element that sticks). data-lenis-prevent per the AppShell
                   Lenis gotcha. */}
-              <div className="overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
+              <div className="relative overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
                 <table className="w-full text-body-sm">
                   <thead>
                     <tr className="text-on-surface-variant text-label-md">
@@ -1879,7 +1879,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                     </p>
                   </div>
                 ) : (
-                  <div className="overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
+                  <div className="relative overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
                     {/* The list scrolls INSIDE the card (data-lenis-prevent —
                         see the AppShell Lenis gotcha) so the header can stay
                         sticky; the background lives on each th because that's

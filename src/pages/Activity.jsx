@@ -35,7 +35,7 @@ const ACTION_META = {
 
 // Target (the "where" / site). pim = internal edits. Some channels were logged
 // under their raw API host, so those alias to the same chip.
-const WALMART_TARGET = { label: 'Walmart', className: 'bg-brand-walmart/15 text-brand-walmart' };
+const WALMART_TARGET = { label: 'Walmart', className: 'bg-brand-walmart/15 text-brand-walmart-ink' };
 const BESTBUY_TARGET = { label: 'Best Buy', className: 'bg-brand-bestbuy/15 text-brand-bestbuy' };
 const TARGET_META = {
   pim: { label: 'PIM', className: 'bg-surface-container-high text-on-surface-variant' },
@@ -347,7 +347,7 @@ function ActivityRow({ event, avatarUrl }) {
           )}
         </div>
 
-        <p className="text-body-md text-on-surface mt-1">{summary}</p>
+        <p className="text-body-md text-on-surface mt-1 [overflow-wrap:anywhere]">{summary}</p>
 
         <div className="flex items-center gap-2 text-label-sm text-on-surface-variant mt-1 flex-wrap">
           <span className="font-medium text-on-surface-variant">{who}</span>

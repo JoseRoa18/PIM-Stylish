@@ -45,7 +45,7 @@ export default function CategoryProgress({ index, week, targets, canEditTargets,
           </button>
         )}
       </header>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" tabIndex={0}>
         <table className="w-full min-w-[760px]">
           <thead>
             <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">

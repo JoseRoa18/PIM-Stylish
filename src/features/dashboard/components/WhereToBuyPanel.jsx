@@ -394,7 +394,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
             )}
             <span className="text-body-sm text-on-surface-variant ml-auto">{filtered.length} of {groups.length} products</span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full text-body-sm">
               <thead>
                 <tr className="bg-surface-container-low text-label-md text-on-surface-variant">
@@ -424,7 +424,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                         <td className="px-2 py-1.5 text-on-surface-variant">
                           {/* The row opens on click; this button lets the keyboard do it too
                               (its click reaches the row's onClick). Plain look, no press sink. */}
-                          <button type="button" aria-expanded={open} aria-label={`Links of ${g.sku}`} className="block cursor-pointer active:scale-none!">
+                          <button type="button" aria-expanded={open} aria-label={`Links of ${g.sku}`} className="block p-1 -m-1 cursor-pointer active:scale-none!">
                             <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
                           </button>
                         </td>

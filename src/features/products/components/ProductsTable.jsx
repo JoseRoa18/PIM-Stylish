@@ -28,6 +28,12 @@ const COLUMNS = [
 // survive border-collapse), so each th carries its own opaque background
 // and an inset shadow as bottom rule — borders don't travel with sticky
 // cells either.
+// The table's minimum width: every fixed column plus room for Model (its
+// own share, 18rem). A flat 64rem left Model 0 px wide once the stock and
+// MSRP columns were on, and its text ran over Brand (sweep of 2026-11-10).
+const REM_OF = { 'w-10': 2.5, 'w-20': 5, 'w-28': 7, 'w-36': 9, 'w-44': 11 };
+const MODEL_REM = 18;
+
 const TH_STICKY =
   'sticky top-0 bg-surface-container-low shadow-[inset_0_-1px_0_var(--color-outline-variant)]';
 
@@ -115,6 +121,8 @@ export default function ProductsTable({
     );
   }
 
+  const minRem = Math.max(64, (selectionEnabled ? 2.5 : 0) + 5 + columns.reduce((n, c) => n + (REM_OF[c.width] ?? 0), 0) + MODEL_REM);
+
   const allSelected =
     selectionEnabled &&
     products.length > 0 &&
@@ -127,7 +135,7 @@ export default function ProductsTable({
           page scroll never activates it. data-lenis-prevent keeps the
           Lenis instance on <main> from swallowing wheel events here. */}
       <div className="max-h-[max(24rem,calc(100vh-16rem))] overflow-auto scrollbar-slim" data-lenis-prevent>
-        <table className="w-full min-w-[64rem] table-fixed">
+        <table className="w-full table-fixed" style={{ minWidth: `${minRem}rem` }}>
           <thead>
             <tr className="text-on-surface-variant">
               {selectionEnabled && (

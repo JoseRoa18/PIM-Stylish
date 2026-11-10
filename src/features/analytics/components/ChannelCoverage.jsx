@@ -37,7 +37,7 @@ export default function ChannelCoverage({ index, week }) {
         <h3 className="text-title-md text-on-surface">Channel coverage</h3>
         <p className="text-body-sm text-on-surface-variant mt-0.5">Linked products, listing score, price alignment (Wix sites) and spec sync (Wayfair), from the latest snapshot.</p>
       </header>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" tabIndex={0}>
         <table className="w-full min-w-[960px]">
           <thead>
             <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">

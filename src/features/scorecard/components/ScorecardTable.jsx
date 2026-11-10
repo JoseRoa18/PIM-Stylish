@@ -117,7 +117,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                     )}
                     {!m.auto_key && m.source && <span className="sr-only">Source: {m.source}</span>}
                     {isAdmin && (
-                      <button type="button" onClick={() => onEditMetric(m)} aria-label={`Edit ${m.name}`} title="Edit measurable" className="relative flex-shrink-0 p-1 rounded-full text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container-high transition-colors after:absolute after:-inset-1.5">
+                      <button type="button" onClick={() => onEditMetric(m)} aria-label={`Edit ${m.name}`} title="Edit measurable" className="relative flex-shrink-0 p-[5px] rounded-full text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container-high transition-colors after:absolute after:-inset-1.5">
                         <Pencil className="w-3.5 h-3.5" aria-hidden />
                       </button>
                     )}

@@ -58,7 +58,7 @@ export default function SyndicationChannel() {
     <div className="space-y-6 max-w-4xl">
       <Link
         to="/syndication"
-        className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-primary transition-colors"
+        className="inline-flex items-center gap-1 min-h-6 sm:min-h-0 text-body-sm text-on-surface-variant hover:text-primary transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />
         All channels

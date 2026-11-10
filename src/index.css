@@ -74,6 +74,7 @@
   --color-brand-wayfair: #7b189f;
   --color-brand-bestbuy: #0046be;
   --color-brand-walmart: #0071ce;
+  --color-brand-walmart-ink: #005bb5; /* small text on its 10% tint (axe 2026-11-10) */
 
   /* ============================================
      STYLISH BRAND FONTS
@@ -229,6 +230,7 @@
   --color-brand-wayfair: #ce93e8;
   --color-brand-bestbuy: #9dc2ff;
   --color-brand-walmart: #7fb6ff;
+  --color-brand-walmart-ink: #7fb6ff;
 }
 
 /* ============================================

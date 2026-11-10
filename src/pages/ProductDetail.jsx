@@ -596,7 +596,7 @@ export default function ProductDetail() {
           bare /catalog would wipe it. Falls back to bare in a fresh tab. */}
       <Link
         to={`/catalog${sessionStorage.getItem('catalog:lastSearch') ?? ''}`}
-        className="inline-flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"
+        className="inline-flex items-center gap-1 min-h-6 sm:min-h-0 text-body-sm text-on-surface-variant hover:text-primary mb-4 transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to Catalog
@@ -962,7 +962,7 @@ function TabBar({ tabs, active, onChange, variants = [] }) {
       <div className={`sticky top-0 z-20 bg-surface min-[1880px]:static min-[1880px]:bg-transparent -mx-4 sm:-mx-6 border-b border-outline-variant relative ${
         scrolledPast ? 'shadow-md shadow-black/5 min-[1880px]:shadow-none' : ''
       }`}>
-        <div ref={stripRef} onScroll={updateEdges} className="overflow-x-auto scrollbar-hide px-4 sm:px-6">
+        <div ref={stripRef} onScroll={updateEdges} className="relative overflow-x-auto scrollbar-hide px-4 sm:px-6">
         <nav className="flex min-w-max gap-1 items-center" aria-label="Product sections">
           {/* display: contents — the tablist groups only the tabs (the
               variant links below are not tabs) without touching the layout. */}
@@ -1845,7 +1845,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
         <ChannelTile
           label="Walmart Canada"
           avatar="WM"
-          avatarClass="bg-brand-walmart/10 text-brand-walmart"
+          avatarClass="bg-brand-walmart/10 text-brand-walmart-ink"
           active={selected === 'walmart_ca'}
           linked={isExcluded(product, 'walmart_ca') ? undefined : wmCa === undefined ? null : Boolean(wmCa)}
           linkedText={isExcluded(product, 'walmart_ca') ? 'Excluded' : 'In feed'}
@@ -1855,7 +1855,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
         <ChannelTile
           label="Walmart USA"
           avatar="WM"
-          avatarClass="bg-brand-walmart/10 text-brand-walmart"
+          avatarClass="bg-brand-walmart/10 text-brand-walmart-ink"
           active={selected === 'walmart_us'}
           linked={isExcluded(product, 'walmart_us') ? undefined : wmUs === undefined ? null : Boolean(wmUs)}
           linkedText={isExcluded(product, 'walmart_us') ? 'Excluded' : 'Listed'}
@@ -2614,7 +2614,7 @@ function PriceTierTable({ product, edit, msrpKey, columns }) {
           <DerivedCost label="B&M Cost" baseKey={msrpKey} factor={0.3} product={product} edit={edit} help="Brick & Mortar: MSRP × 0.30 — calculated, updates with MSRP." />
         </div>
       )}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" tabIndex={0}>
         <table className="w-full text-body-sm">
           <thead>
             <tr className="text-label-sm text-on-surface-variant">

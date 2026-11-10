@@ -16,11 +16,13 @@ const SYNCS = {
   walmart_us: {
     invoke: walmartUsStock,
     channel: 'Walmart USA',
+    margin: 2,
     describe: (m) => `Every hour, every product listed on Walmart USA gets our USA stock (ShipStation, Flowery Branch) minus ${m} units of safety margin; a product we do not track goes as 0, and one without stock stays listed at 0.`,
   },
   bestbuy: {
     invoke: bestBuyStock,
     channel: 'Best Buy',
+    margin: 0,
     describe: (m) => `When a new Canada stock file arrives (once a day), every Best Buy offer gets our Canada stock${m ? ` minus ${m} units of safety margin` : ''}, keeping its price and discount; a product we do not track goes as 0. Open-box offers are left alone. Only the offers whose quantity differs are sent.`,
   },
 };
@@ -49,7 +51,7 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
     const enabled = !status?.enabled;
     if (enabled && !(await confirm({
       title: `Turn on the ${sync.channel} stock sync?`,
-      message: `${sync.describe(status?.safetyUnits ?? 2)} The first run sends every product whose quantity differs.`,
+      message: `${sync.describe(status?.safetyUnits ?? sync.margin)} The first run sends every product whose quantity differs.`,
       confirmLabel: 'Turn on',
     }))) return;
     if (await run('switch', { mode: 'switch', enabled })) await load();
@@ -86,7 +88,7 @@ export default function StockSyncCard({ channel = 'walmart_us' }) {
       <div className="px-6 py-5 border-b border-outline-variant flex items-start justify-between gap-4 flex-wrap">
         <div className="max-w-3xl">
           <h2 className="text-title-lg text-on-surface leading-tight">Stock sync</h2>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">{sync.describe(status?.safetyUnits ?? 2)}</p>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">{sync.describe(status?.safetyUnits ?? sync.margin)}</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-label-lg text-on-surface">{status ? (on ? 'On' : 'Off') : '…'}</span>

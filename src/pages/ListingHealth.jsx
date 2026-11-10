@@ -97,10 +97,10 @@ function IssueBreakdown({ result, sku, notLinked = false, marketplaceLabel = 'th
                         <span className="text-on-surface">{wayfairAudit.fields.join(' · ')}</span>
                       </p>
                     )}
-                    {i.key === 'bb_price_matches' && bbOffer?.price != null && bbOffer?.msrp != null && (
+                    {i.key === 'bb_price_matches' && bbOffer?.price != null && bbOffer?.map != null && (
                       <p className="ml-3.5 mt-0.5 text-body-sm text-on-surface-variant">
-                        Best Buy <span className="text-on-surface">${Number(bbOffer.price).toFixed(2)}</span>{' '}
-                        vs PIM MSRP <span className="text-on-surface">${Number(bbOffer.msrp).toFixed(2)}</span>
+                        Best Buy <span className="text-on-surface">${Number(bbOffer.origin_price ?? bbOffer.price).toFixed(2)}</span>{' '}
+                        vs PIM MAP <span className="text-on-surface">${Number(bbOffer.map).toFixed(2)}</span>
                       </p>
                     )}
                     {i.key === 'bb_in_stock' && bbOffer && (

@@ -178,7 +178,7 @@ function ListingTitleCell({ sku, row, canEdit, onSaved, onError }) {
     <span className="group inline-flex items-start gap-1.5 max-w-[420px]">
       <span className={row.listingTitle ? '' : 'text-on-surface-variant'}>{row.listingTitle ?? (canEdit ? 'Add name' : '')}</span>
       {canEdit && (
-        <button type="button" onClick={() => setEditing(true)} className="p-1 rounded-full text-on-surface-variant opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-surface-container-low transition-opacity" title="Edit the name on the marketplace">
+        <button type="button" onClick={() => setEditing(true)} className="p-1 rounded-full text-on-surface-variant opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-container-low transition-opacity" title="Edit the name on the marketplace">
           <Pencil className="w-3.5 h-3.5" />
         </button>
       )}
