@@ -313,7 +313,7 @@ interface Reading {
   page_options: OptionLink[] | null;
   review_count?: number | null; // kept when a later read has no answer: only a page that shows it writes it
 }
-const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null, page_options: null };
+const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null, page_options: null, review_count: null };
 interface Row extends Reading {
   site: string; sku: string; wix_product_id: string | null; section: string; market: string | null;
   retailer: string; label: string | null; url: string | null; host: string | null;
@@ -441,6 +441,22 @@ function missingRows(base: Base, links: Link[], standard: string[]): Row[] {
   return rows;
 }
 
+// PostgREST takes a batch only when every row has the same keys. On
+// 2026-11-10 the rows carried from earlier ones had review_count and the new
+// ones did not: the scan's insert was refused after Stylish Canada's rows had
+// been deleted, and the site stood empty until the scan ran again.
+function sameKeys(rows: Row[]): Row[] {
+  const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+  return rows.map((r) => Object.fromEntries(keys.map((k) => [k, (r as unknown as Record<string, unknown>)[k] ?? null])) as unknown as Row);
+}
+
+// A site's rows (or those of `skus` on it) replaced in one transaction:
+// where_to_buy_replace_rows (20261110_where_to_buy_replace_rows.sql) deletes and
+// inserts together, and refuses a scan that would leave under half the rows.
+async function replaceRows(siteKey: string, skus: string[] | null, rows: Row[]) {
+  await rest("rpc/where_to_buy_replace_rows", { method: "POST", body: JSON.stringify({ p_site: siteKey, p_skus: skus, p_rows: rows }) });
+}
+
 function dedupeRows(rows: Row[]): Row[] {
   const seen = new Set<string>();
   return rows.filter((r) => {
@@ -533,9 +549,9 @@ async function scanSite(siteKey: string, now: string, pim: PimLinks) {
   }
 
   // One row per (sku, section, retailer, url) — the table's unique key.
-  const unique = dedupeRows(rows);
-  await rest(`where_to_buy_links?site=eq.${siteKey}`, { method: "DELETE" });
-  for (const part of chunk(unique, 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
+  const unique = sameKeys(dedupeRows(rows));
+  // One transaction: a refused insert undoes the delete, so a site is never left empty (2026-11-10).
+  await replaceRows(siteKey, null, unique);
   return { site: siteKey, label: site.label, rows: unique.length, ...counts };
 }
 
@@ -579,8 +595,7 @@ async function syncSkus(skus: string[]) {
       rows.push(...lr, ...mr);
       out.push({ site: siteKey, sku: w.sku, links: lr.length, missing: mr.length });
     }
-    await rest(`where_to_buy_links?site=eq.${siteKey}&sku=${inList(onSite.map((x) => x.sku))}`, { method: "DELETE" });
-    for (const part of chunk(dedupeRows(rows), 500)) await rest("where_to_buy_links", { method: "POST", body: JSON.stringify(part) });
+    await replaceRows(siteKey, onSite.map((x) => x.sku), sameKeys(dedupeRows(rows)));
   }
   // The pages were just pushed from the PIM: they no longer differ.
   if (state.differs) {
@@ -2511,7 +2526,17 @@ Deno.serve(async (req) => {
       const pim = await loadPimLinks();
       const sinksDirect = await refreshSinksDirect(pim, now);
       const out = [];
-      for (const s of sites) out.push(await scanSite(s, now, pim));
+      const failed: { site: string; error: string }[] = [];
+      for (const s of sites) {
+        try {
+          out.push(await scanSite(s, now, pim));
+        } catch (err) {
+          // Its rows stay as they were (the replace is one transaction), and so
+          // do its standard portals and differences; the other sites go on.
+          console.error(`[where-to-buy] scan of ${s} failed:`, (err as Error).message);
+          failed.push({ site: s, error: (err as Error).message });
+        }
+      }
       // The PIM owns the section: pages whose Sinks Direct link changed, and
       // pages that show something else than the PIM, are written again.
       await enqueuePublish([...new Set([...sinksDirect.changed, ...out.flatMap((o) => [...o.differsFromPim, ...o.newlyLinked])])]);
@@ -2521,7 +2546,7 @@ Deno.serve(async (req) => {
         standard: { ...(prev.standard ?? {}), ...Object.fromEntries(out.map((o) => [o.site, o.standardPortals])) },
         differs: { ...(prev.differs ?? {}), ...Object.fromEntries(out.map((o) => [o.site, o.differsFromPim])) },
       });
-      return json({ ok: true, scanned_at: now, sinksDirect: sinksDirect.counts, sites: out.map(({ differsFromPim, ...o }) => ({ ...o, differsFromPim: differsFromPim.length })) });
+      return json({ ok: !failed.length, scanned_at: now, sinksDirect: sinksDirect.counts, sites: out.map(({ differsFromPim, ...o }) => ({ ...o, differsFromPim: differsFromPim.length })), failed });
     }
     if (mode === "sync") {
       // body: { skus } — a product's links were saved in the PIM.
