@@ -13,7 +13,9 @@ import ScorecardTable from '@/features/scorecard/components/ScorecardTable';
 import MetricDialog from '@/features/scorecard/components/MetricDialog';
 
 const WEEKS_SHOWN = 13;
-const AUTO_FRESH_MS = 3 * 3600 * 1000; // a PIM-filled value is worked out again after 3 h
+// Opening a tab works its live rows out again unless they were in the last
+// 15 minutes (user, 2026-11-10); the crons fill them in between.
+const AUTO_FRESH_MS = 15 * 60 * 1000;
 
 // EOS ScoreCard (user, 2026-11-03): the weekly measurables of each
 // marketplace, one tab per sheet of the company's scorecard workbook.

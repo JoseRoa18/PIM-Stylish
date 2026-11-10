@@ -40,6 +40,8 @@ import { isServiceRole } from "../_shared/serviceRole.ts";
 import { WIX_SITES } from "../_shared/wixSites.ts";
 import { priceOff } from "../_shared/priceTolerance.js";
 import { promoWindow, windowContains, prevPeriod, periodOfDay, PROMO_DATE_COLUMNS } from "../_shared/promoCalendar.ts";
+import { alignTargets, createPriceAlignment } from "../_shared/priceAlignmentReport.js";
+import { createScorecardLive, LIVE_KEYS } from "../_shared/scorecardLive.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,6 +64,7 @@ interface MarketSource {
   ships?: number[];     // the Odoo marketplaces of it WE ship (Amazon: FBM, not FBA); none = all
   promo: string[];      // its promotion channel keys (promotions.marketplaces) — for the AI note
   pages: string[];      // its store-page retailer keys (where_to_buy_readings) — for the AI note
+  align?: string[];     // its Price Alignment targets, when they are not `pages`
 }
 const BOARD_LABEL: Record<string, string> = { sinksdirect: "Sinks Direct", amazon: "Amazon", wayfair: "Wayfair", homedepot_ca: "Home Depot", lowes: "Lowe's", menards: "Menards", rona: "Rona", bbb_overstock: "BB&B / Overstock", bestbuy: "Best Buy", walmart: "Walmart" };
 // Odoo's marketplaces (marketplace.master) and companies.
@@ -95,7 +98,7 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
   // Menards has no aliases in the PIM: what it lists = the products with a Menards link.
   menards: { us: { odoo: sold([MP.menards], US), company: US, stock: "us", listed: { wtb: "menards" }, promo: ["menards"], pages: ["menards"] } },
   // The same: what each lists = the products with its Where to Buy link.
-  bestbuy: { ca: { odoo: sold([MP.bestbuy], CA), company: CA, stock: "ca", listed: { wtb: "bestbuy_ca" }, promo: ["bestbuy"], pages: ["bestbuy_ca"] } },
+  bestbuy: { ca: { odoo: sold([MP.bestbuy], CA), company: CA, stock: "ca", listed: { wtb: "bestbuy_ca" }, promo: ["bestbuy"], pages: ["bestbuy_ca"], align: ["bestbuy"] } },
   walmart: {
     ca: { odoo: sold([MP.walmart], CA), company: CA, stock: "ca", listed: { wtb: "walmart_ca" }, promo: ["walmart_ca"], pages: ["walmart_ca"] },
     us: { odoo: sold([MP.walmart], US), company: US, stock: "us", listed: { wtb: "walmart_us" }, promo: ["walmart_us"], pages: ["walmart_us"] },
@@ -106,6 +109,8 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
 /** The same domain read from another model: sale.order fields under `prefix` (order_id., sale_id.). */
 const via = (domain: unknown[], prefix: string) => domain.map((leaf) => (Array.isArray(leaf) ? [`${prefix}${leaf[0]}`, leaf[1], leaf[2]] : leaf));
 const SERVER_KEYS = [
+  // 2026-11-09: MAP %, promotions, deals and coupons (they only changed when the tab was opened).
+  ...LIVE_KEYS,
   "sales", "orders", "units", "skus_not_sold_90d", "oos_loss", "obsolete_skus", "listings_updated",
   // 2026-11-05: Odoo records almost no cancellation, the store's own orders do.
   "cancel_rate", "on_time_ship", "late_ship_rate", "odr", "returns_not_received", "reviews_5plus", "no_profit_skus",
@@ -696,6 +701,15 @@ Deno.serve(async (req) => {
     const lower = new Map((products ?? []).map((p) => [p.sku.toLowerCase(), p.sku]));
     const skuOf = (code: string | null) => (code == null ? null : exact.has(code) ? code : lower.get(code.toLowerCase()) ?? null);
 
+    // One run reads each thing once (MAP %, promotions, deals, coupons).
+    const memo = new Map<string, Promise<unknown>>();
+    const sharedLoad = (key: string, loader: () => Promise<unknown>) => {
+      if (!memo.has(key)) memo.set(key, loader());
+      return memo.get(key);
+    };
+    const reports = createPriceAlignment({ db: admin, sharedLoad, readingsOfOneStore: true });
+    const liveRows = createScorecardLive({ db: admin, targets: alignTargets(WIX_SITES), latestReport: reports.latestReport });
+
     const odoo = await odooClient();
     const oldest = loop.at(-1)!;
     const newest = loop[0];
@@ -1089,6 +1103,16 @@ Deno.serve(async (req) => {
               if (mode === "preview" || body.regenerate || !(have ?? []).some((h) => h.note && h.origin === "auto")) {
                 notes.losers_note = await losersNoteFor(board, market, src, from, column);
               } else diag.noteKept = true;
+            }
+          }
+          // The rows that read the PIM as it is now: this week's column and the running one.
+          const liveKeys = (column === thisColumn || column === runColumn) ? LIVE_KEYS.filter((k: string) => keys.has(k)) : [];
+          if (liveKeys.length) {
+            try {
+              Object.assign(value, await liveRows.values({ keys: liveKeys, market, channels: src.promo, align: src.align ?? src.pages, column, today }));
+            } catch (err) {
+              diag.liveError = (err as Error).message; // the tab's other numbers still go
+              console.error(`[scorecard-fill] ${board}/${market} live rows:`, (err as Error).message);
             }
           }
           for (const m of rows) {
