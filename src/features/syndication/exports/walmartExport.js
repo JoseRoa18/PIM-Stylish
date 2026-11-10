@@ -111,9 +111,10 @@ export const WALMART_RULES = {
   modelNumber: (p) => p.sku,
 
   // Walmart CA sells at the PIM's MAP CAD (verified 2026-09-13: S-612WN 628,
-  // S-406TG 357, A-02 82); MSRP is the list price shown struck through.
+  // S-406TG 357, A-02 82). MSRP is always the MAP (user, 2026-11-06), so Walmart
+  // shows no struck-through list price.
   price: (p) => num(p.map_cad),
-  msrp: (p) => num(p.msrp_cad),
+  msrp: (p) => num(p.map_cad),
   MinimumAdvertisedPrice: (p) => num(p.map_cad),
 
   countryOfOriginAssembly: (p) => walmartCountry(attr(p).country_of_origin || 'China'),
