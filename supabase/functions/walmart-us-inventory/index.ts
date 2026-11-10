@@ -3,7 +3,7 @@
 // PIM by itself).
 //
 // What it sends: every SKU listed on Walmart USA gets our USA stock
-// (product_inventory 'us', the ShipStation pull) MINUS 2 units of safety
+// (product_inventory 'us': Odoo's "Available for Use" in the ATL warehouse) MINUS 2 units of safety
 // margin (user's choice the same day), never below 0; a SKU we do not track
 // goes as 0, and a product without stock stays listed at 0 so it sells as
 // soon as stock arrives.
@@ -11,8 +11,8 @@
 // How: Walmart's bulk inventory feed, feedType "inventory" (spec 1.4, one ship
 // node per file — read on developer.walmart.com 2026-10-30): it updates the
 // seller's default ship node, and the account has only one, VIRTUAL
-// 10003231796 "Stylish USA Inc" (Flowery Branch GA, the ShipStation
-// warehouse). The amount sent replaces Walmart's.
+// 10003231796 "Stylish USA Inc" (Flowery Branch GA, Odoo's ATL warehouse).
+// The amount sent replaces Walmart's.
 //
 // When: every hour after inventory-pull (cron walmart-us-inventory-hourly),
 // and only while the switch on the Walmart USA page is on

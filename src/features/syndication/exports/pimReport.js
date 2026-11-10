@@ -344,7 +344,7 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
         ['Descriptions', 'Plain text (the formatting of the product page is removed). Each bullet has its own column.'],
         ['PIM Completeness', "The same score as Listing Health → PIM: only the fields that apply to the product count. 'Missing' lists each gap and, for a value that is filled but wrong, the reason."],
         ['Obsolete', "A mark of its own (Status & Dates, Yes / No), apart from the workflow status: it changes no listing, channel push or marketplace file. Obsolete products keep their own score in All Products but, like archived ones, are left out of the Summary's completeness figures, as in Listing Health."],
-        ['Stock', 'Canada = the Stylish Inventory file, USA = ShipStation. An empty cell means the SKU is not tracked in that market (not 0).'],
+        ['Stock', "Odoo's Available for Use: Canada = warehouse CBG, USA = warehouse ATL. An empty cell means Odoo does not have the product, so it is not tracked (not 0)."],
         ['Images & Documents', "Counts per product; the Media sheet lists every file with its type, language set (Universal = language-neutral), order and link. Videos and documents are shared by a family's products."],
         ['Marketplace IDs', "The product's Aliases tab (retailer item numbers), the Amazon Seller SKUs and ASINs, and the product of each Wix website — one row per ID."],
         ['Other / Older Fields', 'Values stored on products by earlier imports that the app no longer reads, kept as they are. The current field with the same meaning is in its own section.'],

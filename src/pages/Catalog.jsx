@@ -147,7 +147,7 @@ export default function Catalog() {
     sessionStorage.setItem('catalog:lastSearch', qs ? `?${qs}` : '');
   }, [searchParams]);
 
-  // Stock per market and SKU (the ShipStation cache) joined onto the rows as
+  // Stock per market and SKU (the cache of Odoo's stock) joined onto the rows as
   // `stock_ca` / `stock_us` so the columns sort like any other: a number,
   // null when that warehouse doesn't track the SKU, undefined until the
   // lookup answers.

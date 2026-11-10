@@ -2,9 +2,9 @@ import { Package } from 'lucide-react';
 import { STOCK_MARKETS, describeStock } from '@/features/pricing/api/inventory';
 
 /**
- * Stock chip for one product and market: units available in that market's
- * source (ShipStation for the USA, the Canada inventory file for Canada), 0
- * — with the file's ETA when it has one —, or "not tracked" (no row:
+ * Stock chip for one product and market: units available for use in that
+ * market's Odoo warehouse (Canada CBG, USA ATL), 0 — with an ETA when the
+ * row has one —, or "not tracked" (no row: Odoo does not have the product;
  * unknown, never zero). While `loading` the chip stays out of the way
  * instead of flashing "not tracked".
  */

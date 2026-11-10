@@ -4,17 +4,17 @@
 // Best Buy takes a product's page down while its offer has none.
 //
 // What it sends: every Best Buy offer whose shop SKU is a PIM product gets
-// our Canada stock (product_inventory 'ca', the daily "Stylish Inventory"
-// Excel) as it is — no safety margin (user, the same day: "quítale eso";
+// our Canada stock (product_inventory 'ca': Odoo's "Available for Use" in the
+// CBG warehouse, read every hour) as it is — no safety margin (user, the same day: "quítale eso";
 // Walmart USA keeps its 2 units) — and a product we do not track goes as 0. Open-box offers ("…-B-OB-A") and
 // products switched off for Best Buy are left alone.
 //
-// When: the Canada stock arrives once a day, so a run sends only when a NEWER
-// Canada file is in the PIM than the one last sent (or on "Send now") — the
-// cron runs every hour (bestbuy-inventory-hourly) and finds nothing to do the
-// rest of the day. Correcting Best Buy every hour would put back the units
-// its own sales took off before the next file knows about them. A run sends
-// only the offers whose quantity differs from ours.
+// When: a run sends only when a NEWER Canada stock reading is in the PIM than
+// the one last sent (or on "Send now"). The stock came once a day (an Excel)
+// until 2026-11-10; since then inventory-pull reads Odoo every hour, so the
+// hourly cron (bestbuy-inventory-hourly) finds a new reading each time. A run
+// sends only the offers whose quantity differs from ours — which also puts
+// back the units of a Best Buy sale Odoo does not know about yet.
 //
 // How: Mirakl OF24 (the same import as bestbuy-push-price). Mirakl runs it in
 // NORMAL mode — a field missing from a line is blanked — so each line carries
@@ -23,7 +23,7 @@
 //
 // Body: { mode: "push" | "status" | "switch", dryRun?: boolean, all?: boolean, enabled?: boolean }
 //   push    — dryRun returns the lines without sending; all sends even when
-//           no newer Canada file came in (Send now). Only an explicit push sends.
+//           no newer Canada stock reading came in (Send now). Only an explicit push sends.
 //   status  — the switch, the last import and its outcome.
 //   switch  — turns the sync on or off (enabled), with an Activity Log entry.
 // Caller: cron (x-cron-secret), the service-role key, or an admin / editor.
@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, skipped: "Stock sync is off (Best Buy page)." });
     }
 
-    // --- the Canada stock: only a newer file than the last one sent ------------
+    // --- the Canada stock: only a newer reading than the last one sent ---------
     const stock = new Map<string, number>();
     let stockAt = "";
     for (let from = 0; ; from += 1000) {
@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
     const fresh = !settings.stock_at || stockAt > settings.stock_at;
     if (!fresh && body.all !== true && !dryRun) {
       if (last !== settings.last) await save({ ...settings, last, checked_at: now });
-      return json({ ok: true, sending: 0, note: "No newer Canada stock file since the last send.", stockAt, last });
+      return json({ ok: true, sending: 0, note: "No newer Canada stock since the last send.", stockAt, last });
     }
 
     // --- every offer of a PIM product, at our quantity -------------------------

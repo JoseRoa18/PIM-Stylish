@@ -137,8 +137,8 @@ const costMeta = (slug) =>
 
 const fmt = (v) => (v == null ? '—' : `$${Number(v).toFixed(2)}`);
 
-// Stock states of the price table's filter (each market reads its own
-// ShipStation warehouse). A SKU without a row is unknown, not zero.
+// Stock states of the price table's filter (each market reads its own Odoo
+// warehouse). A SKU without a row is unknown, not zero.
 const STOCK_STATES = ['In stock', 'Out of stock', 'Not tracked'];
 
 // 'YYYY-MM-DD' moved by n days.
@@ -1340,7 +1340,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   const [stockFilter, setStockFilter] = useState([]);
   // Only the obsolete products (user, 2026-10-16) — the "N obsolete" chip.
   const [obsoleteOnly, setObsoleteOnly] = useState(false);
-  // Stock per market and SKU from product_inventory (ShipStation); null
+  // Stock per market and SKU from product_inventory (Odoo); null
   // until loaded.
   const [stockByMarket, setStockByMarket] = useState(null);
   const [skuText, setSkuText] = useState('');
@@ -1400,12 +1400,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
     });
   }, [rows]);
 
-  // Pull both markets' stock from ShipStation now (the cron does it hourly).
+  // Pull both markets' stock from Odoo now (the cron does it hourly).
   async function refreshStock() {
     setBusy('stock');
     setMsg(null);
     // The pull is one call (a moving stripe), then the table's stock.
-    const task = startTask('Refresh stock', { detail: 'Pulling ShipStation (USA) and the Canada inventory file…' });
+    const task = startTask('Refresh stock', { detail: 'Pulling the stock from Odoo…' });
     try {
       const r = await refreshInventory();
       task.progress(0.8, "Reading the promotion's stock…");
@@ -1707,8 +1707,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             const brandOf = (r) => mapBySku?.[r.sku]?.brand ?? null;
             const categories = [...new Set(marketRows.map(catOf).filter(Boolean))].sort();
             const brands = [...new Set(marketRows.map(brandOf).filter(Boolean))].sort();
-            // Stock of the market shown: each tab reads its own ShipStation
-            // warehouse (Canada = Cambridge, USA = Flowery Branch).
+            // Stock of the market shown: each tab reads its own Odoo warehouse
+            // (Canada = CBG, Cambridge; USA = ATL, Flowery Branch).
             const stockRows = stockByMarket?.[market] ?? {};
             const stockOf = (r) => stockRows[r.sku] ?? null;
             const stockStateOf = (r) => {
@@ -1837,7 +1837,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       onClick={refreshStock}
                       disabled={busy === 'stock'}
                       aria-busy={busy === 'stock'}
-                      title="Pull both markets' stock now — ShipStation for the USA, the Canada inventory file for Canada (it also refreshes every hour)"
+                      title="Pull both markets' stock from Odoo now (it also refreshes every hour)"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md font-medium text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50 whitespace-nowrap"
                     >
                       {busy === 'stock' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -1890,7 +1890,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">SKU</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Promo MAP</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={market === 'ca' ? 'Units in stock per the Canada inventory file' : 'Units available in the USA warehouse (ShipStation)'}>Stock</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={market === 'ca' ? 'Units available for use in Canada (Odoo, warehouse CBG)' : 'Units available for use in the USA (Odoo, warehouse ATL)'}>Stock</th>
                           {costKeys.map((k) => {
                             const m = costMeta(k);
                             return (

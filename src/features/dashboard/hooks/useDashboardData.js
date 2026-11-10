@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { getInventoryReport } from '@/features/pricing/api/inventory';
 import { MARKETPLACES, API_MARKETPLACE_KEYS } from '../lib/listingHealth';
 import {
   computeListingHealth,
@@ -93,7 +92,7 @@ function buildContentGaps(summaries) {
 // Titles never repeat the count — the card renders it in the chip. `tone`
 // grades each chip: 'error' only for genuine channel failures, 'warning' for
 // PIM↔channel desyncs, 'neutral' for informational rows.
-function buildActions({ channelSnapshots, unlinkedWix, inventoryReport }) {
+function buildActions({ channelSnapshots, unlinkedWix }) {
   const actions = [];
   const plural = (n, word) => (n === 1 ? word : `${word}s`);
 
@@ -161,27 +160,6 @@ function buildActions({ channelSnapshots, unlinkedWix, inventoryReport }) {
     });
   }
 
-  // SKUs a stock source lists that the PIM doesn't know yet — create them and
-  // their stock shows up on the next pull (seconds later). One row per
-  // market (USA = ShipStation, Canada = the inventory file).
-  for (const r of Object.values(inventoryReport?.markets ?? {})) {
-    // The Canada inventory file lists far more than the PIM's catalog
-    // (packaging codes, other brands — ~700 part numbers), so "not in the
-    // PIM" is not actionable there; Settings → Stock still shows the count.
-    if (r?.market === 'ca') continue;
-    const missing = r?.ok ? r.unmatched ?? [] : [];
-    if (missing.length === 0) continue;
-    actions.push({
-      key: `inventory_${r.market}`,
-      count: missing.length,
-      tone: 'neutral',
-      title: `${plural(missing.length, 'SKU')} in the ${r.place ?? `${r.label} warehouse`} with no product in the PIM`,
-      detail: `${r.source ?? 'Inventory'} — ${missing.slice(0, 6).join(', ')}${missing.length > 6 ? '…' : ''}`,
-      to: '/catalog?new=1',
-      runAt: r.syncedAt,
-    });
-  }
-
   return actions;
 }
 
@@ -200,14 +178,13 @@ export function useDashboardData() {
 
     (async () => {
       try {
-        const [productsResult, healthSummaries, inventoryReport, ...snapshots] = await Promise.all([
+        const [productsResult, healthSummaries, ...snapshots] = await Promise.all([
           supabase
             .from('products')
             .select(
               'sku, model_name, workflow_status, category, wix_product_id, wix_synced_at, created_at',
             ),
           latestHealthSummaries(),
-          getInventoryReport().catch(() => null),
           ...SYNC_CHANNELS.map((c) => latestSnapshotLite(c)),
         ]);
         if (productsResult.error) throw productsResult.error;
@@ -246,7 +223,7 @@ export function useDashboardData() {
             total: list.length,
             byStatus,
             byCategory,
-            actions: buildActions({ channelSnapshots, unlinkedWix: list.length - linkedWix, inventoryReport }),
+            actions: buildActions({ channelSnapshots, unlinkedWix: list.length - linkedWix }),
             hasChannelSnapshots: Object.values(channelSnapshots).some(Boolean),
             healthSummaries,
             healthRefreshing: stale,

@@ -13,7 +13,7 @@
 //   H Brand                         the product's brand (Stylish or Azuni)
 //   I Product Description           the name on the alias (Rona's own title)
 //   J Inventory                     the Canada stock in the PIM
-//                                   (product_inventory: the inventory file),
+//                                   (product_inventory: Odoo, warehouse CBG),
 //                                   0 when the SKU is not in it (user rule
 //                                   2026-09-28: every stock column of a promo
 //                                   file takes the PIM's inventory)
@@ -136,8 +136,8 @@ export async function fillRonaPromoTemplate(template, promotion, channel, { task
     for (const a of aliases ?? []) alias.set(a.sku, a);
   }
 
-  // Column J is the Canada stock in the PIM; a SKU the inventory file does
-  // not carry goes out as 0 and is reported.
+  // Column J is the Canada stock in the PIM; a SKU that is not tracked
+  // (Odoo does not have it) goes out as 0 and is reported.
   const stock = (await getStockFor(skus, { task: task?.part(0.65, 0.75) })).ca ?? {};
 
   const window = promoWindow(promotion, 'ca');
@@ -274,7 +274,7 @@ export function summarizeRonaFill(channel, r) {
   if (r.noName.length) parts.push(`${r.noName.length} without a Rona name (column I empty): ${few(r.noName, 5)}`);
   if (r.noUpc.length) parts.push(`${r.noUpc.length} without UPC (column E empty): ${few(r.noUpc, 5)}`);
   parts.push(`inventory (column J) = Canada stock${r.atZero ? `, ${r.atZero} at 0` : ''}`);
-  if (r.noStock?.length) parts.push(`${r.noStock.length} not in the Canada inventory file, inventory 0: ${few(r.noStock, 5)}`);
+  if (r.noStock?.length) parts.push(`${r.noStock.length} not tracked in Canada (not in Odoo), inventory 0: ${few(r.noStock, 5)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${few(r.excluded)}`);
   return parts.join(' · ');
 }

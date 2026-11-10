@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, Upload, UserCheck, ShieldCheck } from 'lucide-react';
+import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, UserCheck, ShieldCheck } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
-import { getInventoryReport, refreshInventory, uploadCanadaInventory, describeInventoryPull, stockAge } from '@/features/pricing/api/inventory';
+import { getInventoryReport, refreshInventory, describeInventoryPull, stockAge } from '@/features/pricing/api/inventory';
 import { listPromotions } from '@/features/pricing/api/promotions';
 import { listTaskOwners } from '@/features/pricing/api/promoTasks';
 import { TASK_CHANNELS } from '@/features/pricing/lib/promoTasks';
@@ -58,26 +58,20 @@ function SettingRow({ title, description, checked, disabled, onChange }) {
   );
 }
 
-// Stock sources: USA from ShipStation on its own (hourly); Canada from the
-// "Stylish Inventory" workbook, mailed daily to the PIM mailbox
-// (scripts/gmail-inventory-to-pim.gs) or uploaded here. The last pull's
-// report per market comes from app_settings.
+// Stock source (user, 2026-11-10): both markets from Odoo's Calculated
+// Inventory, column "Available for Use", one warehouse each, on their own
+// every hour. The last pull's report per market comes from app_settings.
 const STOCK_SOURCES = [
-  { key: 'us', title: 'USA — ShipStation', description: 'Every hour, and right after a product is created.' },
-  { key: 'ca', title: 'Canada — "Stylish Inventory" file', description: 'From the daily email, or the file uploaded here. A SKU not in the file is not tracked.' },
+  { key: 'us', title: 'USA — Odoo, warehouse ATL' },
+  { key: 'ca', title: 'Canada — Odoo, warehouse CBG' },
 ];
 
 function describeSource(r) {
   if (!r) return 'not loaded yet';
-  if (r.skipped) return r.note ?? 'unchanged';
   if (!r.ok) return r.error ?? 'not loaded yet';
   const bits = [`${r.matched} SKUs tracked`, `${r.inStock} in stock`];
   if (r.outOfStock) bits.push(`${r.outOfStock} at 0`);
-  if (r.unmatched?.length) bits.push(`${r.unmatched.length} not in the PIM`);
-  const how = r.via === 'email' ? `emailed${r.file ? ` "${r.file}"` : ''}`
-    : r.via === 'upload' ? `uploaded${r.file ? ` "${r.file}"` : ''}`
-    : r.via ? `SharePoint (${r.via})` : 'ShipStation';
-  return `${bits.join(', ')} · ${how} · ${stockAge(r.syncedAt)}`;
+  return `${bits.join(', ')} · ${stockAge(r.syncedAt)}`;
 }
 
 // Who answers for each channel whose promotion files go through its own
@@ -251,7 +245,7 @@ function WarrantySection() {
 
 function InventorySection() {
   const [report, setReport] = useState(null);
-  const [busy, setBusy] = useState(null); // 'refresh' | 'upload'
+  const [busy, setBusy] = useState(null); // 'refresh'
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
@@ -262,7 +256,7 @@ function InventorySection() {
     setBusy('refresh');
     setMsg(null);
     // One edge-function call: the stripe moves until it answers.
-    const task = startTask('Stock refresh', { detail: 'Waiting for ShipStation and the Canada file…' });
+    const task = startTask('Stock refresh', { detail: 'Waiting for Odoo…' });
     try {
       const r = await refreshInventory();
       task.progress(0.85, 'Reloading the report…');
@@ -278,31 +272,9 @@ function InventorySection() {
     }
   }
 
-  async function upload(file) {
-    if (!file) return;
-    setBusy('upload');
-    setMsg(null);
-    // Encoding + one edge-function call: the stripe moves until it answers.
-    const task = startTask('Canada stock file', { detail: `Loading "${file.name}"…` });
-    try {
-      const r = await uploadCanadaInventory(file);
-      task.progress(0.85, 'Reloading the report…');
-      setReport((await getInventoryReport()) ?? {});
-      const ca = r.markets?.ca;
-      if (ca?.ok) task.finish(`"${file.name}" loaded`);
-      else task.fail(ca?.error ?? r.error ?? 'The file could not be loaded.');
-      setMsg(ca?.ok
-        ? { tone: 'success', text: `"${file.name}" loaded — ${describeInventoryPull(r).join(' · ')}` }
-        : { tone: 'error', text: ca?.error ?? r.error ?? 'The file could not be loaded.' });
-    } catch (err) {
-      task.fail(err);
-      setMsg({ tone: 'error', text: err.message });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const markets = report?.markets ?? {};
+  // PIM products Odoo has no record of (both markets read the same products).
+  const notInOdoo = [...new Set(Object.values(markets).flatMap((r) => (r?.ok ? r.notInOdoo ?? [] : [])))].sort();
   return (
     <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
       <div className="flex items-start gap-3">
@@ -312,7 +284,7 @@ function InventorySection() {
         <div>
           <h2 className="text-title-md text-on-surface font-semibold">Stock</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-            Shown in the catalog, on each product and in the promotion tables. A missing SKU is "not tracked", never 0.
+            Read from Odoo's Calculated Inventory, column "Available for Use" (free stock plus what can be built from components), every hour and right after a product is created. Shown in the catalog, on each product and in the promotion tables. A product Odoo does not have is "not tracked", never 0.
           </p>
         </div>
       </div>
@@ -323,7 +295,7 @@ function InventorySection() {
             <Loader2 className="w-4 h-4 animate-spin inline mr-1.5 align-middle" />Loading…
           </p>
         ) : (
-          STOCK_SOURCES.map(({ key, title, description }) => {
+          STOCK_SOURCES.map(({ key, title }) => {
             const r = markets[key];
             const fine = Boolean(r?.ok);
             return (
@@ -335,11 +307,15 @@ function InventorySection() {
                 )}
                 <div className="min-w-0">
                   <p className="text-on-surface font-medium">{title} <span className="font-normal text-on-surface-variant">— {describeSource(r)}</span></p>
-                  <p className="text-on-surface-variant">{description}</p>
                 </div>
               </div>
             );
           })
+        )}
+        {notInOdoo.length > 0 && (
+          <p className="text-body-sm text-on-surface-variant [overflow-wrap:anywhere]">
+            {notInOdoo.length} {notInOdoo.length === 1 ? 'product is' : 'products are'} not in Odoo, so not tracked: {notInOdoo.join(', ')}
+          </p>
         )}
       </div>
 
@@ -354,17 +330,6 @@ function InventorySection() {
           {busy === 'refresh' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
           Refresh now
         </button>
-        <label className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-primary/40 ${busy !== null ? 'opacity-40 pointer-events-none' : ''}`}>
-          {busy === 'upload' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-          Upload the Canada file (.xlsx)
-          <input
-            type="file"
-            accept=".xlsx"
-            className="sr-only"
-            disabled={busy !== null}
-            onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ''; }}
-          />
-        </label>
       </div>
 
       {msg && (

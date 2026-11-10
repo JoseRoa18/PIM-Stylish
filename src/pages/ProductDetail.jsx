@@ -485,7 +485,7 @@ export default function ProductDetail() {
   const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({});
 
-  // Stock per market (the ShipStation cache): undefined while looking it
+  // Stock per market (the cache of Odoo's stock): undefined while looking it
   // up; inside, null where that warehouse doesn't track this SKU.
   const [stock, setStock] = useState(undefined);
   useEffect(() => {

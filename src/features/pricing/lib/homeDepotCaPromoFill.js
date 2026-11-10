@@ -294,7 +294,7 @@ async function buildWorkbook(template, promotion, channel, { task = null, label 
       sku: m.sku,
       article: /^\d+$/.test(String(a.alias).trim()) ? Number(a.alias) : a.alias,
       description: a.listing_title ?? null,
-      // a forecast of 0 (no stock, or not in the inventory file) goes as 5
+      // a forecast of 0 (no stock, or not tracked) goes as 5
       forecast: Math.max(0, Math.round(available * layout.forecastShare)) || FORECAST_FLOOR,
       available,
       stocked: Boolean(tracked),
@@ -471,7 +471,7 @@ function describeFile(r) {
   if (r.atOrAbove.length) parts.push(`${r.atOrAbove.length} with the promo MAP not below MAP, check them: ${few(r.atOrAbove, 5)}`);
   if (r.noCost.length) parts.push(`${r.noCost.length} without WC Rona / Home Depot (old cost empty): ${few(r.noCost, 5)}`);
   if (r.noPromoCost.length) parts.push(`${r.noPromoCost.length} without WC ${levelLabel(r.tier)} (new cost empty): ${few(r.noPromoCost, 5)}`);
-  if (r.noStock.length) parts.push(`${r.noStock.length} not in the Canada inventory file, forecast ${FORECAST_FLOOR}: ${few(r.noStock, 5)}`);
+  if (r.noStock.length) parts.push(`${r.noStock.length} not tracked in Canada (not in Odoo), forecast ${FORECAST_FLOOR}: ${few(r.noStock, 5)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from Home Depot Canada: ${few(r.excluded)}`);
   if (r.week === null) parts.push(`no NLP launch week near ${r.windowStart} in the FY 2026 schedule — fill Fiscal Week by hand`);
   return parts.join(' · ');

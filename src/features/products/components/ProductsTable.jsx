@@ -293,11 +293,11 @@ export default function ProductsTable({
   );
 }
 
-// Units available per market (USA: ShipStation's warehouse; Canada: the
-// inventory file); "—" is not tracked, never zero.
+// Units available per market — Odoo's "Available for Use" in the market's
+// warehouse (Canada CBG, USA ATL); "—" is not tracked, never zero.
 const STOCK_TITLES = {
-  ca: { none: 'Not in the Canada inventory file', some: (v) => `${v} in stock per the Canada inventory file` },
-  us: { none: 'Not tracked in ShipStation (USA warehouse)', some: (v) => `${v} available in the USA warehouse (ShipStation)` },
+  ca: { none: 'Not tracked — Odoo does not have this product', some: (v) => `${v} available for use in Canada (Odoo, warehouse CBG)` },
+  us: { none: 'Not tracked — Odoo does not have this product', some: (v) => `${v} available for use in the USA (Odoo, warehouse ATL)` },
 };
 function StockCell({ value, market }) {
   const t = STOCK_TITLES[market];

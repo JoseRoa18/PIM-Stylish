@@ -9,21 +9,22 @@ import { startTask } from '@/lib/taskProgress';
 
 // A channel's stock sync, on its channel page (user 2026-10-30): our stock
 // minus 2 units of safety margin, 0 when we do not track it, while the switch
-// is on. Walmart USA (walmart-us-inventory) every hour from ShipStation;
-// Best Buy Canada (bestbuy-inventory) when a new Canada stock file arrives.
+// is on. The stock is Odoo's (product_inventory, read every hour): Walmart
+// USA (walmart-us-inventory) takes the USA's, Best Buy Canada
+// (bestbuy-inventory) Canada's, after each new reading.
 // Shows the channel's answer to the last send.
 const SYNCS = {
   walmart_us: {
     invoke: walmartUsStock,
     channel: 'Walmart USA',
     margin: 2,
-    describe: (m) => `Every hour, every product listed on Walmart USA gets our USA stock (ShipStation, Flowery Branch) minus ${m} units of safety margin; a product we do not track goes as 0, and one without stock stays listed at 0.`,
+    describe: (m) => `Every hour, every product listed on Walmart USA gets our USA stock (Odoo, warehouse ATL) minus ${m} units of safety margin; a product we do not track goes as 0, and one without stock stays listed at 0.`,
   },
   bestbuy: {
     invoke: bestBuyStock,
     channel: 'Best Buy',
     margin: 0,
-    describe: (m) => `When a new Canada stock file arrives (once a day), every Best Buy offer gets our Canada stock${m ? ` minus ${m} units of safety margin` : ''}, keeping its price and discount; a product we do not track goes as 0. Open-box offers are left alone. Only the offers whose quantity differs are sent.`,
+    describe: (m) => `Every hour, every Best Buy offer gets our Canada stock (Odoo, warehouse CBG)${m ? ` minus ${m} units of safety margin` : ''}, keeping its price and discount; a product we do not track goes as 0. Open-box offers are left alone. Only the offers whose quantity differs are sent.`,
   },
 };
 

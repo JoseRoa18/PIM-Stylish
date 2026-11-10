@@ -1,42 +1,49 @@
-// Stylish PIM ← warehouse stock: READ-ONLY pull into product_inventory, one
-// source per market. Nothing here writes to the sources.
+// Stylish PIM ← Odoo stock: READ-ONLY pull into product_inventory. Nothing
+// here writes to Odoo.
 //
-//   us  ShipStation Inventory (API v2), secret SHIPSTATION_API_KEY: every
-//       warehouse of the USA account (Flowery Branch GA + a 2-SKU "Walmart"
-//       one; Amazon FBA is empty). ShipStation's list omits SKUs at 0 stock,
-//       so a SKU we already track that is missing from a pull is kept at 0
-//       with dropped_at stamped (most likely sold out), never deleted.
-//   ca  The "Stylish Inventory" Excel on SharePoint: columns PART NUMBER,
-//       NAME, QUANTITY IN STOCK CANADA and ETA CAN, found by header text on
-//       whichever sheet carries them. The file lists its zeros itself, so a
-//       SKU that is not in the file is not tracked — its row is removed.
-//       The workbook comes from, in this order:
-//         · the request body (`file`, base64): the Settings upload, or the
-//           mailbox script (scripts/gmail-inventory-to-pim.gs) forwarding the
-//           daily email with the INVENTORY_INBOUND_SECRET header,
-//         · Microsoft Graph, when MS_TENANT_ID / MS_CLIENT_ID /
-//           MS_CLIENT_SECRET are set: the share link CA_INVENTORY_XLSX_URL is
-//           resolved through /shares (an app registration with
-//           Files.Read.All or Sites.Selected on the site),
-//         · a plain download of CA_INVENTORY_XLSX_URL when the link is an
-//           "anyone with the link" one.
+// Both markets come from Odoo's "Calculated Inventory" (Inventory →
+// Reporting), column "Available for Use" = Free to Use (Finished) + Max
+// Buildable Qty from components — product.product's computed fields
+// available_for_use / finished_free_qty / max_buildable_qty (Odoo's
+// replenishment_report module) — read with ONE warehouse selected per market
+// (user, 2026-11-10: "el inventario debe venir de acá, de la columna llamada
+// Available for Use"; the warehouses are the user's choice the same day: what
+// can really be shipped, so no Amazon FBA, Irene / Elina / Bonnie or Open Box
+// stock):
+//   ca  warehouse CBG (Cambridge), Stylish International Inc
+//   us  warehouse ATL (Flowery Branch GA), Stylish USA Inc
+// The screen's warehouse filter is the context key `warehouse_id` (Odoo's
+// own StockReportSearchModel), which is what this sends; the numbers are the
+// screen's with that warehouse picked. Until that day the USA came from
+// ShipStation Inventory and Canada from the "Stylish Inventory" Excel (daily
+// email / Settings upload): both are gone.
 //
-// Body: { mode?: "pull" | "ping", market?: "us" | "ca" | "all",
-//         file?: string (base64 xlsx, Canada only), dryRun?: boolean }
-//   (defaults: pull, all). dryRun parses and matches but writes nothing.
+// One row per PIM product Odoo has: `available` = Available for Use (whole
+// units, never below 0), `on_hand` = Quantity On Hand, `warehouses` =
+// { "<code>": { on_hand, available, free, buildable, incoming } }. A PIM
+// product Odoo does not have (no record, or an archived one) has NO row —
+// "not tracked", which is not 0 — and is listed in the report's `notInOdoo`.
+//
+// Matching: the PIM's SKU = Odoo's default_code, exact, then ignoring case —
+// the DASH is kept (dashed and undashed SKUs are DIFFERENT brands here). Two
+// Odoo records of one SKU are added up.
+//
+// Guards: Odoo answering with no product, or with under half of the products
+// the market holds now, changes nothing — the last numbers stay.
+//
+// Body: { mode?: "pull" | "ping", market?: "us" | "ca" | "all", dryRun?: boolean }
+//   (defaults: pull, all). dryRun reads and matches but writes nothing.
 //   Each market's outcome is reported under `markets`; one failing does not
 //   stop the other. The last report is saved in app_settings
-//   'shipstation_inventory' for the Dashboard and Settings.
-//
-// Matching: exact SKU, then case-insensitive — the DASH is kept (dashed and
-// undashed SKUs are DIFFERENT brands here). A SKU never seen stays absent
-// ("not tracked"), which is not 0.
+//   'shipstation_inventory' (the key kept its first name) for Settings.
 //
 // Auth: `x-cron-secret` header matching CRON_SECRET (deployed with verify_jwt
 // off so pg_net can call it), a service-role bearer (proven through GoTrue's
 // admin API, not by matching the runtime's copy), or a signed-in session.
+// The mailbox script that used to forward the Canada workbook
+// (`x-inventory-secret`) is answered "no longer read" and changes nothing.
+// Secrets: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -47,17 +54,20 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-const SS_BASE = "https://api.shipstation.com/v2";
-const SS_US = { secret: "SHIPSTATION_API_KEY" };
-const EXCEL_SOURCE = "Stylish Inventory (SharePoint)";
-const MARKET_LABEL: Record<string, string> = { us: "USA", ca: "Canada" };
-// Where a market's SKUs live, for the Dashboard wording.
-const MARKET_PLACE: Record<string, string> = { us: "USA warehouse", ca: "Canada inventory file" };
+const SOURCE = "Odoo";
+const FIELD = "Available for Use";
+// The warehouse each market's stock is read from (Odoo's warehouse code).
+const MARKETS: Record<string, { label: string; warehouse: string }> = {
+  ca: { label: "Canada", warehouse: "CBG" },
+  us: { label: "USA", warehouse: "ATL" },
+};
+const NO_FILE = "The stock now comes from Odoo (Calculated Inventory, Available for Use): the Canada inventory file is no longer read.";
 
 type Client = ReturnType<typeof createClient>;
-type ProductIndex = { exact: Set<string>; byUpper: Map<string, string> };
 type Report = Record<string, unknown> & { ok: boolean; market: string; label: string; place: string };
-type Bucket = { on_hand: number; available: number };
+type Warehouse = { id: number; code: string; name: string; company: string; companyId: number };
+type OdooRow = { default_code: string; qty_available: number; finished_free_qty: number; max_buildable_qty: number; available_for_use: number; incoming_qty: number };
+type Stock = { on_hand: number; free: number; buildable: number; available: number; incoming: number; spellings: string[] };
 
 // The role claim of a JWT, read without a signature check — it only picks
 // which real check to run on the bearer.
@@ -71,279 +81,143 @@ function claimRole(token: string): string | null {
   }
 }
 
-function matchSku(products: ProductIndex, source: string): string | null {
-  return products.exact.has(source) ? source : products.byUpper.get(source.toUpperCase()) ?? null;
-}
+// ================================= Odoo ===================================
 
-// ============================ USA: ShipStation ============================
-
-type Warehouse = { inventory_warehouse_id: string; name: string };
-type InventoryRow = { sku: string; on_hand?: number; available?: number; inventory_warehouse_id?: string };
-
-// Follows the cursor links (absolute URLs) until the last page; one retry
-// on 429 honouring Retry-After.
-async function ssAll<T>(firstPath: string, key: string, field: string): Promise<T[]> {
-  const out: T[] = [];
-  let url: string | null = `${SS_BASE}${firstPath}`;
-  let retried = false;
-  let guard = 0;
-  while (url && guard++ < 500) {
-    const r = await fetch(url, { headers: { "API-Key": key, Accept: "application/json" } });
-    if (r.status === 429 && !retried) {
-      retried = true;
-      const wait = Number(r.headers.get("Retry-After") ?? "2");
-      await new Promise((res) => setTimeout(res, Math.min(Math.max(wait, 1), 30) * 1000));
-      continue;
-    }
-    const text = await r.text();
-    if (!r.ok) throw new Error(`ShipStation ${r.status}: ${text.slice(0, 300)}`);
-    const page = JSON.parse(text);
-    out.push(...((page[field] ?? []) as T[]));
-    url = page.links?.next?.href || null;
-  }
-  return out;
-}
-
-async function pullShipStationUs(key: string, supabase: Client, products: ProductIndex, dryRun: boolean): Promise<Report> {
-  const market = "us";
-  const base = { market, label: MARKET_LABEL[market], place: MARKET_PLACE[market], source: "ShipStation" };
-  const syncedAt = new Date().toISOString();
-  const warehouses = await ssAll<Warehouse>("/inventory_warehouses?page_size=100", key, "inventory_warehouses");
-  const warehouseName = new Map(warehouses.map((w) => [w.inventory_warehouse_id, w.name]));
-
-  // --- one row per (sku, warehouse), summed per SKU ------------------------
-  const rows = await ssAll<InventoryRow>("/inventory?group_by=warehouse&page_size=250", key, "inventory");
-  const bySource = new Map<string, Bucket & { warehouses: Record<string, Bucket> }>();
-  for (const r of rows) {
-    const sku = String(r.sku ?? "").trim();
-    if (!sku) continue;
-    const onHand = Number(r.on_hand ?? 0) || 0;
-    const available = Number(r.available ?? 0) || 0;
-    const agg = bySource.get(sku) ?? { on_hand: 0, available: 0, warehouses: {} };
-    agg.on_hand += onHand;
-    agg.available += available;
-    const wh = warehouseName.get(r.inventory_warehouse_id ?? "") ?? r.inventory_warehouse_id ?? "unknown";
-    const w = agg.warehouses[wh] ?? { on_hand: 0, available: 0 };
-    w.on_hand += onHand;
-    w.available += available;
-    agg.warehouses[wh] = w;
-    bySource.set(sku, agg);
-  }
-  if (bySource.size === 0) return { ok: false, ...base, error: "ShipStation returned no inventory rows; nothing changed." };
-
-  // --- match to PIM SKUs ---------------------------------------------------
-  const matched = new Map<string, Record<string, unknown>>();
-  const unmatched: string[] = [];
-  const ignored: string[] = [];
-  for (const [sourceSku, agg] of bySource) {
-    const sku = matchSku(products, sourceSku);
-    if (!sku) {
-      // Warehouse activity codes ("House Keeping", "Unload Pallets"…) live
-      // in the same list; a SKU with a space in it is never a product.
-      (/\s/.test(sourceSku) ? ignored : unmatched).push(sourceSku);
-      continue;
-    }
-    const prev = matched.get(sku);
-    if (prev) {
-      // Two source spellings of one PIM SKU (A-921bk + A-921BK): add up.
-      prev.on_hand = (prev.on_hand as number) + agg.on_hand;
-      prev.available = (prev.available as number) + agg.available;
-      prev.source_sku = `${prev.source_sku}, ${sourceSku}`;
-      continue;
-    }
-    matched.set(sku, {
-      market, sku, on_hand: agg.on_hand, available: agg.available, warehouses: agg.warehouses,
-      source: "shipstation", source_sku: sourceSku, eta: null, dropped_at: null, synced_at: syncedAt,
-    });
-  }
-  const upserts = [...matched.values()];
-  const summary = {
-    warehouses: warehouses.map((w) => w.name),
-    tracked: bySource.size,
-    matched: upserts.length,
-    inStock: upserts.filter((u) => (u.available as number) > 0).length,
-    unmatched: unmatched.sort(),
-    ignored: ignored.sort(),
-    syncedAt,
-  };
-  if (dryRun) return { ok: true, ...base, dryRun: true, ...summary, dropped: [], droppedTotal: 0 };
-
-  // --- write the market's rows ---------------------------------------------
-  for (let i = 0; i < upserts.length; i += 500) {
-    const { error } = await supabase.from("product_inventory").upsert(upserts.slice(i, i + 500), { onConflict: "market,sku" });
-    if (error) return { ok: false, ...base, step: "upsert", error: error.message };
-  }
-  // SKUs we track that are missing from this pull: ShipStation drops
-  // sold-out SKUs from its list, so they are kept at 0 (stamped once).
-  const { data: missing, error: mErr } = await supabase
-    .from("product_inventory").select("sku, dropped_at").eq("market", market).lt("synced_at", syncedAt);
-  if (mErr) return { ok: false, ...base, step: "missing", error: mErr.message };
-  const newlyDropped = (missing ?? []).filter((m) => !m.dropped_at).map((m) => String(m.sku));
-  if (missing?.length) {
-    if (newlyDropped.length) {
-      const { error } = await supabase.from("product_inventory").update({ dropped_at: syncedAt }).eq("market", market).in("sku", newlyDropped);
-      if (error) return { ok: false, ...base, step: "dropped", error: error.message };
-    }
-    const { error } = await supabase
-      .from("product_inventory")
-      .update({ on_hand: 0, available: 0, warehouses: {}, synced_at: syncedAt })
-      .eq("market", market).lt("synced_at", syncedAt);
-    if (error) return { ok: false, ...base, step: "zero", error: error.message };
-  }
-  return { ok: true, ...base, ...summary, dropped: newlyDropped.sort(), droppedTotal: missing?.length ?? 0 };
-}
-
-// ============================ Canada: the Excel ===========================
-
-type ExcelRow = { part: string; name: string | null; qty: number | null; eta: string | null; row: number };
-
-const normHeader = (v: unknown) => String(v ?? "").trim().toUpperCase().replace(/\s+/g, " ");
-
-function toQty(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  if (typeof v === "number") return Number.isFinite(v) ? Math.round(v) : null;
-  const s = String(v).trim();
-  if (!s) return null;
-  const n = Number(s.replace(/[^0-9.\-]/g, ""));
-  return /\d/.test(s) && Number.isFinite(n) ? Math.round(n) : null;
-}
-function toEta(v: unknown): string | null {
-  if (v == null || v === "") return null;
-  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
-  const s = String(v).trim();
-  return s || null;
-}
-
-// The first sheet whose first 20 rows carry a "PART NUMBER" header, read by
-// header text — the sheet can gain, hide or move columns.
-function parseInventoryWorkbook(bytes: Uint8Array): { rows: ExcelRow[]; sheet: string; headerRow: number; columns: Record<string, string | null> } {
-  const wb = XLSX.read(bytes, { type: "array", cellDates: true });
-  const col = (i: number) => (i < 0 ? null : XLSX.utils.encode_col(i));
-  for (const name of wb.SheetNames) {
-    const ws = wb.Sheets[name];
-    if (!ws) continue;
-    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true }) as unknown[][];
-    for (let r = 0; r < Math.min(grid.length, 20); r++) {
-      const headers = (grid[r] ?? []).map(normHeader);
-      const part = headers.indexOf("PART NUMBER");
-      if (part < 0) continue;
-      const qty = headers.findIndex((h) => /^QUANTITY IN STOCK/.test(h));
-      if (qty < 0) throw new Error(`Sheet "${name}" has a PART NUMBER header on row ${r + 1} but no "QUANTITY IN STOCK…" column.`);
-      const nameCol = headers.indexOf("NAME");
-      const eta = headers.findIndex((h) => /^ETA\b/.test(h));
-      const rows: ExcelRow[] = [];
-      for (let i = r + 1; i < grid.length; i++) {
-        const line = grid[i] ?? [];
-        const partNo = String(line[part] ?? "").trim();
-        if (!partNo) continue;
-        rows.push({
-          part: partNo,
-          name: nameCol >= 0 && line[nameCol] != null ? String(line[nameCol]).trim() : null,
-          qty: toQty(line[qty]),
-          eta: eta >= 0 ? toEta(line[eta]) : null,
-          row: i + 1,
-        });
+type Odoo = (model: string, method: string, args: unknown[], kwargs?: Record<string, unknown>) => Promise<any>;
+async function odooClient(): Promise<Odoo> {
+  const url = (Deno.env.get("ODOO_URL") ?? "").replace(/\/$/, "");
+  const db = Deno.env.get("ODOO_DB");
+  const user = Deno.env.get("ODOO_USER");
+  const key = Deno.env.get("ODOO_API_KEY");
+  if (!url || !db || !user || !key) throw new Error("The ODOO_URL / ODOO_DB / ODOO_USER / ODOO_API_KEY secrets are not set.");
+  let id = 0;
+  // A request that does not get through (Odoo refuses some under load) is
+  // sent again after a growing, random pause; an answer from Odoo itself (an
+  // error it gives) is never retried.
+  const rpc = async (service: string, method: string, args: unknown[]) => {
+    const body = JSON.stringify({ jsonrpc: "2.0", method: "call", params: { service, method, args }, id: ++id });
+    for (let attempt = 1; ; attempt++) {
+      let j: { error?: { message?: string; data?: { message?: string } }; result?: unknown };
+      try {
+        const r = await fetch(`${url}/jsonrpc`, { method: "POST", headers: { "content-type": "application/json" }, body });
+        if (r.status === 429 || r.status >= 500) throw new Error(`Odoo answered ${r.status}`);
+        j = await r.json();
+      } catch (err) {
+        if (attempt >= 4) throw err;
+        await new Promise((ok) => setTimeout(ok, 600 * 2 ** (attempt - 1) + Math.random() * 500));
+        continue;
       }
-      return { rows, sheet: name, headerRow: r + 1, columns: { part: col(part), name: col(nameCol), qty: col(qty), eta: col(eta) } };
+      if (j.error) throw new Error(`Odoo: ${j.error.data?.message ?? j.error.message}`);
+      return j.result;
     }
-  }
-  throw new Error('No sheet has a "PART NUMBER" header row.');
+  };
+  const uid = await rpc("common", "authenticate", [db, user, key, {}]);
+  if (!uid) throw new Error("Odoo refused the PIM's login (ODOO_USER / ODOO_API_KEY).");
+  return (model, method, args, kwargs = {}) => rpc("object", "execute_kw", [db, uid, key, model, method, args, kwargs]);
 }
 
-function base64ToBytes(b64: string): Uint8Array {
-  const clean = b64.replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "");
-  const bin = atob(clean);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+// The markets' warehouses by code. Odoo keeps an archived twin of CBG under
+// the other company: only the active one counts, and two active ones with
+// one code would be a wrong guess, so that fails.
+async function findWarehouses(odoo: Odoo): Promise<Record<string, Warehouse>> {
+  const codes = [...new Set(Object.values(MARKETS).map((m) => m.warehouse))];
+  const rows = await odoo("stock.warehouse", "search_read", [[["code", "in", codes]]], { fields: ["id", "code", "name", "company_id"] }) as
+    { id: number; code: string; name: string; company_id: [number, string] }[];
+  const out: Record<string, Warehouse> = {};
+  for (const code of codes) {
+    const found = rows.filter((r) => r.code === code);
+    if (found.length === 0) throw new Error(`Odoo has no active warehouse with the code ${code}.`);
+    if (found.length > 1) throw new Error(`Odoo has ${found.length} active warehouses with the code ${code}.`);
+    out[code] = { id: found[0].id, code, name: found[0].name, company: found[0].company_id[1], companyId: found[0].company_id[0] };
+  }
   return out;
 }
 
-async function fetchCanadaWorkbook(body: Record<string, unknown>): Promise<{ bytes: Uint8Array; via: string }> {
-  if (typeof body.file === "string" && body.file.length > 0) {
-    return { bytes: base64ToBytes(body.file), via: body.via === "email" ? "email" : "upload" };
-  }
+const STOCK_FIELDS = ["default_code", "qty_available", "finished_free_qty", "max_buildable_qty", "available_for_use", "incoming_qty"];
+const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-  const url = Deno.env.get("CA_INVENTORY_XLSX_URL");
-  if (!url) {
-    throw new Error("No Canada inventory source yet: upload the file in Settings, or set CA_INVENTORY_XLSX_URL (the SharePoint link) plus MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET so the PIM can read it.");
+// Odoo's numbers for the PIM's SKUs with one warehouse selected — what the
+// Calculated Inventory screen shows with that warehouse picked on its left
+// panel. Every company of both warehouses is allowed, as on that screen: a
+// product of one company only reads 0 in the other's warehouse.
+async function readStock(odoo: Odoo, warehouse: Warehouse, companies: number[], skus: string[]): Promise<Map<string, Stock>> {
+  const context = { warehouse_id: warehouse.id, allowed_company_ids: companies };
+  const byUpper = new Map<string, string>();
+  for (const sku of skus) if (!byUpper.has(sku.toUpperCase())) byUpper.set(sku.toUpperCase(), sku);
+  const stock = new Map<string, Stock>();
+  const add = (sku: string, r: OdooRow) => {
+    const s = stock.get(sku) ?? { on_hand: 0, free: 0, buildable: 0, available: 0, incoming: 0, spellings: [] };
+    s.on_hand += num(r.qty_available);
+    s.free += num(r.finished_free_qty);
+    s.buildable += num(r.max_buildable_qty);
+    s.available += num(r.available_for_use);
+    s.incoming += num(r.incoming_qty);
+    s.spellings.push(String(r.default_code));
+    stock.set(sku, s);
+  };
+  const exact = new Set(skus);
+  for (let i = 0; i < skus.length; i += 200) {
+    const rows = await odoo("product.product", "search_read", [[["default_code", "in", skus.slice(i, i + 200)]]], { fields: STOCK_FIELDS, context }) as OdooRow[];
+    for (const r of rows) if (exact.has(r.default_code)) add(r.default_code, r);
   }
-  const tenant = Deno.env.get("MS_TENANT_ID");
-  const clientId = Deno.env.get("MS_CLIENT_ID");
-  const clientSecret = Deno.env.get("MS_CLIENT_SECRET");
-  if (tenant && clientId && clientSecret) {
-    const tok = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, scope: "https://graph.microsoft.com/.default", grant_type: "client_credentials" }),
-    });
-    const tj = await tok.json();
-    if (!tj.access_token) throw new Error(`Microsoft sign-in failed: ${tj.error_description ?? tj.error ?? tok.status}`);
-    // A sharing link becomes a Graph "shares" id: "u!" + base64url(link).
-    const shareId = "u!" + btoa(url).replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
-    const r = await fetch(`https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem/content`, { headers: { Authorization: `Bearer ${tj.access_token}` } });
-    if (!r.ok) throw new Error(`Microsoft Graph could not download the file (${r.status}): ${(await r.text()).slice(0, 200)}`);
-    return { bytes: new Uint8Array(await r.arrayBuffer()), via: "graph" };
+  // What the exact spelling did not find, once more ignoring case.
+  const missing = skus.filter((s) => !stock.has(s));
+  for (let i = 0; i < missing.length; i += 40) {
+    const part = missing.slice(i, i + 40);
+    const domain: unknown[] = [...Array(part.length - 1).fill("|"), ...part.map((s) => ["default_code", "=ilike", likeEscape(s)])];
+    const rows = await odoo("product.product", "search_read", [domain], { fields: STOCK_FIELDS, context }) as OdooRow[];
+    for (const r of rows) {
+      const sku = byUpper.get(String(r.default_code ?? "").toUpperCase());
+      if (sku && missing.includes(sku)) add(sku, r);
+    }
   }
-  const dl = url.includes("download=1") ? url : `${url}${url.includes("?") ? "&" : "?"}download=1`;
-  const r = await fetch(dl, { redirect: "follow" });
-  if (!r.ok || /text\/html/i.test(r.headers.get("content-type") ?? "")) {
-    throw new Error("The Canada inventory link asks for a Microsoft sign-in (it is not an 'anyone with the link' link): set MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET so the PIM reads it through Microsoft Graph, or upload the file in Settings.");
-  }
-  return { bytes: new Uint8Array(await r.arrayBuffer()), via: "link" };
+  return stock;
 }
 
-async function pullCanadaExcel(body: Record<string, unknown>, supabase: Client, products: ProductIndex, dryRun: boolean): Promise<Report> {
-  const market = "ca";
-  const base = { market, label: MARKET_LABEL[market], place: MARKET_PLACE[market], source: EXCEL_SOURCE };
+async function pullMarket(market: string, odoo: Odoo, warehouse: Warehouse, companies: number[], skus: string[], supabase: Client, dryRun: boolean): Promise<Report> {
+  const base = {
+    market, label: MARKETS[market].label, place: `Odoo warehouse ${warehouse.code}`, source: SOURCE,
+    warehouse: warehouse.code, warehouseName: warehouse.name, company: warehouse.company, field: FIELD,
+  };
   const syncedAt = new Date().toISOString();
-  const { bytes, via } = await fetchCanadaWorkbook(body);
-  const parsed = parseInventoryWorkbook(bytes);
-  if (parsed.rows.length === 0) return { ok: false, ...base, via, error: `Sheet "${parsed.sheet}" has the headers on row ${parsed.headerRow} but no part numbers under them; nothing changed.` };
+  const stock = await readStock(odoo, warehouse, companies, skus);
+  if (stock.size === 0) return { ok: false, ...base, error: `Odoo returned none of the PIM's products for the warehouse ${warehouse.code}; nothing changed.` };
 
-  const matched = new Map<string, Record<string, unknown>>();
-  const unmatched: string[] = [];
-  const blankQty: string[] = [];
-  const duplicates: string[] = [];
-  for (const r of parsed.rows) {
-    const sku = matchSku(products, r.part);
-    if (!sku) {
-      if (!unmatched.includes(r.part)) unmatched.push(r.part);
-      continue;
-    }
-    if (r.qty == null) {
-      blankQty.push(r.part);
-      continue;
-    }
-    // The same part number twice: the lower row wins (the sheet's latest).
-    if (matched.has(sku)) duplicates.push(r.part);
-    matched.set(sku, {
-      market, sku, on_hand: r.qty, available: r.qty,
-      warehouses: { [EXCEL_SOURCE]: { on_hand: r.qty, available: r.qty } },
-      source: "excel", source_sku: r.part, eta: r.eta, dropped_at: null, synced_at: syncedAt,
-    });
-  }
-  const upserts = [...matched.values()];
+  const upserts = [...stock].map(([sku, s]) => {
+    // Whole units that can be sold: never a fraction, never below 0.
+    const available = Math.max(0, Math.floor(s.available + 1e-9));
+    const onHand = Math.round(s.on_hand);
+    return {
+      market, sku, on_hand: onHand, available,
+      warehouses: { [warehouse.code]: { on_hand: onHand, available, free: Math.round(s.free), buildable: Math.round(s.buildable), incoming: Math.round(s.incoming) } },
+      source: "odoo", source_sku: s.spellings.join(", "), eta: null, dropped_at: null, synced_at: syncedAt,
+    };
+  });
   const summary = {
-    via, file: typeof body.fileName === "string" ? body.fileName : null,
-    sheet: parsed.sheet, headerRow: parsed.headerRow, columns: parsed.columns,
-    fileRows: parsed.rows.length,
     matched: upserts.length,
-    inStock: upserts.filter((u) => (u.available as number) > 0).length,
-    outOfStock: upserts.filter((u) => (u.available as number) <= 0).length,
-    withEta: upserts.filter((u) => u.eta).length,
-    unmatched: unmatched.sort(),
-    blankQty: blankQty.sort(),
-    duplicates: [...new Set(duplicates)].sort(),
+    inStock: upserts.filter((u) => u.available > 0).length,
+    outOfStock: upserts.filter((u) => u.available <= 0).length,
+    units: upserts.reduce((a, u) => a + u.available, 0),
+    notInOdoo: skus.filter((s) => !stock.has(s)).sort(),
+    duplicates: [...stock].filter(([, s]) => s.spellings.length > 1).map(([sku]) => sku).sort(),
     syncedAt,
   };
+
+  // Odoo answering with far fewer products than the market holds is a
+  // broken answer (a lost permission, a half read), not a real change.
+  const { count, error: cErr } = await supabase.from("product_inventory").select("sku", { count: "exact", head: true }).eq("market", market);
+  if (cErr) return { ok: false, ...base, step: "count", error: cErr.message };
+  if (count && upserts.length < count / 2) {
+    return { ok: false, ...base, ...summary, error: `Odoo returned only ${upserts.length} of the ${count} products tracked in ${base.label}; nothing changed.` };
+  }
   if (dryRun) return { ok: true, ...base, dryRun: true, ...summary, removed: 0, sample: upserts.slice(0, 5) };
 
   for (let i = 0; i < upserts.length; i += 500) {
     const { error } = await supabase.from("product_inventory").upsert(upserts.slice(i, i + 500), { onConflict: "market,sku" });
     if (error) return { ok: false, ...base, step: "upsert", error: error.message };
   }
-  // Not in the file = not tracked there: the row goes (the file lists its
-  // own zeros, unlike ShipStation).
+  // A product Odoo no longer has is not tracked: its row goes.
   const { data: gone, error: gErr } = await supabase.from("product_inventory").select("sku").eq("market", market).lt("synced_at", syncedAt);
   if (gErr) return { ok: false, ...base, step: "gone", error: gErr.message };
   if (gone?.length) {
@@ -363,15 +237,19 @@ Deno.serve(async (req) => {
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
+    // The mailbox script still forwards the daily Canada workbook until its
+    // trigger is switched off: it is told the file is not read (as a success,
+    // so the script does not mail a failure every day) and nothing changes.
+    const inboundSecret = Deno.env.get("INVENTORY_INBOUND_SECRET");
+    if (inboundSecret && req.headers.get("x-inventory-secret") === inboundSecret) {
+      return json({ ok: true, ignored: true, note: NO_FILE, markets: { ca: { ok: true, market: "ca", label: "Canada", place: "Odoo warehouse CBG", source: SOURCE, ignored: true, note: NO_FILE } } });
+    }
+
     // --- caller: cron secret, service role, or a signed-in user -------------
     const cronSecret = Deno.env.get("CRON_SECRET");
     const provided = req.headers.get("x-cron-secret");
-    // The mailbox script hands over the Canada workbook with this secret and
-    // can do nothing else here (checked once the body is parsed).
-    const inboundSecret = Deno.env.get("INVENTORY_INBOUND_SECRET");
-    const viaInbound = Boolean(inboundSecret && req.headers.get("x-inventory-secret") === inboundSecret);
     const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-    let authorized = Boolean(cronSecret && provided === cronSecret) || viaInbound || bearer === SERVICE_ROLE;
+    let authorized = Boolean(cronSecret && provided === cronSecret) || bearer === SERVICE_ROLE;
     let detail: string | null = null;
     if (!authorized && bearer) {
       if (claimRole(bearer) === "service_role" || bearer.startsWith("sb_secret_")) {
@@ -394,67 +272,56 @@ Deno.serve(async (req) => {
     const mode = String(body.mode ?? "pull");
     const which = String(body.market ?? "all");
     const dryRun = body.dryRun === true;
-    const markets = which === "all" ? ["us", "ca"] : [which];
-    if (markets.some((m) => !MARKET_LABEL[m])) return json({ error: `unknown market "${which}" (use us, ca or all)` }, 400);
-    if (viaInbound && !(mode === "pull" && which === "ca" && typeof body.file === "string" && body.file.length > 0)) {
-      return json({ error: "The inbound secret only loads the Canada inventory file (mode pull, market ca, file)." }, 403);
+    const markets = which === "all" ? Object.keys(MARKETS) : [which];
+    if (markets.some((m) => !MARKETS[m])) return json({ error: `unknown market "${which}" (use us, ca or all)` }, 400);
+    // An upload from a page opened before this change.
+    if (typeof body.file === "string" && body.file.length > 0) {
+      return json({ ok: false, error: NO_FILE, markets: { ca: { ok: false, market: "ca", label: "Canada", place: "Odoo warehouse CBG", error: NO_FILE } } });
     }
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+    if (mode !== "pull" && mode !== "ping") return json({ error: `unknown mode "${mode}" (use pull or ping)` }, 400);
+
+    // Odoo not answering (or a warehouse gone) fails every market asked for,
+    // with the reason in the saved report; the last numbers stay.
+    let odoo: Odoo | null = null;
+    let warehouses: Record<string, Warehouse> = {};
+    let companies: number[] = [];
+    let down: string | null = null;
+    try {
+      odoo = await odooClient();
+      warehouses = await findWarehouses(odoo);
+      companies = [...new Set(Object.values(warehouses).map((w) => w.companyId))];
+    } catch (err) {
+      down = (err as Error).message;
+    }
+    const failed = (m: string, error: string): Report => ({ ok: false, market: m, label: MARKETS[m].label, place: `Odoo warehouse ${MARKETS[m].warehouse}`, source: SOURCE, error });
 
     if (mode === "ping") {
       const out: Record<string, unknown> = {};
       for (const m of markets) {
-        if (m === "us") {
-          const key = Deno.env.get(SS_US.secret);
-          if (!key) { out.us = { ok: false, label: "USA", error: `${SS_US.secret} secret is not set.` }; continue; }
-          try {
-            const warehouses = await ssAll<Warehouse>("/inventory_warehouses?page_size=100", key, "inventory_warehouses");
-            const r = await fetch(`${SS_BASE}/inventory?page_size=1`, { headers: { "API-Key": key, Accept: "application/json" } });
-            out.us = { ok: true, label: "USA", source: "ShipStation", warehouses: warehouses.map((w) => `${w.inventory_warehouse_id} ${w.name}`), tracked: (await r.json()).total ?? null };
-          } catch (err) {
-            out.us = { ok: false, label: "USA", error: (err as Error).message };
-          }
-        } else {
-          const link = Boolean(Deno.env.get("CA_INVENTORY_XLSX_URL"));
-          const graph = Boolean(Deno.env.get("MS_TENANT_ID") && Deno.env.get("MS_CLIENT_ID") && Deno.env.get("MS_CLIENT_SECRET"));
-          out.ca = { ok: link, label: "Canada", source: EXCEL_SOURCE, link, graph, automatic: link, note: link ? (graph ? "read through Microsoft Graph" : "plain download of the link") : "upload only until CA_INVENTORY_XLSX_URL is set" };
-        }
+        const w = warehouses[MARKETS[m].warehouse];
+        out[m] = down || !w ? failed(m, down ?? "warehouse not found") : { ok: true, label: MARKETS[m].label, source: SOURCE, field: FIELD, warehouse: w.code, warehouseName: w.name, company: w.company };
       }
-      return json({ ok: Object.values(out).every((r) => (r as { ok: boolean }).ok), markets: out });
+      return json({ ok: !down, ...(down ? { error: down } : {}), markets: out });
     }
-    if (mode !== "pull") return json({ error: `unknown mode "${mode}" (use pull or ping)` }, 400);
 
-    // --- the PIM's SKUs, indexed once for every market ----------------------
-    const { data: productRows, error: pErr } = await supabase.from("products").select("sku");
-    if (pErr) return json({ ok: false, step: "products", error: pErr.message }, 500);
-    const products: ProductIndex = { exact: new Set(), byUpper: new Map() };
-    for (const p of productRows ?? []) {
-      const sku = String(p.sku);
-      products.exact.add(sku);
-      if (!products.byUpper.has(sku.toUpperCase())) products.byUpper.set(sku.toUpperCase(), sku);
+    // --- the PIM's SKUs, read once for every market --------------------------
+    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+    const skus: string[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from("products").select("sku").order("sku").range(from, from + 999);
+      if (error) return json({ ok: false, step: "products", error: error.message }, 500);
+      for (const p of data ?? []) skus.push(String(p.sku));
+      if ((data ?? []).length < 1000) break;
     }
+    if (skus.length === 0) return json({ ok: false, step: "products", error: "The PIM has no products." }, 500);
 
     const reports: Record<string, Report> = {};
-    const skipped: Record<string, Report> = {};
     for (const m of markets) {
+      if (down || !odoo) { reports[m] = failed(m, down ?? "Odoo is not reachable."); continue; }
       try {
-        if (m === "us") {
-          const key = Deno.env.get(SS_US.secret);
-          reports.us = key
-            ? await pullShipStationUs(key, supabase, products, dryRun)
-            : { ok: false, market: "us", label: "USA", place: MARKET_PLACE.us, error: `${SS_US.secret} secret is not set.` };
-        } else {
-          const hasSource = (typeof body.file === "string" && body.file.length > 0) || Boolean(Deno.env.get("CA_INVENTORY_XLSX_URL"));
-          if (!hasSource && which === "all") {
-            // The hourly run has no workbook to read (it arrives by email or
-            // upload): the last loaded file's rows and report stay as they are.
-            skipped.ca = { ok: true, market: "ca", label: "Canada", place: MARKET_PLACE.ca, source: EXCEL_SOURCE, skipped: true, note: "No new workbook this run — the last loaded file stays." };
-            continue;
-          }
-          reports.ca = await pullCanadaExcel(body, supabase, products, dryRun);
-        }
+        reports[m] = await pullMarket(m, odoo, warehouses[MARKETS[m].warehouse], companies, skus, supabase, dryRun);
       } catch (err) {
-        reports[m] = { ok: false, market: m, label: MARKET_LABEL[m], place: MARKET_PLACE[m], error: (err as Error).message };
+        reports[m] = failed(m, (err as Error).message);
       }
     }
 
@@ -477,7 +344,7 @@ Deno.serve(async (req) => {
       ...(failures.length ? { error: failures.map((r) => `${r.label}: ${r.error}`).join(" · ") } : {}),
       dryRun,
       syncedAt,
-      markets: { ...skipped, ...reports },
+      markets: reports,
       reportSaved,
     });
   } catch (err) {
