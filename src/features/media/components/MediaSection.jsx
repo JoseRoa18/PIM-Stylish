@@ -1104,7 +1104,7 @@ function MediaCard({
       {/* Selection checkbox — top-left, always visible (editors only) */}
       {canEdit && (
         <label
-          className="absolute top-2 left-2 z-10 cursor-pointer"
+          className="absolute top-2 left-2 z-10 cursor-pointer p-1 -m-1"
           onClick={(e) => e.stopPropagation()}
         >
           <input

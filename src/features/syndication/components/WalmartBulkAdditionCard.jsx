@@ -402,7 +402,7 @@ export default function WalmartBulkAdditionCard() {
             <table className="w-full text-body-sm">
               <thead className="bg-surface-container-low text-label-sm text-on-surface-variant">
                 <tr>
-                  <th scope="col" className="px-3 py-2 text-left w-8"><input type="checkbox" checked={pageRows.some(free) && pageRows.filter(free).every((p) => selected.has(p.sku))} onChange={toggleAll} aria-label="Select the products of this page" className="accent-primary" /></th>
+                  <th scope="col" className="px-3 py-2 text-left w-8"><label className="inline-flex p-1 -m-1 cursor-pointer"><input type="checkbox" checked={pageRows.some(free) && pageRows.filter(free).every((p) => selected.has(p.sku))} onChange={toggleAll} aria-label="Select the products of this page" className="w-4 h-4 accent-primary" /></label></th>
                   <th scope="col" className="px-3 py-2 text-left">SKU</th>
                   <th scope="col" className="px-3 py-2 text-left">Product</th>
                   <th scope="col" className="px-3 py-2 text-left">Category</th>
@@ -417,8 +417,8 @@ export default function WalmartBulkAdditionCard() {
                   const out = outcome.get(p.sku);
                   return (
                     <tr key={p.sku} className={selected.has(p.sku) ? 'bg-primary-container/15' : ''}>
-                      <td className="px-3 py-1.5"><input type="checkbox" checked={selected.has(p.sku)} onChange={() => toggle(p.sku)} disabled={!selected.has(p.sku) && selected.size >= LOT_MAX} aria-label={`Add ${p.sku} to the lot`} className="accent-primary" /></td>
-                      <td className="px-3 py-1.5 font-mono whitespace-nowrap"><Link to={`/catalog/${encodeURIComponent(p.sku)}?tab=marketplaces`} className="text-primary hover:underline">{p.sku}</Link></td>
+                      <td className="px-3 py-1.5"><label className="inline-flex p-1 -m-1 cursor-pointer"><input type="checkbox" checked={selected.has(p.sku)} onChange={() => toggle(p.sku)} disabled={!selected.has(p.sku) && selected.size >= LOT_MAX} aria-label={`Add ${p.sku} to the lot`} className="w-4 h-4 accent-primary" /></label></td>
+                      <td className="px-3 py-1.5 font-mono whitespace-nowrap"><Link to={`/catalog/${encodeURIComponent(p.sku)}?tab=marketplaces`} className="inline-block py-[3px] -my-[3px] text-primary hover:underline">{p.sku}</Link></td>
                       <td className="px-3 py-1.5 text-on-surface">{p.model_name}</td>
                       <td className="px-3 py-1.5 text-on-surface-variant">{CATEGORY.get(p.category) ?? p.category}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{p.stock == null ? <span className="text-on-surface-variant">Not tracked</span> : p.stock}</td>

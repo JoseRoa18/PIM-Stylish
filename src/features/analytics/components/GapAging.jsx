@@ -37,7 +37,7 @@ export default function GapAging({ index }) {
                 <td className="px-6 py-3 text-right tabular-nums text-on-surface">{r.over7}</td>
                 <td className={`px-6 py-3 text-right tabular-nums ${r.over30 > 0 ? 'text-error font-medium' : 'text-on-surface'}`}>{r.over30}</td>
                 <td className="px-6 py-3 text-body-sm text-on-surface-variant">
-                  {r.oldestSku ? <>{r.oldestDays} day{r.oldestDays === 1 ? '' : 's'} · <Link to={`/catalog/${r.oldestSku}`} className="font-mono text-primary hover:underline">{r.oldestSku}</Link></> : '—'}
+                  {r.oldestSku ? <>{r.oldestDays} day{r.oldestDays === 1 ? '' : 's'} · <Link to={`/catalog/${r.oldestSku}`} className="inline-block py-[3px] -my-[3px] font-mono text-primary hover:underline">{r.oldestSku}</Link></> : '—'}
                 </td>
               </tr>
             ))}

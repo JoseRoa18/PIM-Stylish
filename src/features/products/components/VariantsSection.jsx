@@ -200,7 +200,7 @@ function VariantCard({ variant, current, onRemove }) {
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(); }}
-        className="absolute top-2 right-2 p-1 rounded-full bg-surface text-on-surface-variant opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-error-container hover:text-on-error-container transition-all"
+        className="absolute top-2 right-2 p-[5px] rounded-full bg-surface text-on-surface-variant opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-error-container hover:text-on-error-container transition-all"
         title="Remove from variant family"
         aria-label={`Remove ${variant.sku} from variant family`}
       >

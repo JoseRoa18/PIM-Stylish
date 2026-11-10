@@ -243,7 +243,7 @@ export default function ProductsTable({
                     <Link
                       to={url}
                       onClick={(e) => e.stopPropagation()}
-                      className="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded"
+                      className="inline-block py-[3px] -my-[3px] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded"
                     >
                       {product.sku}
                     </Link>
@@ -340,7 +340,7 @@ function SortableHeader({ col, sortKey, sortDir, onSort }) {
       <button
         type="button"
         onClick={() => onSort(col.key)}
-        className={`inline-flex items-center gap-1 rounded px-1 -mx-1 hover:text-on-surface transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+        className={`inline-flex items-center gap-1 rounded px-1 -mx-1 py-1 -my-1 hover:text-on-surface transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
           alignRight ? 'flex-row-reverse' : ''
         } ${active ? 'text-on-surface' : ''}`}
       >

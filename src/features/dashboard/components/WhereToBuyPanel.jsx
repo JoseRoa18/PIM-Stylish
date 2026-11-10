@@ -415,7 +415,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                     <Fragment key={g.sku}>
                       <tr className="border-t border-outline-variant hover:bg-surface-container-low cursor-pointer" onClick={() => setExpanded(open ? null : g.sku)}>
                         <td className="sticky left-0 bg-surface-container-lowest px-4 py-1.5 font-semibold text-on-surface whitespace-nowrap">
-                          <Link to={`/catalog/${g.sku}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>{g.sku}</Link>
+                          <Link to={`/catalog/${g.sku}`} className="inline-block py-[3px] -my-[3px] hover:underline" onClick={(e) => e.stopPropagation()}>{g.sku}</Link>
                         </td>
                         {columns.map((c) => (
                           <td key={c.key} className="px-1 py-1.5 text-center"><Cell links={byRetailer.get(c.key)} /></td>

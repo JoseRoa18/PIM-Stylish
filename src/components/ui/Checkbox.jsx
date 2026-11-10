@@ -13,7 +13,7 @@ import { cn } from '@/lib/cn';
 export default function Checkbox({ checked = false, onChange, className, ...rest }) {
   return (
     <label
-      className={cn('relative inline-flex items-center justify-center cursor-pointer', className)}
+      className={cn('relative inline-flex items-center justify-center cursor-pointer p-1 -m-1', className)}
     >
       <input
         type="checkbox"
