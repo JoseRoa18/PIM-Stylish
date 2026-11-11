@@ -343,10 +343,10 @@ function InventorySection() {
   );
 }
 
-// PIM → Odoo (user, 2026-11-11: "apenas alguien le dé SAVE en PIM la
-// información viaje a Odoo … solo UPC"): a UPC saved in the PIM is written to
-// the product's Barcode in Odoo right away (odoo-push). Off until the user
-// turns it on; the edge function reads the same switch.
+// PIM → Odoo, one way (user, 2026-11-11: "apenas alguien le dé SAVE en PIM la
+// información viaje a Odoo"): a UPC, shipping box or shipping weight saved in
+// the PIM is written to the product in Odoo right away, and a new product can
+// be created there (odoo-push). The edge function reads the same switch.
 function OdooSection() {
   const confirm = useConfirm();
   const descriptionId = useId();
@@ -361,8 +361,8 @@ function OdooSection() {
 
   async function toggle(next) {
     if (next && !(await confirm({
-      title: 'Send UPC changes to Odoo?',
-      message: 'From now on, a UPC saved in the PIM — on a product page or through a spreadsheet import — is written to that product’s Barcode in Odoo right away. A product whose UPC is not edited is not touched.',
+      title: 'Send product data to Odoo?',
+      message: 'From now on, a UPC, a shipping box or a shipping weight saved in the PIM — on a product page or through a spreadsheet import — is written to that product in Odoo right away, and a new product can be created there with it. A product nobody edits is not touched.',
       confirmLabel: 'Turn on',
     }))) return;
     const prev = on;
@@ -386,14 +386,14 @@ function OdooSection() {
           <div>
             <h2 className="text-title-md text-on-surface font-semibold">Odoo</h2>
             <p id={descriptionId} className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-              When a product’s UPC is saved in the PIM — on its page or through a spreadsheet import — it is written to that product’s Barcode in Odoo right away. Only the UPC travels. The PIM never creates a product in Odoo, never empties a Barcode, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
+              One way, PIM to Odoo. When a product’s UPC, shipping box or shipping weight is saved in the PIM — on its page or through a spreadsheet import — it is written to that product in Odoo right away. A new product is created in Odoo when its “Create it in Odoo too” box is ticked; its name there is the General Title. The PIM never empties a field in Odoo, never sends half a box, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
               <Link to="/activity" className="text-primary underline underline-offset-2">Activity Log</Link>.
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-label-lg text-on-surface">{on === null ? '…' : on ? 'On' : 'Off'}</span>
-          <Switch checked={on === true} disabled={on === null} onChange={toggle} label="Send UPC changes to Odoo" describedBy={descriptionId} />
+          <Switch checked={on === true} disabled={on === null} onChange={toggle} label="Send product data to Odoo" describedBy={descriptionId} />
         </div>
       </div>
       {error && (

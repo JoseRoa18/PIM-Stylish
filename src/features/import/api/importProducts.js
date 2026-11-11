@@ -2,12 +2,14 @@ import { supabase } from '@/lib/supabase';
 import { syncVariantFamilies } from '@/features/products/api/variantFamilies';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { upcKey } from '@/features/import/lib/upcCheck';
-import { sendUpcsToOdoo, upcChanged } from '@/features/odoo/api/odooPush';
+import { sendToOdoo, changedOdooFields } from '@/features/odoo/api/odooPush';
 
 /**
  * Check which of the given SKUs already exist. Returns a Map of
- * sku → { attributes, description, is_obsolete } for merge purposes (the
- * mark tells the Activity Log which products an import marks or unmarks).
+ * sku → { attributes, description, is_obsolete, shipping_weight_lb } for
+ * merge purposes (the mark tells the Activity Log which products an import
+ * marks or unmarks; the shipping weight, whether the import changes what
+ * Odoo takes).
  * `task` (optional taskProgress reporter): one step per chunk of 100 SKUs.
  */
 export async function fetchExistingProducts(skus, { task = null } = {}) {
@@ -20,7 +22,7 @@ export async function fetchExistingProducts(skus, { task = null } = {}) {
     const chunk = skus.slice(i, i + 100);
     const { data, error } = await supabase
       .from('products')
-      .select('sku, attributes, description, is_obsolete')
+      .select('sku, attributes, description, is_obsolete, shipping_weight_lb')
       .in('sku', chunk);
     if (error) throw error;
     for (const row of data ?? []) out.set(row.sku, row);
@@ -73,7 +75,7 @@ const textOf = (html) => String(html ?? '')
  * taskProgress reporter): the rows written 90%, the variant family re-sync
  * after them the rest.
  */
-export async function importProducts(rows, existingMap, onProgress, { task = null } = {}) {
+export async function importProducts(rows, existingMap, onProgress, { task = null, createInOdoo = false } = {}) {
   const newRows = rows.filter((r) => !existingMap.has(r.sku));
   const updateRows = rows.filter((r) => existingMap.has(r.sku));
   const total = rows.length;
@@ -140,11 +142,11 @@ export async function importProducts(rows, existingMap, onProgress, { task = nul
     }
   } finally {
     logImport(written, existingMap);
-    // The UPCs this import set or changed go to Odoo (user, 2026-11-11), with
-    // their own card — also the ones saved before a batch failed.
-    sendUpcsToOdoo(written
-      .filter(({ r }) => r.attributes?.upc && upcChanged(existingMap.get(r.sku)?.attributes?.upc, r.attributes.upc))
-      .map(({ r }) => r.sku));
+    // What this import changed of the fields Odoo takes (UPC, shipping box
+    // and weight) goes there, and its new products are created there when
+    // asked (user, 2026-11-11) — with their own cards, and also for the rows
+    // saved before a batch failed.
+    sendImportToOdoo(written, existingMap, createInOdoo);
   }
 
   // Re-derive variant families for every base model touched by this import.
@@ -160,6 +162,28 @@ export async function importProducts(rows, existingMap, onProgress, { task = nul
   task?.progress(1);
 
   return { created: newRows.length, updated: updateRows.length, familiesSynced };
+}
+
+// The rows an import wrote, as Odoo sees them: a product the PIM already had
+// sends the fields the file changed; a new one sends what the file gave it
+// and, with `create`, is created in Odoo when it is not there yet.
+function sendImportToOdoo(written, existingMap, create) {
+  const changed = { skus: [], fields: new Set() };
+  const fresh = { skus: [], fields: new Set() };
+  for (const { r, isNew } of written) {
+    const prev = isNew ? null : existingMap.get(r.sku);
+    const now = {
+      attributes: { ...(prev?.attributes ?? {}), ...r.attributes },
+      shipping_weight_lb: r.columns.shipping_weight_lb ?? prev?.shipping_weight_lb ?? null,
+    };
+    const fields = changedOdooFields(prev ?? {}, now);
+    const group = isNew ? fresh : changed;
+    if (!fields.length && !(isNew && create)) continue;
+    group.skus.push(r.sku);
+    fields.forEach((f) => group.fields.add(f));
+  }
+  if (changed.skus.length) sendToOdoo(changed.skus, { fields: [...changed.fields] });
+  if (fresh.skus.length) sendToOdoo(fresh.skus, { fields: [...fresh.fields], create });
 }
 
 // One Activity Log entry per import (2026-10-16): how many products it created

@@ -48,7 +48,7 @@ import StatusBadge from '@/features/products/components/StatusBadge';
 import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
 import StockBadge from '@/features/products/components/StockBadge';
 import { getStockFor } from '@/features/pricing/api/inventory';
-import { sendUpcsToOdoo, upcChanged } from '@/features/odoo/api/odooPush';
+import { sendToOdoo, changedOdooFields } from '@/features/odoo/api/odooPush';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import { isExcluded, wixExclusionKey, marketplaceLabel, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
 import { latestSnapshotItem } from '@/features/syndication/lib/channels';
@@ -548,9 +548,11 @@ export default function ProductDetail() {
       const changes = computeChanges(form, product).filter((c) => !NEVER_PROPAGATE.has(c.key));
       const hadFamily = product.family_number != null;
       const updated = await updateProduct(product.sku, patch);
-      // A UPC saved here goes to Odoo right away (user, 2026-11-11), beside
-      // the save: its own card says what Odoo took, the save never waits.
-      if (updated && upcChanged(product.attributes?.upc, updated.attributes?.upc)) sendUpcsToOdoo([product.sku]);
+      // What Odoo takes from the PIM (UPC, shipping box and weight) goes
+      // there right away (user, 2026-11-11), beside the save: its own card
+      // says what Odoo took, the save never waits.
+      const odooFields = updated ? changedOdooFields(product, updated) : [];
+      if (odooFields.length) sendToOdoo([product.sku], { fields: odooFields });
       forgetSuggestions(); // a value saved now shows in the dropdowns right away
       mergeProduct(updated);
       setIsEditing(false);

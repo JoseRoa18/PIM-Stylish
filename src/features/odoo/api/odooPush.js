@@ -3,17 +3,20 @@ import { getAppSetting, saveAppSetting } from '@/features/settings/api/appSettin
 import { logActivity } from '@/features/activity/api/activityLog';
 import { startTask } from '@/lib/taskProgress';
 
-// PIM → Odoo (user, 2026-11-11: "apenas alguien le dé SAVE en PIM la
-// información viaje a Odoo … en este caso solo UPC"). A save that changes a
-// product's UPC — its page or a spreadsheet import — sends it to the
-// product's Barcode in Odoo through the `odoo-push` edge function, which
-// reads the UPC from the database itself and holds back what must not go
-// (no product in Odoo, an archived one, a UPC another Odoo product has…).
-// The switch is app_settings 'odoo_push' (Settings → Odoo), off until the
-// user turns it on; the function checks it too.
+// PIM → Odoo, one way only (user, 2026-11-11: "apenas alguien le dé SAVE en
+// PIM la información viaje a Odoo"; "el flujo es solo PIM to Odoo, nunca Odoo
+// to PIM"). A save that changes one of the fields below — on the product
+// page or through a spreadsheet import — sends it to Odoo through the
+// `odoo-push` edge function, which reads the values from the database itself
+// and holds back what must not go (no product in Odoo, an archived one, a UPC
+// another Odoo product has, half a box…). A new product can be created in
+// Odoo with it (`create`). The switch is app_settings 'odoo_push'
+// (Settings → Odoo); the function checks it too.
 
 const SETTING = 'odoo_push';
 const PER_CALL = 100; // the function's limit
+// "Nothing to send" for a field (the PIM has no value): said, not a failure.
+const SOFT = new Set(['no_upc', 'no_box', 'no_weight']);
 
 // The switch, remembered for a minute so a save does not wait on it twice.
 let known = null; // { at, enabled }
@@ -34,14 +37,37 @@ export async function setOdooPush(enabled) {
     entityType: 'setting',
     entityId: SETTING,
     target: 'odoo',
-    summary: `Sending UPC changes to Odoo turned ${enabled ? 'on' : 'off'}`,
+    summary: `Sending product data to Odoo turned ${enabled ? 'on' : 'off'}`,
     metadata: { enabled: Boolean(enabled) },
   });
 }
 
-const upcText = (value) => String(value ?? '').trim();
-/** Did a save change the UPC? (what was stored before, what is stored now) */
-export const upcChanged = (before, after) => upcText(before) !== upcText(after);
+const text = (value) => String(value ?? '').trim();
+const measure = (value) => {
+  const n = typeof value === 'number' ? value : parseFloat(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 1000) / 1000 : null;
+};
+const boxOf = (product) => {
+  const box = product?.attributes?.shipping_dimensions_in ?? {};
+  return [measure(box.length), measure(box.width), measure(box.height)].join('|');
+};
+
+/**
+ * Which of the fields that travel to Odoo a save changed — the product as it
+ * was, the product as it is now ({ attributes, shipping_weight_lb }):
+ *   upc     the UPC → Odoo's Barcode
+ *   box     Shipping Dimensions → Shipping Length / Width / Height
+ *   weight  Shipping Weight → Shipping Weight (Lbs)
+ *   title   General Title → the Name, on products the PIM created in Odoo
+ */
+export function changedOdooFields(before, after) {
+  const fields = [];
+  if (text(before?.attributes?.upc) !== text(after?.attributes?.upc)) fields.push('upc');
+  if (boxOf(before) !== boxOf(after)) fields.push('box');
+  if (measure(before?.shipping_weight_lb) !== measure(after?.shipping_weight_lb)) fields.push('weight');
+  if (text(before?.attributes?.general_title_en) !== text(after?.attributes?.general_title_en)) fields.push('title');
+  return fields;
+}
 
 async function invoke(body) {
   const { data, error } = await supabase.functions.invoke('odoo-push', { body });
@@ -49,8 +75,8 @@ async function invoke(body) {
     let detail = error.message;
     try {
       if (error.context && typeof error.context.text === 'function') {
-        const text = await error.context.text();
-        try { detail = JSON.parse(text).error ?? text; } catch { detail = text || detail; }
+        const raw = await error.context.text();
+        try { detail = JSON.parse(raw).error ?? raw; } catch { detail = raw || detail; }
       }
     } catch { /* keep error.message */ }
     throw new Error(detail);
@@ -61,14 +87,17 @@ async function invoke(body) {
 
 /**
  * The function's answer for these SKUs, 100 per call:
- * { off, results: [{ sku, state: updated | would_update | same | held, reason?, note, before?, after? }] }.
- * `dryRun` compares and writes nothing. `task` (optional) counts the SKUs done.
+ * { off, results: [{ sku, state, note, changes, held }] } — state updated |
+ * created | same | held (would_update / would_create on a dry run).
+ * `fields`: what to send (upc, box, weight, title). `create`: make the
+ * products Odoo does not have. `dryRun` compares and writes nothing.
+ * `task` (optional) counts the SKUs done.
  */
-export async function pushUpcsToOdoo(skus, { dryRun = false, task = null } = {}) {
+export async function pushToOdoo(skus, { fields = [], create = false, dryRun = false, task = null } = {}) {
   const list = [...new Set(skus ?? [])];
   const results = [];
   for (let i = 0; i < list.length; i += PER_CALL) {
-    const out = await invoke({ skus: list.slice(i, i + PER_CALL), dryRun });
+    const out = await invoke({ skus: list.slice(i, i + PER_CALL), fields, create, dryRun });
     if (out?.off) return { off: true, results: [] };
     results.push(...(out?.results ?? []));
     if (list.length > PER_CALL) task?.count(Math.min(i + PER_CALL, list.length), list.length);
@@ -77,41 +106,47 @@ export async function pushUpcsToOdoo(skus, { dryRun = false, task = null } = {})
 }
 
 /**
- * After a save that changed these products' UPCs: send them to Odoo, with a
- * progress card that says what Odoo took or why it did not. Runs beside the
- * save — it never throws and never undoes it: the PIM's value is saved either
- * way. Nothing happens while the switch is off.
+ * After a save: send what it changed to Odoo (or create the new product
+ * there), with a progress card that says what Odoo took or why it did not.
+ * Runs beside the save — it never throws and never undoes it: the PIM's
+ * values are saved either way. Nothing happens while the switch is off.
  */
-export async function sendUpcsToOdoo(skus) {
+export async function sendToOdoo(skus, { fields = [], create = false } = {}) {
   const list = [...new Set(skus ?? [])];
-  if (!list.length) return null;
+  if (!list.length || (!fields.length && !create)) return null;
   try {
     if (!(await isOdooPushOn())) return null;
   } catch {
-    return null; // the switch could not be read: the function decides
+    return null; // the switch could not be read: nothing is sent
   }
   const one = list.length === 1;
-  const task = startTask('Odoo · UPC', { detail: one ? `Sending the UPC of ${list[0]} to Odoo…` : `Sending ${list.length} UPCs to Odoo…` });
+  const doing = create ? 'Creating' : 'Sending';
+  const task = startTask('Odoo', { detail: one ? `${doing} ${list[0]} ${create ? 'in' : 'to'} Odoo…` : `${doing} ${list.length} products ${create ? 'in' : 'to'} Odoo…` });
   try {
-    const out = await pushUpcsToOdoo(list, { task });
+    const out = await pushToOdoo(list, { fields, create, task });
     if (out.off) { known = null; task.cancel(); return out; }
-    const updated = out.results.filter((r) => r.state === 'updated');
-    const same = out.results.filter((r) => r.state === 'same');
-    // A product whose UPC was emptied keeps Odoo's Barcode: said, not a failure.
-    const held = out.results.filter((r) => r.state === 'held' && r.reason !== 'no_upc');
+    const failed = out.results.filter((r) => (r.held ?? []).some((h) => !SOFT.has(h.reason)));
     if (one) {
       const r = out.results[0];
-      if (held.length) task.fail(`${r.sku}: ${r.note}`);
-      else task.finish(r ? `${r.sku}: ${r.note}` : 'Nothing to send');
-    } else if (held.length) {
-      const shown = held.slice(0, 3).map((r) => `${r.sku}: ${r.note}`).join(' ');
-      task.fail(`${updated.length} updated in Odoo, ${held.length} not sent. ${shown}${held.length > 3 ? ' … the rest is in the Activity Log.' : ''}`);
+      if (!r) task.finish('Nothing to send');
+      else if (failed.length) task.fail(`${r.sku}: ${r.note}`);
+      else task.finish(`${r.sku}: ${r.note}`);
+      return out;
+    }
+    const count = (state) => out.results.filter((r) => r.state === state).length;
+    const parts = [];
+    if (count('created')) parts.push(`${count('created')} created in Odoo`);
+    if (count('updated')) parts.push(`${count('updated')} updated in Odoo`);
+    if (count('same')) parts.push(`${count('same')} already the same`);
+    if (failed.length) {
+      const shown = failed.slice(0, 3).map((r) => `${r.sku}: ${r.held.filter((h) => !SOFT.has(h.reason)).map((h) => h.note).join(' ')}`).join(' ');
+      task.fail(`${[...parts, `${failed.length} with something not sent`].join(' · ')}. ${shown}${failed.length > 3 ? ' … the rest is in the Activity Log.' : ''}`);
     } else {
-      task.finish(`${updated.length} updated in Odoo${same.length ? ` · ${same.length} already the same` : ''}`);
+      task.finish(parts.join(' · ') || 'Nothing to send');
     }
     return out;
   } catch (err) {
-    task.fail(`The UPC is saved in the PIM, but Odoo was not updated: ${err.message}`);
+    task.fail(`Saved in the PIM, but Odoo was not updated: ${err.message}`);
     return null;
   }
 }

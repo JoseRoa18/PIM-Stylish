@@ -4,6 +4,7 @@ import { Plus, Loader2, AlertCircle, Copy, X, Search } from 'lucide-react';
 import { createProduct, cloneProduct, searchProducts } from '../api/products';
 import { syncVariantFamilies } from '../api/variantFamilies';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
+import { isOdooPushOn, sendToOdoo } from '@/features/odoo/api/odooPush';
 import Dialog from '@/components/ui/Dialog';
 
 import { CATEGORY_OPTIONS } from '../lib/categories';
@@ -29,6 +30,15 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
   const [results, setResults] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // "Create it in Odoo too" (user, 2026-11-11): offered while Settings → Odoo
+  // is on, ticked unless the person unticks it.
+  const [odooOn, setOdooOn] = useState(false);
+  const [inOdoo, setInOdoo] = useState(true);
+  useEffect(() => {
+    let active = true;
+    isOdooPushOn().then((on) => { if (active) setOdooOn(on); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (mode !== 'clone' || source || !query.trim()) { setResults([]); return; }
@@ -72,6 +82,9 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
       autoLinkChannels(created.sku).catch((err) =>
         console.error('Channel auto-link failed (non-fatal):', err),
       );
+      // Beside the creation, with its own card: the product is made in Odoo
+      // when Odoo does not have it yet (never a second copy of one it has).
+      if (odooOn && inOdoo) sendToOdoo([created.sku], { create: true });
       // Land on the new product's detail page so the user can fill the rest.
       navigate(`/catalog/${encodeURIComponent(created.sku)}`);
     } catch (err) {
@@ -283,6 +296,23 @@ export default function CreateProductDialog({ onClose, cloneSource = null }) {
                 placeholder="0.00"
                 className={inputClass}
               />
+            </label>
+          )}
+
+          {odooOn && (
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={inOdoo}
+                onChange={(e) => setInOdoo(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-outline-variant accent-primary flex-shrink-0"
+              />
+              <span>
+                <span className="block text-body-md text-on-surface">Create it in Odoo too</span>
+                <span className="block text-body-sm text-on-surface-variant">
+                  With its SKU, category and brand, tracked in inventory. A SKU Odoo already has is not created again. Route, bill of materials, vendor and cost are filled in Odoo.
+                </span>
+              </span>
             </label>
           )}
 

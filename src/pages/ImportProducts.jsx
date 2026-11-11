@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Upload,
@@ -18,6 +18,7 @@ import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { fetchExistingProducts, fetchUpcOwners, importProducts } from '@/features/import/api/importProducts';
 import { flagRepeatedUpcs } from '@/features/import/lib/upcCheck';
+import { isOdooPushOn } from '@/features/odoo/api/odooPush';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import { startTask } from '@/lib/taskProgress';
 
@@ -113,6 +114,15 @@ export default function ImportProducts() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState(null);
   const [expandedRow, setExpandedRow] = useState(null);
+  // "Create the new products in Odoo too" (user, 2026-11-11): offered while
+  // Settings → Odoo is on, ticked unless the person unticks it.
+  const [odooOn, setOdooOn] = useState(false);
+  const [createInOdoo, setCreateInOdoo] = useState(true);
+  useEffect(() => {
+    let active = true;
+    isOdooPushOn().then((on) => { if (active) setOdooOn(on); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const validRows = rows.filter((r) => r.errors.length === 0);
   const errorRows = rows.filter((r) => r.errors.length > 0);
@@ -207,7 +217,7 @@ export default function ImportProducts() {
         validRows,
         existingMap,
         (done, total) => setProgress({ done, total }),
-        { task },
+        { task, createInOdoo: odooOn && createInOdoo },
       );
       task.finish(`${summary.created} created · ${summary.updated} updated`);
       // Fire-and-forget: link the whole batch to every API-connected channel
@@ -354,6 +364,25 @@ export default function ImportProducts() {
               Import {validRows.length} {validRows.length === 1 ? 'product' : 'products'}
             </button>
           </div>
+
+          {odooOn && newCount > 0 && (
+            <label className="mb-4 flex items-start gap-2.5 px-4 py-3 rounded-xl border border-outline-variant bg-surface-container-lowest cursor-pointer">
+              <input
+                type="checkbox"
+                checked={createInOdoo}
+                onChange={(e) => setCreateInOdoo(e.target.checked)}
+                className="mt-1 w-4 h-4 accent-primary flex-shrink-0"
+              />
+              <span>
+                <span className="block text-body-md text-on-surface">
+                  Create the {newCount} new {newCount === 1 ? 'product' : 'products'} in Odoo too
+                </span>
+                <span className="block text-body-sm text-on-surface-variant">
+                  With SKU, category and brand, tracked in inventory. A SKU Odoo already has is not created again. Route, bill of materials, vendor and cost are filled in Odoo.
+                </span>
+              </span>
+            </label>
+          )}
 
           {unknownHeaders.length > 0 && (
             <div className="mb-4 px-4 py-3 rounded-xl bg-warning-container/50 border border-warning-container text-on-warning-container text-body-sm">
