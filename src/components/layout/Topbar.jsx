@@ -193,7 +193,12 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 h-16 flex justify-between items-center px-4 sm:px-6 bg-surface border-b border-outline-variant gap-2">
+    <header className="sticky top-0 z-[35] h-16 flex justify-between items-center px-4 sm:px-6 bg-surface border-b border-outline-variant gap-2">
+      {/* z-[35]: above anything a page pins inside <main> — the EOS ScoreCard's
+          toolbar is sticky at z-30 and, coming later in the page, it was drawn
+          OVER this bar's menus (the account panel and the search results were
+          cut by it, user 2026-11-11) — and still under the phone menu's
+          backdrop (z-40) and the dialogs (z-50). */}
       {/* Mobile menu toggle */}
       <button
         type="button"

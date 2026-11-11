@@ -27,6 +27,7 @@ export default function AccountMenu() {
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
   const triggerRef = useRef(null);
+  const rootRef = useRef(null);
 
   const displayName = profile?.full_name?.trim() || nameFromEmail(user?.email);
   const avatarUrl = profile?.avatar_url ?? null;
@@ -37,8 +38,18 @@ export default function AccountMenu() {
       // Back to the chip, so keyboard focus isn't lost with the panel.
       if (e.key === 'Escape') { setOpen(false); triggerRef.current?.focus(); }
     };
+    // A press anywhere else closes the panel. A listener, not a see-through
+    // layer over the page: that layer took the mouse wheel, so the page could
+    // not be scrolled while the panel was open (user, 2026-11-11).
+    const onDown = (e) => {
+      if (!rootRef.current?.contains(e.target)) setOpen(false);
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onDown);
+    };
   }, [open]);
 
   async function handleFile(e) {
@@ -72,7 +83,7 @@ export default function AccountMenu() {
   }
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         ref={triggerRef}
         type="button"
@@ -100,7 +111,6 @@ export default function AccountMenu() {
 
       {open && (
         <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-2 z-30 w-72 rounded-xl border border-outline-variant bg-surface shadow-lg animate-menu-in">
             <div className="px-5 pt-5 pb-4 flex flex-col items-center text-center">
               <div className="relative">
