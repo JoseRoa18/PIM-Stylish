@@ -729,6 +729,31 @@ export async function updatePromotionMarketDates(promotion, dates) {
 }
 
 /**
+ * Rename a promotion of any kind and any status (user, 2026-11-11: "habilita
+ * la opción de cambiar nombre de promociones, tanto monthly como todas las
+ * demás"). The name is a label: files, sends and automations go by the
+ * promotion's id, dates and lists, so nothing else changes — the Activity Log
+ * keeps the name each entry was written with, and this change's own entry
+ * carries both.
+ */
+export async function renamePromotion(promotion, name) {
+  const clean = String(name ?? '').replace(/\s+/g, ' ').trim();
+  if (!clean) throw new Error('The promotion needs a name.');
+  if (clean === promotion.name) return clean;
+  const { error } = await supabase.from('promotions').update({ name: clean }).eq('id', promotion.id);
+  if (error) throw error;
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    target: 'pim',
+    summary: `Renamed ${KIND_NOUN[promotion.kind ?? 'monthly'] ?? 'promotion'} "${promotion.name}" to "${clean}"`,
+    metadata: { before: promotion.name, after: clean },
+  });
+  return clean;
+}
+
+/**
  * Custom dates for a flash deal / special event (both or none) — one pair,
  * the portal's dates, for every market. Pass nulls to go back to the
  * calendar. Monthly promotions use updatePromotionMarketDates.

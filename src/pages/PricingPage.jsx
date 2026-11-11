@@ -47,6 +47,7 @@ import {
   markPromotionActive,
   updatePromotionDates,
   updatePromotionMarketDates,
+  renamePromotion,
   deletePromotion,
   applyPromotion,
   endPromotion,
@@ -1829,6 +1830,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         <div className="px-5 pb-5 space-y-4">
           <div className="mx-0 border-t border-outline-variant/60" />
 
+          <PromoName promo={promo} canEdit={canEdit} onChanged={onChanged} />
           <PromoDates promo={promo} canEdit={canEdit && promo.status !== 'ended'} onChanged={onChanged} />
           {(promo.kind ?? 'monthly') !== 'monthly' && (
             <PromoPortals key={(promo.marketplaces ?? []).join(',')} promo={promo} canEdit={canEdit && promo.status !== 'ended'} onChanged={onChanged} />
@@ -2493,6 +2495,64 @@ function fileTaskTitle(def) {
 // The days the promotion runs on each market. Monthly promotions have them
 // PER COUNTRY (user rule 2026-09-30 — October: Canada Oct 1–21, USA Oct 1–31);
 // flash deals and special events keep one pair, the portal's dates.
+// A promotion's name can be changed on its card, whatever its kind or status
+// (user, 2026-11-11: "tanto monthly como todas las demás"). It is a label:
+// files, sends and automations go by the promotion's id, dates and lists.
+function PromoName({ promo, canEdit, onChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(promo.name);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const clean = name.replace(/\s+/g, ' ').trim();
+  const stop = () => { setEditing(false); setError(null); };
+
+  async function save() {
+    if (!clean || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await renamePromotion(promo, name);
+      setEditing(false);
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap text-body-sm">
+      <span className="text-on-surface-variant">Name</span>
+      {!editing ? (
+        <>
+          <span className="text-on-surface min-w-0 [overflow-wrap:anywhere]">{promo.name}</span>
+          {canEdit && (
+            <button type="button" onClick={() => { setName(promo.name); setError(null); setEditing(true); }} className="text-label-md font-medium text-primary hover:underline">
+              Rename
+            </button>
+          )}
+        </>
+      ) : (
+        <form onSubmit={(e) => { e.preventDefault(); save(); }} className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); stop(); } }}
+            aria-label="Promotion name"
+            autoFocus
+            className="min-w-0 flex-1 sm:max-w-md px-2.5 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          <button type="submit" disabled={busy || !clean || clean === promo.name} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">Save</button>
+          <button type="button" onClick={stop} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
+        </form>
+      )}
+      {error && <span role="alert" className="text-error">{error}</span>}
+    </div>
+  );
+}
+
 function PromoDates(props) {
   return (props.promo.kind ?? 'monthly') === 'monthly' ? <PromoMarketDates {...props} /> : <PromoWideDates {...props} />;
 }
