@@ -129,6 +129,10 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     // window is open today sets the expected price.
     const todayET = today ?? etToday();
     for (const promo of activePromos ?? []) {
+      // A store that follows the promotions only from one month on stays at
+      // its regular price before it (`promosFrom` in pageStores.js: the small
+      // online dealers, at MAP until December 2026's promotion).
+      if (cfg.promosFrom && promo.period < cfg.promosFrom) continue;
       const w = promoWindow(promo, cfg.market);
       if (!windowContains(w, todayET)) continue;
       for (const row of promo.promotion_prices ?? []) {
@@ -211,6 +215,8 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     const changes = new Map();
     const mark = (sku, day) => { if (day <= today && (!changes.has(sku) || day > changes.get(sku))) changes.set(sku, day); };
     for (const promo of [...monthly, ...deals]) {
+      // Never this store's price (`promosFrom`), so it changed nothing there.
+      if (cfg.promosFrom && promo.period < cfg.promosFrom) continue;
       const w = promoWindow(promo, cfg.market);
       for (const row of promo.promotion_prices ?? []) {
         const member = 'in_us' in row ? ((cfg.market === 'us' ? row.in_us : row.in_ca) ?? row[promoField] != null) : row[promoField] != null;
