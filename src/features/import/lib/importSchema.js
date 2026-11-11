@@ -815,6 +815,17 @@ const DEF_BY_HEADER = (() => {
 })();
 export const defForHeader = (header) => DEF_BY_HEADER.get(normalizeHeader(header)) ?? null;
 
+// Can a sheet with these headers hold products? It names the columns every
+// row needs (SKU, Brand, Category). A workbook's other tables — the Full
+// Report's Media and Marketplace IDs sheets, one row per file / per ID — have a
+// SKU column too, and read as products they were thousands of rows of errors
+// (2026-11-11: 13,438 rows for 378 products, and a page that barely moved).
+const REQUIRED_KEYS = FIELD_DEFS.filter((d) => d.required).map((d) => d.key);
+export function isProductSheet(headers) {
+  const keys = new Set(headers.map((h) => ALIAS_LOOKUP.get(normalizeHeader(h))?.key).filter(Boolean));
+  return REQUIRED_KEYS.every((k) => keys.has(k));
+}
+
 // How much a spreadsheet row looks like the import's header row: the number
 // of cells that name a known field. Lets the parser skip the section band
 // above the headers (and any title rows a sheet carries).

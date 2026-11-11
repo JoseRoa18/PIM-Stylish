@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { syncVariantFamilies } from '@/features/products/api/variantFamilies';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { upcKey } from '@/features/import/lib/upcCheck';
+import { updatePatch } from '@/features/import/lib/importChanges';
 import { sendToOdoo, changedOdooFields } from '@/features/odoo/api/odooPush';
 
 /**
@@ -57,19 +58,35 @@ export async function fetchUpcOwners() {
   return owners;
 }
 
-// A description's words, whatever its HTML: tags, entities and spacing out.
-const textOf = (html) => String(html ?? '')
-  .replace(/<[^>]+>/g, ' ')
-  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
-  .replace(/\s+/g, ' ')
-  .trim();
+/**
+ * The file's SKUs the PIM already has, whole: sku → product. The import
+ * compares each row with it (rowChanges) so the preview says what a row would
+ * change and the import writes only that. A superset of what
+ * fetchExistingProducts returns, so it is also the `existingMap` of
+ * importProducts. `task` (optional taskProgress reporter): one step per chunk
+ * of 100 SKUs.
+ */
+export async function fetchProductsForImport(skus, { task = null } = {}) {
+  const out = new Map();
+  const chunks = Math.ceil(skus.length / 100);
+  for (let i = 0; i < skus.length; i += 100) {
+    const n = i / 100;
+    task?.count(n, chunks, chunks > 1 ? `Looking up existing products (${n + 1} of ${chunks})…` : 'Looking up existing products…');
+    const { data, error } = await supabase.from('products').select('*').in('sku', skus.slice(i, i + 100));
+    if (error) throw error;
+    for (const row of data ?? []) out.set(row.sku, row);
+  }
+  task?.progress(1);
+  return out;
+}
 
 /**
  * Import rows: new products are bulk-inserted; existing products are updated
- * individually so only the imported fields are touched (a bulk upsert would
- * null out columns missing from some rows, because PostgREST requires every
- * row in a batch to share the same keys).
+ * individually with ONLY what the row changes (updatePatch — 2026-11-11: a
+ * row that changes nothing is not written, so a report uploaded as it was
+ * downloaded touches no product). A bulk upsert would null out columns
+ * missing from some rows, because PostgREST requires every row in a batch to
+ * share the same keys.
  *
  * onProgress(done, total) fires as rows complete. `task` (optional
  * taskProgress reporter): the rows written 90%, the variant family re-sync
@@ -119,20 +136,16 @@ export async function importProducts(rows, existingMap, onProgress, { task = nul
       const batch = updateRows.slice(i, i + 5);
       const results = await Promise.all(
         batch.map((r) => {
-          const prev = existingMap.get(r.sku);
-          const patch = {
-            ...r.columns,
-            attributes: { ...(prev?.attributes ?? {}), ...r.attributes },
-          };
-          delete patch.sku; // key, not a patch field
-          // The sheet holds the description as plain text; one whose words did
-          // not change keeps the PIM's formatting (lists, bold) instead of
-          // coming back as bare paragraphs.
-          if (patch.description != null && textOf(patch.description) === textOf(prev?.description)) delete patch.description;
+          // Only the fields whose value differs from the product's are sent:
+          // a description whose words did not change keeps the PIM's
+          // formatting, an axis the file lacks stays in its dimension group,
+          // and a row that changes nothing is not written.
+          const patch = updatePatch(r, existingMap.get(r.sku));
+          if (!patch) return Promise.resolve({ error: null, unchanged: true });
           return supabase.from('products').update(patch).eq('sku', r.sku);
         }),
       );
-      results.forEach((res, j) => { if (!res.error) written.push({ r: batch[j], isNew: false }); });
+      results.forEach((res, j) => { if (!res.error && !res.unchanged) written.push({ r: batch[j], isNew: false }); });
       const failed = results.find((res) => res.error);
       if (failed?.error) {
         throw new Error(`Update failed: ${failed.error.message}`);
@@ -149,10 +162,11 @@ export async function importProducts(rows, existingMap, onProgress, { task = nul
     sendImportToOdoo(written, existingMap, createInOdoo);
   }
 
-  // Re-derive variant families for every base model touched by this import.
-  // Spreadsheet "Family #" values are ignored — the SKU is the source of truth.
+  // The products of this import that have no variant family join their base
+  // model's (see syncVariantFamilies): a family number a product already has
+  // is never changed. Spreadsheet "Family #" values are ignored.
   let familiesSynced = 0;
-  task?.step('Re-syncing variant families…');
+  task?.step('Checking the variant families…');
   try {
     const sync = await syncVariantFamilies(rows.map((r) => r.sku));
     familiesSynced = sync.updated;
@@ -161,7 +175,8 @@ export async function importProducts(rows, existingMap, onProgress, { task = nul
   }
   task?.progress(1);
 
-  return { created: newRows.length, updated: updateRows.length, familiesSynced };
+  const updated = written.filter((w) => !w.isNew).length;
+  return { created: newRows.length, updated, unchanged: updateRows.length - updated, familiesSynced };
 }
 
 // The rows an import wrote, as Odoo sees them: a product the PIM already had

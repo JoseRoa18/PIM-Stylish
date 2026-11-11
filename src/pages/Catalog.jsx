@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { Plus, Upload, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Plus, Upload, FileSpreadsheet, Loader2, ChevronDown } from 'lucide-react';
 import { useProducts } from '@/features/products/hooks/useProducts';
 import {
   useFilteredProducts,
@@ -15,9 +15,56 @@ import { statusMeta, STATUS_ORDER } from '@/features/products/lib/workflowStatus
 import { getThumbnailUrl } from '@/features/media/api/media';
 import { getAllStock } from '@/features/pricing/api/inventory';
 import { startTask } from '@/lib/taskProgress';
+import { REPORT_KINDS, reportKind } from '@/features/syndication/exports/pimReportKinds';
 
 // Loaded when "New product" opens — it drags the exporters' shared code along.
 const CreateProductDialog = lazy(() => import('@/features/products/components/CreateProductDialog'));
+
+// The Full Report button: which report to download — the complete one or one
+// subject (user, 2026-11-11). Each file can be uploaded back in Import.
+function ReportMenu({ busy, canEdit, onPick }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative" onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        disabled={busy}
+        title="Download the PIM's data as Excel: everything, or one subject"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+      >
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <FileSpreadsheet className="w-4 h-4" aria-hidden="true" />}
+        {busy ? 'Building report…' : 'Full Report'}
+        {!busy && <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full mt-1 left-0 sm:left-auto sm:right-0 z-20 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-outline-variant bg-surface shadow-lg py-1 animate-menu-in">
+            <div className="px-4 pt-2 pb-1 text-label-md uppercase tracking-wide text-on-surface-variant">Download as Excel</div>
+            {REPORT_KINDS.map((k) => (
+              <button
+                key={k.key}
+                type="button"
+                onClick={() => { setOpen(false); onPick(k.key); }}
+                className="w-full text-left px-4 py-2 hover:bg-on-surface/8 transition-colors"
+              >
+                <span className="block text-body-md text-on-surface font-medium">{k.label}</span>
+                <span className="block text-body-sm text-on-surface-variant">{k.hint}</span>
+              </button>
+            ))}
+            {canEdit && (
+              <p className="px-4 pt-2 pb-2 mt-1 border-t border-outline-variant text-body-sm text-on-surface-variant">
+                Change the cells you need and upload the file in Import: only what changed is updated.
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -44,18 +91,24 @@ export default function Catalog() {
   // The full PIM report (user, 2026-10-15): null, 'busy' or { ok, text }.
   const [report, setReport] = useState(null);
 
-  // Every product with everything the PIM holds, in one Excel. Read-only, so
-  // viewers get it too; the builder loads on click.
-  async function downloadReport() {
+  // Every product with what the PIM holds for it, in one Excel: everything
+  // (the complete report) or one subject — prices, attributes, content,
+  // images, marketplace IDs (user, 2026-11-11; pimReportKinds.js). Reading
+  // only, so viewers get it too; the builder loads on click.
+  async function downloadReport(kind = 'complete') {
     setReport('busy');
-    const task = startTask('Full Report', { detail: 'Loading the catalog…' });
+    const which = reportKind(kind);
+    const name = which.key === 'complete' ? 'Full Report' : `${which.label} report`;
+    const task = startTask(name, { detail: 'Loading the catalog…' });
     try {
       const { generatePimReport } = await import('@/features/syndication/exports/pimReport');
-      const r = await generatePimReport({ task });
+      const r = await generatePimReport({ task, kind: which.key });
       task.finish(`Downloaded · ${r.products} products`);
       setReport({
         ok: true,
-        text: `Full report downloaded: ${r.products} products, ${r.columns} columns, ${r.files.toLocaleString()} media files, ${r.ids.toLocaleString()} marketplace IDs.`,
+        text: which.key === 'complete'
+          ? `Full report downloaded: ${r.products} products, ${r.columns} columns, ${r.files.toLocaleString()} media files, ${r.ids.toLocaleString()} marketplace IDs.`
+          : `${name} downloaded: ${r.products} products, ${r.columns} columns.`,
       });
     } catch (err) {
       task.fail(err);
@@ -325,16 +378,7 @@ export default function Catalog() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={downloadReport}
-            disabled={report === 'busy'}
-            title="One Excel with every product and everything the PIM holds for it"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
-          >
-            {report === 'busy' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <FileSpreadsheet className="w-4 h-4" aria-hidden="true" />}
-            {report === 'busy' ? 'Building report…' : 'Full Report'}
-          </button>
+          <ReportMenu busy={report === 'busy'} canEdit={canEdit} onPick={downloadReport} />
           {canEdit && (
             <>
               <Link

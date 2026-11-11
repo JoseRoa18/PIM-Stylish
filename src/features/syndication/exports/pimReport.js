@@ -1,19 +1,32 @@
 import { supabase } from '@/lib/supabase';
-import { FIELD_DEFS, SECTIONS, sectionOfHeader, CATEGORY_LABELS } from '@/features/import/lib/importSchema';
+import { FIELD_DEFS, SECTIONS, sectionOfHeader, CATEGORY_LABELS, ALIAS_LOOKUP, BULLET_RE, IMAGE_LINK_RE, imageLinkHeader, normalizeHeader } from '@/features/import/lib/importSchema';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { scoreCompleteness, completenessContext, inCompleteness } from '@/features/products/lib/completeness';
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { fetchAllProducts } from './pimExport';
+import { reportKind } from './pimReportKinds';
 
-// The full PIM report (user, 2026-10-15: "un reporte completo en un solo
-// excel con toda la información de todos los productos"): one .xlsx with
+// The PIM's reports (user, 2026-10-15: "un reporte completo en un solo excel
+// con toda la información de todos los productos"; 2026-11-11: one per
+// subject too — prices, attributes, content, images, marketplace IDs — "y
+// lógicamente el full completo", pimReportKinds.js). The complete one is an
+// .xlsx with
 //  - Summary: totals, by category, by status, the most-missed fields;
 //  - All Products: one row per product, every field the PIM's Excel carries
 //    in its sections, then completeness, stock, media, marketplace IDs, the
 //    web store flags and the older fields the app no longer reads;
 //  - Media (one row per file) and Marketplace IDs (one row per ID);
 //  - Notes: what each part means.
-// A read-only snapshot; it is not an import file (that is the PIM export).
+// A report by subject is the same product sheet with that subject's sections.
+//
+// Every report can be uploaded back in Import Products (user, 2026-11-11:
+// "que permita importar y que actualice aquellos datos nuevos"): each product
+// row starts with SKU, Model Name, Brand and Category, the PIM's own fields
+// keep the import's column names, and every other column (completeness,
+// stock, links, IDs, older fields) has a name the import does not know, so it
+// is read-only (`readOnlyHeader`). The import writes only the cells that
+// differ from the PIM (importChanges.js), so a report uploaded as it was
+// downloaded changes nothing.
 
 const PAGE = 1000; // the API's row cap per request
 
@@ -58,6 +71,7 @@ const REPORT_SECTIONS = [
   { key: 'x_completeness', title: 'PIM Completeness', color: 'B71C1C' },
   { key: 'x_stock', title: 'Stock', color: '33691E' },
   { key: 'x_media', title: 'Images & Documents', color: '4E342E' },
+  { key: 'x_images', title: 'Images (links)', color: '4E342E' },
   { key: 'x_channels', title: 'Websites & Marketplace IDs', color: '01579B' },
   { key: 'x_sync', title: 'Web Store Flags & Sync', color: '455A64' },
   { key: 'x_other', title: 'Other / Older Fields (not used by the app)', color: '616161' },
@@ -71,15 +85,30 @@ const SHOWN_COLUMNS = new Set(['sku', 'brand', 'category', 'attributes', 'workfl
   'channel_exclusions', 'wix_raw', 'additional_info_sections', 'wix_collection_ids']);
 const filled = (v) => v != null && v !== '' && !(Array.isArray(v) && !v.length);
 
-// `task` (optional taskProgress reporter): one step per table read.
-async function loadReportData(task = null) {
+// A read-only column must not be read by the import as one of its fields: an
+// older attribute called `color` was taken for the Color column and its value
+// would have been written over 11 products (2026-11-11). A name the import
+// knows gets a tag that makes it unknown.
+const importKnows = (header) => {
+  const n = normalizeHeader(header);
+  return ALIAS_LOOKUP.has(n) || BULLET_RE.test(n) || IMAGE_LINK_RE.test(n);
+};
+const readOnlyHeader = (header, tag = 'read-only') => (importKnows(header) ? `${header} (${tag})` : header);
+// The four columns every product row starts with, so a report can be imported.
+const KEY_FIELDS = new Set(['sku', 'model_name', 'brand', 'category']);
+
+// `task` (optional taskProgress reporter): one step per table read. A report
+// by subject reads only the tables it shows (the media list is ~9,500 rows).
+async function loadReportData(task = null, kind = reportKind('complete')) {
+  const has = (section) => kind.sections === null || kind.sections.includes(section);
+  const none = Promise.resolve([]);
   const reads = [
     fetchAllProducts(),
-    readAll('product_media', 'id, sku, media_type, storage_path, file_name, file_size_bytes, is_primary, display_order, document_type, language, image_role', 'id'),
-    readAll('product_aliases', 'sku, marketplace, alias, kind, note, listing_title', 'sku'),
-    readAll('amazon_links', 'marketplace, sku, seller_sku, asin, status, fulfillment', 'sku'),
-    readAll('product_inventory', 'market, sku, on_hand, available, eta, synced_at', 'sku'),
-    readAll('wix_links', 'site, sku, wix_product_id, synced_at', 'sku'),
+    has('x_media') || has('x_images') ? readAll('product_media', 'id, sku, media_type, storage_path, file_name, file_size_bytes, is_primary, display_order, document_type, language, image_role', 'id') : none,
+    has('x_channels') ? readAll('product_aliases', 'sku, marketplace, alias, kind, note, listing_title', 'sku') : none,
+    has('x_channels') ? readAll('amazon_links', 'marketplace, sku, seller_sku, asin, status, fulfillment', 'sku') : none,
+    has('x_stock') ? readAll('product_inventory', 'market, sku, on_hand, available, eta, synced_at', 'sku') : none,
+    has('x_channels') ? readAll('wix_links', 'site, sku, wix_product_id, synced_at', 'sku') : none,
   ];
   let done = 0;
   const [products, media, aliases, amazon, stock, wix] = await Promise.all(reads.map((p) => p.then((rows) => {
@@ -90,8 +119,11 @@ async function loadReportData(task = null) {
   return { products, media, aliases, amazon, stock, wix };
 }
 
-/** The report's sheets, from the loaded rows (see buildSectionedWorkbook). */
-export function pimReportSheets({ products, media, aliases, amazon, stock, wix }, generatedOn = new Date().toISOString().slice(0, 10)) {
+/** The report's sheets, from the loaded rows (see buildSectionedWorkbook). `kindKey`: pimReportKinds.js. */
+export function pimReportSheets({ products, media, aliases, amazon, stock, wix }, generatedOn = new Date().toISOString().slice(0, 10), kindKey = 'complete') {
+  const kind = reportKind(kindKey);
+  const whole = kind.sections === null; // the complete report: every section
+  const inKind = (section) => whole || kind.sections.includes(section);
   const mediaBy = groupBy(media);
   const aliasBy = groupBy(aliases);
   const amazonBy = groupBy(amazon);
@@ -105,13 +137,14 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
   // the same score as Listing Health → PIM: the UPC check sees every product
   // that is not archived, obsolete ones included (user, 2026-10-16); every
   // product keeps its own score here, the Summary counts only the scored ones
-  const ctx = completenessContext(products.filter((p) => p.workflow_status !== 'archived'));
-  const score = new Map(products.map((p) => [p.sku, scoreCompleteness(p, mediaBy.get(p.sku) ?? [], ctx)]));
+  // (only the complete report scores: it is the one that reads the media too)
+  const ctx = whole ? completenessContext(products.filter((p) => p.workflow_status !== 'archived')) : null;
+  const score = new Map(whole ? products.map((p) => [p.sku, scoreCompleteness(p, mediaBy.get(p.sku) ?? [], ctx)]) : []);
 
   // ---- every field of the PIM's Excel, in its section ----
   const longest = (key) => Math.max(0, ...products.map((p) => (Array.isArray(p.attributes?.[key]) ? p.attributes[key].length : 0)));
   const bulletCols = (key, lang, section) => Array.from({ length: longest(key) }, (_, i) => ({
-    section, header: `Bullet/Feature ${i + 1} (${lang})`, get: (p) => show(p.attributes?.[key]?.[i], 'text'),
+    section, header: `Bullet/Feature ${i + 1} (${lang})`, field: key, get: (p) => show(p.attributes?.[key]?.[i], 'text'), // an import field too
   }));
   const columns = [];
   const covered = new Set(['attr:bullet_points', 'attr:bullet_points_fr']); // what the field columns show
@@ -124,6 +157,7 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
     columns.push({
       section,
       header: def.label,
+      field: def.key, // one of the import's own fields: what an upload can change
       money: section.startsWith('pricing'),
       format: /\bURL\b/.test(def.label) ? 'link' : undefined, // Product URL, Warranty URLs
       get: (p) => (def.type === 'category'
@@ -147,9 +181,11 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
     { section: 'status', header: 'Family #', get: (p) => show(p.family_number, 'int') },
     { section: 'status', header: 'Created', get: (p) => day(p.created_at) },
     { section: 'status', header: 'Last Updated', get: (p) => day(p.updated_at) },
-    { section: 'x_completeness', header: 'PIM Completeness', format: 'percent', get: (p) => score.get(p.sku).score / 100 },
-    { section: 'x_completeness', header: 'Fields Missing', get: (p) => score.get(p.sku).missing.length },
-    { section: 'x_completeness', header: 'Missing (field — reason)', get: (p) => score.get(p.sku).missing.map((m) => (m.note ? `${m.label} — ${m.note}` : m.label)).join('; ') },
+    ...(whole ? [
+      { section: 'x_completeness', header: 'PIM Completeness', format: 'percent', get: (p) => score.get(p.sku).score / 100 },
+      { section: 'x_completeness', header: 'Fields Missing', get: (p) => score.get(p.sku).missing.length },
+      { section: 'x_completeness', header: 'Missing (field — reason)', get: (p) => score.get(p.sku).missing.map((m) => (m.note ? `${m.label} — ${m.note}` : m.label)).join('; ') },
+    ] : []),
     ...['ca', 'us'].flatMap((mk) => {
       const M = mk.toUpperCase();
       return [
@@ -186,10 +222,24 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
     { section: 'x_sync', header: 'Installation Sheet Needs Update', get: (p) => show(p.installation_sheet_needs_update, 'text') },
     { section: 'x_sync', header: 'Notes', get: (p) => show(p.notes, 'text') },
   );
+  // The images report: every image's link, the main one first, then in their
+  // order — "Image 1", "Image 2"… as in the PIM export (the import knows those
+  // names and never reads them).
+  if (!whole && inKind('x_images')) {
+    const linksOf = new Map(products.map((p) => [p.sku, [...imagesOf(p.sku)]
+      .filter((m) => m.storage_path)
+      .sort((a, b) => Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)) || (a.display_order ?? 0) - (b.display_order ?? 0))
+      .map((m) => m.storage_path)]));
+    const most = Math.max(0, ...[...linksOf.values()].map((l) => l.length));
+    for (let i = 0; i < most; i += 1) {
+      columns.push({ section: 'x_images', header: imageLinkHeader(i + 1), imageLink: true, format: 'link', get: (p) => linksOf.get(p.sku)[i] ?? '' });
+    }
+  }
+
   // every other value a product holds: older columns and attributes from
   // earlier imports, kept as they are
   const older = new Map(); // id → name
-  for (const p of products) {
+  for (const p of whole ? products : []) {
     for (const [k, v] of Object.entries(p)) {
       if (!SHOWN_COLUMNS.has(k) && !covered.has(`col:${k}`) && filled(v)) older.set(`col:${k}`, k);
     }
@@ -201,30 +251,37 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
     }
   }
   for (const [id, name] of [...older].sort((a, b) => a[1].localeCompare(b[1]))) {
-    const [kind] = id.split(':');
+    const [olderKind] = id.split(':');
     columns.push({
       section: 'x_other',
-      header: kind === 'col' ? `${name} (column)` : name,
+      header: olderKind === 'col' ? `${name} (column)` : `${name} (older field)`,
       get: (p) => {
-        if (kind === 'col') return show(p[name], 'text');
-        if (kind === 'dim') { const [g, axis] = name.split('.'); return show(p.attributes?.[g]?.[axis], 'text'); }
+        if (olderKind === 'col') return show(p[name], 'text');
+        if (olderKind === 'dim') { const [g, axis] = name.split('.'); return show(p.attributes?.[g]?.[axis], 'text'); }
         return show(p.attributes?.[name], 'text');
       },
     });
   }
 
-  // ---- All Products: rows by category, then SKU; columns nobody fills left out ----
+  // ---- The product sheet: rows by category, then SKU ----
+  // Its columns: the report's sections, after the four every row starts with.
+  // The complete report leaves out a column nobody fills; a report by subject
+  // keeps every field of its sections, filled or not, so it can be filled in
+  // and uploaded (its read-only columns still go when empty).
+  // (an image link keeps its name: the import knows "Image N" and skips it)
+  for (const c of columns) if (!c.field && !c.imageLink) c.header = readOnlyHeader(c.header);
+  const wanted = columns.filter((c) => inKind(c.section) || KEY_FIELDS.has(c.field));
   const catOrder = [...CATEGORY_OPTIONS.map((c) => c.value), ...new Set(products.map((p) => p.category).filter((c) => !CATEGORY_OPTIONS.some((o) => o.value === c)))];
   const sorted = [...products].sort((a, b) => catOrder.indexOf(a.category) - catOrder.indexOf(b.category) || a.sku.localeCompare(b.sku));
   const sectionDefs = [...SECTIONS, ...REPORT_SECTIONS];
-  const values = columns.map((c) => sorted.map((p) => c.get(p)));
-  const kept = columns.map((c, i) => ({ ...c, values: values[i] })).filter((c) => c.header.startsWith('SKU') || c.values.some(filled));
+  const values = wanted.map((c) => sorted.map((p) => c.get(p)));
+  const kept = wanted.map((c, i) => ({ ...c, values: values[i] })).filter((c) => KEY_FIELDS.has(c.field) || (!whole && c.field) || c.values.some(filled));
   const sections = sectionDefs
     .map((s) => ({ ...s, cols: kept.filter((c) => c.section === s.key) }))
     .filter((s) => s.cols.length);
   const ordered = sections.flatMap((s) => s.cols);
   const allProducts = {
-    name: 'All Products',
+    name: kind.sheet,
     sections: sections.map((s) => ({ title: s.title, color: s.color, headers: s.cols.map((c) => c.header) })),
     formats: ordered.map((c) => c.format ?? (c.money ? 'money' : null)),
     rows: sorted.map((_, r) => ordered.map((c) => c.values[r])),
@@ -252,6 +309,43 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
       ...wix.map((w) => [w.sku, modelOf.get(w.sku) ?? '', `Wix — ${w.site}`, w.wix_product_id ?? '', 'wix product id', '', w.synced_at ? `synced ${day(w.synced_at)}` : '']),
     ].sort((a, b) => a[0].localeCompare(b[0]) || a[2].localeCompare(b[2])),
   };
+
+  // How a report goes back into the PIM (every kind's Notes say it).
+  const howToUpdate = ['Updating the PIM with this file', `Change the cells you need on "${kind.sheet}" and upload the file in Import Products. Only the cells that differ from the PIM are updated: a product whose row changes nothing is not touched, and an empty cell never clears a value. Keep SKU, Brand and Category as they are — they tell the import which product a row is. The read-only columns (links, counts, IDs, completeness, stock, older fields) and the other sheets are not imported.`];
+
+  // ---- A report by subject: its product sheet, its own extra sheet, its notes ----
+  if (!whole) {
+    const about = {
+      prices: ['Prices', 'Blue = the regular level, Orange and Purple = the promotion levels. MAP and WC (wholesale cost) per channel, in CAD or USD as each header says. A product without a price on a level has that cell empty.'],
+      attributes: ['Attributes', 'Each field of the product page\'s Overview and Specifications tabs. A field that does not apply to a product (a faucet field on a sink) stays empty.'],
+      content: ['Content', 'Titles, descriptions, keywords and each bullet in its own column, in English and French. Descriptions are plain text here: one whose words do not change keeps its formatting in the PIM.'],
+      images: ['Images', 'Counts per product and every image as a link, the main one first; the Media sheet lists every file with its type, language set (Universal = language-neutral), order and link. Images and documents are changed on the product page, not from this file.'],
+      ids: ['Marketplace IDs', 'The retailer IDs the PIM keeps on the product can be changed here. The Aliases tab numbers, Amazon Seller SKUs / ASINs and the Wix products (the other columns and the Marketplace IDs sheet) are read-only: they are changed on the product page.'],
+    }[kind.key];
+    const subjectNotes = {
+      name: 'Notes',
+      title: `About this report — ${kind.label}`,
+      widths: [30, 110],
+      blocks: [{
+        headers: ['Part', 'What it means'],
+        formats: ['topic', 'wrap'],
+        rows: [
+          ['Generated', `${generatedOn}, read live from the PIM. It is a snapshot: later edits in the PIM are not reflected.`],
+          [kind.sheet, `One row per product (${products.length}), by category then SKU. Row 1 names the section, row 2 the field; the filters are on row 2.`],
+          about,
+          ...(kind.key === 'images' ? [] : [howToUpdate]),
+        ].filter(Boolean),
+      }],
+    };
+    const extra = { media: mediaSheet, ids: idsSheet };
+    return {
+      sheets: [allProducts, ...kind.extra.map((k) => extra[k]).filter(Boolean), subjectNotes],
+      products: products.length,
+      columns: ordered.length,
+      files: media.length,
+      ids: idsSheet.rows.length,
+    };
+  }
 
   // ---- Summary ----
   // The completeness figures count what Listing Health scores: archived and
@@ -341,7 +435,7 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
         ['All Products', `One row per product (${products.length}), by category then SKU. Row 1 names the section, row 2 the field; the filters are on row 2. The sections follow the product page and the PIM's import / export Excel, then what the PIM keeps besides: completeness, stock, media, marketplace IDs and the web store flags.`],
         ['Empty columns', 'A column is left out when no product has a value in it; an empty cell means the field is not filled for that product.'],
         ['Prices', 'Blue = the regular level, Orange and Purple = the promotion levels. MAP and WC (wholesale cost) per channel, in CAD or USD as each header says.'],
-        ['Descriptions', 'Plain text (the formatting of the product page is removed). Each bullet has its own column.'],
+        ['Descriptions', 'Plain text (the formatting of the product page is removed). Each bullet has its own column. Uploaded back, a description whose words did not change keeps its formatting in the PIM.'],
         ['PIM Completeness', "The same score as Listing Health → PIM: only the fields that apply to the product count. 'Missing' lists each gap and, for a value that is filled but wrong, the reason."],
         ['Obsolete', "A mark of its own (Status & Dates, Yes / No), apart from the workflow status: it changes no listing, channel push or marketplace file. Obsolete products keep their own score in All Products but, like archived ones, are left out of the Summary's completeness figures, as in Listing Health."],
         ['Stock', "Odoo's Available for Use: Canada = warehouse CBG, USA = warehouse ATL. An empty cell means Odoo does not have the product, so it is not tracked (not 0)."],
@@ -349,11 +443,12 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
         ['Marketplace IDs', "The product's Aliases tab (retailer item numbers), the Amazon Seller SKUs and ASINs, and the product of each Wix website — one row per ID."],
         ['Other / Older Fields', 'Values stored on products by earlier imports that the app no longer reads, kept as they are. The current field with the same meaning is in its own section.'],
         ['Not included', "Wix's own copy of each product (raw data, additional-info sections), price history and the activity log."],
+        howToUpdate,
       ],
     }],
   };
 
-  return { sheets: [summary, allProducts, mediaSheet, idsSheet, notes], products: products.length, columns: ordered.length };
+  return { sheets: [summary, allProducts, mediaSheet, idsSheet, notes], products: products.length, columns: ordered.length, files: media.length, ids: idsSheet.rows.length };
 }
 
 function downloadBlob(blob, fileName) {
@@ -368,16 +463,18 @@ function downloadBlob(blob, fileName) {
 }
 
 /**
- * Builds and downloads the full report; returns what it holds. `task`
- * (optional taskProgress reporter): loading 45%, the sheets 10%, writing 45%.
+ * Builds and downloads a report (`kind`: a key of pimReportKinds.js, the
+ * complete one by default); returns what it holds. `task` (optional
+ * taskProgress reporter): loading 45%, the sheets 10%, writing 45%.
  */
-export async function generatePimReport({ task = null } = {}) {
-  const data = await loadReportData(task?.part(0, 0.45));
+export async function generatePimReport({ task = null, kind = 'complete' } = {}) {
+  const which = reportKind(kind);
+  const data = await loadReportData(task?.part(0, 0.45), which);
   if (!data.products.length) throw new Error('The catalog has no products.');
   const date = new Date().toISOString().slice(0, 10);
   if (task) await task.step(`Building the sheets for ${data.products.length} products…`);
-  const { sheets, products, columns } = pimReportSheets(data, date);
+  const { sheets, products, columns, files, ids } = pimReportSheets(data, date, which.key);
   task?.progress(0.55);
-  downloadBlob(await buildSectionedWorkbook(sheets, { task: task?.part(0.55, 1) }), `Stylish_PIM_Full_Report_${date}.xlsx`);
-  return { products, columns, files: data.media.length, ids: sheets[3].rows.length };
+  downloadBlob(await buildSectionedWorkbook(sheets, { task: task?.part(0.55, 1) }), `Stylish_PIM_${which.file}_${date}.xlsx`);
+  return { kind: which.key, label: which.label, products, columns, files, ids };
 }

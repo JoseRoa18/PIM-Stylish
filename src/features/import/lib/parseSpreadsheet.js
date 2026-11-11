@@ -140,7 +140,7 @@ function rowsBelow(grid, index, sheetName) {
 
 // `task` (optional taskProgress reporter): opening the file 10%, then one
 // share per sheet read (each waits for a paint first: the XML parse blocks).
-async function parseXlsx(file, { scoreHeader = null, allSheets = false, task = null } = {}) {
+async function parseXlsx(file, { scoreHeader = null, allSheets = false, isDataSheet = null, task = null } = {}) {
   const { default: JSZip } = await import('jszip');
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
 
@@ -152,8 +152,7 @@ async function parseXlsx(file, { scoreHeader = null, allSheets = false, task = n
   const sheets = await listSheets(zip);
   // every visible sheet (the PIM's Excel keeps its dropdown lists on a hidden one)
   const wanted = allSheets ? sheets.filter((s) => !s.hidden) : sheets.slice(0, 1);
-  const headers = [];
-  const rows = [];
+  const parts = []; // { name, headers, rows, data }
   const reading = task?.part(0.1, 1);
   for (const [n, sheet] of wanted.entries()) {
     reading?.count(n, wanted.length);
@@ -165,12 +164,23 @@ async function parseXlsx(file, { scoreHeader = null, allSheets = false, task = n
     // with every sheet read, one that names no known column (a notes tab) is skipped
     if (index === -1 || (allSheets && scoreHeader && score < 2)) continue;
     const part = rowsBelow(grid, index, allSheets ? sheet.name : null);
+    parts.push({ name: sheet.name, ...part, data: isDataSheet ? Boolean(isDataSheet(part.headers)) : true });
+  }
+  // When at least one sheet has the columns every row needs, only those are
+  // read: a workbook's other tables (a report's per-file or per-ID sheets)
+  // are named in `skippedSheets` instead of becoming rows of errors. A file
+  // where no sheet has them is read as before, so its rows say what is missing.
+  const used = parts.some((p) => p.data) ? parts.filter((p) => p.data) : parts;
+  const skippedSheets = parts.filter((p) => !used.includes(p)).map((p) => p.name);
+  const headers = [];
+  const rows = [];
+  for (const part of used) {
     for (const h of part.headers) if (!headers.includes(h)) headers.push(h);
-    rows.push(...part.rows);
+    for (const r of part.rows) rows.push(r);
   }
   reading?.progress(1, `${rows.length} rows read`);
   if (!headers.length) throw new Error(allSheets ? 'No sheet in the file has the template columns.' : 'The file appears to be empty.');
-  return { headers, rows, sheets: wanted.length };
+  return { headers, rows, sheets: wanted.length, skippedSheets };
 }
 
 // Exported: promo file fillers need the raw grid (their header row isn't
@@ -229,6 +239,8 @@ async function parseCsv(text, { scoreHeader = null, task = null } = {}) {
  *     the first ten rows with content wins (else the first one).
  *   allSheets — read every sheet of an .xlsx (a sheet that scores under 2 is
  *     skipped); rows then carry their sheet name.
+ *   isDataSheet(headers) — with allSheets: does a sheet hold the rows wanted?
+ *     When any does, the others are left out and named in `skippedSheets`.
  *   task — an optional taskProgress reporter, moved through the sheets.
  */
 export async function parseSpreadsheetFile(file, options = {}) {

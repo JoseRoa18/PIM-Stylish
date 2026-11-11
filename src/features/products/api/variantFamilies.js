@@ -1,14 +1,22 @@
 import { supabase } from '@/lib/supabase';
 
 /**
- * Variant families are derived from the SKU base model: the "LETTERS-DIGITS"
- * prefix (S-300XG → S-300). Products sharing a base model are variants.
+ * Variant families start from the SKU base model: the "LETTERS-DIGITS" prefix
+ * (S-300XG → S-300). Products sharing a base model are variants.
  *
- * syncVariantFamilies(skus) re-syncs the family_number of every product whose
- * base model matches one of the given SKUs:
- *   - groups with 2+ products share a family number (reusing the group's
- *     existing number when it isn't contaminated by another base model)
- *   - singletons get family_number = NULL
+ * syncVariantFamilies(skus) gives a family number to the products of those
+ * base models that have NONE (a new product, a first import):
+ *   - the base's products already share ONE family number: the ones without
+ *     join it;
+ *   - nobody in the base has one and it has 2+ products: they get a new one;
+ *   - the base is split into several families by hand, or the product is
+ *     alone: it stays without a family (the person sets it).
+ *
+ * A family number a product already has is NEVER changed or removed. Until
+ * 2026-11-11 every base touched was regrouped from scratch, so any import
+ * naming K-131N would have merged the family the user made by hand for
+ * K-131 G / N / P / S (79) into K-131 CR / GR / NR / SR's (32), and taken
+ * B-111N's (66, alone in it) away — silently, as "family links re-synced".
  *
  * Call it after importing or creating products.
  */
@@ -19,26 +27,12 @@ export function baseModelOf(sku) {
   return m ? m[1].toUpperCase() : null;
 }
 
-export async function syncVariantFamilies(skus) {
+/**
+ * The family numbers to write: [{ sku, family_number }], only for products
+ * without one. `all` = every product as { sku, family_number }.
+ */
+export function planFamilySync(all, skus) {
   const affectedBases = new Set(skus.map(baseModelOf).filter(Boolean));
-  if (affectedBases.size === 0) return { updated: 0 };
-
-  const { data: all, error } = await supabase
-    .from('products')
-    .select('sku, family_number')
-    .limit(10000);
-  if (error) throw error;
-
-  // Which base models does each family number currently span?
-  // A family number is only reusable for a base if it's exclusive to it.
-  const famBases = new Map();
-  for (const p of all) {
-    if (p.family_number == null) continue;
-    const b = baseModelOf(p.sku);
-    if (!famBases.has(p.family_number)) famBases.set(p.family_number, new Set());
-    famBases.get(p.family_number).add(b);
-  }
-
   const groups = new Map();
   for (const p of all) {
     const b = baseModelOf(p.sku);
@@ -48,34 +42,32 @@ export async function syncVariantFamilies(skus) {
   }
 
   let maxFam = Math.max(0, ...all.map((p) => p.family_number ?? 0));
-  const claimed = new Set();
   const updates = [];
-
   for (const base of [...groups.keys()].sort()) {
     const members = groups.get(base);
+    const without = members.filter((m) => m.family_number == null);
+    if (!without.length) continue;
+    const numbers = [...new Set(members.map((m) => m.family_number).filter((f) => f != null))];
     let target = null;
-
-    if (members.length >= 2) {
-      const reusable = members
-        .map((m) => m.family_number)
-        .filter(
-          (f) =>
-            f != null &&
-            !claimed.has(f) &&
-            famBases.get(f)?.size === 1 &&
-            famBases.get(f).has(base),
-        );
-      target = reusable.length > 0 ? Math.min(...reusable) : ++maxFam;
-      claimed.add(target);
-    }
-
-    for (const m of members) {
-      if (m.family_number !== target) {
-        updates.push({ sku: m.sku, family_number: target });
-      }
-    }
+    if (numbers.length === 1) target = numbers[0];
+    else if (numbers.length === 0 && members.length >= 2) target = ++maxFam;
+    // alone in its base, or a base split into several families by hand
+    if (target == null) continue;
+    for (const m of without) updates.push({ sku: m.sku, family_number: target });
   }
+  return updates;
+}
 
+export async function syncVariantFamilies(skus) {
+  if (!skus.map(baseModelOf).some(Boolean)) return { updated: 0 };
+
+  const { data: all, error } = await supabase
+    .from('products')
+    .select('sku, family_number')
+    .limit(10000);
+  if (error) throw error;
+
+  const updates = planFamilySync(all, skus);
   for (let i = 0; i < updates.length; i += 5) {
     const batch = updates.slice(i, i + 5);
     const results = await Promise.all(

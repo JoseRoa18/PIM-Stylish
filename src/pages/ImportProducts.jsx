@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Upload,
@@ -13,14 +13,16 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { buildImportRows } from '@/features/import/lib/buildImportRows';
-import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS, templateLayout, templateKindOf, scoreImportHeader, excelValidationFor } from '@/features/import/lib/importSchema';
+import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS, templateLayout, templateKindOf, scoreImportHeader, excelValidationFor, isProductSheet } from '@/features/import/lib/importSchema';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
-import { fetchExistingProducts, fetchUpcOwners, importProducts } from '@/features/import/api/importProducts';
+import { fetchProductsForImport, fetchUpcOwners, importProducts } from '@/features/import/api/importProducts';
+import { rowChanges } from '@/features/import/lib/importChanges';
 import { flagInvalidUpcs, flagRepeatedUpcs } from '@/features/import/lib/upcCheck';
 import { isOdooPushOn } from '@/features/odoo/api/odooPush';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import { startTask } from '@/lib/taskProgress';
+import Pagination from '@/components/ui/Pagination';
 
 const BLANK_TEMPLATE_GROUPS = [
   {
@@ -110,7 +112,17 @@ export default function ImportProducts() {
   const [parseError, setParseError] = useState(null);
   const [rows, setRows] = useState([]);
   const [unknownHeaders, setUnknownHeaders] = useState([]);
+  // Sheets of the workbook that were not read: tables without the columns a
+  // product row needs (the Full Report's Media and Marketplace IDs).
+  const [skippedSheets, setSkippedSheets] = useState([]);
   const [existingMap, setExistingMap] = useState(new Map());
+  // The preview shows one page of rows (2026-11-11: every row at once — 13,438
+  // of them from a Full Report — made the page crawl) and can show one kind
+  // only: the summary's counters are its filters.
+  const [show, setShow] = useState('all'); // all | new | updates | unchanged | errors
+  const [showIgnored, setShowIgnored] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState(null);
   const [expandedRow, setExpandedRow] = useState(null);
@@ -124,10 +136,25 @@ export default function ImportProducts() {
     return () => { active = false; };
   }, []);
 
-  const validRows = rows.filter((r) => r.errors.length === 0);
-  const errorRows = rows.filter((r) => r.errors.length > 0);
-  const newCount = validRows.filter((r) => !existingMap.has(r.sku)).length;
-  const updateCount = validRows.length - newCount;
+  const validRows = useMemo(() => rows.filter((r) => r.errors.length === 0), [rows]);
+  const errorRows = useMemo(() => rows.filter((r) => r.errors.length > 0), [rows]);
+  const newRows = useMemo(() => validRows.filter((r) => !existingMap.has(r.sku)), [validRows, existingMap]);
+  // A product the PIM has: an update when the row changes something on it
+  // (r.changes, worked out when the file is read), else unchanged — a row that
+  // changes nothing is not imported (user, 2026-11-11: a report uploaded back
+  // updates "aquellos datos nuevos" only).
+  const updateRows = useMemo(() => validRows.filter((r) => existingMap.has(r.sku) && r.changes?.length > 0), [validRows, existingMap]);
+  const unchangedRows = useMemo(() => validRows.filter((r) => existingMap.has(r.sku) && !(r.changes?.length > 0)), [validRows, existingMap]);
+  // What the Import button writes, in the file's order.
+  const importRows = useMemo(() => validRows.filter((r) => !existingMap.has(r.sku) || r.changes?.length > 0), [validRows, existingMap]);
+  const newCount = newRows.length;
+  const updateCount = updateRows.length;
+  const shownRows = show === 'errors' ? errorRows : show === 'new' ? newRows : show === 'updates' ? updateRows : show === 'unchanged' ? unchangedRows : rows;
+  const lastPage = Math.max(1, Math.ceil(shownRows.length / pageSize));
+  const currentPage = Math.min(page, lastPage);
+  const pageRows = shownRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  // A counter pressed again goes back to every row.
+  const showOnly = (kind) => { setShow((cur) => (cur === kind ? 'all' : kind)); setPage(1); setExpandedRow(null); };
 
   const TEMPLATES = {
     sink: TEMPLATE_HEADERS,
@@ -181,7 +208,10 @@ export default function ImportProducts() {
     const task = startTask('Import file', { detail: `Opening ${file.name}…` });
     try {
       // Every sheet (the PIM export has one per category), headers found under the section band.
-      const parsed = await parseSpreadsheetFile(file, { scoreHeader: scoreImportHeader, allSheets: true, task: task.part(0, 0.7) });
+      // A sheet without the columns a product row needs (SKU, Brand, Category)
+      // is another kind of table — the Full Report's Media and Marketplace IDs —
+      // and is left out when the workbook has a product sheet.
+      const parsed = await parseSpreadsheetFile(file, { scoreHeader: scoreImportHeader, allSheets: true, isDataSheet: isProductSheet, task: task.part(0, 0.7) });
       if (parsed.rows.length === 0) {
         throw new Error('The file has headers but no data rows.');
       }
@@ -189,7 +219,7 @@ export default function ImportProducts() {
       const built = buildImportRows(parsed);
       task.progress(0.75);
       const skus = built.rows.map((r) => r.sku).filter(Boolean);
-      const existing = await fetchExistingProducts(skus, { task: task.part(0.75, 0.95) });
+      const existing = await fetchProductsForImport(skus, { task: task.part(0.75, 0.95) });
       // A UPC must be well formed (12 digits, right check digit) and can be
       // on one product only: a row that breaks either is an error here,
       // before anything is written (the database refuses it too).
@@ -198,9 +228,17 @@ export default function ImportProducts() {
         flagInvalidUpcs(built.rows, existing);
         flagRepeatedUpcs(built.rows, existing, await fetchUpcOwners());
       }
+      // What each row would change on the product the PIM has.
+      for (const r of built.rows) {
+        if (!r.errors.length && existing.has(r.sku)) r.changes = rowChanges(r, existing.get(r.sku));
+      }
       setRows(built.rows);
       setUnknownHeaders(built.unknownHeaders);
+      setSkippedSheets(parsed.skippedSheets ?? []);
       setExistingMap(existing);
+      setShow('all');
+      setShowIgnored(false);
+      setPage(1);
       setPhase('preview');
       task.finish(`${built.rows.length} ${built.rows.length === 1 ? 'row' : 'rows'} ready to review`);
     } catch (err) {
@@ -212,11 +250,11 @@ export default function ImportProducts() {
 
   async function handleImport() {
     setPhase('importing');
-    setProgress({ done: 0, total: validRows.length });
-    const task = startTask('Import', { detail: `Importing ${validRows.length} ${validRows.length === 1 ? 'product' : 'products'}…` });
+    setProgress({ done: 0, total: importRows.length });
+    const task = startTask('Import', { detail: `Importing ${importRows.length} ${importRows.length === 1 ? 'product' : 'products'}…` });
     try {
       const summary = await importProducts(
-        validRows,
+        importRows,
         existingMap,
         (done, total) => setProgress({ done, total }),
         { task, createInOdoo: odooOn && createInOdoo },
@@ -224,10 +262,10 @@ export default function ImportProducts() {
       task.finish(`${summary.created} created · ${summary.updated} updated`);
       // Fire-and-forget: link the whole batch to every API-connected channel
       // where the products already exist (Wix by SKU, Wayfair group ids).
-      autoLinkChannels(validRows.map((r) => r.sku)).catch((err) =>
+      autoLinkChannels(importRows.map((r) => r.sku)).catch((err) =>
         console.error('Channel auto-link failed (non-fatal):', err),
       );
-      setResult({ ok: true, ...summary });
+      setResult({ ok: true, ...summary, unchanged: unchangedRows.length });
       setPhase('done');
     } catch (err) {
       task.fail(err);
@@ -240,7 +278,10 @@ export default function ImportProducts() {
     setPhase('upload');
     setRows([]);
     setUnknownHeaders([]);
+    setSkippedSheets([]);
     setExistingMap(new Map());
+    setShow('all');
+    setPage(1);
     setFileName(null);
     setParseError(null);
     setResult(null);
@@ -351,21 +392,29 @@ export default function ImportProducts() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <Stat label="rows" value={rows.length} />
-              <Stat label="new" value={newCount} tone="success" />
-              <Stat label="updates" value={updateCount} tone="tertiary" />
-              {errorRows.length > 0 && <Stat label="with errors" value={errorRows.length} tone="error" />}
+              <Stat label="rows" value={rows.length} pressed={show === 'all'} onClick={() => showOnly('all')} title="Show every row" />
+              <Stat label="new" value={newCount} tone="success" pressed={show === 'new'} onClick={() => showOnly('new')} title="Show only the new products" />
+              <Stat label="updates" value={updateCount} tone="tertiary" pressed={show === 'updates'} onClick={() => showOnly('updates')} title="Show only the updates" />
+              {unchangedRows.length > 0 && <Stat label="unchanged" value={unchangedRows.length} pressed={show === 'unchanged'} onClick={() => showOnly('unchanged')} title="Show only the products that already have every value of their row — they are not imported" />}
+              {errorRows.length > 0 && <Stat label="with errors" value={errorRows.length} tone="error" pressed={show === 'errors'} onClick={() => showOnly('errors')} title="Show only the rows with errors" />}
             </div>
             <button
               type="button"
               onClick={handleImport}
-              disabled={validRows.length === 0}
+              disabled={importRows.length === 0}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
             >
               <Upload className="w-4 h-4" />
-              Import {validRows.length} {validRows.length === 1 ? 'product' : 'products'}
+              Import {importRows.length} {importRows.length === 1 ? 'product' : 'products'}
             </button>
           </div>
+
+          {importRows.length === 0 && unchangedRows.length > 0 && (
+            <div role="status" className="mb-4 px-4 py-3 rounded-xl bg-surface-container border border-outline-variant text-on-surface text-body-sm">
+              <span className="font-medium">Nothing to import: </span>
+              the PIM already has every value of this file. Change a cell and upload it again to update that product.
+            </div>
+          )}
 
           {odooOn && newCount > 0 && (
             <label className="mb-4 flex items-start gap-2.5 px-4 py-3 rounded-xl border border-outline-variant bg-surface-container-lowest cursor-pointer">
@@ -386,15 +435,37 @@ export default function ImportProducts() {
             </label>
           )}
 
-          {unknownHeaders.length > 0 && (
-            <div className="mb-4 px-4 py-3 rounded-xl bg-warning-container/50 border border-warning-container text-on-warning-container text-body-sm">
-              <span className="font-medium">Ignored columns (not recognized): </span>
-              {unknownHeaders.join(', ')}
+          {skippedSheets.length > 0 && (
+            <div role="status" className="mb-4 px-4 py-3 rounded-xl bg-surface-container border border-outline-variant text-on-surface text-body-sm">
+              <span className="font-medium">{skippedSheets.length === 1 ? 'Sheet' : 'Sheets'} not read: </span>
+              {skippedSheets.join(', ')}
+              <span className="text-on-surface-variant"> — no SKU, Brand and Category columns, so {skippedSheets.length === 1 ? 'it holds' : 'they hold'} no products.</span>
             </div>
           )}
 
-          {/* Rows table */}
-          <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+          {/* The columns the import does not read. A report has dozens of its
+              own (completeness, stock, links…): the first few, the rest on
+              demand. */}
+          {unknownHeaders.length > 0 && (
+            <div className="mb-4 px-4 py-3 rounded-xl bg-warning-container/50 border border-warning-container text-on-warning-container text-body-sm">
+              <span className="font-medium">{unknownHeaders.length} {unknownHeaders.length === 1 ? 'column' : 'columns'} not imported (read-only or not recognized): </span>
+              {(showIgnored ? unknownHeaders : unknownHeaders.slice(0, 6)).join(', ')}
+              {unknownHeaders.length > 6 && (
+                <>
+                  {!showIgnored && '… '}
+                  <button type="button" onClick={() => setShowIgnored((v) => !v)} aria-expanded={showIgnored} className="ml-1 font-medium underline underline-offset-2">
+                    {showIgnored ? 'Show fewer' : `Show all ${unknownHeaders.length}`}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Rows table. On a phone it is wider than the page: it scrolls inside
+              its own box (focusable, so the keyboard can scroll it), and the
+              box is `relative` so the header's screen-reader text stays in it
+              instead of making the whole page scroll sideways. */}
+          <div className="relative rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-x-auto" tabIndex={0}>
             <table className="w-full">
               <thead>
                 <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md font-medium text-on-surface-variant">
@@ -402,12 +473,12 @@ export default function ImportProducts() {
                   <th scope="col" className="text-left px-5 py-3">SKU</th>
                   <th scope="col" className="text-left px-5 py-3">Name</th>
                   <th scope="col" className="text-left px-5 py-3">Action</th>
-                  <th scope="col" className="text-left px-5 py-3">Completeness</th>
+                  <th scope="col" className="text-left px-5 py-3">Fields</th>
                   <th scope="col" className="px-5 py-3"><span className="sr-only">Details</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
-                {rows.map((r) => {
+                {pageRows.map((r) => {
                   const hasErrors = r.errors.length > 0;
                   const isUpdate = r.sku && existingMap.has(r.sku);
                   const isExpanded = expandedRow === r.rowNumber;
@@ -417,6 +488,7 @@ export default function ImportProducts() {
                       row={r}
                       hasErrors={hasErrors}
                       isUpdate={isUpdate}
+                      changes={isUpdate ? r.changes ?? [] : null}
                       isExpanded={isExpanded}
                       onToggle={() => setExpandedRow(isExpanded ? null : r.rowNumber)}
                     />
@@ -424,6 +496,16 @@ export default function ImportProducts() {
                 })}
               </tbody>
             </table>
+          </div>
+          <div className="mt-4">
+            <Pagination
+              label="Import rows"
+              page={currentPage}
+              pageSize={pageSize}
+              total={shownRows.length}
+              onPageChange={(n) => { setPage(n); setExpandedRow(null); }}
+              onPageSizeChange={(n) => { setPageSize(n); setPage(1); setExpandedRow(null); }}
+            />
           </div>
         </>
       )}
@@ -445,8 +527,9 @@ export default function ImportProducts() {
               <p className="text-title-lg text-on-surface mb-2">Import complete</p>
               <p className="text-body-md text-on-surface-variant mb-8">
                 {result.created} {result.created === 1 ? 'product' : 'products'} created · {result.updated} updated
+                {result.unchanged > 0 && <> · {result.unchanged} already up to date, not touched</>}
                 {result.familiesSynced > 0 && (
-                  <> · {result.familiesSynced} variant {result.familiesSynced === 1 ? 'family link' : 'family links'} re-synced</>
+                  <> · {result.familiesSynced} {result.familiesSynced === 1 ? 'product' : 'products'} added to {result.familiesSynced === 1 ? 'its' : 'their'} variant family</>
                 )}
                 <br />
                 Channel auto-link is running in the background — results land in the Activity Log.
@@ -481,24 +564,36 @@ export default function ImportProducts() {
   );
 }
 
-function Stat({ label, value, tone }) {
+// A counter of the summary, and the filter of the rows below: pressed, the
+// table shows only that kind (its label is underlined).
+function Stat({ label, value, tone, pressed, onClick, title }) {
   const tones = {
     success: 'text-on-success-container bg-success-container',
     tertiary: 'text-on-tertiary-container bg-tertiary-container/40',
     error: 'text-on-error-container bg-error-container',
   };
   return (
-    <div className="flex items-center gap-1.5 text-body-sm text-on-surface-variant">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={pressed}
+      title={title}
+      className="group flex items-center gap-1.5 text-body-sm text-on-surface-variant rounded-lg"
+    >
       <span className={`inline-flex items-center justify-center min-w-7 px-1.5 h-7 rounded-lg text-label-md font-bold ${tones[tone] ?? 'bg-surface-container text-on-surface'}`}>
         {value}
       </span>
-      {label}
-    </div>
+      <span className={pressed ? 'text-on-surface font-medium underline underline-offset-4' : 'group-hover:text-on-surface'}>{label}</span>
+    </button>
   );
 }
 
-function RowGroup({ row, hasErrors, isUpdate, isExpanded, onToggle }) {
+// `changes` (a product the PIM has): what the row would change on it — none =
+// unchanged, the row is not imported.
+const clip = (s, n = 140) => (s.length > n ? `${s.slice(0, n)}…` : s);
+function RowGroup({ row, hasErrors, isUpdate, changes, isExpanded, onToggle }) {
   const missingCount = row.missing.length;
+  const unchanged = !hasErrors && isUpdate && changes.length === 0;
   return (
     <>
       <tr
@@ -517,6 +612,10 @@ function RowGroup({ row, hasErrors, isUpdate, isExpanded, onToggle }) {
             <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-label-md bg-error-container text-on-error-container">
               {row.errors.length} error{row.errors.length === 1 ? '' : 's'}
             </span>
+          ) : unchanged ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-label-md bg-surface-container text-on-surface-variant">
+              Unchanged
+            </span>
           ) : isUpdate ? (
             <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-label-md bg-tertiary-container/40 text-on-tertiary-container">
               Update
@@ -528,7 +627,12 @@ function RowGroup({ row, hasErrors, isUpdate, isExpanded, onToggle }) {
           )}
         </td>
         <td className="px-5 py-3 text-body-sm">
-          {missingCount === 0 ? (
+          {isUpdate && !hasErrors ? (
+            // a product the PIM has: what the row changes on it
+            changes.length === 0
+              ? <span className="text-on-surface-variant">No change</span>
+              : <span className="text-on-surface font-medium">{changes.length} {changes.length === 1 ? 'change' : 'changes'}</span>
+          ) : missingCount === 0 ? (
             <span className="text-success font-medium">All fields filled</span>
           ) : (
             <span className="text-on-surface-variant">{missingCount} missing</span>
@@ -559,7 +663,25 @@ function RowGroup({ row, hasErrors, isUpdate, isExpanded, onToggle }) {
                 </ul>
               </div>
             )}
-            {row.missing.length > 0 ? (
+            {isUpdate && !hasErrors ? (
+              changes.length === 0 ? (
+                <p className="text-body-sm text-on-surface-variant">The product already has every value of this row, so it is not imported.</p>
+              ) : (
+                <div>
+                  <div className="text-label-md font-semibold text-on-surface mb-1">Changes</div>
+                  <ul className="text-body-sm text-on-surface-variant space-y-1 [overflow-wrap:anywhere]">
+                    {changes.map((c) => (
+                      <li key={c.key}>
+                        <span className="font-medium text-on-surface">{c.label}:</span>{' '}
+                        {c.from ? clip(c.from) : <span className="italic">empty</span>}
+                        <span aria-hidden="true"> → </span><span className="sr-only"> becomes </span>
+                        <span className="text-on-surface">{clip(c.to)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            ) : row.missing.length > 0 ? (
               <div>
                 <div className="text-label-md font-semibold text-on-surface mb-1">Missing fields</div>
                 <p className="text-body-sm text-on-surface-variant">{row.missing.join(' · ')}</p>
