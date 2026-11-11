@@ -71,7 +71,7 @@ import DealsOverview from '@/features/pricing/components/DealsOverview';
 import CouponsTab from '@/features/pricing/components/CouponsTab';
 import StylishDiscountFields, { PromoStylishDiscount } from '@/features/pricing/components/StylishDiscountFields';
 import { buildStylishDiscount, draftHasPrices, emptyStylishDraft, stylishMarkets } from '@/features/pricing/lib/stylishDraft';
-import { STYLISH_CHANNELS } from '@/features/pricing/lib/stylishDiscount';
+import { STYLISH_CHANNELS, discountFor, CUSTOMER_OFF } from '@/features/pricing/lib/stylishDiscount';
 import { goesToSinksDirect, sendSinksDirectDeals, sinksDirectLive, onSinksDirectSent, SINKS_DIRECT_SITE_OF } from '@/features/pricing/api/sinksDirectDeals';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 import { TOLERANCE_FROM, TOLERANCE_HIGH, TOLERANCE_LOW } from '@/features/pricing/lib/priceTolerance';
@@ -1115,7 +1115,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       const notes = [];
       if (res.counts) notes.push(`Canada ${res.counts.ca} product${res.counts.ca === 1 ? '' : 's'}, USA ${res.counts.us}`);
       if (res.notInPim.length) notes.push(`Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
-      if (res.noLevel?.length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in the PIM: ${res.noLevel.join(', ')}`);
+      // An event for the Stylish stores takes no level price: it discounts the MSRP.
+      if (res.noLevel?.length && !stylishStores.length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in the PIM: ${res.noLevel.join(', ')}`);
       for (const m of ['ca', 'us']) {
         if (priceNow?.none[m].length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in ${m === 'ca' ? 'CAD' : 'USD'}, so no promotion price in ${m === 'ca' ? 'Canada' : 'the USA'}: ${priceNow.none[m].join(', ')}`);
       }
@@ -1609,6 +1610,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   }, [open]);
   const [rows, setRows] = useState(null);
   const [mapBySku, setMapBySku] = useState(null);
+  // An event for the Stylish stores (it goes only to them): they sell at the
+  // MSRP and the event is a discount on it, so its table shows the MSRP and
+  // the price the discount leaves on the store — never the MAP level or the
+  // costs, which no Stylish store uses (user, 2026-11-11: "ahí solo el MSRP y
+  // el promo MSRP").
+  const stylishEvent = (promo.marketplaces ?? []).some((k) => STYLISH_CHANNELS.includes(k));
   // Flash deals / special events: the SKU list can be changed after creation.
   const [editingSkus, setEditingSkus] = useState(false);
   // Price-table filters: SKU text, product categories and brands, and the
@@ -1681,7 +1688,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         // The obsolete mark is for the rows' Obsolete pill.
         const parts = await Promise.all(chunks.map((part) => supabase
           .from('products')
-          .select('sku, map_cad, map_usd, category, brand, is_obsolete')
+          .select('sku, map_cad, map_usd, msrp_cad, msrp_usd, category, brand, is_obsolete')
           .in('sku', part)));
         const maps = {};
         for (const { data } of parts) for (const p of data ?? []) maps[p.sku] = p;
@@ -1701,7 +1708,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   // A promo price below its own promo COST is a real anomaly (negative
   // margin) — below MAP is just what promotions are, so no alarm for that.
   const belowCost = useMemo(() => {
-    if (!rows) return [];
+    if (!rows || stylishEvent) return []; // a Stylish event has no MAP level or cost to compare
     return rows.filter((r) => {
       const costs = r.promo_costs ?? {};
       return Object.entries(costs).some(([slug, cost]) => {
@@ -1711,7 +1718,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         return price != null && cost != null && price < cost;
       });
     });
-  }, [rows]);
+  }, [rows, stylishEvent]);
 
   // Pull both markets' stock from Odoo now (the cron does it hourly).
   async function refreshStock() {
@@ -2029,11 +2036,22 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
           ) : (() => {
             const markets = promoMarkets(promo);
             const market = markets.includes(marketTab) ? marketTab : markets[0];
-            const costKeys = [...new Set(rows.flatMap((r) => Object.keys(r.promo_costs ?? {})))]
+            const costKeys = stylishEvent ? [] : [...new Set(rows.flatMap((r) => Object.keys(r.promo_costs ?? {})))]
               .filter((k) => costMeta(k).market === market)
               .sort();
             const priceKey = market === 'ca' ? 'promo_price_cad' : 'promo_price_usd';
             const mapKey = market === 'ca' ? 'map_cad' : 'map_usd';
+            // A Stylish event: what the store takes for each product — the
+            // very discount stylish-event-discounts sends (`storePrice` = the
+            // price the store shows), or why it gets none.
+            const msrpKey = market === 'ca' ? 'msrp_cad' : 'msrp_usd';
+            const stylishOf = (r) => {
+              const p = mapBySku?.[r.sku];
+              if (!mapBySku) return { skip: null }; // still loading
+              if (!p) return { skip: 'not in the PIM' };
+              if (String(p.brand ?? '').toLowerCase().includes('azuni')) return { skip: 'Azuni is not sold on the Stylish stores' };
+              return discountFor(promo.stylish_discount, p[msrpKey], market, r.sku);
+            };
             // Each market shows its own list (rule 2026-09-30).
             const marketRows = rows.filter((r) => onMarketList(r, market));
             const q = skuQuery.trim().toUpperCase();
@@ -2057,7 +2075,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             // On the list with no promotion price in this market: the product
             // has no price on the promotion's level in this currency (and the
             // file gave none). No channel of the market can take it.
-            const noPrice = (r) => r[priceKey] == null;
+            // A Stylish event: the products its discount cannot reach (no MSRP,
+            // no price given in price mode, an Azuni product).
+            const noPrice = (r) => (stylishEvent ? Boolean(stylishOf(r).skip) : r[priceKey] == null);
             const noPriceCount = marketRows.filter(noPrice).length;
             const visibleRows = marketRows.filter((r) =>
               (!q || r.sku.toUpperCase().includes(q)) &&
@@ -2155,7 +2175,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         type="button"
                         onClick={() => setNoPriceOnly(!noPriceOnly)}
                         aria-pressed={noPriceOnly}
-                        title={`Show only the products of the ${market === 'ca' ? 'Canada' : 'USA'} list with no promotion price: they have no ${levelLabel(promotionLevel(promo))} price in ${market === 'ca' ? 'CAD' : 'USD'} (the product's Pricing tab)`}
+                        title={stylishEvent
+                          ? `Show only the products of the ${market === 'ca' ? 'Canada' : 'USA'} list the event's discount cannot reach: no MSRP in ${market === 'ca' ? 'CAD' : 'USD'}, no price given, or an Azuni product`
+                          : `Show only the products of the ${market === 'ca' ? 'Canada' : 'USA'} list with no promotion price: they have no ${levelLabel(promotionLevel(promo))} price in ${market === 'ca' ? 'CAD' : 'USD'} (the product's Pricing tab)`}
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-label-md font-medium whitespace-nowrap transition-colors ${
                           noPriceOnly
                             ? 'bg-error text-on-error'
@@ -2163,7 +2185,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         }`}
                       >
                         <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
-                        {noPriceCount} without a promo price
+                        {noPriceCount} without a {stylishEvent ? 'discount' : 'promo price'}
                       </button>
                     )}
                     {/* Obsolete products (user, 2026-10-16) in the badge's
@@ -2221,7 +2243,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         {busy === 'skus' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save SKUs
                       </button>
                       <button type="button" onClick={() => setEditingSkus(false)} disabled={busy === 'skus'} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
-                      <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take their {levelLabel(promotionLevel(promo))} prices, removed ones leave the {KIND_NOUN[promo.kind] ?? 'promotion'}.</span>
+                      <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take {stylishEvent ? "the event's Stylish discount" : `their ${levelLabel(promotionLevel(promo))} prices`}, removed ones leave the {KIND_NOUN[promo.kind] ?? 'promotion'}.</span>
                     </div>
                     <PromoCheckNotes lines={skuCheckLines} note="You can still save it." />
                   </div>
@@ -2251,8 +2273,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       <thead>
                         <tr className="text-on-surface-variant text-label-md">
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">SKU</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Promo MAP</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={stylishEvent ? "The price the store shows during the event: the MSRP with the event's discount" : undefined}>{stylishEvent ? 'Promo MSRP' : 'Promo MAP'}</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">{stylishEvent ? 'Regular MSRP' : 'Regular MAP'}</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={market === 'ca' ? 'Units available for use in Canada (Odoo, warehouse CBG)' : 'Units available for use in the USA (Odoo, warehouse ATL)'}>Stock</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={`Units sold in ${market === 'ca' ? 'Canada' : 'the USA'} in the last 90 days, every marketplace (Odoo)`}>Sold 90 d</th>
                           {costKeys.map((k) => {
@@ -2286,8 +2308,23 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                                   <span className="ml-2 inline-flex align-middle -my-1 font-sans"><ObsoleteBadge product={p} /></span>
                                 )}
                               </td>
-                              <td className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
-                              <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[mapKey])}</td>
+                              {stylishEvent ? (() => {
+                                // The store's price with the event's discount; an
+                                // approved customer then pays it less the coupon.
+                                const d = stylishOf(r);
+                                const pays = d.skip === undefined ? Math.round(d.storePrice * (100 - CUSTOMER_OFF)) / 100 : null;
+                                return (
+                                  <td
+                                    className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums"
+                                    title={d.skip ? `No discount: ${d.skip}` : pays != null ? `An approved customer pays ${fmt(pays)} with the ${CUSTOMER_OFF}% coupon` : undefined}
+                                  >
+                                    {d.skip === undefined ? fmt(d.storePrice) : '—'}
+                                  </td>
+                                );
+                              })() : (
+                                <td className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
+                              )}
+                              <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[stylishEvent ? msrpKey : mapKey])}</td>
                               {(() => {
                                 const s = stockOf(r);
                                 return (
