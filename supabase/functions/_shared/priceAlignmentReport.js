@@ -97,8 +97,10 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
    * promo price for members when the target follows promotions. Reading it
    * live means a price edited in the PIM shows in the report at once, without
    * pulling the channel again (the pull only refreshes the LIVE prices).
+   * `today` (an Eastern day, 'YYYY-MM-DD') reads another day's prices: the
+   * dry runs of sinksdirect-deals. A deal's entry carries its promotion `id`.
    */
-  async function loadExpectedPrices(cfg) {
+  async function loadExpectedPrices(cfg, { today = null } = {}) {
     const prods = await sharedLoad(`products:${cfg.priceField}`, async () => {
       const { data, error } = await db
         .from('products')
@@ -125,7 +127,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     // Market calendar: USA runs the 1st → month end; Canada runs first
     // Thursday → the day before the next first Thursday. Only the promo whose
     // window is open today sets the expected price.
-    const todayET = etToday();
+    const todayET = today ?? etToday();
     for (const promo of activePromos ?? []) {
       const w = promoWindow(promo, cfg.market);
       if (!windowContains(w, todayET)) continue;
@@ -144,7 +146,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
       const deals = await sharedLoad(`deals:${cfg.promoChannel}:${promoField}`, async () => {
         const { data, error } = await db
           .from('promotions')
-          .select(`name, kind, period, status, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku, ${promoField}, in_ca, in_us)`)
+          .select(`id, name, kind, period, status, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku, ${promoField}, in_ca, in_us)`)
           .in('kind', DEAL_KINDS)
           .neq('status', 'ended')
           .contains('marketplaces', [cfg.promoChannel]);
@@ -167,7 +169,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
           const onList = (cfg.market === 'us' ? row.in_us : row.in_ca) ?? (row[promoField] != null);
           if (!onList) continue;
           const price = levelMap ? levelMap.get(row.sku) ?? null : row[promoField];
-          if (price != null) promoBySku.set(row.sku, { price, period: deal.period, windowStart: w.start, windowEnd: w.end, kind: deal.kind, name: deal.name });
+          if (price != null) promoBySku.set(row.sku, { price, period: deal.period, windowStart: w.start, windowEnd: w.end, kind: deal.kind, name: deal.name, id: deal.id });
         }
       }
     }

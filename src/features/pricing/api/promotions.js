@@ -402,7 +402,9 @@ export async function updatePromotionStylishDiscount(promotion, discount) {
 
 // Promotion kinds: 'monthly' follows the market calendar and is automated on
 // its boundaries; 'flash' (flash deal) and 'special' (special event) always run
-// on their own dates and are pushed / exported by hand from their sections.
+// on their own dates and are exported by hand from their sections — except on
+// the Sinks Direct stores (api/sinksDirectDeals.js) and the Stylish stores,
+// where the price goes on and off by itself on the deal's dates.
 // 'special' keeps its key; people read Peak Season Events (user, 2026-11-09).
 export const PROMOTION_KINDS = { monthly: 'Monthly promotion', flash: 'Flash deal', mk_event: 'MK event', special: 'Peak season event' };
 /** The word inside a sentence (MK keeps its capitals). `coupon`: the Coupons tab's overview. */
@@ -866,6 +868,25 @@ export async function applyPromotion(promotion, { task = null } = {}) {
  * counts the products.
  */
 export async function endPromotion(promotion, { task = null } = {}) {
+  // A flash deal, MK event or peak season event only ends: it never owned the
+  // products' sale fields (clearing them took November's price off the members
+  // of an Amazon deal). What it put on a Sinks Direct store goes back by
+  // itself (sinksdirect-deals).
+  if ((promotion.kind ?? 'monthly') !== 'monthly') {
+    const { error } = await supabase
+      .from('promotions')
+      .update({ status: 'ended', ended_at: new Date().toISOString() })
+      .eq('id', promotion.id);
+    if (error) throw error;
+    task?.progress(1);
+    logActivity({
+      action: 'update',
+      entityType: 'promotion',
+      entityId: String(promotion.id),
+      summary: `Ended ${KIND_NOUN[promotion.kind] ?? 'promotion'} "${promotion.name}"`,
+    });
+    return { cleared: 0, deal: true };
+  }
   task?.progress(0, "Reading the promotion's products…");
   const prices = await getPromotionPrices(promotion.id);
   const each = task?.part(0.05, 0.95);

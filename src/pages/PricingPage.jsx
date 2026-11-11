@@ -71,10 +71,27 @@ import CouponsTab from '@/features/pricing/components/CouponsTab';
 import StylishDiscountFields, { PromoStylishDiscount } from '@/features/pricing/components/StylishDiscountFields';
 import { buildStylishDiscount, draftHasPrices, emptyStylishDraft, stylishMarkets } from '@/features/pricing/lib/stylishDraft';
 import { STYLISH_CHANNELS } from '@/features/pricing/lib/stylishDiscount';
+import { goesToSinksDirect, sendSinksDirectDeals, sinksDirectLive, onSinksDirectSent, SINKS_DIRECT_SITE_OF } from '@/features/pricing/api/sinksDirectDeals';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 import { TOLERANCE_FROM, TOLERANCE_HIGH, TOLERANCE_LOW } from '@/features/pricing/lib/priceTolerance';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { startTask } from '@/lib/taskProgress';
+
+// A flash deal, MK event or peak season event made for a Sinks Direct store
+// goes on the store by itself (sinksdirect-deals, every 5 minutes). After a
+// change made here it goes NOW (user, 2026-11-11: "si se pone la fecha de hoy,
+// se envía de una vez"): the prices of the deals that run today go up, those
+// of a deal that is over go back. `task` = the action's own card, whose bar
+// goes on from `from` (`done` = what that action did); without one the send
+// gets a card of its own. Never awaited: the card stays while the person
+// moves on, and a send that fails is taken up by the cron.
+function sendDealsNow(name, { task = null, from = 0, done = null } = {}) {
+  const card = task ?? startTask(`Sinks Direct — ${name}`, { detail: 'Checking what goes on the stores today…' });
+  if (task) card.step('Sinks Direct: checking what goes on the stores today…');
+  sendSinksDirectDeals({ task: task ? card.part(from, 1) : card })
+    .then((r) => card.finish([done, r.text].filter(Boolean).join(' · ')))
+    .catch((err) => card.fail(`${done ? `${done}. ` : ''}Sinks Direct: ${err.message} — the PIM tries again within 5 minutes.`));
+}
 
 // The promotion file tools load the first time a file of their kind is
 // generated (performance pass 2026-09-29) — they stay out of the page's first
@@ -259,9 +276,9 @@ export default function PricingPage() {
         <h1 className="text-display-lg text-on-surface">Pricing</h1>
         <p className="text-body-md text-on-surface-variant mt-3">
           {tab === 'monthly' && 'Monthly promotions for all marketplaces: the market calendar drives them and the boundaries run on their own.'}
-          {tab === 'flash' && 'Flash deals: short promotions on their own dates, pushed and exported by hand from here.'}
-          {tab === 'mk_event' && 'MK events: promotions on their own dates at the Orange level (Bed Bath & Beyond and Overstock at Purple), pushed and exported by hand from here.'}
-          {tab === 'special' && 'Peak season events: Way Day, Prime Day, Black Friday, Boxing Day. On their own dates at the Purple level, pushed and exported by hand from here.'}
+          {tab === 'flash' && 'Flash deals: short promotions on their own dates, exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
+          {tab === 'mk_event' && 'MK events: promotions on their own dates at the Orange level (Bed Bath & Beyond and Overstock at Purple), exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
+          {tab === 'special' && 'Peak season events: Way Day, Prime Day, Black Friday, Boxing Day. On their own dates at the Purple level, exported by hand from here. One made for Sinks Direct or the Stylish stores goes on the store by itself on its dates.'}
           {tab === 'coupons' && 'Coupons on Amazon and Wayfair, by percentage or by money. Several can run at once, each with its products.'}
           {tab === 'alignment' && 'What each marketplace shows against the PIM price, promo aware.'}
         </p>
@@ -919,6 +936,8 @@ function PromoPortals({ promo, canEdit, onChanged }) {
       await updatePromotionMarketplaces(promo, value);
       setEditing(false);
       onChanged?.();
+      // A Sinks Direct store added or taken off: its prices follow now.
+      if (goesToSinksDirect(promo) || goesToSinksDirect({ ...promo, marketplaces: value })) sendDealsNow(promo.name);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1082,11 +1101,14 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         await checkStylishDiscount(stylishDiscount);
       }
       task = startTask(`Create ${KIND_NOUN[kind]}`, { detail: fromFile || fromPaste ? 'Checking the SKUs against the PIM…' : `Reading the ${levelLabel(KIND_LEVEL[kind])} prices…` });
+      // A deal for Sinks Direct that runs today goes on the store at once: the
+      // same card goes on with it (a later one goes up by itself on its day).
+      const toStoresNow = !monthly && goesToSinksDirect({ kind, marketplaces: portals }) && startsOn <= etToday();
       const res = fromFile
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows, task })
         : fromPaste
           ? await createPromotionFromFile({ ...payload, rows: mergedPasteRows, source: 'list', task })
-          : await createPromotionFromLevels({ ...payload, skus: [...new Set([...skuList.skus, ...stylishPricedSkus(stylishDiscount)])], marketplaces: monthly ? [] : portals, stylish_discount: stylishDiscount, task });
+          : await createPromotionFromLevels({ ...payload, skus: [...new Set([...skuList.skus, ...stylishPricedSkus(stylishDiscount)])], marketplaces: monthly ? [] : portals, stylish_discount: stylishDiscount, task: toStoresNow ? task.part(0, 0.3) : task });
       // What the person should know once the form is gone: it goes to the
       // page, since this form closes on success.
       const notes = [];
@@ -1096,7 +1118,9 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       for (const m of ['ca', 'us']) {
         if (priceNow?.none[m].length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in ${m === 'ca' ? 'CAD' : 'USD'}, so no promotion price in ${m === 'ca' ? 'Canada' : 'the USA'}: ${priceNow.none[m].join(', ')}`);
       }
-      task.finish(`Created · ${res.added} SKU${res.added === 1 ? '' : 's'}`);
+      const created = `Created · ${res.added} SKU${res.added === 1 ? '' : 's'}`;
+      if (toStoresNow) sendDealsNow(payload.name, { task, from: 0.3, done: created });
+      else task.finish(created);
       onCreated(res.promotion, notes.length > (res.counts ? 1 : 0) ? `Created "${payload.name}" — ${notes.join(' · ')}` : null);
     } catch (err) {
       task?.fail(err);
@@ -1714,9 +1738,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
     setBusy('skus');
     setMsg(null);
     const task = startTask(`Save SKUs — ${promo.name}`, { detail: "Reading the promotion's products…" });
+    // On a Sinks Direct deal the stores follow the new list now, on the same card.
+    const toStores = goesToSinksDirect(promo);
     try {
-      const r = await setPromotionSkusFromLevel(promo, parseSkuList(skuText).skus, undefined, { task });
-      task.finish(`${r.added} added, ${r.removed} removed`);
+      const r = await setPromotionSkusFromLevel(promo, parseSkuList(skuText).skus, undefined, { task: toStores ? task.part(0, 0.4) : task });
+      if (toStores) sendDealsNow(promo.name, { task, from: 0.4, done: `${r.added} added, ${r.removed} removed` });
+      else task.finish(`${r.added} added, ${r.removed} removed`);
       const notes = [`${r.added} added, ${r.removed} removed.`];
       if (r.notInPim.length) notes.push(`Not in the PIM, skipped: ${r.notInPim.join(', ')}.`);
       if (r.noLevel.length) notes.push(`No ${levelLabel(promotionLevel(promo))} price in the PIM: ${r.noLevel.join(', ')}.`);
@@ -1812,7 +1839,11 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             <div className="flex items-center gap-2 flex-wrap">
               {promo.status === 'draft' && (
                 <>
-                  {(!promo.marketplaces?.length || promo.marketplaces.some((k) => k.startsWith('wix_') && !STYLISH_CHANNELS.includes(k))) && (
+                  {/* Monthly promotions only: a deal made for Sinks Direct goes
+                      on the store by itself (sinksdirect-deals). These two
+                      buttons work in CAD on Sinks Direct Canada — on a USA
+                      deal they put Canada's sale prices on the Canada store. */}
+                  {(promo.kind ?? 'monthly') === 'monthly' && (
                   <ActionButton
                     icon={Play}
                     label="Apply to store pricing"
@@ -1842,7 +1873,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   />
                 </>
               )}
-              {(promo.status === 'active' || promo.status === 'ended') && (
+              {(promo.kind ?? 'monthly') === 'monthly' && (promo.status === 'active' || promo.status === 'ended') && (
                 <ActionButton
                   icon={Send}
                   label="Push to Wix"
@@ -1870,10 +1901,17 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   busy={busy === 'end'}
                   onClick={() => run('end', async (task) => {
                     const r = await endPromotion(promo, { task });
+                    // A deal only ends; what it put on a Sinks Direct store goes back now.
+                    if (r.deal) {
+                      if (goesToSinksDirect(promo)) sendDealsNow(promo.name);
+                      return { text: goesToSinksDirect(promo) ? 'Ended. Its products on Sinks Direct go back to their regular prices now.' : 'Ended.', done: 'Ended' };
+                    }
                     return { text: `${r.cleared} products back to regular price in the PIM. Push to Wix to publish.`, done: `${r.cleared} products back to regular price` };
                   }, {
                     title: `End "${promo.name}"?`,
-                    message: 'Clears the sale price on every SKU in the list (in the PIM). Push to Wix afterwards to update the store.',
+                    message: (promo.kind ?? 'monthly') === 'monthly'
+                      ? 'Clears the sale price on every SKU in the list (in the PIM). Push to Wix afterwards to update the store.'
+                      : `Marks it as over from today.${goesToSinksDirect(promo) ? ' Its products on Sinks Direct go back to their regular prices by themselves.' : ''}`,
                     confirmLabel: 'End promotion',
                     destructive: true,
                   }, `End promotion — ${promo.name}`)}
@@ -1894,10 +1932,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   busy={busy === 'delete'}
                   onClick={() => run('delete', async () => {
                     await deletePromotion(promo.id);
+                    // What a deal put on a Sinks Direct store goes back now.
+                    if (goesToSinksDirect(promo)) sendDealsNow(promo.name);
                     return { text: 'Promotion deleted.' };
                   }, {
                     title: `Delete "${promo.name}"?`,
-                    message: 'Removes the promotion and its price list. Product pricing is not touched.',
+                    message: goesToSinksDirect(promo)
+                      ? 'Removes the promotion and its price list. Its products on Sinks Direct go back to their regular prices.'
+                      : 'Removes the promotion and its price list. Product pricing is not touched.',
                     confirmLabel: 'Delete',
                     destructive: true,
                   })}
@@ -1935,6 +1977,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                 setRows(null);
                 setMapBySku(null);
                 onChanged();
+                // A Sinks Direct deal: the stores follow the new list and prices now.
+                if (goesToSinksDirect(promo)) sendDealsNow(promo.name);
                 // An updated list re-schedules the Best Buy discounts (the
                 // OF24 import overwrites the previous ones and clears the
                 // SKUs that left).
@@ -2553,6 +2597,9 @@ function PromoWideDates({ promo, canEdit, onChanged }) {
       await updatePromotionDates(promo, clear ? { starts_on: null, ends_on: null } : { starts_on: startsOn, ends_on: endsOn });
       setEditing(false);
       onChanged?.();
+      // New dates on a Sinks Direct deal: the stores follow them now (a deal
+      // that now runs today goes up, one moved away comes off).
+      if (goesToSinksDirect(promo)) sendDealsNow(promo.name);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -2618,6 +2665,19 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
     });
     return () => { active = false; };
   }, [promo.id, goesToStylish]);
+
+  // What a deal made for Sinks Direct has on each of its stores now (the edge
+  // function sinksdirect-deals); read again after every send from this page.
+  const [dealLive, setDealLive] = useState(null);
+  const toSinksDirect = goesToSinksDirect(promo);
+  useEffect(() => {
+    if (!toSinksDirect) return undefined;
+    let active = true;
+    const read = () => sinksDirectLive(promo.id).then((live) => { if (active) setDealLive(live); }).catch(() => {});
+    read();
+    const off = onSinksDirectSent(read);
+    return () => { active = false; off(); };
+  }, [promo.id, toSinksDirect]);
 
   useEffect(() => {
     let active = true;
@@ -2725,6 +2785,19 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           else if (today < w.start) status = `Starts ${dayOf(w.start)}`;
           else if (live) { status = `${live} live`; tone = 'ok'; }
           else status = 'Going on…';
+        } else if (toSinksDirect && SINKS_DIRECT_SITE_OF[ch.key]) {
+          // A deal on a Sinks Direct store: what sinksdirect-deals has put on it.
+          const w = promoWindow(promo, ch.market);
+          const today = etToday();
+          const on = dealLive?.[ch.key] ?? { live: 0, failed: 0, pending: 0 };
+          detail = ch.dealHow;
+          tone = 'muted';
+          if (promo.status === 'ended' || today > w.end) status = on.live ? `Taking back ${on.live}` : 'Back at regular prices';
+          else if (today < w.start) status = `Starts ${dayOf(w.start)}`;
+          else if (on.live) { status = `${on.live} on the store${on.failed ? ` · ${on.failed} not sent` : ''}`; tone = 'ok'; }
+          else status = dealLive ? 'Going on…' : 'Checking…';
+          if (on.live) detail += ` ${on.live} product${on.live === 1 ? '' : 's'} carry its price there now.`;
+          if (on.failed) detail += ` ${on.failed} could not go: Wix no longer has ${on.failed === 1 ? 'that product' : 'those products'} or refused the change (the Activity Log names them).`;
         } else if (ch.key === 'bestbuy') {
           const sch = promo.bb_schedule;
           status = sch ? `${sch.scheduled} scheduled` : 'Not scheduled';

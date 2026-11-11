@@ -32,11 +32,17 @@ export function channelLevelFor(channel, promotion) {
   return channel?.levelByKind?.[promotion?.kind ?? 'monthly'] ?? null;
 }
 
+// A flash deal, MK event or peak season event made for a Sinks Direct store
+// (user, 2026-11-11): the edge function sinksdirect-deals puts its price on
+// the store by its dates — `dealHow` is what its row says, `how` stays the
+// monthly promotion's.
+const SD_DEAL_HOW = "Automatic: the deal's price goes on the store the day it starts (at once when that is today) and comes off the day after it ends.";
+
 export const PROMO_CHANNELS = [
   { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', kind: 'api', stamp: 'ca_applied_at',
-    how: 'Automatic. Promo MAP CAD goes live on the first Thursday.' },
+    how: 'Automatic. Promo MAP CAD goes live on the first Thursday.', dealHow: SD_DEAL_HOW },
   { key: 'wix_sinksdirect_us', label: 'Sinks Direct USA', monogram: 'SD', market: 'us', kind: 'api', stamp: 'us_applied_at',
-    how: 'Automatic. Promo MAP USD goes live on the 1st.' },
+    how: 'Automatic. Promo MAP USD goes live on the 1st.', dealHow: SD_DEAL_HOW },
   // The Stylish stores take promotions only through special events (user,
   // 2026-11-09), as a percentage or by price: stylish-event-discounts puts the
   // discount on by the event's dates (lib/stylishDiscount.js). `kinds` = the
