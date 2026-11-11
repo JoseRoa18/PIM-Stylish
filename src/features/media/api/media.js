@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { sendToOdoo } from '@/features/odoo/api/odooPush';
 
 function inferMimeType(filename) {
   const ext = filename.toLowerCase().split('.').pop();
@@ -492,6 +493,9 @@ export async function uploadMediaFiles(sku, files, language = null, onProgress, 
     summary: `Uploaded ${uploaded.length} media file(s) to ${sku}${videoCount ? ` — ${videoCount} video(s)` : ''}${videoCount && siblings.length ? `, shared with ${siblings.length} family variant(s)` : ''}`,
     metadata: { count: uploaded.length, videos: videoCount, language, sharedWith: videoCount ? siblings : [] },
   });
+  // A product's first main image is also its picture in Odoo (user,
+  // 2026-11-11) — sent beside the upload, with its own card.
+  if (uploaded.some((r) => r.is_primary)) sendToOdoo([sku], { fields: ['image'] });
   return data.filter((r) => r.sku === sku);
 }
 
@@ -785,6 +789,8 @@ export async function setPrimaryMedia(sku, mediaId) {
     summary: `Set primary image for ${sku}`,
     metadata: { mediaId },
   });
+  // The new main image becomes the product's picture in Odoo (user, 2026-11-11).
+  sendToOdoo([sku], { fields: ['image'] });
 }
 
 /**

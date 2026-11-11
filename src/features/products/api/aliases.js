@@ -1,6 +1,13 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WIX_SITES } from '@/features/syndication/lib/wixSites';
+import { sendToOdoo } from '@/features/odoo/api/odooPush';
+
+// The marketplace ids Odoo keeps too (user, 2026-11-11: "SI … hazlo todos"):
+// Home Depot CA, Rona, Lowe's US, BB&B / Overstock, Best Buy CA and the Amazon
+// seller SKUs / ASINs go to their Odoo field when they are added here. One
+// that is removed stays in Odoo: the PIM never empties a field there.
+const toOdoo = (skus) => sendToOdoo(skus, { fields: ['ids'] });
 
 /**
  * Every name a product answers to outside the PIM.
@@ -90,6 +97,7 @@ export async function addAlias(sku, { marketplace, alias, kind = 'sku', note = n
     if (error) throw new Error(/duplicate|unique/i.test(error.message) ? `${value} is already an alias of another product on ${marketplace}.` : error.message);
   }
   logActivity({ action: 'update', entityType: 'product', entityId: sku, target: 'pim', summary: `Added alias ${value} (${marketplace}) to ${sku}`, metadata: { marketplace, alias: value, kind } });
+  toOdoo([sku]);
 }
 
 /**
@@ -240,5 +248,6 @@ export async function importAliasList(marketplace, text, kind = 'sku', { task = 
     writing?.count(written, toWrite.length, `Saved ${written} of ${toWrite.length} aliases`);
   }
   logActivity({ action: 'import', entityType: 'product', entityId: `${written} aliases`, target: 'pim', summary: `Imported ${written} ${marketplace} aliases${notInPim.length ? ` · ${notInPim.length} SKUs not in the PIM` : ''}${review.length ? ` · ${review.length} need a manual pick` : ''}`, metadata: { marketplace, written, notInPim: notInPim.slice(0, 50), review: review.slice(0, 50), conflicts: conflicts.slice(0, 50) } });
+  toOdoo(toWrite.map((p) => p.sku));
   return { written, notInPim, review, conflicts };
 }

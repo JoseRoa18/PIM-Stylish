@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import FilterDropdown from '@/features/products/components/FilterDropdown';
 import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
-import { getStockFor, refreshInventory, describeInventoryPull, describeStock, stockAge } from '@/features/pricing/api/inventory';
+import { getStockFor, refreshInventory, describeInventoryPull, describeStock, stockAge, arrivalText } from '@/features/pricing/api/inventory';
+import { getSalesFor, daysOfStock, daysOfStockText } from '@/features/pricing/api/sales';
 // Icon DATA (vanilla lucide) for MorphIcon — it animates the strokes between
 // the two shapes instead of swapping elements.
 import { MorphIcon } from 'morphicons/react';
@@ -1114,6 +1115,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         if (!active) return;
         const zero = { key: stockKey };
         for (const m of stockMarkets) zero[m] = (marketSkus[m] ?? []).filter((s) => stock[m]?.[s] && Number(stock[m][s].available) <= 0);
+        // when Odoo expects more of each ("arrives Nov 27"), where units are on order
+        zero.arrival = Object.fromEntries(stockMarkets.map((m) => [m, Object.fromEntries(zero[m].map((s) => [s, arrivalText(stock[m][s])]))]));
         setZeroStock(zero);
       }).catch(() => {});
     }, 400);
@@ -1407,7 +1410,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             {zeroNow.map((m) => (
               <p key={m}>
                 <span className="font-medium">{zeroStock[m].length} with 0 stock in {m === 'ca' ? 'Canada' : 'the USA'}:</span>{' '}
-                {zeroStock[m].slice(0, 12).join(', ')}{zeroStock[m].length > 12 ? ` and ${zeroStock[m].length - 12} more` : ''}
+                {zeroStock[m].slice(0, 12).map((s) => (zeroStock.arrival?.[m]?.[s] ? `${s} (${zeroStock.arrival[m][s]})` : s)).join(', ')}{zeroStock[m].length > 12 ? ` and ${zeroStock[m].length - 12} more` : ''}
               </p>
             ))}
             <p className="text-on-surface-variant">You can still create it — they show in red on its table.</p>
@@ -1487,6 +1490,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   // Stock per market and SKU from product_inventory (Odoo); null
   // until loaded.
   const [stockByMarket, setStockByMarket] = useState(null);
+  // Units sold per market and SKU in the last 90 days (Odoo, product_sales):
+  // with the stock, how long each product lasts. null until loaded.
+  const [salesByMarket, setSalesByMarket] = useState(null);
   const [skuText, setSkuText] = useState('');
   const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete' | 'stock'
   const [msg, setMsg] = useState(null);
@@ -1508,6 +1514,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         // Stock is an add-on to the table: if it cannot be read the prices
         // still show, with the Stock column empty.
         const stockPromise = getStockFor(skus).catch(() => ({ ca: {}, us: {} }));
+        const salesPromise = getSalesFor(skus).catch(() => null);
         const chunks = [];
         for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
         // The obsolete mark is for the rows' Obsolete pill.
@@ -1519,6 +1526,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         for (const { data } of parts) for (const p of data ?? []) maps[p.sku] = p;
         setMapBySku(maps);
         setStockByMarket(await stockPromise);
+        setSalesByMarket(await salesPromise);
       } catch (err) {
         setMsg({ tone: 'error', text: err.message });
       }
@@ -1855,6 +1863,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             // (Canada = CBG, Cambridge; USA = ATL, Flowery Branch).
             const stockRows = stockByMarket?.[market] ?? {};
             const stockOf = (r) => stockRows[r.sku] ?? null;
+            const salesOf = (r) => salesByMarket?.[market]?.[r.sku] ?? null;
             const stockStateOf = (r) => {
               const s = stockOf(r);
               return !s ? 'Not tracked' : s.available > 0 ? 'In stock' : 'Out of stock';
@@ -2062,6 +2071,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Promo MAP</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={market === 'ca' ? 'Units available for use in Canada (Odoo, warehouse CBG)' : 'Units available for use in the USA (Odoo, warehouse ATL)'}>Stock</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={`Units sold in ${market === 'ca' ? 'Canada' : 'the USA'} in the last 90 days, every marketplace (Odoo)`}>Sold 90 d</th>
+                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title="How long the stock lasts at the pace of the last 90 days">Stock lasts</th>
                           {costKeys.map((k) => {
                             const m = costMeta(k);
                             return (
@@ -2083,7 +2094,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                             <tr
                               key={r.id}
                               className={`border-t border-outline-variant/40 ${out ? 'bg-error-container/30' : 'odd:bg-surface-container-low/30'}`}
-                              title={out ? `0 units in ${market === 'ca' ? 'Canada' : 'the USA'}` : undefined}
+                              title={out ? `0 units in ${market === 'ca' ? 'Canada' : 'the USA'}${arrivalText(stockOf(r)) ? ` · ${arrivalText(stockOf(r))}` : ''}` : undefined}
                             >
                               <td className="px-4 py-2 font-mono text-on-surface">
                                 {r.sku}
@@ -2104,6 +2115,18 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                                   >
                                     {s ? s.available : '—'}
                                   </td>
+                                );
+                              })()}
+                              {(() => {
+                                // no reading yet: an empty cell, not a 0
+                                if (!salesByMarket) return (<><td className="px-4 py-2" /><td className="px-4 py-2" /></>);
+                                const sold = salesOf(r);
+                                const days = daysOfStock(stockOf(r), sold);
+                                return (
+                                  <>
+                                    <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums" title={sold ? `${sold.units_30} in the last 30 days` : 'No sales in the last 90 days'}>{sold ? sold.units_90 : 0}</td>
+                                    <td className={`px-4 py-2 text-right tabular-nums whitespace-nowrap ${days != null && days < 30 ? 'text-error font-semibold' : 'text-on-surface-variant'}`}>{daysOfStockText(days)}</td>
+                                  </>
                                 );
                               })()}
                               {costKeys.map((k) => (

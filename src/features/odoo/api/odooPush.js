@@ -10,13 +10,16 @@ import { startTask } from '@/lib/taskProgress';
 // `odoo-push` edge function, which reads the values from the database itself
 // and holds back what must not go (no product in Odoo, an archived one, a UPC
 // another Odoo product has, half a box…). A new product can be created in
-// Odoo with it (`create`). The switch is app_settings 'odoo_push'
+// Odoo with it (`create`). What waits for Odoo's side (the product is not
+// there yet, an HS code its list lacks…) is tried again every hour by the
+// function's own cron. The switch is app_settings 'odoo_push'
 // (Settings → Odoo); the function checks it too.
 
 const SETTING = 'odoo_push';
 const PER_CALL = 100; // the function's limit
-// "Nothing to send" for a field (the PIM has no value): said, not a failure.
-const SOFT = new Set(['no_upc', 'no_box', 'no_weight']);
+// "Nothing to send" for a field (the PIM has no value: no_upc, no_box…):
+// said, not a failure — the function's own rule.
+const isSoft = (reason) => String(reason ?? '').startsWith('no_') && reason !== 'no_category';
 
 // The switch, remembered for a minute so a save does not wait on it twice.
 let known = null; // { at, enabled }
@@ -42,6 +45,34 @@ export async function setOdooPush(enabled) {
   });
 }
 
+// Why a send waits, in the words Settings shows.
+const WAITING = {
+  not_in_odoo: 'not in Odoo yet',
+  archived: 'archived in Odoo',
+  several: 'twice in Odoo',
+  taken: 'their UPC is on another Odoo product',
+  hs_not_listed: 'their HS code is not on Odoo’s list',
+  country_unknown: 'their country is not in Odoo',
+  refused: 'Odoo gave an error',
+};
+
+/**
+ * What could not go to Odoo yet and is tried again every hour (table
+ * odoo_pending, written by the edge function): [{ reason, label, skus }],
+ * the biggest group first.
+ */
+export async function listOdooPending() {
+  const { data, error } = await supabase.from('odoo_pending').select('sku, reason').order('sku').range(0, 999);
+  if (error) throw error;
+  const groups = new Map();
+  for (const row of data ?? []) {
+    const reason = row.reason ?? 'refused';
+    if (!groups.has(reason)) groups.set(reason, { reason, label: WAITING[reason] ?? reason, skus: [] });
+    groups.get(reason).skus.push(row.sku);
+  }
+  return [...groups.values()].sort((a, b) => b.skus.length - a.skus.length);
+}
+
 const text = (value) => String(value ?? '').trim();
 const measure = (value) => {
   const n = typeof value === 'number' ? value : parseFloat(String(value ?? '').replace(',', '.'));
@@ -54,18 +85,29 @@ const boxOf = (product) => {
 
 /**
  * Which of the fields that travel to Odoo a save changed — the product as it
- * was, the product as it is now ({ attributes, shipping_weight_lb }):
- *   upc     the UPC → Odoo's Barcode
- *   box     Shipping Dimensions → Shipping Length / Width / Height
- *   weight  Shipping Weight → Shipping Weight (Lbs)
- *   title   General Title → the Name, on products the PIM created in Odoo
+ * was, the product as it is now ({ attributes, shipping_weight_lb, model_name }):
+ *   upc             the UPC → Odoo's Barcode
+ *   box             Shipping Dimensions → Shipping Length / Width / Height
+ *   weight          Shipping Weight → Shipping Weight (Lbs)
+ *   product_weight  Product Weight → Overall Product Weight
+ *   model           Model Name → Model Name
+ *   hs              HS Code → HS Code (Odoo's own list)
+ *   country         Country of Origin → Country of Origin
+ *   title           General Title → the Name, on products the PIM created in Odoo
+ * (The main image, `image`, is sent by the media module when it changes, and
+ * the marketplace ids, `ids`, by the Aliases tab when one is added.)
  */
 export function changedOdooFields(before, after) {
   const fields = [];
-  if (text(before?.attributes?.upc) !== text(after?.attributes?.upc)) fields.push('upc');
+  const attr = (product, key) => text(product?.attributes?.[key]);
+  if (attr(before, 'upc') !== attr(after, 'upc')) fields.push('upc');
   if (boxOf(before) !== boxOf(after)) fields.push('box');
   if (measure(before?.shipping_weight_lb) !== measure(after?.shipping_weight_lb)) fields.push('weight');
-  if (text(before?.attributes?.general_title_en) !== text(after?.attributes?.general_title_en)) fields.push('title');
+  if (measure(before?.attributes?.product_weight_lb) !== measure(after?.attributes?.product_weight_lb)) fields.push('product_weight');
+  if (text(before?.model_name) !== text(after?.model_name)) fields.push('model');
+  if (attr(before, 'hs_code') !== attr(after, 'hs_code')) fields.push('hs');
+  if (attr(before, 'country_of_origin') !== attr(after, 'country_of_origin')) fields.push('country');
+  if (attr(before, 'general_title_en') !== attr(after, 'general_title_en')) fields.push('title');
   return fields;
 }
 
@@ -125,7 +167,7 @@ export async function sendToOdoo(skus, { fields = [], create = false } = {}) {
   try {
     const out = await pushToOdoo(list, { fields, create, task });
     if (out.off) { known = null; task.cancel(); return out; }
-    const failed = out.results.filter((r) => (r.held ?? []).some((h) => !SOFT.has(h.reason)));
+    const failed = out.results.filter((r) => (r.held ?? []).some((h) => !isSoft(h.reason)));
     if (one) {
       const r = out.results[0];
       if (!r) task.finish('Nothing to send');
@@ -139,7 +181,7 @@ export async function sendToOdoo(skus, { fields = [], create = false } = {}) {
     if (count('updated')) parts.push(`${count('updated')} updated in Odoo`);
     if (count('same')) parts.push(`${count('same')} already the same`);
     if (failed.length) {
-      const shown = failed.slice(0, 3).map((r) => `${r.sku}: ${r.held.filter((h) => !SOFT.has(h.reason)).map((h) => h.note).join(' ')}`).join(' ');
+      const shown = failed.slice(0, 3).map((r) => `${r.sku}: ${r.held.filter((h) => !isSoft(h.reason)).map((h) => h.note).join(' ')}`).join(' ');
       task.fail(`${[...parts, `${failed.length} with something not sent`].join(' · ')}. ${shown}${failed.length > 3 ? ' … the rest is in the Activity Log.' : ''}`);
     } else {
       task.finish(parts.join(' · ') || 'Nothing to send');

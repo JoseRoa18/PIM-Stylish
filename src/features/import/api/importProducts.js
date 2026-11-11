@@ -6,10 +6,10 @@ import { sendToOdoo, changedOdooFields } from '@/features/odoo/api/odooPush';
 
 /**
  * Check which of the given SKUs already exist. Returns a Map of
- * sku → { attributes, description, is_obsolete, shipping_weight_lb } for
- * merge purposes (the mark tells the Activity Log which products an import
- * marks or unmarks; the shipping weight, whether the import changes what
- * Odoo takes).
+ * sku → { attributes, description, is_obsolete, shipping_weight_lb,
+ * model_name } for merge purposes (the mark tells the Activity Log which
+ * products an import marks or unmarks; the shipping weight and the model
+ * name, whether the import changes what Odoo takes).
  * `task` (optional taskProgress reporter): one step per chunk of 100 SKUs.
  */
 export async function fetchExistingProducts(skus, { task = null } = {}) {
@@ -22,7 +22,7 @@ export async function fetchExistingProducts(skus, { task = null } = {}) {
     const chunk = skus.slice(i, i + 100);
     const { data, error } = await supabase
       .from('products')
-      .select('sku, attributes, description, is_obsolete, shipping_weight_lb')
+      .select('sku, attributes, description, is_obsolete, shipping_weight_lb, model_name')
       .in('sku', chunk);
     if (error) throw error;
     for (const row of data ?? []) out.set(row.sku, row);
@@ -175,6 +175,7 @@ function sendImportToOdoo(written, existingMap, create) {
     const now = {
       attributes: { ...(prev?.attributes ?? {}), ...r.attributes },
       shipping_weight_lb: r.columns.shipping_weight_lb ?? prev?.shipping_weight_lb ?? null,
+      model_name: r.columns.model_name ?? prev?.model_name ?? null,
     };
     const fields = changedOdooFields(prev ?? {}, now);
     const group = isNew ? fresh : changed;

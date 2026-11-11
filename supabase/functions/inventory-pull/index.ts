@@ -18,6 +18,11 @@
 // ShipStation Inventory and Canada from the "Stylish Inventory" Excel (daily
 // email / Settings upload): both are gone.
 //
+// `eta` (user, 2026-11-11: "llega el…"): the next date Odoo expects units of the
+// product, from the open purchase order lines of the market's company (ordered,
+// not received yet); `warehouses[code]` keeps `on_order`, `expected` and `late`
+// (the date is already past). Nothing on order → no date.
+//
 // One row per PIM product Odoo has: `available` = Available for Use (whole
 // units, never below 0), `on_hand` = Quantity On Hand, `warehouses` =
 // { "<code>": { on_hand, available, free, buildable, incoming } }. A PIM
@@ -66,8 +71,10 @@ const NO_FILE = "The stock now comes from Odoo (Calculated Inventory, Available 
 type Client = ReturnType<typeof createClient>;
 type Report = Record<string, unknown> & { ok: boolean; market: string; label: string; place: string };
 type Warehouse = { id: number; code: string; name: string; company: string; companyId: number };
-type OdooRow = { default_code: string; qty_available: number; finished_free_qty: number; max_buildable_qty: number; available_for_use: number; incoming_qty: number };
-type Stock = { on_hand: number; free: number; buildable: number; available: number; incoming: number; spellings: string[] };
+type OdooRow = { id: number; default_code: string; qty_available: number; finished_free_qty: number; max_buildable_qty: number; available_for_use: number; incoming_qty: number };
+type Stock = { on_hand: number; free: number; buildable: number; available: number; incoming: number; spellings: string[]; ids: number[] };
+// What is on order for a product: the units not received yet and the next date Odoo expects them.
+type OnOrder = { qty: number; date: string; late: boolean };
 
 // The role claim of a JWT, read without a signature check — it only picks
 // which real check to run on the bearer.
@@ -147,13 +154,14 @@ async function readStock(odoo: Odoo, warehouse: Warehouse, companies: number[], 
   for (const sku of skus) if (!byUpper.has(sku.toUpperCase())) byUpper.set(sku.toUpperCase(), sku);
   const stock = new Map<string, Stock>();
   const add = (sku: string, r: OdooRow) => {
-    const s = stock.get(sku) ?? { on_hand: 0, free: 0, buildable: 0, available: 0, incoming: 0, spellings: [] };
+    const s = stock.get(sku) ?? { on_hand: 0, free: 0, buildable: 0, available: 0, incoming: 0, spellings: [], ids: [] };
     s.on_hand += num(r.qty_available);
     s.free += num(r.finished_free_qty);
     s.buildable += num(r.max_buildable_qty);
     s.available += num(r.available_for_use);
     s.incoming += num(r.incoming_qty);
     s.spellings.push(String(r.default_code));
+    s.ids.push(r.id);
     stock.set(sku, s);
   };
   const exact = new Set(skus);
@@ -175,6 +183,39 @@ async function readStock(odoo: Odoo, warehouse: Warehouse, companies: number[], 
   return stock;
 }
 
+// What is on order for the market (user, 2026-11-11: "llega el…"): the open
+// purchase order lines of the market's company — units ordered and not
+// received yet — and the next date Odoo expects them (the line's Expected
+// Arrival). The orders land in the vendors' own warehouses of that country
+// (Irene-CAN, Elina-USA…), not in CBG / ATL, so the date is when the purchase
+// is expected, not when the units can be sold. A date already past means the
+// order is late in Odoo: the latest of those is kept and marked late.
+async function readOnOrder(odoo: Odoo, companyId: number, companies: number[], stock: Map<string, Stock>): Promise<Map<string, OnOrder>> {
+  const skuOf = new Map<number, string>();
+  for (const [sku, s] of stock) for (const id of s.ids) skuOf.set(id, sku);
+  const lines = await odoo("purchase.order.line", "search_read", [[["order_id.state", "=", "purchase"], ["order_id.company_id", "=", companyId], ["product_id", "in", [...skuOf.keys()]]]],
+    { fields: ["product_id", "product_qty", "qty_received", "date_planned"], limit: 20000, context: { allowed_company_ids: companies } }) as { product_id: [number, string]; product_qty: number; qty_received: number; date_planned: string | false }[];
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date());
+  const open = new Map<string, { qty: number; dates: string[] }>();
+  for (const l of lines) {
+    const left = num(l.product_qty) - num(l.qty_received);
+    const sku = skuOf.get(l.product_id?.[0]);
+    if (!sku || left <= 0) continue;
+    const o = open.get(sku) ?? { qty: 0, dates: [] };
+    o.qty += left;
+    if (l.date_planned) o.dates.push(String(l.date_planned).slice(0, 10));
+    open.set(sku, o);
+  }
+  const out = new Map<string, OnOrder>();
+  for (const [sku, o] of open) {
+    if (!o.dates.length) continue;
+    const dates = [...o.dates].sort();
+    const next = dates.find((d) => d >= today);
+    out.set(sku, { qty: Math.round(o.qty), date: next ?? dates[dates.length - 1], late: !next });
+  }
+  return out;
+}
+
 async function pullMarket(market: string, odoo: Odoo, warehouse: Warehouse, companies: number[], skus: string[], supabase: Client, dryRun: boolean): Promise<Report> {
   const base = {
     market, label: MARKETS[market].label, place: `Odoo warehouse ${warehouse.code}`, source: SOURCE,
@@ -184,14 +225,25 @@ async function pullMarket(market: string, odoo: Odoo, warehouse: Warehouse, comp
   const stock = await readStock(odoo, warehouse, companies, skus);
   if (stock.size === 0) return { ok: false, ...base, error: `Odoo returned none of the PIM's products for the warehouse ${warehouse.code}; nothing changed.` };
 
+  // The purchase orders are an extra: when they cannot be read the stock
+  // still goes in, without dates.
+  let onOrder = new Map<string, OnOrder>();
+  let onOrderError: string | null = null;
+  try {
+    onOrder = await readOnOrder(odoo, warehouse.companyId, companies, stock);
+  } catch (err) {
+    onOrderError = (err as Error).message;
+  }
+
   const upserts = [...stock].map(([sku, s]) => {
     // Whole units that can be sold: never a fraction, never below 0.
     const available = Math.max(0, Math.floor(s.available + 1e-9));
     const onHand = Math.round(s.on_hand);
+    const coming = onOrder.get(sku) ?? null;
     return {
       market, sku, on_hand: onHand, available,
-      warehouses: { [warehouse.code]: { on_hand: onHand, available, free: Math.round(s.free), buildable: Math.round(s.buildable), incoming: Math.round(s.incoming) } },
-      source: "odoo", source_sku: s.spellings.join(", "), eta: null, dropped_at: null, synced_at: syncedAt,
+      warehouses: { [warehouse.code]: { on_hand: onHand, available, free: Math.round(s.free), buildable: Math.round(s.buildable), incoming: Math.round(s.incoming), ...(coming ? { on_order: coming.qty, expected: coming.date, late: coming.late } : {}) } },
+      source: "odoo", source_sku: s.spellings.join(", "), eta: coming?.date ?? null, dropped_at: null, synced_at: syncedAt,
     };
   });
   const summary = {
@@ -201,6 +253,9 @@ async function pullMarket(market: string, odoo: Odoo, warehouse: Warehouse, comp
     units: upserts.reduce((a, u) => a + u.available, 0),
     notInOdoo: skus.filter((s) => !stock.has(s)).sort(),
     duplicates: [...stock].filter(([, s]) => s.spellings.length > 1).map(([sku]) => sku).sort(),
+    onOrder: onOrder.size,
+    onOrderLate: [...onOrder.values()].filter((o) => o.late).length,
+    ...(onOrderError ? { onOrderError } : {}),
     syncedAt,
   };
 

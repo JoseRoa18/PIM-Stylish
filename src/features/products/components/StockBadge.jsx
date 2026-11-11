@@ -1,10 +1,11 @@
 import { Package } from 'lucide-react';
-import { STOCK_MARKETS, describeStock } from '@/features/pricing/api/inventory';
+import { STOCK_MARKETS, describeStock, arrivalText } from '@/features/pricing/api/inventory';
 
 /**
  * Stock chip for one product and market: units available for use in that
- * market's Odoo warehouse (Canada CBG, USA ATL), 0 — with an ETA when the
- * row has one —, or "not tracked" (no row: Odoo does not have the product;
+ * market's Odoo warehouse (Canada CBG, USA ATL), 0 — with the date Odoo
+ * expects more ("arrives Nov 27", "was due Oct 17") when units are on
+ * order —, or "not tracked" (no row: Odoo does not have the product;
  * unknown, never zero). While `loading` the chip stays out of the way
  * instead of flashing "not tracked".
  */
@@ -20,7 +21,7 @@ export default function StockBadge({ stock, market, loading = false }) {
   const label = STOCK_MARKETS[market] ?? market;
   const text = !tracked
     ? `${label} stock · not tracked`
-    : `${label} stock · ${stock.available}${out && stock.eta ? ` · ETA ${stock.eta}` : ''}`;
+    : `${label} stock · ${stock.available}${out && arrivalText(stock) ? ` · ${arrivalText(stock)}` : ''}`;
   return (
     <span title={describeStock(stock, market)} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-body-sm font-medium whitespace-nowrap ${cls}`}>
       <Package className="w-3.5 h-3.5" strokeWidth={2} />

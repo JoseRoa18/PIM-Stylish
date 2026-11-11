@@ -132,6 +132,30 @@ export function describeInventoryPull(data) {
   });
 }
 
+/**
+ * What is on order for a stock row (user, 2026-11-11: "llega el…"): the units
+ * of Odoo's open purchase orders not received yet and the next date Odoo
+ * expects them — { qty, date, day ("Nov 27"), late } — or null when nothing
+ * is on order. `late`: the date is already past in Odoo. It is the date of
+ * the purchase, which lands in the vendor's warehouse of that country first.
+ */
+export function onOrder(stock) {
+  const w = Object.values(stock?.warehouses ?? {})[0];
+  const date = w?.expected ?? stock?.eta ?? null;
+  if (!date) return null;
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : String(date);
+  return { qty: w?.on_order ?? null, date, day, late: w?.late === true };
+}
+
+/** "arrives Nov 27" · "was due Oct 17" · '' (nothing on order). */
+export function arrivalText(stock) {
+  const o = onOrder(stock);
+  if (!o) return '';
+  return o.late ? `was due ${o.day}` : `arrives ${o.day}`;
+}
+
 /** Tooltip for one product_inventory row (or null = not tracked). */
 export function describeStock(stock, market) {
   if (!stock) return NOT_TRACKED[market] ?? 'Not tracked';
@@ -139,8 +163,9 @@ export function describeStock(stock, market) {
   const where = `Odoo · ${code ?? STOCK_WAREHOUSES[market] ?? market}`;
   // Odoo's own sum: free finished units + what can be built from components.
   const how = w?.free != null && w?.buildable ? ` (${w.free} free + ${w.buildable} buildable)` : '';
-  const eta = stock.eta ? ` · ETA ${stock.eta}` : '';
-  return `${where} · available for use ${stock.available}${how}, on hand ${stock.on_hand}${eta} · synced ${stockAge(stock.synced_at)}`;
+  const o = onOrder(stock);
+  const coming = o ? ` · ${o.qty != null ? `${o.qty} on order, ` : ''}${o.late ? `was due ${o.day} (late in Odoo)` : `expected ${o.day}`}` : '';
+  return `${where} · available for use ${stock.available}${how}, on hand ${stock.on_hand}${coming} · synced ${stockAge(stock.synced_at)}`;
 }
 
 /** "just now" · "12 min ago" · "3 h ago" · "2 d ago" — for the sync stamp. */

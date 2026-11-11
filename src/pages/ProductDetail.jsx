@@ -50,6 +50,7 @@ import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
 import StockBadge from '@/features/products/components/StockBadge';
 import { getStockFor } from '@/features/pricing/api/inventory';
 import { sendToOdoo, changedOdooFields } from '@/features/odoo/api/odooPush';
+import ProductSalesCard from '@/features/pricing/components/ProductSalesCard';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import { isExcluded, wixExclusionKey, marketplaceLabel, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
 import { latestSnapshotItem } from '@/features/syndication/lib/channels';
@@ -728,18 +729,22 @@ export default function ProductDetail() {
       <div className="mt-6" role="tabpanel" aria-label={TABS.find((t) => t.key === activeTab)?.label}>
         <Suspense fallback={<TabFallback />}>
         {activeTab === 'overview' && (
-          <OverviewTab
-            product={product}
-            edit={editCtx}
-            onProductChanged={refetch}
-            onUnify={(driftFields) =>
-              setPropagation({
-                changes: driftFields,
-                title: 'Unify shared attributes?',
-                subtitle: `Family ${product.family_number} · copy this product's values to the variants that differ`,
-              })
-            }
-          />
+          <div className="space-y-6">
+            {/* What Odoo sold and has of it, per market (user, 2026-11-11). */}
+            <ProductSalesCard sku={product.sku} stock={stock} />
+            <OverviewTab
+              product={product}
+              edit={editCtx}
+              onProductChanged={refetch}
+              onUnify={(driftFields) =>
+                setPropagation({
+                  changes: driftFields,
+                  title: 'Unify shared attributes?',
+                  subtitle: `Family ${product.family_number} · copy this product's values to the variants that differ`,
+                })
+              }
+            />
+          </div>
         )}
         {activeTab === 'specs' && <SpecsTab product={product} edit={editCtx} />}
         {activeTab === 'content' && <ContentTab product={product} edit={editCtx} onGenerated={refetch} />}

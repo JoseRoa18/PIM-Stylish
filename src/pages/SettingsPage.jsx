@@ -11,7 +11,7 @@ import { WARRANTY_BRANDS, getBrandWarranties, setBrandWarranty, countBrandProduc
 import { DocumentRow } from '@/features/media/components/DocumentsSection';
 import { Link } from 'react-router-dom';
 import { startTask } from '@/lib/taskProgress';
-import { setOdooPush } from '@/features/odoo/api/odooPush';
+import { setOdooPush, listOdooPending } from '@/features/odoo/api/odooPush';
 
 function monthLabel(period) {
   if (!period) return '';
@@ -352,17 +352,20 @@ function OdooSection() {
   const descriptionId = useId();
   const [on, setOn] = useState(null); // null while loading
   const [error, setError] = useState(null);
+  // What could not go yet and is tried again every hour.
+  const [pending, setPending] = useState([]);
 
   useEffect(() => {
     getAppSetting('odoo_push', { enabled: false })
       .then((value) => setOn(value?.enabled === true))
       .catch((err) => { setOn(false); setError(err.message); });
+    listOdooPending().then(setPending).catch(() => {});
   }, []);
 
   async function toggle(next) {
     if (next && !(await confirm({
       title: 'Send product data to Odoo?',
-      message: 'From now on, a UPC, a shipping box or a shipping weight saved in the PIM — on a product page or through a spreadsheet import — is written to that product in Odoo right away, and a new product can be created there with it. A product nobody edits is not touched.',
+      message: 'From now on, what the PIM owns of a product — UPC, shipping box and weight, product weight, model name, HS code, country of origin, main image and marketplace ids — is written to that product in Odoo right away when it is saved in the PIM, and a new product can be created there with it. A product nobody edits is not touched.',
       confirmLabel: 'Turn on',
     }))) return;
     const prev = on;
@@ -386,7 +389,7 @@ function OdooSection() {
           <div>
             <h2 className="text-title-md text-on-surface font-semibold">Odoo</h2>
             <p id={descriptionId} className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-              One way, PIM to Odoo. When a product’s UPC, shipping box or shipping weight is saved in the PIM — on its page or through a spreadsheet import — it is written to that product in Odoo right away. A new product is created in Odoo when its “Create it in Odoo too” box is ticked; its name there is the General Title. The PIM never empties a field in Odoo, never sends half a box, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
+              One way, PIM to Odoo. When a product’s UPC, shipping box, shipping weight, product weight, model name, HS code, country of origin, main image or a marketplace id (Aliases) is saved in the PIM — on its page or through a spreadsheet import — it is written to that product in Odoo right away. A new product is created in Odoo when its “Create it in Odoo too” box is ticked; its name there is the General Title. The PIM never empties a field in Odoo, never sends half a box, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
               <Link to="/activity" className="text-primary underline underline-offset-2">Activity Log</Link>.
             </p>
           </div>
@@ -396,6 +399,19 @@ function OdooSection() {
           <Switch checked={on === true} disabled={on === null} onChange={toggle} label="Send product data to Odoo" describedBy={descriptionId} />
         </div>
       </div>
+      {pending.length > 0 && (
+        <div className="mt-4 rounded-xl bg-surface-container-low/60 p-4 space-y-2">
+          <p className="text-label-lg font-medium text-on-surface">
+            Waiting for Odoo — tried again every hour
+          </p>
+          {pending.map((group) => (
+            <p key={group.reason} className="text-body-sm text-on-surface-variant [overflow-wrap:anywhere]">
+              <span className="text-on-surface font-medium">{group.skus.length} {group.label}:</span>{' '}
+              {group.skus.join(', ')}
+            </p>
+          ))}
+        </div>
+      )}
       {error && (
         <p role="alert" className="mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 bg-error-container/60 text-on-error-container">
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />

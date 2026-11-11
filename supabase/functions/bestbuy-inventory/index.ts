@@ -60,7 +60,14 @@ async function liveOffers(key: string): Promise<Offer[]> {
     const res = await fetch(`${MIRAKL_BASE}/api/offers?max=100&offset=${offset}`, { headers: { Authorization: key, Accept: "application/json" } });
     if (!res.ok) throw new Error(`Could not read Best Buy's offers (Mirakl ${res.status}) — nothing was sent.`);
     const data = await res.json();
-    for (const o of data.offers ?? []) out.push({ shop_sku: String(o.shop_sku), quantity: Number(o.quantity ?? 0), price: o.price ?? null, discount: o.discount ?? null });
+    // The offer's OWN price: while a discount runs Mirakl's `price` is the
+    // discounted one and the offer's price is discount.origin_price. Sending
+    // `price` with the carried discount made price = discount price, and
+    // Mirakl refused the line ("The discount price is incorrect: must not be
+    // null or must be lower than price") — 124 of 250 lines on 2026-11-10, so
+    // the stock of every product on promotion had stopped reaching Best Buy
+    // (S-601WK stood at 6 units with 144 in the PIM). Fixed 2026-11-11.
+    for (const o of data.offers ?? []) out.push({ shop_sku: String(o.shop_sku), quantity: Number(o.quantity ?? 0), price: o.discount?.origin_price ?? o.price ?? null, discount: o.discount ?? null });
     if (!data.offers?.length || offset + 100 >= (data.total_count ?? 0)) break;
   }
   return out;
