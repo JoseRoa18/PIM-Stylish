@@ -111,6 +111,26 @@ export function changedOdooFields(before, after) {
   return fields;
 }
 
+/**
+ * The Odoo fields a write touches, from the names of what it wrote: the
+ * product columns and the attribute keys. For the writers that do not hold
+ * the product before and after (the catalog's bulk edit, "apply to variants").
+ */
+export function odooFieldsOf(columnKeys = [], attributeKeys = []) {
+  const column = new Set(columnKeys);
+  const attribute = new Set(attributeKeys);
+  const fields = [];
+  if (attribute.has('upc')) fields.push('upc');
+  if (attribute.has('shipping_dimensions_in')) fields.push('box');
+  if (column.has('shipping_weight_lb')) fields.push('weight');
+  if (attribute.has('product_weight_lb')) fields.push('product_weight');
+  if (column.has('model_name')) fields.push('model');
+  if (attribute.has('hs_code')) fields.push('hs');
+  if (attribute.has('country_of_origin')) fields.push('country');
+  if (attribute.has('general_title_en')) fields.push('title');
+  return fields;
+}
+
 async function invoke(body) {
   const { data, error } = await supabase.functions.invoke('odoo-push', { body });
   if (error) {

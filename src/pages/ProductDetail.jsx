@@ -49,7 +49,7 @@ import StatusBadge from '@/features/products/components/StatusBadge';
 import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
 import StockBadge from '@/features/products/components/StockBadge';
 import { getStockFor } from '@/features/pricing/api/inventory';
-import { sendToOdoo, changedOdooFields } from '@/features/odoo/api/odooPush';
+import { sendToOdoo, changedOdooFields, odooFieldsOf } from '@/features/odoo/api/odooPush';
 import ProductSalesCard from '@/features/pricing/components/ProductSalesCard';
 import { WIX_SITES, DEFAULT_WIX_SITE, wixSiteSells, wixSitesFor } from '@/features/syndication/lib/wixSites';
 import { isExcluded, wixExclusionKey, marketplaceLabel, templateMarketplaceKey } from '@/features/syndication/lib/marketplaces';
@@ -835,6 +835,10 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
         if (Object.keys(patch).length) { await updateProduct(v.sku, patch); ok++; }
       }
       task.finish(`Applied to ${ok} of ${targets.length} variant${targets.length === 1 ? '' : 's'}`);
+      // What Odoo takes of the fields copied (box, weights, HS code, country…)
+      // goes there for every variant, as it does for the product itself.
+      const odooFields = odooFieldsOf(fields.filter((f) => f.scope === 'column').map((f) => f.key), fields.filter((f) => f.scope !== 'column').map((f) => f.key));
+      if (ok && odooFields.length) sendToOdoo(targets.map((v) => v.sku), { fields: odooFields });
       setResult({ ok, total: targets.length });
     } catch (err) {
       task.fail(err);

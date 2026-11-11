@@ -3,6 +3,7 @@ import { logActivity } from '@/features/activity/api/activityLog';
 import { deleteStorageObjectsIfUnreferenced } from '@/features/media/api/media';
 import { formatFieldList } from '@/lib/humanize';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
+import { sendToOdoo, odooFieldsOf } from '@/features/odoo/api/odooPush';
 
 /**
  * List all products from the catalog with their primary image (if any).
@@ -426,6 +427,10 @@ export async function bulkUpdateProducts(skus, patch = {}, attrPatch = {}, { tas
     summary: `Bulk-edited ${skus.length} ${skus.length === 1 ? 'product' : 'products'}${changedKeys.length ? ` (${formatFieldList(changedKeys)})` : ''}`,
     metadata: { count: skus.length, fields: changedKeys, skus },
   });
+  // What Odoo takes of what was edited (the Country of Origin today) goes
+  // there too, beside the edit, with its own card (2026-11-11).
+  const odooFields = odooFieldsOf(Object.keys(patch ?? {}), Object.keys(attrPatch ?? {}));
+  if (odooFields.length) sendToOdoo(skus, { fields: odooFields });
   // Same Ready-to-Sell link refresh as updateProduct, for the whole batch.
   if (patch?.workflow_status === 'ready_to_sell') {
     autoLinkChannels(skus).catch((err) => console.error('Channel auto-link failed:', err));
