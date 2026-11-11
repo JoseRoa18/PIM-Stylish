@@ -206,6 +206,11 @@ function NewCouponForm({ onClose, onCreated }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // An amount as much as the product's price or more is said once before the
+  // coupon is created (user, 2026-11-11 — a warning: pressing Create again
+  // with the same amounts creates it). `warned` = what was already said.
+  const [warned, setWarned] = useState(null);
+  const [overNote, setOverNote] = useState(null);
   // A percentage is the whole coupon's; money is per product (user, 2026-11-09).
   const money = type === 'amount';
   const currency = [...new Set(marketplaces.map((k) => (k.endsWith('_ca') ? 'CAD' : 'USD')))].sort().join(' / ') || 'money';
@@ -219,6 +224,7 @@ function NewCouponForm({ onClose, onCreated }) {
   async function create() {
     setBusy(true);
     setError(null);
+    setOverNote(null);
     let task = null;
     try {
       const base = { name: name.trim(), discount_type: type, discount_value: money ? null : parseCouponValue(value, type), amounts: money ? list.amounts : null, starts_on: startsOn, ends_on: endsOn, skus: list.skus };
@@ -229,6 +235,15 @@ function NewCouponForm({ onClose, onCreated }) {
       const reviewed = await reviewCoupons(marketplaces.map((marketplace) => ({ ...base, marketplace })));
       if (reviewed.every((c) => c.exists)) throw new Error('A coupon with that name and first day already exists on the marketplaces picked.');
       if (!reviewed.some((c) => c.skus.length && !c.exists)) throw new Error('None of these products can go on this coupon: they are not in the PIM or are switched off for the marketplaces picked.');
+      const over = reviewed.filter((c) => !c.exists).flatMap((c) => c.overPrice.map((r) => `${r.sku} ${couponAmountText(c.marketplace, r.amount)} off with a MAP of ${couponAmountText(c.marketplace, r.map)} (${label(c.marketplace)})`));
+      const typed = JSON.stringify([marketplaces, list.amounts ?? null]);
+      if (over.length && warned !== typed) {
+        task.cancel();
+        setWarned(typed);
+        setOverNote(`${plural(over.length, 'amount')} as much as the product's price or more: ${listOf(over, 6)}. If that is right, press Create coupon again.`);
+        setBusy(false);
+        return;
+      }
       const made = await createCoupons(reviewed, { task: task.part(0.3, 1) });
       task.finish(plural(made, 'coupon'));
       onCreated(leftOutNote(reviewed));
@@ -305,6 +320,7 @@ function NewCouponForm({ onClose, onCreated }) {
           Create coupon
         </button>
       </div>
+      {overNote && <p role="status" className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">{overNote}</p>}
       {error && <p role="alert" className="text-body-sm text-on-error-container bg-error-container/60 rounded-lg px-3 py-2">{error}</p>}
     </div>
   );
@@ -402,6 +418,7 @@ function UploadDialog({ onClose, onCreated }) {
                 {c.exists && <p className="text-error">Already exists: it will not be created again.</p>}
                 {c.notInPim.length > 0 && <p className="text-error">Not in the PIM, left out: {listOf(c.notInPim)}</p>}
                 {c.excluded.length > 0 && <p className="text-on-surface-variant">Switched off for this marketplace, left out: {listOf(c.excluded)}</p>}
+                {c.overPrice?.length > 0 && <p className="text-error">An amount as much as the product&apos;s price or more — check it before creating: {listOf(c.overPrice.map((r) => `${r.sku} (${couponAmountText(c.marketplace, r.amount)} off, MAP ${couponAmountText(c.marketplace, r.map)})`), 6)}</p>}
               </li>
             ))}
           </ul>

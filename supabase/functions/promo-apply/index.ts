@@ -555,7 +555,47 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
   // (Best Buy re-schedules on every prep pass) already went out.
   const doPrep = chain === 0 && (prepTarget != null || prepUsTarget != null);
 
+  // A promotion ENDS once BOTH markets' windows are over — the day after the
+  // one that closes last (user, 2026-11-11: "cuando culmine la fecha más
+  // tardía, debería pasarse a ended"). Until 2026-11-11 only the Canada pass
+  // ended promotions: October 2026 closed in Canada first (Oct 21) and in the
+  // USA last (Oct 31), the USA pass ended nothing, and it stood "active" —
+  // with its End promotion button — until the next Canada boundary (Dec 3).
+  // Never a target (a promotion still running on a market is not over), and
+  // only the status changes: the members' prices are the passes' work.
+  const overBoth = promos.filter((p) =>
+    p.status === "active" && p.id !== usTarget?.id && p.id !== caTarget?.id &&
+    win(p, "us").end < today && win(p, "ca").end < today
+  );
+  const endedNow = new Set<number>();
+  const endPromotions = async (list: PromoRow[]) => {
+    for (const p of list) {
+      if (endedNow.has(p.id)) continue;
+      await restPatch(`promotions?id=eq.${p.id}`, { status: "ended", ended_at: nowIso });
+      endedNow.add(p.id);
+    }
+  };
+  if (overBoth.length) report.ending = overBoth.map((p) => ({ id: p.id, name: p.name }));
+
   if (!doUS && !doCA && !doPrep) {
+    // No pass today, so the day after its last window is behind it (that day
+    // is a pass day): a promotion still active here was left open by a run
+    // that never got to end it. Its status is closed now.
+    if (!dryRun && overBoth.length) {
+      try {
+        await endPromotions(overBoth);
+        await restPost("audit_log", {
+          action: "update",
+          entity_type: "promotion",
+          entity_id: overBoth.map((p) => p.id).join(","),
+          target: "automation",
+          summary: `Promotion ended (its dates are over in both countries): ${overBoth.map((p) => `"${p.name}"`).join(", ")}`,
+          metadata: { ended: overBoth.map((p) => ({ id: p.id, name: p.name, us_end: win(p, "us").end, ca_end: win(p, "ca").end })) },
+        });
+      } catch (err) {
+        return { ...report, skipped: "no promo boundary today", errors: [`ending: ${(err as Error).message}`], ok: false };
+      }
+    }
     return { ...report, skipped: "no promo boundary today" };
   }
 
@@ -656,7 +696,6 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
     }
     const clearSkus = [...endSkus].filter((s) => !targetCadSkus.has(s));
     report.store = { cleared: clearSkus.length, on_sale: cadRows.length };
-    report.ending = toEnd.map((p) => ({ id: p.id, name: p.name }));
 
     if (!dryRun) {
       for (const part of chunk(clearSkus, 100)) {
@@ -670,9 +709,7 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
       applied.forEach((res, i) => {
         if (res.status === "rejected") errors.push(`store ${cadRows[i].sku}: ${(res.reason as Error).message}`);
       });
-      for (const p of toEnd) {
-        await restPatch(`promotions?id=eq.${p.id}`, { status: "ended", ended_at: nowIso });
-      }
+      await endPromotions(toEnd);
     }
 
     if (settings.wix !== false) {
@@ -799,6 +836,19 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
     }
   }
 
+  // The promotions over on both markets that the Canada pass did not end —
+  // the USA closed last. On a pass day only once nothing is owed to Wix:
+  // until then the promotion stays on the board, so the second nightly run
+  // and the continuation runs still see the market that closed and its
+  // members. (A day with only the prep pass closes no market.)
+  if (!dryRun && (!(doUS || doCA) || wixOwed === 0)) {
+    try {
+      await endPromotions(overBoth);
+    } catch (err) {
+      errors.push(`ending: ${(err as Error).message}`);
+    }
+  }
+
   // -- 6. Wix changes still owed: the next run of the chain finishes them ----
   if (!dryRun && !lockedByOther && (doUS || doCA)) {
     progress.lock_until = null;
@@ -839,6 +889,7 @@ async function run(dryRun: boolean, reconcile: boolean, opts: { chain?: number; 
     if (chain > 0) parts.push(`Wix continuation ${chain}`);
     if (doUS) parts.push(usTarget ? `USA on promo "${usTarget.name}"` : "USA back to regular prices");
     if (doCA) parts.push(caTarget ? `Canada on promo "${caTarget.name}"` : "Canada back to regular prices");
+    if (endedNow.size) parts.push(`ended ${promos.filter((p) => endedNow.has(p.id)).map((p) => `"${p.name}"`).join(", ")} (its dates are over in both countries)`);
     if (lockedByOther) parts.push("Wix left to the run still pushing");
     else if (report.wix_owed) parts.push(`Wix: ${report.wix_owed} changes left${report.wix_continuing ? ", continuing" : ""}`);
     if (doPrep && prepTarget && settings.bestbuy !== false) parts.push(`Best Buy scheduled for "${prepTarget.name}" (starts tomorrow)`);

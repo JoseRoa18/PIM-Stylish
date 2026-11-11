@@ -19,6 +19,7 @@ import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { fetchProductsForImport, fetchUpcOwners, importProducts } from '@/features/import/api/importProducts';
 import { rowChanges } from '@/features/import/lib/importChanges';
 import { flagInvalidUpcs, flagRepeatedUpcs } from '@/features/import/lib/upcCheck';
+import { flagPriceProblems } from '@/features/import/lib/priceCheck';
 import { isOdooPushOn } from '@/features/odoo/api/odooPush';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import { startTask } from '@/lib/taskProgress';
@@ -228,6 +229,10 @@ export default function ImportProducts() {
         flagInvalidUpcs(built.rows, existing);
         flagRepeatedUpcs(built.rows, existing, await fetchUpcOwners());
       }
+      // The prices a row sets must make sense (more than 0, Orange and Purple
+      // never above Blue, a cost under the MAP of its level): an error here,
+      // like the database's own refusal.
+      flagPriceProblems(built.rows, existing);
       // What each row would change on the product the PIM has.
       for (const r of built.rows) {
         if (!r.errors.length && existing.has(r.sku)) r.changes = rowChanges(r, existing.get(r.sku));

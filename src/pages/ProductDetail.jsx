@@ -42,6 +42,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useVariants } from '@/features/products/hooks/useVariants';
 import { VARIANT_DISTINGUISHING, NEVER_PROPAGATE, prettifyKey, readField } from '@/features/products/lib/variantFields';
 import { upcProblem } from '@/features/import/lib/upcCheck';
+import { PRICE_KEYS, priceProblems, priceNotes, changedPriceKeys } from '@/features/products/lib/priceRules';
 import Dialog from '@/components/ui/Dialog';
 import { getThumbnailUrl, thumbFallback } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
@@ -553,6 +554,17 @@ export default function ProductDetail() {
         const problem = upcProblem(upcTyped);
         if (problem) {
           setSaveError(`UPC ${upcTyped} is not valid: ${problem}.`);
+          return;
+        }
+      }
+      // The prices this save changes must make sense (more than 0, Orange and
+      // Purple never above Blue, a cost under the MAP of its level): the
+      // database refuses them anyway — the same rule in the same words.
+      const priceKeys = Object.keys(patch).filter((k) => PRICE_KEYS.includes(k));
+      if (priceKeys.length) {
+        const problems = priceProblems({ ...product, ...patch }, priceKeys);
+        if (problems.length) {
+          setSaveError(problems.join(' '));
           return;
         }
       }
@@ -1658,16 +1670,31 @@ function ContentTab({ product, edit, onGenerated }) {
 // ===================== Pricing Tab =====================
 
 function PricingTab({ product, edit, onAddPricing }) {
-  const PRICE_KEYS = [
-    'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
-    'msrp_usd', 'map_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_wayfair', 'cost_usd_menards',
-  'map_orange_cad', 'map_orange_usd', 'map_purple_cad', 'map_purple_usd',
-  'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards_orange', 'cost_usd_menards_purple',
-  ...WAYFAIR_CA_KEYS,
-  ];
+  // PRICE_KEYS: every price column (the MSRPs, the MAPs and costs of the three levels).
   const noPricing = !edit.isEditing && PRICE_KEYS.every((k) => product[k] == null);
+  // While editing: what would stop the save (the rule of priceRules.js, on
+  // the prices being changed) and what is worth a second look.
+  const typed = edit.isEditing ? { ...product, ...Object.fromEntries(PRICE_KEYS.filter((k) => k in edit.form).map((k) => [k, edit.form[k]])) } : null;
+  const problems = typed ? priceProblems(typed, changedPriceKeys(product, typed)) : [];
+  const notes = typed ? priceNotes(typed) : [];
   return (
     <div className="space-y-6">
+      {problems.length > 0 && (
+        <div role="alert" className="px-4 py-3 rounded-xl bg-error-container text-on-error-container text-body-sm">
+          <p className="font-medium">These prices cannot be saved:</p>
+          <ul className="mt-1 list-disc pl-5 space-y-0.5">
+            {problems.map((p) => <li key={p}>{p}</li>)}
+          </ul>
+        </div>
+      )}
+      {notes.length > 0 && (
+        <div role="status" className="px-4 py-3 rounded-xl bg-surface-container text-on-surface-variant text-body-sm">
+          <p className="font-medium text-on-surface">Worth a look (they do not stop the save):</p>
+          <ul className="mt-1 list-disc pl-5 space-y-0.5">
+            {notes.map((n) => <li key={n}>{n}</li>)}
+          </ul>
+        </div>
+      )}
       {noPricing ? (
         <Section title="Pricing">
           <div className="flex flex-wrap items-center gap-3 py-1">

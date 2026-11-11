@@ -297,6 +297,7 @@ function assertStylishAlone(portals) {
 // 200, the promotion, its rows in batches of 200.
 export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [], stylish_discount = null, task = null }) {
   assertKindDates(kind, starts_on, ends_on);
+  await assertMonthFree(kind, period);
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
   if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${KIND_NOUN[kind] ?? kind} is for.`);
   assertStylishAlone(portals);
@@ -409,6 +410,28 @@ export const KIND_NOUN = { monthly: 'monthly promotion', flash: 'flash deal', mk
 function assertKindDates(kind, starts_on, ends_on) {
   if (kind !== 'monthly' && !(starts_on && ends_on)) throw new Error(`This ${KIND_NOUN[kind] ?? kind} needs a first and a last day.`);
 }
+
+/**
+ * The monthly promotion a month already has (one that is not ended), or null.
+ * A month has ONE monthly promotion (user, 2026-11-11): the nightly automation
+ * takes one per market and day, so a second one was left out without a word.
+ * The database refuses it too (promotions_one_monthly_per_month).
+ */
+export async function monthlyOfPeriod(period, exceptId = null) {
+  let query = supabase.from('promotions').select('id, name, status').eq('kind', 'monthly').eq('period', period).neq('status', 'ended');
+  if (exceptId != null) query = query.neq('id', exceptId);
+  const { data, error } = await query.limit(1);
+  if (error) throw error;
+  return data?.[0] ?? null;
+}
+const monthName = (period) => new Date(`${String(period).slice(0, 7)}-15T12:00:00`).toLocaleDateString('en-CA', { month: 'long', year: 'numeric' });
+/** What the form says when the month is taken. */
+export const monthTakenText = (period, taken) => `${monthName(period)} already has a monthly promotion: "${taken.name}". A month has only one — open that one and use Import list to change its products.`;
+async function assertMonthFree(kind, period) {
+  if (kind !== 'monthly') return;
+  const taken = await monthlyOfPeriod(period);
+  if (taken) throw new Error(monthTakenText(period, taken));
+}
 // Dates are per country (rule 2026-09-30): a monthly promotion created with
 // custom dates gets them on both markets (each is changed on its card) and
 // on the promotion-wide pair (older readers of that pair see the same days);
@@ -422,6 +445,7 @@ function dateColumns(kind, starts_on, ends_on) {
 
 export async function createPromotion({ name, period, currency, rows, kind = 'monthly', starts_on = null, ends_on = null }) {
   assertKindDates(kind, starts_on, ends_on);
+  await assertMonthFree(kind, period);
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
@@ -465,6 +489,7 @@ export async function createPromotion({ name, period, currency, rows, kind = 'mo
  */
 export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null, source = 'file', task = null }) {
   assertKindDates(kind, starts_on, ends_on);
+  await assertMonthFree(kind, period);
   task?.progress(0, 'Checking the SKUs against the PIM…');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
@@ -550,6 +575,10 @@ function withoutMarketCosts(costs, market) {
  */
 export async function addFileToPromotion(promotion, rows, market, { task = null, source = 'file' } = {}) {
   if (market !== 'ca' && market !== 'us') throw new Error('Pick the market this file is for.');
+  // A SKU goes once (the readers say which rows repeat it; this is the
+  // backstop — two rows of one SKU in the same save fail in the database).
+  const twice = [...new Set(rows.map((r) => r.sku).filter((sku, i, all) => all.indexOf(sku) !== i))];
+  if (twice.length) throw new Error(`${twice.length === 1 ? 'This SKU is' : 'These SKUs are'} more than once in the ${source === 'list' ? 'list' : 'file'}: ${twice.slice(0, 10).join(', ')}${twice.length > 10 ? ` and ${twice.length - 10} more` : ''}. A SKU goes once.`);
   task?.progress(0, 'Checking the SKUs against the PIM…');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;

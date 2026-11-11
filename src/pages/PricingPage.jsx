@@ -19,7 +19,7 @@ import {
 import FilterDropdown from '@/features/products/components/FilterDropdown';
 import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
 import { getStockFor, refreshInventory, describeInventoryPull, describeStock, stockAge, arrivalText } from '@/features/pricing/api/inventory';
-import { getSalesFor, daysOfStock, daysOfStockText } from '@/features/pricing/api/sales';
+import { getSalesFor } from '@/features/pricing/api/sales';
 // Icon DATA (vanilla lucide) for MorphIcon — it animates the strokes between
 // the two shapes instead of swapping elements.
 import { MorphIcon } from 'morphicons/react';
@@ -53,7 +53,10 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
-import { PROMOTION_KINDS, KIND_NOUN, monthlyOverlap, KIND_LEVEL, LEVEL_FIELDS, levelLabel, promotionLevel, onMarketList, marketListRows } from '@/features/pricing/api/promotions';
+import { PROMOTION_KINDS, KIND_NOUN, monthlyOverlap, KIND_LEVEL, LEVEL_FIELDS, levelLabel, promotionLevel, onMarketList, marketListRows, monthlyOfPeriod, monthTakenText } from '@/features/pricing/api/promotions';
+import { loadCheckProducts, overlappingDeals } from '@/features/pricing/api/promoChecks';
+import { checkMarketList, checkDealList, marketWarnings, dealWarnings, planMarketImport, listOf } from '@/features/pricing/lib/promoChecks';
+import PromoCheckNotes from '@/features/pricing/components/PromoCheckNotes';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
@@ -137,6 +140,9 @@ const costMeta = (slug) =>
   PROMO_COST_META[slug] ?? { label: slug, unit: slug.endsWith('_usd') ? 'USD' : 'CAD', market: slug.includes('usd') && !slug.includes('_ca_') ? 'us' : 'ca' };
 
 const fmt = (v) => (v == null ? '—' : `$${Number(v).toFixed(2)}`);
+// What stops a promotion file, one after another (each names its row or SKU).
+const NO_SKUS = []; // one empty list for every render, so an effect that depends on it does not run again
+const joinProblems = (problems, max = 8) => `${problems.slice(0, max).join(' · ')}${problems.length > max ? ` · and ${problems.length - max} more` : ''}`;
 
 // Stock states of the price table's filter (each market reads its own Odoo
 // warehouse). A SKU without a row is unknown, not zero.
@@ -978,15 +984,37 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const skuList = useMemo(() => parseSkuList(text), [text]);
   const pasteLists = useMemo(() => ({ ca: parseSkuList(pasted.ca), us: parseSkuList(pasted.us) }), [pasted]);
 
+  // A file is taken only whole (user, 2026-11-11): the other country's file, a
+  // price that cannot be read, a SKU on two rows, a promo price above the
+  // regular MAP or a promo cost that is not under the promo price refuse it,
+  // and the message names the rows to fix. What is only worth a look (a price
+  // that lowers nothing, more than 40 % off, rows left out) stays with the
+  // file as `check` and shows under it.
   async function handleFile(market, file) {
     setError(null);
-    if (!file) { setFiles((f) => ({ ...f, [market]: null })); return; }
+    setFiles((f) => ({ ...f, [market]: null }));
+    if (!file) return;
+    const label = market === 'us' ? 'USA' : 'Canada';
     try {
       const res = await parsePromoFile(file);
+      if (!res.matchedColumns.some((c) => MARKET_FIELDS[market].includes(c))) {
+        throw new Error(`${file.name} has no ${label} price columns — it looks like the ${market === 'us' ? 'Canada' : 'USA'} file. Use the ${label} template of this box.`);
+      }
+      const refuse = (problems) => new Error(`The ${label} file was not loaded — fix ${problems.length === 1 ? 'this' : 'these'} and choose it again: ${joinProblems(problems)}`);
+      if (res.problems.length) throw refuse(res.problems);
+      const products = await loadCheckProducts(res.rows.map((r) => r.sku));
+      const check = checkMarketList({
+        rows: res.rows.map((r) => ({ sku: r.sku, price: market === 'us' ? r.promo_price_usd : r.promo_price_cad, costs: r.promo_costs })),
+        market,
+        kind,
+        levelFields: LEVEL_FIELDS[KIND_LEVEL[kind]],
+        products,
+      });
+      if (check.errors.length) throw refuse(check.errors);
       const cols = res.matchedColumns.filter((c) => c !== 'sku').length;
       const summary = `${file.name} — ${res.rows.length} SKUs · ${cols} price column${cols === 1 ? '' : 's'}` +
         (res.unknownHeaders.length ? ` · ignored: ${res.unknownHeaders.join(', ')}` : '');
-      setFiles((f) => ({ ...f, [market]: { rows: res.rows, summary } }));
+      setFiles((f) => ({ ...f, [market]: { rows: res.rows, summary, check, emptySkus: res.emptySkus } }));
     } catch (err) {
       setError(err.message);
     }
@@ -1077,7 +1105,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
-  const canCreate = !monthly ? (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : mergedPasteRows.length > 0;
+  const hasList = !monthly ? (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : mergedPasteRows.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
   // those days makes no sense in a flash deal — warn before creating.
@@ -1200,6 +1228,76 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   }, [obsoleteKey, stockSkus]);
   const obsoleteNow = obsolete?.key === obsoleteKey && stockSkus.length ? obsolete.skus : [];
 
+  // One monthly promotion per month (user, 2026-11-11): said as the month is
+  // picked, refused again by the create itself and by the database.
+  const [monthTaken, setMonthTaken] = useState(null); // { month, promotion }
+  useEffect(() => {
+    if (!monthly || !/^\d{4}-\d{2}$/.test(month)) return undefined;
+    let active = true;
+    monthlyOfPeriod(`${month}-01`).then((promotion) => { if (active) setMonthTaken({ month, promotion }); }).catch(() => {});
+    return () => { active = false; };
+  }, [monthly, month]);
+  const takenNow = monthly && monthTaken?.month === month ? monthTaken.promotion : null;
+  const canCreate = hasList && !takenNow;
+
+  // Days that are already over: a heads-up, never a block (a deal can be
+  // written down after the fact).
+  const today = etToday();
+  const overNote = customDates && startsOn && endsOn && endsOn >= startsOn && endsOn < today
+    ? 'Those days are already over.'
+    : monthly && !customDates && /^\d{4}-\d{2}$/.test(month) && ['us', 'ca'].every((m) => marketWindow(`${month}-01`, m).end < today)
+      ? `${monthLabel(month)} is already over in both countries.`
+      : null;
+
+  // What is worth a look in the list itself, before creating (user,
+  // 2026-11-11) — warnings, never a block. A flash deal / MK event / peak
+  // season event, portal by portal: SKUs the PIM lacks, no price of the
+  // deal's level in the portal's currency, switched off for the portal, a
+  // level that lowers nothing or goes more than 40 % under the regular MAP,
+  // and products already in another deal on the same portal and days. A
+  // monthly promotion's pasted lists: the last two (its files carry their own
+  // check, made when the file is chosen).
+  const checkSkus = monthly ? (mode === 'paste' ? stockSkus : NO_SKUS) : skuList.skus;
+  const listCheckKey = `${kind}|${mode}|${portals.join(',')}|${startsOn}|${endsOn}|${monthly ? stockKey : skuList.skus.join(',')}`;
+  const [listCheck, setListCheck] = useState(null); // { key, deal } | { key, markets: { ca, us } }
+  useEffect(() => {
+    if (!checkSkus.length) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      Promise.all([loadCheckProducts(checkSkus), monthly ? [] : overlappingDeals({ startsOn, endsOn, portals })])
+        .then(([products, others]) => {
+          if (!active) return;
+          if (monthly) {
+            const markets = {};
+            for (const m of ['ca', 'us']) {
+              markets[m] = checkMarketList({ rows: pasteLists[m].skus.map((sku) => ({ sku, price: null, costs: {} })), market: m, kind, levelFields, products });
+            }
+            setListCheck({ key: listCheckKey, markets });
+          } else {
+            setListCheck({
+              key: listCheckKey,
+              deal: checkDealList({ skus: checkSkus, portals, channels: PROMO_CHANNELS, levelOf: (ch) => promotionLevel({ kind }, ch), levels: LEVEL_FIELDS, products, others }),
+            });
+          }
+        })
+        .catch(() => {});
+    }, 400);
+    return () => { active = false; clearTimeout(timer); };
+  }, [listCheckKey, checkSkus, monthly, kind, portals, startsOn, endsOn, pasteLists, levelFields]);
+  const listNow = listCheck?.key === listCheckKey && checkSkus.length ? listCheck : null;
+  const checkLines = [
+    ...(listNow?.deal ? dealWarnings(listNow.deal) : []),
+    ...['ca', 'us'].flatMap((m) => {
+      const check = monthly && mode === 'file' ? files[m]?.check : listNow?.markets?.[m];
+      return check ? marketWarnings(check, m) : [];
+    }),
+    ...['ca', 'us'].flatMap((m) => {
+      const empty = monthly && mode === 'file' ? files[m]?.emptySkus ?? [] : [];
+      return empty.length ? [{ title: `${empty.length} row${empty.length === 1 ? '' : 's'} of the ${m === 'ca' ? 'Canada' : 'USA'} file left out:`, text: `${listOf(empty)} — no price or cost on ${empty.length === 1 ? 'its' : 'their'} row` }] : [];
+    }),
+    ...(overNote ? [{ title: overNote }] : []),
+  ];
+
   return (
     <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
       <div className="flex items-center justify-between">
@@ -1219,7 +1317,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </label>
-        <div className="block">
+        {/* min-w-0: the two date inputs side by side are wider than a phone's
+            column, and a grid cell does not shrink under its content by itself
+            (the whole form pushed <main> sideways at 390 px). */}
+        <div className="block min-w-0">
           <span className="text-label-lg text-on-surface-variant">{monthly ? 'Month' : 'Dates'}</span>
           {monthly && (
             <input
@@ -1335,7 +1436,12 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
                   accept=".xlsx,.csv"
                   className="sr-only"
                   disabled={busy}
-                  onChange={(e) => handleFile(market, e.target.files?.[0])}
+                  onChange={(e) => {
+                    // emptied at once, so a file fixed and chosen again under the same name is read again
+                    const chosen = e.target.files?.[0];
+                    e.target.value = '';
+                    handleFile(market, chosen);
+                  }}
                 />
               </label>
               {files[market]?.summary && (
@@ -1451,6 +1557,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           </div>
         </div>
       )}
+      <PromoCheckNotes lines={checkLines} note="You can still create it." />
+      {takenNow && (
+        <p role="alert" className="text-body-sm text-on-error-container bg-error-container/60 rounded-lg px-3 py-2">{monthTakenText(`${month}-01`, takenNow)}</p>
+      )}
       {overlap?.skus?.length > 0 && (
         <p className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">
           {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). This {KIND_NOUN[kind]} adds nothing for them.
@@ -1494,6 +1604,32 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   // with the stock, how long each product lasts. null until loaded.
   const [salesByMarket, setSalesByMarket] = useState(null);
   const [skuText, setSkuText] = useState('');
+  // While the list of a flash deal / event is edited: the same look at it as
+  // the new-deal form's (no price on a portal, switched off, another deal on
+  // those days…) — warnings, the list can still be saved.
+  const editSkus = useMemo(() => (editingSkus ? parseSkuList(skuText).skus : NO_SKUS), [editingSkus, skuText]);
+  const editKey = editSkus.join(',');
+  const [skuCheck, setSkuCheck] = useState(null); // { key, deal }
+  useEffect(() => {
+    if (!editSkus.length) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      Promise.all([
+        loadCheckProducts(editSkus),
+        overlappingDeals({ startsOn: promo.starts_on, endsOn: promo.ends_on, portals: promo.marketplaces ?? [], exceptId: promo.id }),
+      ])
+        .then(([products, others]) => {
+          if (!active) return;
+          setSkuCheck({
+            key: editKey,
+            deal: checkDealList({ skus: editSkus, portals: promo.marketplaces ?? [], channels: PROMO_CHANNELS, levelOf: (ch) => promotionLevel(promo, ch), levels: LEVEL_FIELDS, products, others }),
+          });
+        })
+        .catch(() => {});
+    }, 400);
+    return () => { active = false; clearTimeout(timer); };
+  }, [editKey, editSkus, promo]);
+  const skuCheckLines = skuCheck?.key === editKey && editSkus.length ? dealWarnings(skuCheck.deal) : [];
   const [busy, setBusy] = useState(null); // 'apply' | 'push' | 'end' | 'delete' | 'stock'
   const [msg, setMsg] = useState(null);
   const [progress, setProgress] = useState(null);
@@ -2041,6 +2177,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       <button type="button" onClick={() => setEditingSkus(false)} disabled={busy === 'skus'} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>
                       <span className="text-body-sm text-on-surface-variant">{parseSkuList(skuText).skus.length} SKUs · added ones take their {levelLabel(promotionLevel(promo))} prices, removed ones leave the {KIND_NOUN[promo.kind] ?? 'promotion'}.</span>
                     </div>
+                    <PromoCheckNotes lines={skuCheckLines} note="You can still save it." />
                   </div>
                 )}
 
@@ -2072,7 +2209,6 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">Regular MAP</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={market === 'ca' ? 'Units available for use in Canada (Odoo, warehouse CBG)' : 'Units available for use in the USA (Odoo, warehouse ATL)'}>Stock</th>
                           <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={`Units sold in ${market === 'ca' ? 'Canada' : 'the USA'} in the last 90 days, every marketplace (Odoo)`}>Sold 90 d</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title="How long the stock lasts at the pace of the last 90 days">Stock lasts</th>
                           {costKeys.map((k) => {
                             const m = costMeta(k);
                             return (
@@ -2119,14 +2255,10 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                               })()}
                               {(() => {
                                 // no reading yet: an empty cell, not a 0
-                                if (!salesByMarket) return (<><td className="px-4 py-2" /><td className="px-4 py-2" /></>);
+                                if (!salesByMarket) return <td className="px-4 py-2" />;
                                 const sold = salesOf(r);
-                                const days = daysOfStock(stockOf(r), sold);
                                 return (
-                                  <>
-                                    <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums" title={sold ? `${sold.units_30} in the last 30 days` : 'No sales in the last 90 days'}>{sold ? sold.units_90 : 0}</td>
-                                    <td className={`px-4 py-2 text-right tabular-nums whitespace-nowrap ${days != null && days < 30 ? 'text-error font-semibold' : 'text-on-surface-variant'}`}>{daysOfStockText(days)}</td>
-                                  </>
+                                  <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums" title={sold ? `${sold.units_30} in the last 30 days` : 'No sales in the last 90 days'}>{sold ? sold.units_90 : 0}</td>
                                 );
                               })()}
                               {costKeys.map((k) => (
@@ -3183,34 +3315,50 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
   const loaded = market ? counts[market] > 0 : false;
   const marketLabel = market === 'us' ? 'USA' : 'Canada';
 
+  // Nothing is written until the person has seen what the import does (user,
+  // 2026-11-11): a market's list is REPLACED, so a wrong file of 5 SKUs used
+  // to take every other product off it at once — and off Walmart Canada and
+  // Best Buy with it. `pending` is the import waiting for that look:
+  // { source, fileName, rows, plan, check, emptySkus }.
+  const [pending, setPending] = useState(null);
+
+  // What stops a file is said and nothing is kept (the other country's file,
+  // a price that cannot be read, a SKU on two rows, a promo price above the
+  // regular MAP, a promo cost that is not under the promo price); the rest is
+  // shown with the plan.
+  async function review(incoming, meta) {
+    const existing = rows ?? await getPromotionPrices(promo.id);
+    const products = await loadCheckProducts(incoming.map((r) => r.sku));
+    const check = checkMarketList({
+      rows: incoming.map((r) => ({ sku: r.sku, price: market === 'us' ? r.promo_price_usd : r.promo_price_cad, costs: r.promo_costs })),
+      market,
+      kind: promo.kind ?? 'monthly',
+      levelFields: LEVEL_FIELDS[promotionLevel(promo)],
+      products,
+    });
+    if (check.errors.length) throw new Error(`Nothing was changed — fix ${check.errors.length === 1 ? 'this' : 'these'} and upload the file again: ${joinProblems(check.errors)}`);
+    const valid = incoming.filter((r) => products.has(r.sku));
+    if (!valid.length) throw new Error(`None of the SKUs in the ${meta.source === 'list' ? 'list' : 'file'} exist in the PIM — the ${marketLabel} list was left as it is.`);
+    setPending({ ...meta, rows: incoming, check, plan: planMarketImport({ existing, incoming: valid, market, onList: onMarketList }) });
+  }
+
   async function handleUpload(file) {
     if (!file) return;
     setBusy(true);
     setError(null);
-    // The file read (a moving stripe), then the list saved in batches.
-    const task = startTask(`Import ${marketLabel} promotion file`, { detail: `Reading ${file.name}…` });
+    setPending(null);
     try {
       const parsed = await parsePromoFile(file);
-      task.progress(0.2);
       const marketCols = parsed.matchedColumns.filter((c) => MARKET_FIELDS[market].includes(c));
       if (!marketCols.length) {
         const other = market === 'us' ? 'Canada' : 'USA';
         throw new Error(`This file has no ${marketLabel} price columns — it looks like a ${other} file. Download the ${marketLabel} template from this dialog.`);
       }
-      // The file IS this market's list (Canada at the file's prices over
-      // Orange, the USA at Orange — monthly rule 2026-10-02); the SKUs not in
-      // it leave the list. The other market is not touched.
-      const r = await addFileToPromotion(promo, parsed.rows, market, { task: task.part(0.2, 1) });
-      task.finish(`${r.added} SKUs on the ${marketLabel} list${r.left ? ` · ${r.left} left it` : ''}`);
-      onImported(
-        `${marketLabel}: ${r.added} SKUs on the list from ${file.name}` +
-        (r.left ? ` · ${r.left} not in the file left the ${marketLabel} list` : '') +
-        (r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''),
-        { market, ...r },
-      );
+      if (parsed.problems.length) throw new Error(`Nothing was changed — fix ${parsed.problems.length === 1 ? 'this' : 'these'} and upload the file again: ${joinProblems(parsed.problems)}`);
+      await review(parsed.rows, { source: 'file', fileName: file.name, emptySkus: parsed.emptySkus });
     } catch (err) {
-      task.fail(err);
       setError(err.message);
+    } finally {
       setBusy(false);
     }
   }
@@ -3222,13 +3370,33 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
     if (!pastedList.skus.length) return;
     setBusy(true);
     setError(null);
-    const task = startTask(`${marketLabel} list — ${promo.name}`, { detail: 'Checking the SKUs against the PIM…' });
+    setPending(null);
     try {
-      const r = await addFileToPromotion(promo, marketListRows(rows, pastedList.skus, market), market, { task, source: 'list' });
+      const existing = rows ?? await getPromotionPrices(promo.id);
+      await review(marketListRows(existing, pastedList.skus, market), { source: 'list', fileName: null, emptySkus: [] });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The import itself, once the person has seen the plan: the file IS this
+  // market's list (Canada at the file's prices over Orange, the USA at Orange
+  // — monthly rule 2026-10-02); the SKUs not in it leave the list. The other
+  // market is not touched.
+  async function confirmImport() {
+    if (!pending) return;
+    setBusy(true);
+    setError(null);
+    const fromList = pending.source === 'list';
+    const task = startTask(fromList ? `${marketLabel} list — ${promo.name}` : `Import ${marketLabel} promotion file`, { detail: 'Checking the SKUs against the PIM…' });
+    try {
+      const r = await addFileToPromotion(promo, pending.rows, market, { task, source: pending.source });
       task.finish(`${r.added} SKUs on the ${marketLabel} list${r.left ? ` · ${r.left} left it` : ''}`);
       onImported(
-        `${marketLabel}: ${r.added} SKUs on the list from the pasted list` +
-        (r.left ? ` · ${r.left} not in it left the ${marketLabel} list` : '') +
+        `${marketLabel}: ${r.added} SKUs on the list from ${fromList ? 'the pasted list' : pending.fileName}` +
+        (r.left ? ` · ${r.left} not in ${fromList ? 'it' : 'the file'} left the ${marketLabel} list` : '') +
         (r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''),
         { market, ...r },
       );
@@ -3255,7 +3423,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
                 key={key}
                 type="button"
                 aria-pressed={market === key}
-                onClick={() => { setMarket(key); setError(null); }}
+                onClick={() => { setMarket(key); setError(null); setPending(null); }}
                 className={`rounded-xl border px-4 py-3 text-left transition-colors ${
                   market === key
                     ? 'border-primary bg-primary-container/40'
@@ -3271,7 +3439,11 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
           </div>
         </div>
 
-        {market && (
+        {market && pending && (
+          <ImportPlan pending={pending} promo={promo} market={market} marketLabel={marketLabel} busy={busy} onConfirm={confirmImport} onBack={() => { setPending(null); setError(null); }} />
+        )}
+
+        {market && !pending && (
           <div className="rounded-xl bg-surface-container-low/60 p-4 space-y-3">
             {loaded ? (
               <p className="text-body-sm text-on-surface-variant">
@@ -3346,6 +3518,62 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
         )}
       </div>
     </Dialog>
+  );
+}
+
+// What an import into a promotion would do, shown before anything is written:
+// the market's list is replaced, so the person sees how many products join,
+// stay and LEAVE it, and confirms. Warnings of the list (lib/promoChecks.js)
+// sit under the plan; what stops a file never gets this far.
+function ImportPlan({ pending, promo, market, marketLabel, busy, onConfirm, onBack }) {
+  const { plan, check, source, fileName, emptySkus } = pending;
+  const from = source === 'list' ? 'The pasted list' : fileName;
+  const lines = [
+    ...marketWarnings(check, market, { level: promotionLevel(promo), withBasics: true }),
+    ...(emptySkus?.length ? [{ title: `${emptySkus.length} row${emptySkus.length === 1 ? '' : 's'} of the file left out:`, text: `${listOf(emptySkus)} — no price or cost on ${emptySkus.length === 1 ? 'its' : 'their'} row` }] : []),
+  ];
+  // What the products that leave lose on the channels already sent.
+  const sent = [];
+  if (market === 'ca' && plan.left.length) {
+    if (promo.wm_ca_scheduled_at) sent.push('Walmart Canada takes its promo off them');
+    if (promo.bb_scheduled_at) sent.push("Best Buy's discounts are sent again without them");
+  }
+  const money = (v) => (v == null ? 'none' : v);
+  return (
+    <div className="rounded-xl bg-surface-container-low/60 p-4 space-y-3">
+      <p className="text-body-md text-on-surface">
+        <span className="font-semibold">{from}</span> — the {marketLabel} list would have {plan.total} product{plan.total === 1 ? '' : 's'}:
+      </p>
+      <ul className="text-body-sm text-on-surface space-y-1 [overflow-wrap:anywhere]">
+        <li><span className="font-semibold">{plan.joined.length} join it</span>{plan.joined.length > 0 && <span className="text-on-surface-variant">: {listOf(plan.joined)}</span>}</li>
+        <li>
+          <span className="font-semibold">{plan.stay} stay</span>
+          {plan.repriced.length > 0 && <span className="text-on-surface-variant"> · {plan.repriced.length} with another price in the file: {listOf(plan.repriced.map((r) => `${r.sku} ${money(r.from)} → ${money(r.to)}`), 6)}</span>}
+        </li>
+        <li className={plan.left.length ? 'text-error' : undefined}>
+          <span className="font-semibold">{plan.left.length} leave it</span>{plan.left.length > 0 && <span>: {listOf(plan.left)}</span>}
+        </li>
+      </ul>
+      {plan.left.length > 0 && (
+        <p className="text-body-sm text-on-surface-variant">
+          The {marketLabel} list is replaced: {plan.left.length === 1 ? 'that product is' : `those ${plan.left.length} products are`} no longer in the promotion in {market === 'us' ? 'the USA' : 'Canada'}{sent.length ? ` — ${sent.join(', and ')}` : ''}.
+        </p>
+      )}
+      <PromoCheckNotes lines={lines} />
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy}
+          aria-busy={busy}
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="w-4 h-4" aria-hidden="true" />}
+          {plan.left.length || plan.stay ? `Replace the ${marketLabel} list` : `Save the ${marketLabel} list`}
+        </button>
+        <button type="button" onClick={onBack} disabled={busy} className="text-label-lg font-medium text-on-surface-variant hover:underline">Back</button>
+      </div>
+    </div>
   );
 }
 

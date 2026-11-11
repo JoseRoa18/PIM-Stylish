@@ -8,6 +8,7 @@ import {
   IMAGE_LINK_RE,
 } from './importSchema';
 import { BRANDS, canonicalBrand } from '@/features/products/lib/brands';
+import { readMoney } from '@/lib/money';
 
 // "Ask Technical Team" is the PTD's placeholder for an unknown answer, not a
 // value: it lands as empty (user, 2026-10-06 — 253 of them were cleared).
@@ -35,15 +36,10 @@ function coerce(type, raw) {
       const n = parseFloat(cleaned);
       return isNaN(n) ? null : n;
     }
-    case 'money': {
-      // "$1,234.50", "1234.5", "1 234,50" → 1234.5 (a comma before three digits
-      // groups thousands; any other comma is the decimal one)
-      let t = s.replace(/[$\s]|CAD|USD/gi, '');
-      if (t.includes('.') || /,\d{3}(?!\d)/.test(t)) t = t.replace(/,/g, '');
-      else t = t.replace(',', '.');
-      const n = parseFloat(t.replace(/[^\d.-]/g, ''));
-      return isNaN(n) ? null : Math.round(n * 100) / 100;
-    }
+    case 'money':
+      // "$1,234.50", "1234.5", "1 234,50" → 1234.5; a text that is no number
+      // is null here and an error on its row (see the money check below).
+      return readMoney(s).value;
     case 'bool': {
       const l = s.toLowerCase();
       if (['yes', 'y', 'true', '1', 'si', 'sí'].includes(l)) return true;
@@ -173,6 +169,11 @@ export function buildImportRows(parsed) {
         }
         if (def.type === 'brand' && cleanText(rawVal)) {
           errors.push(`Unknown brand "${cleanText(rawVal)}" — only ${BRANDS.join(' or ')}`);
+        }
+        // A price that cannot be read is said, never guessed or skipped (user,
+        // 2026-11-11): "39O" used to be read as 39.
+        if (def.type === 'money' && cleanText(rawVal)) {
+          errors.push(`${def.label}: "${cleanText(rawVal)}" is not a price`);
         }
         continue;
       }

@@ -32,15 +32,19 @@ const sameCoupon = (c) => `${c.name.toLowerCase()}|${c.marketplace}|${c.starts_o
  * What can really be created from a list of coupons: each comes back with its
  * `skus` reduced to the PIM's products that are not switched off for that
  * marketplace, what was left out (`notInPim`, `excluded`) and `exists` when a
- * coupon of that name, marketplace and first day is already there.
+ * coupon of that name, marketplace and first day is already there. `overPrice`
+ * (user, 2026-11-11 — a warning, the coupon can still be created): on a money
+ * coupon, the products whose amount is as much as their regular MAP in the
+ * marketplace's currency or more, [{ sku, amount, map }] — a price typed where
+ * the amount goes.
  */
 export async function reviewCoupons(list) {
   const all = [...new Set(list.flatMap((c) => c.skus))];
-  const known = new Set();
+  const known = new Map(); // sku → { map_cad, map_usd }
   for (let i = 0; i < all.length; i += 200) {
-    const { data, error } = await supabase.from('products').select('sku').in('sku', all.slice(i, i + 200));
+    const { data, error } = await supabase.from('products').select('sku, map_cad, map_usd').in('sku', all.slice(i, i + 200));
     if (error) throw error;
-    for (const p of data ?? []) known.add(p.sku);
+    for (const p of data ?? []) known.set(p.sku, p);
   }
   const { data: existing, error } = await supabase.from('coupons').select('name, marketplace, starts_on').in('name', [...new Set(list.map((c) => c.name))]);
   if (error) throw error;
@@ -48,7 +52,14 @@ export async function reviewCoupons(list) {
   return Promise.all(list.map(async (c) => {
     const inPim = c.skus.filter((s) => known.has(s));
     const off = inPim.length ? await excludedSkus(c.marketplace, inPim) : new Set();
-    return { ...c, skus: inPim.filter((s) => !off.has(s)), notInPim: c.skus.filter((s) => !known.has(s)), excluded: [...off].sort(), exists: taken.has(sameCoupon(c)) };
+    const skus = inPim.filter((s) => !off.has(s));
+    const mapKey = c.marketplace.endsWith('_ca') ? 'map_cad' : 'map_usd';
+    const overPrice = c.discount_type === 'amount'
+      ? skus
+        .map((sku) => ({ sku, amount: Number(c.amounts?.[sku]), map: known.get(sku)[mapKey] == null ? null : Number(known.get(sku)[mapKey]) }))
+        .filter((r) => r.map != null && r.amount >= r.map)
+      : [];
+    return { ...c, skus, notInPim: c.skus.filter((s) => !known.has(s)), excluded: [...off].sort(), exists: taken.has(sameCoupon(c)), overPrice };
   }));
 }
 
