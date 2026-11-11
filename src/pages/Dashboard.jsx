@@ -6,6 +6,7 @@ import CatalogStatusCard from '@/features/dashboard/components/CatalogStatusCard
 import PriceAlignmentCard from '@/features/dashboard/components/PriceAlignmentCard';
 import ContentGapsCard from '@/features/dashboard/components/ContentGapsCard';
 import RecentActivityCard from '@/features/dashboard/components/RecentActivityCard';
+import WeeklyBriefingCard from '@/features/dashboard/components/WeeklyBriefingCard';
 
 export default function Dashboard() {
   const { data, loading, error } = useDashboardData();
@@ -35,6 +36,9 @@ export default function Dashboard() {
 
       {!loading && !error && data && (
         <div className="space-y-6">
+          {/* The week's briefing, made every Monday (nothing until the first one exists). */}
+          <WeeklyBriefingCard />
+
           <MarketplaceHealthGrid
             summaries={data.healthSummaries}
             refreshing={data.healthRefreshing}

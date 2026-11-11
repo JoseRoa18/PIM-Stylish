@@ -20,6 +20,7 @@ export const ROUTE_IMPORTS = {
   settings: () => import('@/pages/SettingsPage'),
   analytics: () => import('@/pages/Analytics'),
   scorecard: () => import('@/pages/Scorecard'),
+  assistant: () => import('@/pages/Assistant'),
   comingSoon: () => import('@/pages/ComingSoon'),
 };
 

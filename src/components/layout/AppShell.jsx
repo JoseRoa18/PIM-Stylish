@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import TaskProgressDock from '@/components/ui/TaskProgressDock';
+import { AssistantPanelHost } from '@/features/assistant/components/AssistantLauncher';
 
 // The reminders appear seconds after load at the earliest, so their code
 // (and the promotion helpers they use) stays out of the first download
@@ -64,6 +65,8 @@ export default function AppShell({ children }) {
       </Suspense>
       {/* The percentage cards of long tasks (downloads, imports, pushes, slow loads). */}
       <TaskProgressDock />
+      {/* The assistant's panel, over the right of any page (opened from the top bar). */}
+      <AssistantPanelHost />
       <div className="lg:ml-64 h-screen flex flex-col">
         <Topbar onMenuClick={() => setSidebarOpen(true)} menuOpen={sidebarOpen} />
         {/* relative: <main> contains its absolutely placed children (the sr-only

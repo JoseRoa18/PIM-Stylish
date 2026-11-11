@@ -251,6 +251,9 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
   function classifySnapshot(snapshot, outOfScope = null) {
     const counts = { promo_ok: 0, map_ok: 0, promo_missing: 0, misaligned: 0, no_map: 0, missing: 0 };
     const problems = [];
+    // The products found at their expected price: counted above, and listed
+    // so one product can be looked up on every store (the assistant).
+    const aligned = [];
     let total = 0;
     let notOnStore = 0;
     let legacy = false;
@@ -276,6 +279,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
         problems.push({ sku: r.sku, status: 'no_map', live: r.price ?? null, expected: null, source: null, ...page });
       } else if (!r.price_diff) {
         tally(r.expected_source === 'promo' ? 'promo_ok' : 'map_ok');
+        aligned.push({ sku: r.sku, live: r.price ?? null, expected: r.expected, source: r.expected_source, promo_kind: r.promo_kind ?? null, ...page });
       } else if (r.expected_source === 'promo' && (r.no_promo || eq(r.price, r.map))) {
         tally('promo_missing');
         problems.push({ sku: r.sku, status: 'promo_missing', live: r.price ?? null, expected: r.expected, source: 'promo', map: r.map ?? null, promo_period: r.promo_period ?? null, promo_kind: r.promo_kind ?? null, promo_window: r.promo_window ?? null, ...page });
@@ -286,7 +290,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     }
 
     problems.sort((a, b) => a.sku.localeCompare(b.sku));
-    return { ranAt: snapshot.run_at, total, counts, problems, legacy, notOnStore };
+    return { ranAt: snapshot.run_at, total, counts, problems, aligned, legacy, notOnStore };
   }
 
   /**

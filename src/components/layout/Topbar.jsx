@@ -13,6 +13,7 @@ import { useAuth } from '@/features/auth/AuthContext';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import AccountMenu from '@/components/layout/AccountMenu';
 import PresenceStack from '@/components/layout/PresenceStack';
+import { AssistantLauncher } from '@/features/assistant/components/AssistantLauncher';
 import { useProductSearch } from '@/features/search/hooks/useProductSearch';
 import { readRecent, rememberRecent, forgetRecent, clearRecent } from '@/features/search/lib/recentSearches';
 import { prefetchRoute } from '@/lib/routePrefetch';
@@ -479,6 +480,8 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
       {/* Right side: user */}
       <div className="flex items-center gap-2 ml-2 sm:ml-6">
         <PresenceStack />
+        {/* Opens the assistant over the page that is open (only for its people). */}
+        <AssistantLauncher />
         <ThemeToggle />
         <AccountMenu />
 

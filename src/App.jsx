@@ -28,6 +28,7 @@ const SettingsPage = lazy(ROUTE_IMPORTS.settings);
 const ComingSoon = lazy(ROUTE_IMPORTS.comingSoon);
 const Analytics = lazy(ROUTE_IMPORTS.analytics);
 const Scorecard = lazy(ROUTE_IMPORTS.scorecard);
+const Assistant = lazy(ROUTE_IMPORTS.assistant);
 
 function PageFallback() {
   return (
@@ -49,6 +50,7 @@ const PAGE_TITLES = [
   ['/listing-health', 'Listing Health'],
   ['/analytics', 'Analytics'],
   ['/scorecard', 'EOS ScoreCard'],
+  ['/assistant', 'Assistant'],
   ['/import', 'Import'],
   ['/users', 'Users'],
   ['/activity', 'Activity Log'],
@@ -137,6 +139,8 @@ export default function App() {
           <Route path="/assets" element={<ComingSoon />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/scorecard" element={<Scorecard />} />
+          {/* The page itself says so when the person is not on the assistant's list. */}
+          <Route path="/assistant" element={<Assistant />} />
         </Route>
 
         {/* Catch-all → redirect to home */}

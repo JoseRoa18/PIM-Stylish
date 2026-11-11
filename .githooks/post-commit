@@ -1,0 +1,15 @@
+#!/bin/sh
+# After a commit that changes what the in-app assistant knows — CLAUDE.md or the
+# list of tables it may read — its knowledge is written again
+# (scripts/sync-assistant-knowledge.mjs). It never blocks a commit: a failure
+# only says so, and the script can be run by hand.
+#
+# Turned on once per clone:  git config core.hooksPath .githooks
+changed=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null)
+case "$changed" in
+  *CLAUDE.md*|*supabase/functions/_shared/assistantTables.js*)
+    echo "assistant: updating what it knows about the app…"
+    node scripts/sync-assistant-knowledge.mjs || echo "assistant: its knowledge was NOT updated — run: node scripts/sync-assistant-knowledge.mjs"
+    ;;
+esac
+exit 0

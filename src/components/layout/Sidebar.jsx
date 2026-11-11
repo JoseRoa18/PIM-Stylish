@@ -15,9 +15,11 @@ import {
   X,
   DollarSign,
   Target,
+  MessageCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useAuth } from '@/features/auth/AuthContext';
+import { useAssistantAccess } from '@/features/assistant/hooks/useAssistantAccess';
 import { prefetchRoute } from '@/lib/routePrefetch';
 
 const NAV_ITEMS = [
@@ -30,6 +32,8 @@ const NAV_ITEMS = [
   { to: '/listing-health', icon: Activity, label: 'Listing Health', prefetch: 'listingHealth' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics', prefetch: 'analytics' },
   { to: '/scorecard', icon: Target, label: 'EOS ScoreCard', prefetch: 'scorecard' },
+  // Only for the people on the assistant's list (app_settings 'assistant').
+  { to: '/assistant', icon: MessageCircle, label: 'Assistant', assistantOnly: true, prefetch: 'assistant' },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true, prefetch: 'users' },
   { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true, prefetch: 'activity' },
   { to: '/settings', icon: Settings, label: 'Settings', adminOnly: true, prefetch: 'settings' },
@@ -38,7 +42,8 @@ const NAV_ITEMS = [
 export default function Sidebar({ open = false, onClose }) {
   const navigate = useNavigate();
   const { isAdmin, canEdit } = useAuth();
-  const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+  const assistant = useAssistantAccess();
+  const navItems = NAV_ITEMS.filter((item) => (!item.adminOnly || isAdmin) && (!item.assistantOnly || assistant === true));
   const closeRef = useRef(null);
 
   // Escape closes the mobile drawer

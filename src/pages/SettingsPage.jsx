@@ -12,6 +12,7 @@ import { DocumentRow } from '@/features/media/components/DocumentsSection';
 import { Link } from 'react-router-dom';
 import { startTask } from '@/lib/taskProgress';
 import { setOdooPush, listOdooPending } from '@/features/odoo/api/odooPush';
+import AssistantSettings from '@/features/assistant/components/AssistantSettings';
 
 function monthLabel(period) {
   if (!period) return '';
@@ -650,6 +651,8 @@ export default function SettingsPage() {
       <InventorySection />
 
       <OdooSection />
+
+      <AssistantSettings />
     </div>
   );
 }
