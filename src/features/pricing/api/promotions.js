@@ -456,11 +456,14 @@ export async function createPromotion({ name, period, currency, rows, kind = 'mo
 
 /**
  * Create a promotion from full row objects (the file-import path):
- *   [{ sku, promo_price_cad, promo_price_usd, promo_costs }]
- * `task` (optional taskProgress reporter): the PIM's SKUs, the promotion,
- * its rows in batches of 200.
+ *   [{ sku, markets?, promo_price_cad, promo_price_usd, promo_costs }]
+ * `markets` (['ca'] / ['us'] / both) says whose list a row is on; a row
+ * without prices takes them from the level. `source: 'list'` = the rows come
+ * from the lists pasted per market (2026-11-11), not from files — only the
+ * wording changes. `task` (optional taskProgress reporter): the PIM's SKUs,
+ * the promotion, its rows in batches of 200.
  */
-export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null, task = null }) {
+export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null, source = 'file', task = null }) {
   assertKindDates(kind, starts_on, ends_on);
   task?.progress(0, 'Checking the SKUs against the PIM…');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
@@ -470,7 +473,7 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
 
   const valid = rows.filter((r) => pimSkus.has(r.sku));
   const notInPim = rows.filter((r) => !pimSkus.has(r.sku)).map((r) => r.sku);
-  if (!valid.length) throw new Error('None of the SKUs in the file exist in the PIM.');
+  if (!valid.length) throw new Error(`None of the SKUs in the ${source === 'list' ? 'list' : 'file'} exist in the PIM.`);
 
   task?.progress(0.2, 'Creating the promotion…');
   const { data: promo, error } = await supabase
@@ -511,10 +514,10 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
     action: 'create',
     entityType: 'promotion',
     entityId: String(promo.id),
-    summary: `Created promotion "${name}" from file (${valid.length} SKUs — Canada ${counts.ca}, USA ${counts.us})`,
-    metadata: { period, skus: valid.length, not_in_pim: notInPim.length },
+    summary: `Created promotion "${name}" from ${source === 'list' ? 'pasted lists' : 'file'} (${valid.length} SKUs — Canada ${counts.ca}, USA ${counts.us})`,
+    metadata: { period, skus: valid.length, source, not_in_pim: notInPim.length },
   });
-  return { promotion: promo, added: valid.length, notInPim };
+  return { promotion: promo, added: valid.length, notInPim, counts };
 }
 
 // Which promo cost slugs belong to each market's file.
@@ -540,9 +543,12 @@ function withoutMarketCosts(costs, market) {
  * trigger); SKUs of the promotion that are not in the file leave that
  * market's list, and a row on neither list is removed. The other market is
  * never touched. `task` (optional taskProgress reporter): the PIM's SKUs, the
- * promotion's rows, the saves in batches of 200, the removals.
+ * promotion's rows, the saves in batches of 200, the removals. `source:
+ * 'list'` = the rows come from a pasted list (`marketListRows`); only the
+ * wording changes. A file or a list with no SKU of the PIM is refused: it
+ * would empty the market's list.
  */
-export async function addFileToPromotion(promotion, rows, market, { task = null } = {}) {
+export async function addFileToPromotion(promotion, rows, market, { task = null, source = 'file' } = {}) {
   if (market !== 'ca' && market !== 'us') throw new Error('Pick the market this file is for.');
   task?.progress(0, 'Checking the SKUs against the PIM…');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
@@ -551,6 +557,7 @@ export async function addFileToPromotion(promotion, rows, market, { task = null 
   const pimSkus = new Set((prods ?? []).map((p) => p.sku));
   const valid = rows.filter((r) => pimSkus.has(r.sku));
   const notInPim = rows.filter((r) => !pimSkus.has(r.sku)).map((r) => r.sku);
+  if (!valid.length) throw new Error(`None of the SKUs in the ${source === 'list' ? 'list' : 'file'} exist in the PIM — the ${market === 'us' ? 'USA' : 'Canada'} list was left as it is.`);
 
   const existing = await getPromotionPrices(promotion.id);
   task?.progress(0.25);
@@ -622,13 +629,33 @@ export async function addFileToPromotion(promotion, rows, market, { task = null 
     action: 'update',
     entityType: 'promotion',
     entityId: String(promotion.id),
-    summary: `Imported the ${label} file into promotion "${promotion.name}" (${valid.length} SKUs on the ${label} list${left ? `, ${left} left it` : ''})`,
-    metadata: { market, skus: valid.length, left_the_list: left, removed_rows: toDelete.length, not_in_pim: notInPim.length },
+    summary: `${source === 'list' ? `Pasted the ${label} list` : `Imported the ${label} file`} into promotion "${promotion.name}" (${valid.length} SKUs on the ${label} list${left ? `, ${left} left it` : ''})`,
+    metadata: { market, source, skus: valid.length, left_the_list: left, removed_rows: toDelete.length, not_in_pim: notInPim.length },
   });
   // Joined = on this market's list now and not before (what an API channel
   // already scheduled still lacks); left = the reverse.
   const joinedSkus = valid.filter((r) => { const prev = bySku.get(r.sku); return !prev || !onMarketList(prev, market); }).map((r) => r.sku);
   return { added: valid.length, left, removed: toDelete.length, notInPim, leftSkus, joinedSkus };
+}
+
+/**
+ * A pasted SKU list as the rows `addFileToPromotion` takes, for one market of
+ * an existing promotion. A list names products, not prices: a SKU already on
+ * that market's list keeps the price and costs its file gave it, a new one
+ * takes everything from the level.
+ */
+export function marketListRows(existing, skus, market) {
+  const bySku = new Map((existing ?? []).map((r) => [r.sku, r]));
+  return [...new Set(skus)].map((sku) => {
+    const prev = bySku.get(sku);
+    const member = prev && onMarketList(prev, market);
+    return {
+      sku,
+      promo_price_cad: member && market === 'ca' ? prev.set_price_cad ?? null : null,
+      promo_price_usd: member && market === 'us' ? prev.set_price_usd ?? null : null,
+      promo_costs: member ? Object.fromEntries(Object.entries(prev.set_costs ?? {}).filter(([slug]) => MARKET_COST_SLUGS[market].includes(slug))) : {},
+    };
+  });
 }
 
 /**

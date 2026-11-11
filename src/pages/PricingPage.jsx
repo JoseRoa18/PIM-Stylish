@@ -52,7 +52,7 @@ import {
   pushPromotionToWix,
 } from '@/features/pricing/api/promotions';
 import { downloadPromoTemplate, downloadPromoMarketData, parsePromoFile, MARKET_FIELDS } from '@/features/pricing/lib/promoImport';
-import { PROMOTION_KINDS, KIND_NOUN, monthlyOverlap, KIND_LEVEL, levelLabel, promotionLevel, onMarketList } from '@/features/pricing/api/promotions';
+import { PROMOTION_KINDS, KIND_NOUN, monthlyOverlap, KIND_LEVEL, LEVEL_FIELDS, levelLabel, promotionLevel, onMarketList, marketListRows } from '@/features/pricing/api/promotions';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
@@ -200,6 +200,7 @@ export default function PricingPage() {
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [notice, setNotice] = useState(null); // what the new-promotion form reported once it created one
   const [autoOpenId, setAutoOpenId] = useState(null); // the promotion just created, opened on its Marketplaces panel
   // One promotion card open at a time (user request 2026-09-30): opening a
   // card closes the one that was open.
@@ -286,6 +287,15 @@ export default function PricingPage() {
         </div>
       )}
 
+      {notice && kindTab && (
+        <div role="status" className="rounded-xl bg-surface-container text-on-surface px-4 py-3 text-body-sm flex items-start justify-between gap-3">
+          <p className="min-w-0 [overflow-wrap:anywhere]">{notice}</p>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="p-1 -m-1 rounded-full hover:bg-surface-container-high text-on-surface-variant flex-shrink-0">
+            <X className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} initialSite={alignSite} />}
 
       {tab === 'coupons' && <CouponsTab canEdit={canEdit} confirm={confirm} />}
@@ -309,8 +319,11 @@ export default function PricingPage() {
           key={tab}
           kind={tab}
           onClose={() => setShowNew(false)}
-          onCreated={(promo) => {
+          onCreated={(promo, note = null) => {
             setShowNew(false);
+            // What the form had to say (SKUs skipped, products without a
+            // price) stays on the page: the form itself is gone.
+            setNotice(note);
             // A new flash deal or special event opens right away on its
             // Marketplaces panel: the next step is picking where it goes.
             if (promo && promo.kind !== 'monthly') {
@@ -951,6 +964,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   // One file per market — memberships differ, so each market has its own
   // template and slot. Either alone is enough to create the promotion.
   const [files, setFiles] = useState({ ca: null, us: null }); // {rows, summary}
+  // A monthly promotion's pasted lists, one per market like the files (user,
+  // 2026-11-11: a single box gave no way to pick the country and put the
+  // same products on both lists).
+  const [pasted, setPasted] = useState({ ca: '', us: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -958,6 +975,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   // for that kind (KIND_LEVEL: Orange for a monthly promotion or a flash
   // deal, Purple for a special event), so nothing else is asked.
   const skuList = useMemo(() => parseSkuList(text), [text]);
+  const pasteLists = useMemo(() => ({ ca: parseSkuList(pasted.ca), us: parseSkuList(pasted.us) }), [pasted]);
 
   async function handleFile(market, file) {
     setError(null);
@@ -993,6 +1011,18 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     return [...bySku.values()];
   }, [files]);
 
+  // The pasted lists in the files' shape: each SKU with the markets whose
+  // list names it and no price of its own (everything comes from the level).
+  const mergedPasteRows = useMemo(() => {
+    const bySku = new Map();
+    for (const market of ['ca', 'us']) {
+      for (const sku of pasteLists[market].skus) {
+        bySku.set(sku, { sku, markets: [...(bySku.get(sku)?.markets ?? []), market], promo_price_cad: null, promo_price_usd: null, promo_costs: {} });
+      }
+    }
+    return [...bySku.values()];
+  }, [pasteLists]);
+
   async function handleCreate() {
     setBusy(true);
     setError(null);
@@ -1012,8 +1042,9 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       // A price file gives each market its list (rule 2026-09-30); Canada
       // takes the file's prices over Orange, the USA Orange over the file
       // (monthly rule 2026-10-02, applied by the database). A pasted SKU list
-      // takes everything from the level.
+      // takes everything from the level — one list per market too.
       const fromFile = monthly && mode === 'file';
+      const fromPaste = monthly && mode === 'paste';
       let stylishDiscount = null;
       if (stylishStores.length) {
         const built = buildStylishDiscount(stylish, stylishStores);
@@ -1021,16 +1052,23 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         stylishDiscount = built.discount;
         await checkStylishDiscount(stylishDiscount);
       }
-      task = startTask(`Create ${KIND_NOUN[kind]}`, { detail: fromFile ? 'Checking the SKUs against the PIM…' : `Reading the ${levelLabel(KIND_LEVEL[kind])} prices…` });
+      task = startTask(`Create ${KIND_NOUN[kind]}`, { detail: fromFile || fromPaste ? 'Checking the SKUs against the PIM…' : `Reading the ${levelLabel(KIND_LEVEL[kind])} prices…` });
       const res = fromFile
         ? await createPromotionFromFile({ ...payload, rows: mergedFileRows, task })
-        : await createPromotionFromLevels({ ...payload, skus: [...new Set([...skuList.skus, ...stylishPricedSkus(stylishDiscount)])], marketplaces: monthly ? [] : portals, stylish_discount: stylishDiscount, task });
+        : fromPaste
+          ? await createPromotionFromFile({ ...payload, rows: mergedPasteRows, source: 'list', task })
+          : await createPromotionFromLevels({ ...payload, skus: [...new Set([...skuList.skus, ...stylishPricedSkus(stylishDiscount)])], marketplaces: monthly ? [] : portals, stylish_discount: stylishDiscount, task });
+      // What the person should know once the form is gone: it goes to the
+      // page, since this form closes on success.
       const notes = [];
+      if (res.counts) notes.push(`Canada ${res.counts.ca} product${res.counts.ca === 1 ? '' : 's'}, USA ${res.counts.us}`);
       if (res.notInPim.length) notes.push(`Not in the PIM (skipped): ${res.notInPim.join(', ')}`);
       if (res.noLevel?.length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in the PIM: ${res.noLevel.join(', ')}`);
-      if (notes.length) setError(`Created — ${res.added} SKUs added. ${notes.join(' · ')}`);
+      for (const m of ['ca', 'us']) {
+        if (priceNow?.none[m].length) notes.push(`No ${levelLabel(KIND_LEVEL[kind])} price in ${m === 'ca' ? 'CAD' : 'USD'}, so no promotion price in ${m === 'ca' ? 'Canada' : 'the USA'}: ${priceNow.none[m].join(', ')}`);
+      }
       task.finish(`Created · ${res.added} SKU${res.added === 1 ? '' : 's'}`);
-      onCreated(res.promotion);
+      onCreated(res.promotion, notes.length > (res.counts ? 1 : 0) ? `Created "${payload.name}" — ${notes.join(' · ')}` : null);
     } catch (err) {
       task?.fail(err);
       setError(err.message);
@@ -1038,7 +1076,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
-  const canCreate = !monthly ? (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : skuList.skus.length > 0;
+  const canCreate = !monthly ? (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : mergedPasteRows.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
   // those days makes no sense in a flash deal — warn before creating.
@@ -1056,10 +1094,18 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   // promotion reaches (a monthly promotion both, a flash deal / special event
   // the markets of its portals) are flagged before it is created — a warning,
   // not a block. "Not tracked" (no stock row) is not 0 and is not flagged.
-  const stockSkus = useMemo(() => (monthly && mode === 'file' ? mergedFileRows.map((r) => r.sku) : skuList.skus), [monthly, mode, mergedFileRows, skuList.skus]);
   const stockMarkets = useMemo(() => promoMarkets({ kind, marketplaces: monthly ? [] : portals }), [kind, monthly, portals]);
+  // What each market's list will hold: its own file or pasted list (a
+  // monthly promotion), or the one SKU list on the portals' markets. Each
+  // market is checked on its own list only.
+  const marketSkus = useMemo(() => {
+    if (!monthly) return Object.fromEntries(stockMarkets.map((m) => [m, skuList.skus]));
+    if (mode === 'file') return { ca: (files.ca?.rows ?? []).map((r) => r.sku), us: (files.us?.rows ?? []).map((r) => r.sku) };
+    return { ca: pasteLists.ca.skus, us: pasteLists.us.skus };
+  }, [monthly, mode, files, pasteLists, skuList.skus, stockMarkets]);
+  const stockSkus = useMemo(() => [...new Set(stockMarkets.flatMap((m) => marketSkus[m] ?? []))], [stockMarkets, marketSkus]);
   const [zeroStock, setZeroStock] = useState(null); // { key, ca: [skus], us: [skus] }
-  const stockKey = `${stockMarkets.join(',')}|${stockSkus.join(',')}`;
+  const stockKey = stockMarkets.map((m) => `${m}:${(marketSkus[m] ?? []).join(',')}`).join('|');
   useEffect(() => {
     if (!stockSkus.length) return undefined;
     let active = true;
@@ -1067,13 +1113,57 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       getStockFor(stockSkus).then((stock) => {
         if (!active) return;
         const zero = { key: stockKey };
-        for (const m of stockMarkets) zero[m] = stockSkus.filter((s) => stock[m]?.[s] && Number(stock[m][s].available) <= 0);
+        for (const m of stockMarkets) zero[m] = (marketSkus[m] ?? []).filter((s) => stock[m]?.[s] && Number(stock[m][s].available) <= 0);
         setZeroStock(zero);
       }).catch(() => {});
     }, 400);
     return () => { active = false; clearTimeout(timer); };
-  }, [stockKey, stockSkus, stockMarkets]);
+  }, [stockKey, stockSkus, stockMarkets, marketSkus]);
   const zeroNow = zeroStock?.key === stockKey && stockSkus.length ? stockMarkets.filter((m) => zeroStock[m]?.length) : [];
+
+  // Price check of a monthly promotion, before it is created (2026-11-11: a
+  // pasted list put 71 products on the USA list, 31 of them with no Orange
+  // price in USD, and nothing said so): the SKUs the PIM does not have, and
+  // per market the ones that will have no promotion price — none in the
+  // file and none on the level. A warning, never a block.
+  const levelFields = LEVEL_FIELDS[KIND_LEVEL[kind]];
+  const [priceCheck, setPriceCheck] = useState(null); // { key, notInPim: [skus], none: { ca: [skus], us: [skus] } }
+  const priceCheckKey = `${mode}|${stockKey}`;
+  useEffect(() => {
+    if (!monthly || !stockSkus.length) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      const given = { ca: new Map(), us: new Map() };
+      if (mode === 'file') {
+        for (const r of files.ca?.rows ?? []) given.ca.set(r.sku, r.promo_price_cad ?? null);
+        for (const r of files.us?.rows ?? []) given.us.set(r.sku, r.promo_price_usd ?? null);
+      }
+      // Chunks of 100 in parallel, so no read can reach the API's 1,000 rows.
+      const chunks = [];
+      for (let i = 0; i < stockSkus.length; i += 100) chunks.push(stockSkus.slice(i, i + 100));
+      Promise.all(chunks.map((part) => supabase
+        .from('products')
+        .select(`sku, ${levelFields.promo_price_cad}, ${levelFields.promo_price_usd}`)
+        .in('sku', part)))
+        .then((results) => {
+          if (!active) return;
+          const found = new Map();
+          for (const { data, error } of results) {
+            if (error) throw error;
+            for (const p of data ?? []) found.set(p.sku, p);
+          }
+          const none = {};
+          for (const m of ['ca', 'us']) {
+            const col = m === 'ca' ? levelFields.promo_price_cad : levelFields.promo_price_usd;
+            none[m] = (marketSkus[m] ?? []).filter((s) => found.has(s) && found.get(s)[col] == null && given[m].get(s) == null);
+          }
+          setPriceCheck({ key: priceCheckKey, notInPim: stockSkus.filter((s) => !found.has(s)), none });
+        })
+        .catch(() => {});
+    }, 400);
+    return () => { active = false; clearTimeout(timer); };
+  }, [monthly, mode, files, priceCheckKey, stockSkus, marketSkus, levelFields]);
+  const priceNow = monthly && priceCheck?.key === priceCheckKey && stockSkus.length ? priceCheck : null;
 
   // Obsolete check (user, 2026-10-16): obsolete products in the list are
   // flagged the same way — a warning, never a block. The mark changes no
@@ -1252,22 +1342,51 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           ))}
         </div>
       ) : (
-        <label className="block">
-          <span className="text-label-lg text-on-surface-variant">Products — one SKU per line</span>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={8}
-            placeholder={'S-822H\nK-131NR\n…'}
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-          />
-          <span className="block mt-1 text-body-sm text-on-surface-variant">Every price comes from each product's Orange level in Pricing (MAP and WC of each marketplace); a price after the SKU is ignored.</span>
-        </label>
+        // One list per market, like the files: the country is chosen by the
+        // box a list is pasted in, and either alone creates the promotion.
+        <div className="space-y-2">
+          <div className="grid sm:grid-cols-2 gap-4">
+            {[['ca', 'Canada list'], ['us', 'USA list']].map(([market, title]) => {
+              const list = pasteLists[market];
+              const other = market === 'ca' ? 'us' : 'ca';
+              return (
+                <div key={market} className="rounded-xl border border-outline-variant p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor={`promo-paste-${market}`} className="text-label-lg font-semibold text-on-surface">{title}</label>
+                    {pasteLists[other].skus.length > 0 && pasted[market] !== pasted[other] && (
+                      <button
+                        type="button"
+                        onClick={() => setPasted((p) => ({ ...p, [market]: p[other] }))}
+                        className="text-label-md font-medium text-primary hover:underline"
+                      >
+                        Copy the {other === 'ca' ? 'Canada' : 'USA'} list
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    id={`promo-paste-${market}`}
+                    value={pasted[market]}
+                    onChange={(e) => setPasted((p) => ({ ...p, [market]: e.target.value }))}
+                    rows={8}
+                    placeholder={'S-822H\nK-131NR\n…'}
+                    aria-describedby={`promo-paste-${market}-count`}
+                    className="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <p id={`promo-paste-${market}-count`} className="text-body-sm text-on-surface-variant">
+                    {list.skus.length === 0 ? `Empty: the promotion will not run in ${market === 'ca' ? 'Canada' : 'the USA'}.` : `${list.skus.length} SKU${list.skus.length === 1 ? '' : 's'}`}
+                    {list.skipped.length > 0 && ` · ${list.skipped.length} line${list.skipped.length === 1 ? '' : 's'} skipped`}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-body-sm text-on-surface-variant">One SKU per line. Each market has its own product list — paste one or both. Every price comes from each product's Orange level in Pricing (MAP and WC of each marketplace); a price after the SKU is ignored.</p>
+        </div>
       )}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-body-sm text-on-surface-variant">
-          {(!monthly || mode === 'paste')
+          {!monthly
             && `${skuList.skus.length} SKU${skuList.skus.length === 1 ? '' : 's'}${skuList.skipped.length > 0 ? ` · ${skuList.skipped.length} line${skuList.skipped.length === 1 ? '' : 's'} skipped` : ''}`}
         </p>
         <button
@@ -1292,6 +1411,28 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
               </p>
             ))}
             <p className="text-on-surface-variant">You can still create it — they show in red on its table.</p>
+          </div>
+        </div>
+      )}
+      {priceNow && (priceNow.notInPim.length > 0 || priceNow.none.ca.length > 0 || priceNow.none.us.length > 0) && (
+        <div role="status" className="flex items-start gap-2.5 text-body-sm text-on-surface bg-error-container/35 rounded-lg px-3 py-2.5">
+          <AlertTriangle className="w-4 h-4 mt-0.5 text-error flex-shrink-0" aria-hidden="true" />
+          <div className="space-y-0.5 min-w-0 [overflow-wrap:anywhere]">
+            {priceNow.notInPim.length > 0 && (
+              <p>
+                <span className="font-medium">{priceNow.notInPim.length} not in the PIM (skipped):</span>{' '}
+                {priceNow.notInPim.slice(0, 40).join(', ')}{priceNow.notInPim.length > 40 ? ` and ${priceNow.notInPim.length - 40} more` : ''}
+              </p>
+            )}
+            {['ca', 'us'].filter((m) => priceNow.none[m].length > 0).map((m) => (
+              <p key={m}>
+                <span className="font-medium">{priceNow.none[m].length} with no {levelLabel(KIND_LEVEL[kind])} price in {m === 'ca' ? 'CAD' : 'USD'}:</span>{' '}
+                {priceNow.none[m].slice(0, 40).join(', ')}{priceNow.none[m].length > 40 ? ` and ${priceNow.none[m].length - 40} more` : ''}
+              </p>
+            ))}
+            {(priceNow.none.ca.length > 0 || priceNow.none.us.length > 0) && (
+              <p className="text-on-surface-variant">You can still create it — they go on that market's list without a promotion price until they get their {levelLabel(KIND_LEVEL[kind])} price in the product's Pricing tab.</p>
+            )}
           </div>
         </div>
       )}
@@ -1340,6 +1481,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   const [stockFilter, setStockFilter] = useState([]);
   // Only the obsolete products (user, 2026-10-16) — the "N obsolete" chip.
   const [obsoleteOnly, setObsoleteOnly] = useState(false);
+  // Only the products of the list with no promotion price in the market
+  // shown (2026-11-11) — the "N without a promo price" chip.
+  const [noPriceOnly, setNoPriceOnly] = useState(false);
   // Stock per market and SKU from product_inventory (Odoo); null
   // until loaded.
   const [stockByMarket, setStockByMarket] = useState(null);
@@ -1594,7 +1738,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
               {promo.status !== 'ended' && (
                 <ActionButton
                   icon={Plus}
-                  label="Import file"
+                  label="Import list"
                   busy={busy === 'import'}
                   onClick={() => setImportModal(true)}
                 />
@@ -1719,21 +1863,25 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             const outCount = marketRows.filter((r) => stockStateOf(r) === 'Out of stock').length;
             const isObsolete = (r) => Boolean(mapBySku?.[r.sku]?.is_obsolete);
             const obsoleteCount = marketRows.filter(isObsolete).length;
+            // On the list with no promotion price in this market: the product
+            // has no price on the promotion's level in this currency (and the
+            // file gave none). No channel of the market can take it.
+            const noPrice = (r) => r[priceKey] == null;
+            const noPriceCount = marketRows.filter(noPrice).length;
             const visibleRows = marketRows.filter((r) =>
               (!q || r.sku.toUpperCase().includes(q)) &&
               (!catFilter.length || catFilter.includes(catOf(r))) &&
               (!brandFilter.length || brandFilter.includes(brandOf(r))) &&
               (!stockFilter.length || stockFilter.includes(stockStateOf(r))) &&
-              (!obsoleteOnly || isObsolete(r)),
+              (!obsoleteOnly || isObsolete(r)) &&
+              (!noPriceOnly || noPrice(r)),
             );
-            const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0 || stockFilter.length > 0 || obsoleteOnly;
-            const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); setStockFilter([]); setObsoleteOnly(false); };
-            // Membership per market for the tab labels — same rule as the
-            // table: a promo price OR any cost of that market counts.
-            const countFor = (m) => rows.filter((r) =>
-              r[m === 'ca' ? 'promo_price_cad' : 'promo_price_usd'] != null ||
-              Object.keys(r.promo_costs ?? {}).some((k) => costMeta(k).market === m && r.promo_costs?.[k] != null),
-            ).length;
+            const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0 || stockFilter.length > 0 || obsoleteOnly || noPriceOnly;
+            const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); setStockFilter([]); setObsoleteOnly(false); setNoPriceOnly(false); };
+            // The tab labels count each market's list, the very rows its
+            // table shows (until 2026-11-11 they counted the rows with a
+            // price, so a list of 71 read "USA 40" over a table of 71).
+            const countFor = (m) => rows.filter((r) => onMarketList(r, m)).length;
             const marketCounts = { ca: countFor('ca'), us: countFor('us') };
             return (
               <div className="space-y-3">
@@ -1750,7 +1898,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         }`}
                       >
                         {label}
-                        <span className={`ml-1.5 tabular-nums ${market === key ? 'text-on-surface-variant' : 'opacity-70'}`}>
+                        {/* The other tab's count keeps the tab's own gray: dimmed
+                            further it fell under the contrast minimum (axe). */}
+                        <span className={`ml-1.5 tabular-nums ${market === key ? 'text-on-surface-variant' : ''}`}>
                           {marketCounts[key]}
                         </span>
                       </button>
@@ -1804,6 +1954,25 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       >
                         <AlertTriangle className="w-3.5 h-3.5" />
                         {outCount} out of stock
+                      </button>
+                    )}
+                    {/* On the list without a promotion price: no channel of
+                        this market can take them until the product gets its
+                        price on the promotion's level. Stays while pressed. */}
+                    {(noPriceCount > 0 || noPriceOnly) && (
+                      <button
+                        type="button"
+                        onClick={() => setNoPriceOnly(!noPriceOnly)}
+                        aria-pressed={noPriceOnly}
+                        title={`Show only the products of the ${market === 'ca' ? 'Canada' : 'USA'} list with no promotion price: they have no ${levelLabel(promotionLevel(promo))} price in ${market === 'ca' ? 'CAD' : 'USD'} (the product's Pricing tab)`}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-label-md font-medium whitespace-nowrap transition-colors ${
+                          noPriceOnly
+                            ? 'bg-error text-on-error'
+                            : 'bg-error-container/50 text-on-error-container hover:bg-error-container'
+                        }`}
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
+                        {noPriceCount} without a promo price
                       </button>
                     )}
                     {/* Obsolete products (user, 2026-10-16) in the badge's
@@ -1873,13 +2042,15 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   </div>
                 ) : marketRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
-                    <p className="text-body-md text-on-surface font-medium">No {market === 'ca' ? 'Canadian' : 'US'} promo prices yet</p>
-                    <p className="text-body-sm text-on-surface-variant mt-1">
-                      Paste the {market === 'ca' ? 'CAD' : 'USD'} promo lists to add this market to the promotion.
-                    </p>
+                    <p className="text-body-md text-on-surface font-medium">No products on the {market === 'ca' ? 'Canada' : 'USA'} list yet</p>
+                    {canEdit && promo.status !== 'ended' && (
+                      <p className="text-body-sm text-on-surface-variant mt-1">
+                        Use Import list above to add this market: upload its file or paste its SKUs.
+                      </p>
+                    )}
                   </div>
                 ) : (
-                  <div className="relative overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
+                  <div className="relative overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent tabIndex={0}>
                     {/* The list scrolls INSIDE the card (data-lenis-prevent —
                         see the AppShell Lenis gotcha) so the header can stay
                         sticky; the background lives on each th because that's
@@ -1897,7 +2068,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                               <th key={k} className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">
                                 Cost · {m.label}
                                 {m.unit !== (market === 'ca' ? 'CAD' : 'USD') && (
-                                  <span className="ml-1 text-on-surface-variant/70">({m.unit})</span>
+                                  <span className="ml-1">({m.unit})</span>
                                 )}
                               </th>
                             );
@@ -2974,11 +3145,15 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
 
 // Guided import: pick the market first; if that market already has data in
 // the promotion, the download is the CURRENT data (update path); otherwise
-// it's the blank template (new upload path). Then upload the filled file.
+// it's the blank template (new upload path). Then upload the filled file —
+// or paste the market's SKUs (2026-11-11): either way it IS that market's
+// list, and the other market is not touched.
 function ImportPromoDialog({ promo, rows, onClose, onImported }) {
   const [market, setMarket] = useState(null); // null | 'ca' | 'us'
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [text, setText] = useState('');
+  const pastedList = useMemo(() => parseSkuList(text), [text]);
 
   const marketCount = (m) => (rows ?? []).filter((r) => onMarketList(r, m)).length;
   const counts = { ca: marketCount('ca'), us: marketCount('us') };
@@ -3017,10 +3192,34 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
     }
   }
 
+  // The pasted SKUs become this market's list: a product already on it keeps
+  // the price its file gave it, a new one takes its level's prices, and the
+  // SKUs not pasted leave the list.
+  async function handlePaste() {
+    if (!pastedList.skus.length) return;
+    setBusy(true);
+    setError(null);
+    const task = startTask(`${marketLabel} list — ${promo.name}`, { detail: 'Checking the SKUs against the PIM…' });
+    try {
+      const r = await addFileToPromotion(promo, marketListRows(rows, pastedList.skus, market), market, { task, source: 'list' });
+      task.finish(`${r.added} SKUs on the ${marketLabel} list${r.left ? ` · ${r.left} left it` : ''}`);
+      onImported(
+        `${marketLabel}: ${r.added} SKUs on the list from the pasted list` +
+        (r.left ? ` · ${r.left} not in it left the ${marketLabel} list` : '') +
+        (r.notInPim.length ? ` · not in PIM: ${r.notInPim.join(', ')}` : ''),
+        { market, ...r },
+      );
+    } catch (err) {
+      task.fail(err);
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
   return (
     <Dialog
       onClose={onClose}
-      title="Import promotion file"
+      title="Import a market's list"
       subtitle={promo.name}
       maxWidth="max-w-lg"
     >
@@ -3079,6 +3278,42 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 {loaded ? 'Upload updated file' : 'Upload filled file'}
               </FileDropzone>
+            </div>
+
+            <div className="border-t border-outline-variant/60 pt-3 space-y-2">
+              <label htmlFor="promo-import-paste" className="block text-label-lg text-on-surface-variant">
+                Or paste the {marketLabel} list — one SKU per line
+              </label>
+              <textarea
+                id="promo-import-paste"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={6}
+                placeholder={'S-822H\nK-131NR\n…'}
+                disabled={busy}
+                aria-describedby="promo-import-paste-help"
+                className="w-full px-3 py-2 rounded-lg bg-surface border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+              <p id="promo-import-paste-help" className="text-body-sm text-on-surface-variant">
+                {loaded ? `It replaces the ${marketLabel} list: the SKUs not pasted leave it.` : `It becomes the ${marketLabel} list.`}{' '}
+                A new product takes its {levelLabel(promotionLevel(promo))} prices{loaded ? '; one already on the list keeps its price' : ''}.
+              </p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handlePaste}
+                  disabled={busy || pastedList.skus.length === 0}
+                  aria-busy={busy}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  Save the {marketLabel} list
+                </button>
+                <span className="text-body-sm text-on-surface-variant">
+                  {pastedList.skus.length} SKU{pastedList.skus.length === 1 ? '' : 's'}
+                  {pastedList.skipped.length > 0 && ` · ${pastedList.skipped.length} line${pastedList.skipped.length === 1 ? '' : 's'} skipped`}
+                </span>
+              </div>
             </div>
           </div>
         )}
