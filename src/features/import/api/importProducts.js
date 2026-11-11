@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { syncVariantFamilies } from '@/features/products/api/variantFamilies';
 import { logActivity } from '@/features/activity/api/activityLog';
+import { upcKey } from '@/features/import/lib/upcCheck';
 
 /**
  * Check which of the given SKUs already exist. Returns a Map of
@@ -25,6 +26,32 @@ export async function fetchExistingProducts(skus, { task = null } = {}) {
   }
   task?.progress(1);
   return out;
+}
+
+/**
+ * Which products carry each UPC, for the whole catalog: a Map of
+ * upcKey → [sku]. The import preview checks a file's UPCs against it
+ * (flagRepeatedUpcs): a UPC can be on one product only.
+ */
+export async function fetchUpcOwners() {
+  const owners = new Map();
+  // paged: the API returns at most 1,000 rows per request
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('sku, upc:attributes->>upc')
+      .order('sku')
+      .range(from, from + 999);
+    if (error) throw error;
+    for (const p of data ?? []) {
+      const key = upcKey(p.upc);
+      if (!key) continue;
+      if (!owners.has(key)) owners.set(key, []);
+      owners.get(key).push(p.sku);
+    }
+    if ((data ?? []).length < 1000) break;
+  }
+  return owners;
 }
 
 // A description's words, whatever its HTML: tags, entities and spacing out.

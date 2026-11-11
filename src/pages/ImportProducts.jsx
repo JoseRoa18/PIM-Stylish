@@ -16,7 +16,8 @@ import { buildImportRows } from '@/features/import/lib/buildImportRows';
 import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS, BATH_SINK_TEMPLATE_HEADERS, CUTTING_BOARD_TEMPLATE_HEADERS, ACCESSORY_TEMPLATE_HEADERS, DRAIN_TEMPLATE_HEADERS, STRAINER_TEMPLATE_HEADERS, FAUCET_PLATE_TEMPLATE_HEADERS, COLANDER_TEMPLATE_HEADERS, templateLayout, templateKindOf, scoreImportHeader, excelValidationFor } from '@/features/import/lib/importSchema';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
-import { fetchExistingProducts, importProducts } from '@/features/import/api/importProducts';
+import { fetchExistingProducts, fetchUpcOwners, importProducts } from '@/features/import/api/importProducts';
+import { flagRepeatedUpcs } from '@/features/import/lib/upcCheck';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import { startTask } from '@/lib/taskProgress';
 
@@ -178,7 +179,13 @@ export default function ImportProducts() {
       const built = buildImportRows(parsed);
       task.progress(0.75);
       const skus = built.rows.map((r) => r.sku).filter(Boolean);
-      const existing = await fetchExistingProducts(skus, { task: task.part(0.75, 1) });
+      const existing = await fetchExistingProducts(skus, { task: task.part(0.75, 0.95) });
+      // A UPC can be on one product only: a row that would repeat one is an
+      // error here, before anything is written (the database refuses it too).
+      if (built.rows.some((r) => r.attributes?.upc)) {
+        task.progress(0.95, 'Checking the UPCs…');
+        flagRepeatedUpcs(built.rows, existing, await fetchUpcOwners());
+      }
       setRows(built.rows);
       setUnknownHeaders(built.unknownHeaders);
       setExistingMap(existing);
