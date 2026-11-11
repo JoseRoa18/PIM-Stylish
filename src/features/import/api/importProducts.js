@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { syncVariantFamilies } from '@/features/products/api/variantFamilies';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { upcKey } from '@/features/import/lib/upcCheck';
+import { sendUpcsToOdoo, upcChanged } from '@/features/odoo/api/odooPush';
 
 /**
  * Check which of the given SKUs already exist. Returns a Map of
@@ -139,6 +140,11 @@ export async function importProducts(rows, existingMap, onProgress, { task = nul
     }
   } finally {
     logImport(written, existingMap);
+    // The UPCs this import set or changed go to Odoo (user, 2026-11-11), with
+    // their own card — also the ones saved before a batch failed.
+    sendUpcsToOdoo(written
+      .filter(({ r }) => r.attributes?.upc && upcChanged(existingMap.get(r.sku)?.attributes?.upc, r.attributes.upc))
+      .map(({ r }) => r.sku));
   }
 
   // Re-derive variant families for every base model touched by this import.

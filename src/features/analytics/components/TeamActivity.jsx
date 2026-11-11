@@ -2,7 +2,7 @@ import { nameFromEmail } from '@/lib/format';
 import { MARKETPLACES } from '@/features/dashboard/lib/listingHealth';
 import { DeltaChip } from './charts';
 
-const TARGET_LABEL = { wix: 'Wix', wayfair: 'Wayfair', bestbuy: 'Best Buy', walmart_us: 'Walmart US', amazon: 'Amazon', automation: 'Promo automation' };
+const TARGET_LABEL = { wix: 'Wix', wayfair: 'Wayfair', bestbuy: 'Best Buy', walmart_us: 'Walmart US', amazon: 'Amazon', automation: 'Promo automation', odoo: 'Odoo' };
 
 // What the team did in the selected week, from the audit log: per person and
 // in total, against the previous week.

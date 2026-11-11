@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, UserCheck, ShieldCheck } from 'lucide-react';
+import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, UserCheck, ShieldCheck, Send } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
 import { getInventoryReport, refreshInventory, describeInventoryPull, stockAge } from '@/features/pricing/api/inventory';
@@ -11,6 +11,7 @@ import { WARRANTY_BRANDS, getBrandWarranties, setBrandWarranty, countBrandProduc
 import { DocumentRow } from '@/features/media/components/DocumentsSection';
 import { Link } from 'react-router-dom';
 import { startTask } from '@/lib/taskProgress';
+import { setOdooPush } from '@/features/odoo/api/odooPush';
 
 function monthLabel(period) {
   if (!period) return '';
@@ -342,6 +343,69 @@ function InventorySection() {
   );
 }
 
+// PIM → Odoo (user, 2026-11-11: "apenas alguien le dé SAVE en PIM la
+// información viaje a Odoo … solo UPC"): a UPC saved in the PIM is written to
+// the product's Barcode in Odoo right away (odoo-push). Off until the user
+// turns it on; the edge function reads the same switch.
+function OdooSection() {
+  const confirm = useConfirm();
+  const descriptionId = useId();
+  const [on, setOn] = useState(null); // null while loading
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    getAppSetting('odoo_push', { enabled: false })
+      .then((value) => setOn(value?.enabled === true))
+      .catch((err) => { setOn(false); setError(err.message); });
+  }, []);
+
+  async function toggle(next) {
+    if (next && !(await confirm({
+      title: 'Send UPC changes to Odoo?',
+      message: 'From now on, a UPC saved in the PIM — on a product page or through a spreadsheet import — is written to that product’s Barcode in Odoo right away. A product whose UPC is not edited is not touched.',
+      confirmLabel: 'Turn on',
+    }))) return;
+    const prev = on;
+    setOn(next);
+    setError(null);
+    try {
+      await setOdooPush(next);
+    } catch (err) {
+      setOn(prev);
+      setError(err.message);
+    }
+  }
+
+  return (
+    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
+            <Send className="w-5 h-5" strokeWidth={2} />
+          </div>
+          <div>
+            <h2 className="text-title-md text-on-surface font-semibold">Odoo</h2>
+            <p id={descriptionId} className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
+              When a product’s UPC is saved in the PIM — on its page or through a spreadsheet import — it is written to that product’s Barcode in Odoo right away. Only the UPC travels. The PIM never creates a product in Odoo, never empties a Barcode, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
+              <Link to="/activity" className="text-primary underline underline-offset-2">Activity Log</Link>.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-label-lg text-on-surface">{on === null ? '…' : on ? 'On' : 'Off'}</span>
+          <Switch checked={on === true} disabled={on === null} onChange={toggle} label="Send UPC changes to Odoo" describedBy={descriptionId} />
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 bg-error-container/60 text-on-error-container">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const confirm = useConfirm();
   const [settings, setSettings] = useState(null);
@@ -568,6 +632,8 @@ export default function SettingsPage() {
       <WarrantySection />
 
       <InventorySection />
+
+      <OdooSection />
     </div>
   );
 }

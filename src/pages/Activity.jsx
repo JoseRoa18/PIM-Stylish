@@ -47,6 +47,7 @@ const TARGET_META = {
   'marketplace.walmartapis.com': WALMART_TARGET,
   bestbuy: BESTBUY_TARGET,
   'marketplace.bestbuy.ca': BESTBUY_TARGET,
+  odoo: { label: 'Odoo', className: 'bg-secondary-container text-on-secondary-container' },
 };
 
 const ACTION_OPTIONS = [
@@ -69,6 +70,7 @@ const TARGET_OPTIONS = [
   { value: 'marketplace.walmartapis.com', label: 'Walmart' },
   { value: 'marketplace.bestbuy.ca', label: 'Best Buy' },
   { value: 'bbb', label: 'Bed Bath & Beyond' },
+  { value: 'odoo', label: 'Odoo' },
 ];
 
 const RANGE_OPTIONS = [
