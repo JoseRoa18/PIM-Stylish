@@ -184,7 +184,7 @@ const VALIDATION = {
     attrs: 'type="custom"',
     formulas: `<formula1>${esc(`AND(ISNUMBER(--${anchor}),ISERROR(FIND(".",${anchor})),LEN(${anchor})>=${r.min},LEN(${anchor})<=${r.max})`)}</formula1>`,
     title: 'Digits only',
-    error: `A UPC is ${r.min} to ${r.max} digits — no letters, spaces or symbols.`,
+    error: `A UPC is ${r.min === r.max ? r.min : `${r.min} to ${r.max}`} digits — no letters, spaces or symbols.`,
   }),
 };
 function validationsXml(validations, untilRow) {

@@ -17,7 +17,7 @@ import { TEMPLATE_HEADERS, FAUCET_TEMPLATE_HEADERS, BATH_FAUCET_TEMPLATE_HEADERS
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { fetchExistingProducts, fetchUpcOwners, importProducts } from '@/features/import/api/importProducts';
-import { flagRepeatedUpcs } from '@/features/import/lib/upcCheck';
+import { flagInvalidUpcs, flagRepeatedUpcs } from '@/features/import/lib/upcCheck';
 import { isOdooPushOn } from '@/features/odoo/api/odooPush';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import { startTask } from '@/lib/taskProgress';
@@ -190,10 +190,12 @@ export default function ImportProducts() {
       task.progress(0.75);
       const skus = built.rows.map((r) => r.sku).filter(Boolean);
       const existing = await fetchExistingProducts(skus, { task: task.part(0.75, 0.95) });
-      // A UPC can be on one product only: a row that would repeat one is an
-      // error here, before anything is written (the database refuses it too).
+      // A UPC must be well formed (12 digits, right check digit) and can be
+      // on one product only: a row that breaks either is an error here,
+      // before anything is written (the database refuses it too).
       if (built.rows.some((r) => r.attributes?.upc)) {
         task.progress(0.95, 'Checking the UPCs…');
+        flagInvalidUpcs(built.rows, existing);
         flagRepeatedUpcs(built.rows, existing, await fetchUpcOwners());
       }
       setRows(built.rows);

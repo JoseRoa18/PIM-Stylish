@@ -4,7 +4,7 @@
 
 export const FIELD_HELP = {
   // ---------- Identification ----------
-  upc: 'Universal Product Code — the 12-digit barcode. One product only: the PIM refuses a UPC another product already has.',
+  upc: 'Universal Product Code — the 12-digit barcode. The PIM refuses one that is not 12 digits with the right check digit (a mistyped number), and one another product already has.',
   manufacturer: 'Company that manufactures the product (may differ from the brand).',
   brand: 'Brand shown to shoppers on every marketplace.',
   category: 'Product category — drives which spec fields, templates and export rules apply.',

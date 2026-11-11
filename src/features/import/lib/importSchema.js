@@ -1079,7 +1079,8 @@ export function dropdownFor(header, kind = null) {
  *     catalog already uses for an open field (`suggestions`, from
  *     loadSuggestionLists);
  *   { type: 'decimal' } / { type: 'whole' } — a number (prices, sizes, counts);
- *   { type: 'textLength', min: 12, max: 14 } — a UPC;
+ *   { type: 'upc', min: 12, max: 12 } — a UPC: 12 digits (its check digit is
+ *     checked by the import preview and the database, not by Excel);
  *   null — free text (titles, descriptions, HS codes, URLs, part numbers).
  */
 // `strict` (user, 2026-10-15: "solo número, no letras ni símbolos"): a number,
@@ -1096,7 +1097,7 @@ export function excelValidationFor(header, kind = null, suggestions = {}) {
   const field = def.target.col ?? def.target.attr;
   const known = field ? suggestions[field] : null;
   if (known?.length) return { type: 'list', values: known };
-  if (def.type === 'upc') return { type: 'upc', min: 12, max: 14, strict: true };
+  if (def.type === 'upc') return { type: 'upc', min: 12, max: 12, strict: true };
   if (def.type === 'int') return { type: 'whole', strict: true };
   if (def.type === 'number' || def.type === 'money') return { type: 'decimal', strict: true };
   return null;

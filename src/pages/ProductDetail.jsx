@@ -41,6 +41,7 @@ import { generateKeywords } from '@/features/products/api/keywords';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useVariants } from '@/features/products/hooks/useVariants';
 import { VARIANT_DISTINGUISHING, NEVER_PROPAGATE, prettifyKey, readField } from '@/features/products/lib/variantFields';
+import { upcProblem } from '@/features/import/lib/upcCheck';
 import Dialog from '@/components/ui/Dialog';
 import { getThumbnailUrl, thumbFallback } from '@/features/media/api/media';
 import { formatCAD, formatCategory, formatDate, formatTimeAgo } from '@/lib/format';
@@ -542,6 +543,17 @@ export default function ProductDetail() {
       if (Object.keys(patch).length === 0) {
         setIsEditing(false);
         return;
+      }
+      // A UPC being set or changed must be well formed (12 digits, right
+      // check digit): the database refuses it anyway — this says so without
+      // the round trip, in the same words.
+      const upcTyped = String(form._upc ?? '').trim();
+      if (upcTyped && upcTyped !== String(attr(product, 'upc') ?? '').trim()) {
+        const problem = upcProblem(upcTyped);
+        if (problem) {
+          setSaveError(`UPC ${upcTyped} is not valid: ${problem}.`);
+          return;
+        }
       }
       // Unique-per-product fields (UPC, factory code) never reach the
       // propagation offer — copying them to siblings would corrupt data.
@@ -1143,7 +1155,7 @@ function OverviewTab({ product, edit, onProductChanged, onUnify }) {
       <Section title="Identification">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
           <Field label="SKU" value={product.sku} mono />
-          <AttrField label="UPC" attrKey="upc" product={product} edit={edit} mono />
+          <AttrField label="UPC" attrKey="upc" product={product} edit={edit} mono note={upcFieldNote} />
           <EditableField label="Brand" fieldKey="brand" type="select" options={BRAND_OPTIONS} product={product} edit={edit} />
           <AttrField label="Manufacturer" attrKey="manufacturer" type="select" options={manufacturers} product={product} edit={edit} />
           <EditableField label="Category" fieldKey="category" type="select" options={CATEGORY_OPTIONS} product={product} edit={edit} />
@@ -2245,7 +2257,19 @@ function FractionField({ label, attrKey, product, edit }) {
 // `options` = a fixed list (a <select>); `suggest` = true for the catalog's own
 // values plus "Other…", or a list that leads them; `skuList` = the SKUs that
 // can be picked, several at once ("A-802B; A-803B").
-function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit, weight, suggest, skuList, help }) {
+// What the UPC field says under itself while it is typed: how many digits
+// are in so far, or what is wrong with it (the rule the save applies).
+function upcFieldNote(value, stored) {
+  const v = String(value ?? '').trim();
+  if (!v || v === String(stored ?? '').trim()) return null;
+  if (/^\d+$/.test(v) && v.length < 12) return { tone: 'hint', text: `${v.length} of 12 digits` };
+  const problem = upcProblem(v);
+  return problem ? { tone: 'error', text: `Not a valid UPC: ${problem}.` } : null;
+}
+
+// `note` (a plain text field only): (typed value, stored value) → null or
+// { tone: 'hint' | 'error', text }, shown under the input as it is typed.
+function AttrField({ label, attrKey, type = 'text', product, edit, mono, options, unit, weight, suggest, skuList, help, note }) {
   const { isEditing, form, setField } = edit;
   const formKey = '_' + attrKey;
   const shownUnit = unit ? (isEditing ? 'in' : unit) : null;
@@ -2377,11 +2401,21 @@ function AttrField({ label, attrKey, type = 'text', product, edit, mono, options
     );
   }
 
+  const noted = note ? note(value, attr(product, attrKey)) : null;
+  const noteId = `attr-note-${attrKey}`;
   return (
     <div className="flex flex-col gap-1">
       <span className="text-label-md text-on-surface-variant">{label}</span>
       <input type="text" value={value ?? ''} onChange={(e) => setField(formKey, e.target.value)} aria-label={name}
+        aria-invalid={noted?.tone === 'error' ? true : undefined} aria-describedby={noted ? noteId : undefined}
         placeholder={`Enter ${(typeof label === 'string' ? label.toLowerCase() : 'value')}…`} className={`${inputBase} ${mono ? 'font-mono' : ''}`} />
+      {/* Always in the page so a screen reader hears it change; out of the
+          layout (sr-only) while there is nothing to say. */}
+      {note && (
+        <span id={noteId} role="status" className={!noted ? 'sr-only' : `text-body-sm ${noted.tone === 'error' ? 'text-error' : 'text-on-surface-variant'}`}>
+          {noted?.text ?? ''}
+        </span>
+      )}
     </div>
   );
 }
