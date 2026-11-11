@@ -15,6 +15,8 @@ import {
   Search,
   RefreshCw,
   ExternalLink,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import FilterDropdown from '@/features/products/components/FilterDropdown';
 import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
@@ -514,8 +516,23 @@ function AlignmentOverview({ overview, site, onSelect }) {
   );
 }
 
+// Which side of its expected price a problem's live price is on (user,
+// 2026-11-11: "si está por debajo o por arriba, como para filtrar"). 'none' =
+// nothing to compare: no promo on the store, or no price in the PIM. A problem
+// with both prices is never equal to it (it would be aligned).
+const priceSide = (p) => (p.live != null && p.expected != null ? (p.live > p.expected ? 'above' : 'below') : 'none');
+const PRICE_SIDES = [
+  { key: 'all', label: 'All' },
+  { key: 'above', label: 'Above', icon: ArrowUp, title: (store) => `On ${store} above the expected price`, empty: (store) => `No price on ${store} is above its expected price.` },
+  { key: 'below', label: 'Below', icon: ArrowDown, title: (store) => `On ${store} below the expected price`, empty: (store) => `No price on ${store} is below its expected price.` },
+  { key: 'none', label: 'No price', title: () => 'Nothing to compare: no promo price on the store, or no price in the PIM', empty: (store) => `Every problem on ${store} has both prices.` },
+];
+
 function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   const [site, setSite] = useState(initialSite && ALIGN_TARGETS[initialSite] ? initialSite : DEFAULT_WIX_SITE);
+  // The side shown in the problems table. Kept when another channel is
+  // picked, so "Below" can be walked store by store.
+  const [side, setSide] = useState('all');
   const cfg = ALIGN_TARGETS[site];
   const money = (v) => `${cfg.symbol}${Number(v).toFixed(2)}`;
   const [result, setResult] = useState(null);
@@ -578,6 +595,13 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   }
 
   const fixable = cfg.canFix ? (result?.problems.filter((p) => p.expected != null) ?? []) : [];
+
+  // The problems table's filter only chooses the rows shown: "Fix all" still
+  // pushes every fixable problem (its count and its confirmation say so).
+  const sideCounts = { all: result?.problems.length ?? 0, above: 0, below: 0, none: 0 };
+  for (const p of result?.problems ?? []) sideCounts[priceSide(p)] += 1;
+  const shownProblems = side === 'all' ? (result?.problems ?? []) : (result?.problems ?? []).filter((p) => priceSide(p) === side);
+  const problemCols = 6 + (cfg.kind === 'page' ? 1 : 0) + (canEdit && cfg.canFix ? 1 : 0);
 
   // After a push the channel needs time before the analysis can see it:
   //  - Wix: the query index lags writes by ~15-30s → wait, then re-check.
@@ -775,7 +799,30 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                <h3 className="text-title-sm text-on-surface font-medium">Problems ({result.problems.length})</h3>
+                <div className="flex items-center gap-3 flex-wrap min-w-0 max-w-full">
+                  <h3 className="text-title-sm text-on-surface font-medium">Problems ({result.problems.length})</h3>
+                  {/* Above or below the expected price (user, 2026-11-11). "No
+                      price" shows only while a problem has nothing to compare. */}
+                  <div role="group" aria-label="Show the prices above or below the expected price" className="inline-flex max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container p-1">
+                    {PRICE_SIDES.filter((s) => s.key !== 'none' || sideCounts.none > 0 || side === 'none').map((s) => (
+                      <button
+                        key={s.key}
+                        type="button"
+                        aria-pressed={side === s.key}
+                        disabled={sideCounts[s.key] === 0 && side !== s.key}
+                        onClick={() => setSide(s.key)}
+                        title={s.title?.(cfg.short)}
+                        className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-label-md font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 ${side === s.key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant enabled:hover:text-on-surface'}`}
+                      >
+                        {s.icon && <s.icon className="w-3.5 h-3.5" aria-hidden="true" />}
+                        {s.label}
+                        {/* The count keeps the segment's own gray, as on a
+                            promotion's Canada / USA tabs. */}
+                        <span className={`tabular-nums ${side === s.key ? 'text-on-surface-variant' : ''}`}>{sideCounts[s.key]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 {canEdit && fixable.length > 0 && (
                   <button
                     type="button"
@@ -791,8 +838,9 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
               </div>
               {/* Inner scroll + sticky header (bg on each th — that's the
                   element that sticks). data-lenis-prevent per the AppShell
-                  Lenis gotcha. */}
-              <div className="relative overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent>
+                  Lenis gotcha. Focusable like the promotion's table: with a
+                  filter that shows no row it holds no link to reach it by. */}
+              <div className="relative overflow-auto max-h-[65vh] rounded-xl border border-outline-variant" data-lenis-prevent tabIndex={0}>
                 <table className="w-full text-body-sm">
                   <thead>
                     <tr className="text-on-surface-variant text-label-md">
@@ -801,12 +849,20 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Expected</th>
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">Source</th>
                       <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium">Δ</th>
+                      <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant pl-0 pr-4 py-2.5"><span className="sr-only">Above or below the expected price</span></th>
                       {cfg.kind === 'page' && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">Page</th>}
                       {canEdit && cfg.canFix && <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-4 py-2.5"><span className="sr-only">Actions</span></th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {result.problems.map((p) => (
+                    {shownProblems.length === 0 && (
+                      <tr>
+                        <td colSpan={problemCols} className="px-4 py-6 text-center text-on-surface-variant">
+                          {PRICE_SIDES.find((s) => s.key === side)?.empty?.(cfg.short)}
+                        </td>
+                      </tr>
+                    )}
+                    {shownProblems.map((p) => (
                       <tr key={p.sku} className="border-t border-outline-variant/40 odd:bg-surface-container-low/30">
                         <td className="px-4 py-2">
                           <Link to={`/catalog/${p.sku}`} className="font-mono text-on-surface hover:text-primary hover:underline">{p.sku}</Link>
@@ -826,6 +882,20 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                         </td>
                         <td className="px-4 py-2 text-right tabular-nums text-on-surface-variant">
                           {p.live != null && p.expected != null ? `${p.live > p.expected ? '+' : '−'}${money(Math.abs(p.live - p.expected))}` : '—'}
+                        </td>
+                        {/* Below the expected price is the one in red: a store
+                            selling under MAP. */}
+                        <td className="pl-0 pr-4 py-2 whitespace-nowrap">
+                          {priceSide(p) === 'above' && (
+                            <span className="inline-flex items-center align-middle gap-1 text-label-md font-medium text-on-surface-variant">
+                              <ArrowUp className="w-3.5 h-3.5" aria-hidden="true" />Above
+                            </span>
+                          )}
+                          {priceSide(p) === 'below' && (
+                            <span className="inline-flex items-center align-middle gap-1 text-label-md font-medium text-error">
+                              <ArrowDown className="w-3.5 h-3.5" aria-hidden="true" />Below
+                            </span>
+                          )}
                         </td>
                         {cfg.kind === 'page' && (
                           <td className="px-4 py-2 whitespace-nowrap">
