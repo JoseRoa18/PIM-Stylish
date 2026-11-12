@@ -11,6 +11,9 @@ import { computeAutoValues, isServerKey } from '@/features/scorecard/lib/autoMet
 import { listMetrics, listPeople, listValues, refreshServerNumbers, saveAutoValues, saveValue } from '@/features/scorecard/api/scorecard';
 import ScorecardTable from '@/features/scorecard/components/ScorecardTable';
 import MetricDialog from '@/features/scorecard/components/MetricDialog';
+import CompanyBoard from '@/features/scorecard/components/CompanyBoard';
+import { COMPANY_BOARD, COMPANY_KEY } from '@/features/scorecard/lib/company';
+import { getCompanyViewers } from '@/features/scorecard/api/company';
 
 const WEEKS_SHOWN = 13;
 // Opening a tab works its live rows out again unless they were in the last
@@ -24,6 +27,16 @@ export default function Scorecard() {
   const [params, setParams] = useSearchParams();
   const boardKey = BOARD_BY_KEY[params.get('board')] ? params.get('board') : BOARDS[0].key;
   const board = BOARD_BY_KEY[boardKey];
+  // The Company tab — the whole company in one grid — is for its viewers only
+  // (user, 2026-11-11): nobody else gets its button, and its address shows
+  // them the first marketplace instead. The database refuses its own numbers
+  // to them too.
+  const [companyViewers, setCompanyViewers] = useState([]);
+  useEffect(() => {
+    getCompanyViewers().then(setCompanyViewers).catch(() => {});
+  }, []);
+  const seesCompany = Boolean(user?.email) && companyViewers.includes(user.email.toLowerCase());
+  const companyMode = seesCompany && params.get('board') === COMPANY_KEY;
   // One market at a time (Canada / USA) when the board sells in both.
   const boardMarkets = Object.keys(board.markets);
   const market = boardMarkets.includes(params.get('market')) ? params.get('market') : boardMarkets[0];
@@ -74,10 +87,12 @@ export default function Scorecard() {
   // On a phone the tab row scrolls: keep the chosen marketplace in view.
   useEffect(() => {
     boardTabs.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [boardKey]);
+  }, [boardKey, companyMode]);
 
-  // The board's measurables and the shown weeks' values.
+  // The board's measurables and the shown weeks' values. (The Company tab
+  // loads its own.)
   useEffect(() => {
+    if (companyMode) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -92,7 +107,7 @@ export default function Scorecard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [boardKey, weeks]);
+  }, [boardKey, weeks, companyMode]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -156,12 +171,12 @@ export default function Scorecard() {
   }
 
   useEffect(() => {
-    if (!canEdit || !metrics || !weeks.includes(thisWeek)) return;
+    if (companyMode || !canEdit || !metrics || !weeks.includes(thisWeek)) return;
     const key = `${boardKey}|${thisWeek}`;
     if (autoDone.current.has(key)) return;
     autoDone.current.add(key);
     fillAuto(metrics, values);
-  }, [canEdit, metrics, values, weeks, thisWeek, boardKey, fillAuto]);
+  }, [companyMode, canEdit, metrics, values, weeks, thisWeek, boardKey, fillAuto]);
 
   // The PIM's numbers can't be edited (user, 2026-11-04) — not even by an
   // admin; RLS refuses them too. An admin turns "Filled by the PIM" off to type a row.
@@ -222,7 +237,7 @@ export default function Scorecard() {
           <h1 className="text-display-lg text-on-surface">EOS ScoreCard</h1>
           <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, goal and {WEEKS_SHOWN} weeks, Sunday to Saturday, from {weekTag(FIRST_WEEK)}.</p>
         </div>
-        {isAdmin && (
+        {isAdmin && !companyMode && (
           <button type="button" onClick={() => setEditing({ isNew: true })} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity">
             <Plus className="w-4 h-4" aria-hidden />
             Add measurable
@@ -240,13 +255,23 @@ export default function Scorecard() {
       <div ref={toolbar} className={cn('lg:sticky lg:top-0 lg:z-30 -mx-4 px-4 sm:-mx-8 sm:px-8 pt-3 pb-3 mb-3 bg-background flex flex-col gap-3 transition-shadow', stuck && 'lg:border-b lg:border-outline-variant lg:shadow-sm')}>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div ref={boardTabs} role="group" aria-label="Marketplace" className="flex gap-1 max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container-low p-1">
+          {seesCompany && (
+            <button
+              type="button"
+              aria-pressed={companyMode}
+              onClick={() => selectBoard(COMPANY_KEY)}
+              className={cn('px-4 py-1.5 rounded-full text-body-md whitespace-nowrap transition-colors', companyMode ? 'bg-secondary-container text-on-secondary-container font-semibold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high')}
+            >
+              {COMPANY_BOARD.label}
+            </button>
+          )}
           {BOARDS.map((b) => (
             <button
               key={b.key}
               type="button"
-              aria-pressed={b.key === boardKey}
+              aria-pressed={!companyMode && b.key === boardKey}
               onClick={() => selectBoard(b.key)}
-              className={cn('px-4 py-1.5 rounded-full text-body-md whitespace-nowrap transition-colors', b.key === boardKey ? 'bg-secondary-container text-on-secondary-container font-semibold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high')}
+              className={cn('px-4 py-1.5 rounded-full text-body-md whitespace-nowrap transition-colors', !companyMode && b.key === boardKey ? 'bg-secondary-container text-on-secondary-container font-semibold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high')}
             >
               {b.label}
             </button>
@@ -267,7 +292,7 @@ export default function Scorecard() {
           )}
         </div>
       </div>
-      {metrics && (
+      {metrics && !companyMode && (
           <div className="flex items-center justify-between gap-3 flex-wrap text-body-sm text-on-surface-variant">
             <div className="flex items-center gap-3 flex-wrap">
               {boardMarkets.length > 1 && (
@@ -319,20 +344,22 @@ export default function Scorecard() {
       )}
       </div>
 
-      {error && (
+      {companyMode && <CompanyBoard weeks={weeks} thisWeek={thisWeek} />}
+
+      {!companyMode && error && (
         <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
           {error.message}
         </div>
       )}
-      {notice && (
+      {!companyMode && notice && (
         <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
           {notice.text}
         </div>
       )}
 
-      {!metrics && !error ? (
+      {companyMode ? null : !metrics && !error ? (
         <div role="status" aria-label="Loading the scorecard" className="animate-pulse rounded-2xl bg-surface-container h-96" />
       ) : metrics && (
         <>

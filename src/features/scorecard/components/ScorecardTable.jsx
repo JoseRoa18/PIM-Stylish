@@ -14,8 +14,13 @@ import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } fro
 // color alone); its owner or an admin edits it in place. The 13 weeks fit
 // the page from 1440 px; narrower, the table scrolls inside itself and
 // opens on the latest week.
-export default function ScorecardTable({ board, metrics, values, weeks, thisWeek, canWrite, isAdmin, onSave, onEditMetric }) {
-  const groups = SECTIONS.map((s) => ({ ...s, rows: metrics.filter((m) => sectionOf(m) === s.key) })).filter((g) => g.rows.length);
+//
+// The Company tab draws the same grid with its own groups (`groups`: [{ key,
+// label, rows }]) and no owners (`plain`); a row there may be `strong` (a
+// total), carry a `hint` for its tooltip, and be typed for any week, the
+// coming ones too (`anyWeek`: a target).
+export default function ScorecardTable({ board, metrics, values, weeks, thisWeek, canWrite, isAdmin, onSave, onEditMetric, groups: ownGroups = null, plain = false }) {
+  const groups = ownGroups ?? SECTIONS.map((s) => ({ ...s, rows: metrics.filter((m) => sectionOf(m) === s.key) })).filter((g) => g.rows.length);
   // The column of the week in progress: the numbers so far (user, 2026-11-06).
   const runningWeek = addWeeks(thisWeek, 1);
   const scroller = useRef(null);
@@ -106,8 +111,8 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
               <tr key={m.id} className="group">
                 <th scope="row" className={`sticky left-0 z-10 bg-surface-container-lowest group-hover:bg-surface-container-low text-left font-normal pl-3 pr-2 py-1.5 border-b border-outline-variant ${nameCol}`}>
                   <div className="flex items-center gap-2 min-w-0">
-                    <OwnerBadge label={m.owner_label} />
-                    <span className="min-w-0 flex-1 truncate text-body-md text-on-surface" title={[m.name, m.owner_label && `Owner: ${m.owner_label}`, m.auto_key ? 'Filled by the PIM' : m.source && `Source: ${m.source}`].filter(Boolean).join('\n')}>
+                    {!plain && <OwnerBadge label={m.owner_label} />}
+                    <span className={cn('min-w-0 flex-1 truncate text-body-md text-on-surface', m.strong && 'font-semibold')} title={[m.name, m.hint, m.owner_label && `Owner: ${m.owner_label}`, m.auto_key ? 'Filled by the PIM' : m.source && `Source: ${m.source}`].filter(Boolean).join('\n')}>
                       {m.name}
                     </span>
                     {m.auto_key && (
@@ -132,7 +137,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                     row={values.get(`${m.id}|${w}`)}
                     current={w === thisWeek}
                     running={w === runningWeek}
-                    editable={canWrite(m) && w <= thisWeek}
+                    editable={canWrite(m) && (m.anyWeek || w <= thisWeek)}
                     onSave={onSave}
                   />
                 ))}
@@ -202,7 +207,9 @@ function OwnerBadge({ label }) {
   );
 }
 
-function ValueCell({ metric, week, row, current, running, editable, onSave }) {
+function ValueCell({ metric, week, row, current, running: inProgress, editable, onSave }) {
+  // A number typed ahead (a target) is not "so far": only measured rows are in progress.
+  const running = inProgress && !metric.anyWeek;
   const [draft, setDraft] = useState(null); // text while editing
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false); // a long note open in full
