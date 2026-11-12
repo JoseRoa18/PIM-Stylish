@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { CalendarClock, ChevronLeft, ChevronRight, Clock, CheckCircle2, Radio } from 'lucide-react';
+import SortButton from '@/features/pricing/components/SortButton';
+import { nextSort, ariaSort, sortRows } from '@/features/pricing/lib/tableSort';
 import { PROMO_CHANNELS } from '@/features/pricing/lib/promoChannels';
 import { promoWindow, etToday } from '@/features/pricing/lib/promoCalendar';
 import { KIND_NOUN } from '@/features/pricing/api/promotions';
@@ -238,6 +240,17 @@ function RunningDeal({ deal, today, onOpen }) {
 
 const MODES = [['month', 'Month'], ['week', 'Week'], ['custom', 'Custom']];
 
+// What each column of the History table sorts by, and the direction of its
+// first click (numbers and dates high to low, words A to Z).
+const HISTORY_SORTS = {
+  name: { value: (d) => d.promo.name, text: true, first: 'asc' },
+  portals: { value: (d) => (d.promo.marketplaces ?? []).map(channelLabel).join(', '), text: true, first: 'asc' },
+  dates: { value: (d) => d.start, text: true, first: 'desc' },
+  days: { value: (d) => daysBetween(d.start, d.end) + 1, first: 'desc' },
+  skus: { value: (d) => d.promo.sku_count ?? 0, first: 'desc' },
+  status: { value: (d) => d.state, text: true, first: 'asc' },
+};
+
 // Monday of the week holding a day.
 function weekStart(ymd) {
   const dow = new Date(`${ymd}T12:00:00Z`).getUTCDay(); // 0 = Sunday
@@ -284,6 +297,15 @@ function DealsHistory({ deals, today, noun, onOpen }) {
   );
   const skus = rows.reduce((n, d) => n + (d.promo.sku_count ?? 0), 0);
   const marketplaces = new Set(rows.flatMap((d) => d.promo.marketplaces ?? [])).size;
+  // A click on a header sorts the table by it (user, 2026-11-12); until then
+  // the newest comes first, as above.
+  const [sort, setSort] = useState(null);
+  const shown = sort ? sortRows(rows, HISTORY_SORTS[sort.key].value, sort.dir, { text: HISTORY_SORTS[sort.key].text }) : rows;
+  const sortTh = (key, label, className) => (
+    <th scope="col" aria-sort={ariaSort(sort, key)} className={className}>
+      <SortButton active={sort?.key === key} dir={sort?.dir} right={className.includes('text-right')} onClick={() => setSort((now) => nextSort(now, key, HISTORY_SORTS[key].first))}>{label}</SortButton>
+    </th>
+  );
 
   const isCurrent = mode === 'month' ? monthStart(anchor) === monthStart(today) : weekStart(anchor) === weekStart(today);
   const step = (n) => setAnchor((a) => (mode === 'month' ? shiftMonth(a, n) : addDays(a, 7 * n)));
@@ -370,16 +392,16 @@ function DealsHistory({ deals, today, noun, onOpen }) {
               <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="text-label-md text-on-surface-variant border-b border-outline-variant">
-                    <th scope="col" className="text-left font-medium py-1.5 pr-4">{noun[0].toUpperCase() + noun.slice(1)}</th>
-                    <th scope="col" className="text-left font-medium py-1.5 pr-4">Marketplaces</th>
-                    <th scope="col" className="text-left font-medium py-1.5 pr-4">Dates</th>
-                    <th scope="col" className="text-right font-medium py-1.5 pr-4">Days</th>
-                    <th scope="col" className="text-right font-medium py-1.5 pr-4">SKUs</th>
-                    <th scope="col" className="text-left font-medium py-1.5">Status</th>
+                    {sortTh('name', noun[0].toUpperCase() + noun.slice(1), 'text-left font-medium py-1.5 pr-4')}
+                    {sortTh('portals', 'Marketplaces', 'text-left font-medium py-1.5 pr-4')}
+                    {sortTh('dates', 'Dates', 'text-left font-medium py-1.5 pr-4')}
+                    {sortTh('days', 'Days', 'text-right font-medium py-1.5 pr-4')}
+                    {sortTh('skus', 'SKUs', 'text-right font-medium py-1.5 pr-4')}
+                    {sortTh('status', 'Status', 'text-left font-medium py-1.5')}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((d) => (
+                  {shown.map((d) => (
                     <tr key={d.promo.id} className="border-b border-outline-variant/60 last:border-b-0 align-top">
                       <td className="py-2 pr-4">
                         <button type="button" onClick={() => onOpen(d.promo.id)} className="text-left text-body-md text-on-surface font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded">

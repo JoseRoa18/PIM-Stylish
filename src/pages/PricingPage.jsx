@@ -60,6 +60,8 @@ import { PROMOTION_KINDS, KIND_NOUN, monthlyOverlap, KIND_LEVEL, LEVEL_FIELDS, l
 import { loadCheckProducts, overlappingDeals } from '@/features/pricing/api/promoChecks';
 import { checkMarketList, checkDealList, marketWarnings, dealWarnings, planMarketImport, listOf } from '@/features/pricing/lib/promoChecks';
 import PromoCheckNotes from '@/features/pricing/components/PromoCheckNotes';
+import SortButton from '@/features/pricing/components/SortButton';
+import { nextSort, ariaSort, sortRows } from '@/features/pricing/lib/tableSort';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
@@ -1720,6 +1722,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   // Only the products of the list with no promotion price in the market
   // shown (2026-11-11) — the "N without a promo price" chip.
   const [noPriceOnly, setNoPriceOnly] = useState(false);
+  // The table's order (user, 2026-11-12: "al hacerle click al header …
+  // mayor a menor o menor a mayor"): { key, dir } — null = the list's own
+  // order. A click on a header sorts by it (numbers high to low first, the
+  // SKU A to Z), a second one turns it round, a third gives the list back.
+  const [sort, setSort] = useState(null);
+  const onSort = (key) => setSort((now) => nextSort(now, key, key === 'sku' ? 'asc' : 'desc'));
   // Stock per market and SKU from product_inventory (Odoo); null
   // until loaded.
   const [stockByMarket, setStockByMarket] = useState(null);
@@ -2181,6 +2189,24 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             );
             const filtering = Boolean(q) || catFilter.length > 0 || brandFilter.length > 0 || stockFilter.length > 0 || obsoleteOnly || noPriceOnly;
             const clearFilters = () => { setSkuQuery(''); setCatFilter([]); setBrandFilter([]); setStockFilter([]); setObsoleteOnly(false); setNoPriceOnly(false); };
+            // The rows in the order asked for by a header: what each column
+            // shows is what it sorts by, and a row with nothing in that column
+            // (no price, stock not tracked) goes last either way.
+            const sortValues = {
+              sku: (r) => r.sku,
+              promo: (r) => {
+                if (!stylishEvent) return r[priceKey];
+                const d = stylishOf(r);
+                return d.skip === undefined ? d.storePrice : null;
+              },
+              regular: (r) => mapBySku?.[r.sku]?.[stylishEvent ? msrpKey : mapKey],
+              stock: (r) => stockOf(r)?.available,
+              sold: (r) => (salesByMarket ? salesOf(r)?.units_90 ?? 0 : null),
+            };
+            const costSort = sort?.key.startsWith('cost:') ? sort.key.slice(5) : null;
+            // (a cost column of the other country's tab sorts nothing here)
+            const sortBy = !sort ? null : costSort ? (costKeys.includes(costSort) ? (r) => r.promo_costs?.[costSort] : null) : sortValues[sort.key];
+            const shownRows = sortBy ? sortRows(visibleRows, sortBy, sort.dir, { text: sort.key === 'sku' }) : visibleRows;
             // The tab labels count each market's list, the very rows its
             // table shows (until 2026-11-11 they counted the rows with a
             // price, so a list of 71 read "USA 40" over a table of 71).
@@ -2379,26 +2405,24 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                     <table className="w-full text-body-sm">
                       <thead>
                         <tr className="text-on-surface-variant text-label-md">
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-left px-4 py-2.5 font-medium">SKU</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={stylishEvent ? "The price the store shows during the event: the MSRP with the event's discount" : undefined}>{stylishEvent ? 'Promo MSRP' : 'Promo MAP'}</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">{stylishEvent ? 'Regular MSRP' : 'Regular MAP'}</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={market === 'ca' ? 'Units available for use in Canada (Odoo, warehouse CBG)' : 'Units available for use in the USA (Odoo, warehouse ATL)'}>Stock</th>
-                          <th className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap" title={`Units sold in ${market === 'ca' ? 'Canada' : 'the USA'} in the last 90 days, every marketplace (Odoo)`}>Sold 90 d</th>
+                          <SortTh sortKey="sku" sort={sort} onSort={onSort} align="left">SKU</SortTh>
+                          <SortTh sortKey="promo" sort={sort} onSort={onSort} title={stylishEvent ? "The price the store shows during the event: the MSRP with the event's discount" : undefined}>{stylishEvent ? 'Promo MSRP' : 'Promo MAP'}</SortTh>
+                          <SortTh sortKey="regular" sort={sort} onSort={onSort}>{stylishEvent ? 'Regular MSRP' : 'Regular MAP'}</SortTh>
+                          <SortTh sortKey="stock" sort={sort} onSort={onSort} title={market === 'ca' ? 'Units available for use in Canada (Odoo, warehouse CBG)' : 'Units available for use in the USA (Odoo, warehouse ATL)'}>Stock</SortTh>
+                          <SortTh sortKey="sold" sort={sort} onSort={onSort} title={`Units sold in ${market === 'ca' ? 'Canada' : 'the USA'} in the last 90 days, every marketplace (Odoo)`}>Sold 90 d</SortTh>
                           {costKeys.map((k) => {
                             const m = costMeta(k);
                             return (
-                              <th key={k} className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant text-right px-4 py-2.5 font-medium whitespace-nowrap">
+                              <SortTh key={k} sortKey={`cost:${k}`} sort={sort} onSort={onSort}>
                                 Cost · {m.label}
-                                {m.unit !== (market === 'ca' ? 'CAD' : 'USD') && (
-                                  <span className="ml-1">({m.unit})</span>
-                                )}
-                              </th>
+                                {m.unit !== (market === 'ca' ? 'CAD' : 'USD') && ` (${m.unit})`}
+                              </SortTh>
                             );
                           })}
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleRows.map((r) => {
+                        {shownRows.map((r) => {
                           const p = mapBySku?.[r.sku];
                           const out = stockStateOf(r) === 'Out of stock';
                           return (
@@ -2407,7 +2431,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                               className={`border-t border-outline-variant/40 ${out ? 'bg-error-container/30' : 'odd:bg-surface-container-low/30'}`}
                               title={out ? `0 units in ${market === 'ca' ? 'Canada' : 'the USA'}${arrivalText(stockOf(r)) ? ` · ${arrivalText(stockOf(r))}` : ''}` : undefined}
                             >
-                              <td className="px-4 py-2 font-mono text-on-surface">
+                              <td className="px-2 first:pl-3 last:pr-3 py-2 font-mono text-on-surface whitespace-nowrap">
                                 {r.sku}
                                 {/* The pill in the page's own font (the cell is
                                     mono); -my-1 keeps the row its usual height. */}
@@ -2422,21 +2446,21 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                                 const pays = d.skip === undefined ? Math.round(d.storePrice * (100 - CUSTOMER_OFF)) / 100 : null;
                                 return (
                                   <td
-                                    className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums"
+                                    className="px-2 first:pl-3 last:pr-3 py-2 text-right font-semibold text-on-surface tabular-nums"
                                     title={d.skip ? `No discount: ${d.skip}` : pays != null ? `An approved customer pays ${fmt(pays)} with the ${CUSTOMER_OFF}% coupon` : undefined}
                                   >
                                     {d.skip === undefined ? fmt(d.storePrice) : '—'}
                                   </td>
                                 );
                               })() : (
-                                <td className="px-4 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
+                                <td className="px-2 first:pl-3 last:pr-3 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
                               )}
-                              <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[stylishEvent ? msrpKey : mapKey])}</td>
+                              <td className="px-2 first:pl-3 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[stylishEvent ? msrpKey : mapKey])}</td>
                               {(() => {
                                 const s = stockOf(r);
                                 return (
                                   <td
-                                    className={`px-4 py-2 text-right tabular-nums ${!s ? 'text-on-surface-variant/60' : s.available > 0 ? 'text-on-surface' : 'text-error font-semibold'}`}
+                                    className={`px-2 first:pl-3 last:pr-3 py-2 text-right tabular-nums ${!s ? 'text-on-surface-variant/60' : s.available > 0 ? 'text-on-surface' : 'text-error font-semibold'}`}
                                     title={describeStock(s, market)}
                                   >
                                     {s ? s.available : '—'}
@@ -2445,14 +2469,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                               })()}
                               {(() => {
                                 // no reading yet: an empty cell, not a 0
-                                if (!salesByMarket) return <td className="px-4 py-2" />;
+                                if (!salesByMarket) return <td className="px-2 first:pl-3 last:pr-3 py-2" />;
                                 const sold = salesOf(r);
                                 return (
-                                  <td className="px-4 py-2 text-right text-on-surface-variant tabular-nums" title={sold ? `${sold.units_30} in the last 30 days` : 'No sales in the last 90 days'}>{sold ? sold.units_90 : 0}</td>
+                                  <td className="px-2 first:pl-3 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums" title={sold ? `${sold.units_30} in the last 30 days` : 'No sales in the last 90 days'}>{sold ? sold.units_90 : 0}</td>
                                 );
                               })()}
                               {costKeys.map((k) => (
-                                <td key={k} className="px-4 py-2 text-right text-on-surface-variant tabular-nums">
+                                <td key={k} className="px-2 first:pl-3 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums">
                                   {fmt(r.promo_costs?.[k])}
                                 </td>
                               ))}
@@ -2469,6 +2493,21 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
         </div>
       )}
     </div>
+  );
+}
+
+// A column header of a promotion's table that sorts it (the catalog's own
+// sortable header: the same button and arrows). `sort` = { key, dir } | null.
+function SortTh({ sortKey, sort, onSort, align = 'right', title, children }) {
+  const right = align === 'right';
+  return (
+    <th
+      aria-sort={ariaSort(sort, sortKey)}
+      title={title}
+      className={`sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-2 first:pl-3 last:pr-3 py-2.5 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
+    >
+      <SortButton active={sort?.key === sortKey} dir={sort?.dir} right={right} onClick={() => onSort(sortKey)}>{children}</SortButton>
+    </th>
   );
 }
 
