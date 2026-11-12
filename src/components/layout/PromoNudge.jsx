@@ -145,7 +145,7 @@ export default function PromoNudge() {
             <button
               type="button"
               onClick={() => { setVisible(false); navigate('/pricing'); }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors"
             >
               <Tag className="w-4 h-4" />
               Go to Pricing
@@ -154,7 +154,7 @@ export default function PromoNudge() {
             <button
               type="button"
               onClick={() => setVisible(false)}
-              className="px-3 py-1.5 rounded-lg text-label-lg text-on-surface-variant hover:bg-on-surface/8 transition-colors"
+              className="px-3 py-1.5 rounded-full text-label-md text-on-surface-variant hover:bg-on-surface/8 transition-colors"
             >
               Later
             </button>

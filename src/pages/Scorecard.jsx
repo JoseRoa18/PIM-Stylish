@@ -223,7 +223,7 @@ export default function Scorecard() {
           <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, goal and {WEEKS_SHOWN} weeks, Sunday to Saturday, from {weekTag(FIRST_WEEK)}.</p>
         </div>
         {isAdmin && (
-          <button type="button" onClick={() => setEditing({ isNew: true })} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity">
+          <button type="button" onClick={() => setEditing({ isNew: true })} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity">
             <Plus className="w-4 h-4" aria-hidden />
             Add measurable
           </button>
@@ -246,7 +246,7 @@ export default function Scorecard() {
               type="button"
               aria-pressed={b.key === boardKey}
               onClick={() => selectBoard(b.key)}
-              className={cn('px-4 py-1.5 rounded-full text-label-md whitespace-nowrap transition-colors', b.key === boardKey ? 'bg-secondary-container text-on-secondary-container font-semibold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high')}
+              className={cn('px-4 py-1.5 rounded-full text-body-md whitespace-nowrap transition-colors', b.key === boardKey ? 'bg-secondary-container text-on-secondary-container font-semibold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high')}
             >
               {b.label}
             </button>
@@ -278,7 +278,7 @@ export default function Scorecard() {
                       type="button"
                       aria-pressed={mk === market}
                       onClick={() => selectMarket(mk)}
-                      className={cn('px-4 py-1 rounded-full text-label-md transition-colors', mk === market ? 'bg-on-surface text-surface font-semibold' : 'text-on-surface-variant hover:text-on-surface')}
+                      className={cn('px-4 py-1 rounded-full text-body-sm transition-colors', mk === market ? 'bg-on-surface text-surface font-semibold' : 'text-on-surface-variant hover:text-on-surface')}
                     >
                       {MARKET_LABEL[mk]}
                     </button>

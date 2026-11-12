@@ -277,7 +277,7 @@ export default function PricingPage() {
     <div className="max-w-5xl space-y-6">
       <div>
         <h1 className="text-display-lg text-on-surface">Pricing</h1>
-        <p className="text-body-md text-on-surface-variant mt-3">
+        <p className="text-body-md text-on-surface-variant mt-1">
           {tab === 'monthly' && 'Monthly promotions for all marketplaces: the market calendar drives them and the boundaries run on their own.'}
           {tab === 'flash' && 'Flash deals: short promotions on their own dates, exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
           {tab === 'mk_event' && 'MK events: promotions on their own dates at the Orange level (Bed Bath & Beyond and Overstock at Purple), exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
@@ -333,7 +333,7 @@ export default function PricingPage() {
             type="button"
             onClick={() => setShowNew((v) => !v)}
             aria-expanded={showNew}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
           >
             <Plus className="w-4 h-4" />
             New {KIND_NOUN[tab]}
@@ -367,12 +367,12 @@ export default function PricingPage() {
       )}
 
       {!kindTab ? null : promotions === null ? (
-        <div className="rounded-2xl bg-surface p-8 text-center text-on-surface-variant text-body-md">
+        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-8 text-center text-on-surface-variant text-body-md">
           <Loader2 className="w-5 h-5 animate-spin inline-block mr-2 align-middle" />
           Loading promotions…
         </div>
       ) : promotions.filter((p) => (p.kind ?? 'monthly') === tab).length === 0 && !showNew ? (
-        <div className="rounded-2xl bg-surface px-6 py-12 text-center">
+        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-6 py-12 text-center">
           <div className="inline-flex w-12 h-12 items-center justify-center rounded-xl bg-surface-container mb-3">
             <Tag className="w-6 h-6 text-on-surface-variant" strokeWidth={1.5} />
           </div>
@@ -700,7 +700,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   }
 
   return (
-    <div className="rounded-2xl bg-surface p-6 space-y-4">
+    <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 space-y-4">
       {/* Alignment overview — one 100%-stacked status bar per channel; the
           rows double as the channel selector. */}
       <AlignmentOverview overview={overview} site={site} onSelect={setSite} />
@@ -718,7 +718,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
           disabled={running}
           aria-busy={running}
           title={cfg.kind === 'page' ? 'Read the latest prices the Where to Buy check found (nothing is opened again)' : undefined}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
           {running ? <Loader2 className="w-4 h-4 animate-spin" /> : cfg.kind === 'page' ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           {running ? 'Analyzing…' : cfg.kind === 'page' ? 'Reload' : 'Run fresh analysis'}
@@ -800,7 +800,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3 flex-wrap min-w-0 max-w-full">
-                  <h3 className="text-title-sm text-on-surface font-medium">Problems ({result.problems.length})</h3>
+                  <h3 className="text-title-md text-on-surface font-medium">Problems ({result.problems.length})</h3>
                   {/* Above or below the expected price (user, 2026-11-11). "No
                       price" shows only while a problem has nothing to compare. */}
                   <div role="group" aria-label="Show the prices above or below the expected price" className="inline-flex max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container p-1">
@@ -829,7 +829,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                     onClick={fixAll}
                     disabled={fixing !== null}
                     aria-busy={fixing === 'all'}
-                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
                   >
                     {fixing === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     Fix all — push {fixable.length}
@@ -1395,7 +1395,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   ];
 
   return (
-    <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
+    <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-title-md text-on-surface font-semibold">New {KIND_NOUN[kind]}</h2>
         <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant">
@@ -1524,7 +1524,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
                 </button>
               </div>
               <p className="text-body-sm text-on-surface-variant">{hint}. Each market has its own product list — upload one or both.</p>
-              <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-primary/40">
+              <label className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-primary/40">
                 <Plus className="w-3.5 h-3.5" />
                 Choose file (.xlsx / .csv)
                 <input
@@ -1599,7 +1599,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           disabled={busy || !canCreate}
           aria-busy={busy}
           onClick={handleCreate}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
           Create promotion
@@ -1863,7 +1863,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   }
 
   return (
-    <div id={`promo-card-${promo.id}`} className="scroll-mt-20 rounded-2xl bg-surface overflow-hidden border border-transparent hover:border-outline-variant transition-colors">
+    <div id={`promo-card-${promo.id}`} className="scroll-mt-20 rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       <button
         ref={headerRef}
         type="button"
@@ -2454,7 +2454,7 @@ function CopySkusButton({ skus }) {
     <button
       type="button"
       onClick={copy}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors"
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
       title="Copy this market's promo SKUs, one per line"
     >
       <MorphIcon
@@ -3218,12 +3218,12 @@ function WalmartSendDialog({ promo, market, onClose, onSent }) {
       maxWidth="max-w-2xl"
       footer={(
         <>
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-full text-label-lg text-on-surface-variant hover:bg-surface-container-low">Close</button>
-          <button type="button" onClick={runPreview} disabled={busy != null} aria-busy={busy === 'preview'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant text-label-lg text-on-surface hover:bg-surface-container-low disabled:opacity-50">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-full text-label-md text-on-surface-variant hover:bg-surface-container-low">Close</button>
+          <button type="button" onClick={runPreview} disabled={busy != null} aria-busy={busy === 'preview'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-50">
             {busy === 'preview' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             Preview
           </button>
-          <button type="button" onClick={send} disabled={busy != null || !preview || !lines.length || result} aria-busy={busy === 'send'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-50">
+          <button type="button" onClick={send} disabled={busy != null || !preview || !lines.length || result} aria-busy={busy === 'send'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 disabled:opacity-50">
             {busy === 'send' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             {lines.length ? `Send ${lines.length} to Walmart` : 'Send to Walmart'}
           </button>
@@ -3700,7 +3700,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
               <button
                 type="button"
                 onClick={() => (loaded ? downloadPromoMarketData(promo, rows ?? [], market) : downloadPromoTemplate(market))}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container transition-colors"
               >
                 {loaded ? 'Download current data' : 'Download blank template'}
               </button>
@@ -3708,7 +3708,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
                 onFile={handleUpload}
                 accept=".xlsx,.csv"
                 disabled={busy}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 {loaded ? 'Upload updated file' : 'Upload filled file'}
@@ -3739,7 +3739,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
                   onClick={handlePaste}
                   disabled={busy || pastedList.skus.length === 0}
                   aria-busy={busy}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
                 >
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                   Save the {marketLabel} list
@@ -3806,7 +3806,7 @@ function ImportPlan({ pending, promo, market, marketLabel, busy, onConfirm, onBa
           onClick={onConfirm}
           disabled={busy}
           aria-busy={busy}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="w-4 h-4" aria-hidden="true" />}
           {plan.left.length || plan.stay ? `Replace the ${marketLabel} list` : `Save the ${marketLabel} list`}
@@ -3824,7 +3824,7 @@ function ActionButton({ icon: Icon, label, busy, onClick }) {
       onClick={onClick}
       disabled={busy}
       aria-busy={busy}
-      className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
     >
       {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" strokeWidth={2} />}
       {label}

@@ -57,7 +57,7 @@ function IssueProductsDialog({ issue, products, onClose }) {
           <button
             type="button"
             onClick={copySkus}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
             {copied ? 'Copied' : `Copy SKUs (${affected.length})`}

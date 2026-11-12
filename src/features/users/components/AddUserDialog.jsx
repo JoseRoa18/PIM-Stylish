@@ -50,7 +50,7 @@ export default function AddUserDialog({ onClose, onCreated }) {
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+            className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
@@ -58,7 +58,7 @@ export default function AddUserDialog({ onClose, onCreated }) {
             type="submit"
             disabled={submitting || !email}
             aria-busy={submitting}
-            className="px-5 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
             Create user

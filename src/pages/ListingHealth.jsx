@@ -449,30 +449,36 @@ export default function ListingHealth() {
                 <> · scoring against the store's latest catalog snapshot (refreshed twice a day)</>
               )}
             </p>
-            {refreshDef && (
-              <button
-                type="button"
-                onClick={refreshChannel}
-                disabled={refreshing}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Pulling…' : `Refresh from ${refreshDef.label}`}
-              </button>
-            )}
-            {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && (
-              <button
-                type="button"
-                onClick={refreshAllFromWix}
-                disabled={refreshing}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing
-                  ? `Refreshing ${refreshProgress.done}/${refreshProgress.total}…`
-                  : 'Refresh from Wix'}
-              </button>
-            )}
+            {/* Sinks Direct Canada has two reads, so they sit together and carry
+                their own names (both used to say "Refresh from Wix"): the
+                store's catalog in one pull, and every linked product one by one. */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {refreshDef && (
+                <button
+                  type="button"
+                  onClick={refreshChannel}
+                  disabled={refreshing}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  {refreshing ? 'Pulling…' : `Refresh from ${refreshDef.label}`}
+                </button>
+              )}
+              {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={refreshAllFromWix}
+                  disabled={refreshing}
+                  title="Reads every linked product from Wix, one by one (slower)"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  {refreshing
+                    ? `Reading ${refreshProgress.done}/${refreshProgress.total}…`
+                    : 'Read each product'}
+                </button>
+              )}
+            </div>
           </div>
 
           {mktDef.dataSource === 'wix_cache' && linkedCount > 0 && cachedCount < linkedCount && (
@@ -483,7 +489,7 @@ export default function ListingHealth() {
                   {linkedCount - cachedCount} product{linkedCount - cachedCount === 1 ? '' : 's'} need a live Wix refresh
                 </p>
                 <p className="opacity-80 mt-0.5">
-                  {cachedCount} of {linkedCount} linked products have cached Wix data. Click "Refresh from Wix" to update the rest.
+                  {cachedCount} of {linkedCount} linked products have cached Wix data. Click "Read each product" to update the rest.
                 </p>
               </div>
             </div>
@@ -541,7 +547,7 @@ export default function ListingHealth() {
             ) : (
               // The section clips to its rounded corners, so narrow viewports
               // scroll the table inside its own wrapper instead of losing columns.
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
               <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">
@@ -648,7 +654,7 @@ export default function ListingHealth() {
                     type="button"
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={safePage === 1}
-                    className="px-3 py-1.5 rounded-lg border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Previous
                   </button>
@@ -659,7 +665,7 @@ export default function ListingHealth() {
                     type="button"
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={safePage === totalPages}
-                    className="px-3 py-1.5 rounded-lg border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Next
                   </button>

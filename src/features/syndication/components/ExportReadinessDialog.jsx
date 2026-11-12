@@ -42,7 +42,7 @@ export default function ExportReadinessDialog({ reports, onClose }) {
         <button
           type="button"
           onClick={onClose}
-          className="px-4 py-2 rounded-lg bg-primary text-on-primary text-label-md font-semibold enabled:hover:brightness-110 transition"
+          className="px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:brightness-110 transition"
         >
           Got it
         </button>

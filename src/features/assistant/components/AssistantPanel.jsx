@@ -36,7 +36,7 @@ export default function AssistantPanel({ open }) {
         // Escape closes the panel — unless a dialog opened from it is the one answering.
         if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role="dialog"][aria-modal="true"]:not(#app-sidebar)')) close();
       }}
-      className="fixed top-16 right-0 bottom-0 z-30 w-full sm:w-[440px] bg-surface border-l border-outline-variant shadow-2xl"
+      className="fixed top-16 right-0 bottom-0 z-30 w-full sm:w-[440px] bg-surface border-l border-outline-variant shadow-xl"
     >
       <AssistantChat
         variant="panel"

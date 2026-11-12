@@ -32,3 +32,6 @@ dist-ssr
 
 # Supabase CLI scratch
 supabase/.temp/
+
+# Impeccable design skill: its engine is downloaded again by the launcher when missing
+.claude/skills/impeccable/scripts/bin/

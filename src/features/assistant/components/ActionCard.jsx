@@ -83,7 +83,7 @@ export default function ActionCard({ action, onDecided }) {
             type="button"
             onClick={() => decide('confirm')}
             disabled={Boolean(working)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {working === 'confirm' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
             Confirm

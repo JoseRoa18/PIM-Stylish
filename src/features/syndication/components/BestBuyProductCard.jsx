@@ -250,7 +250,7 @@ function OfferButton({ sku, plan, canEdit, onChanged }) {
 
   return (
     <div className="rounded-xl border border-outline-variant p-4 space-y-3">
-      <h3 className="text-title-sm text-on-surface font-medium">Its offer</h3>
+      <h3 className="text-title-md text-on-surface font-medium">Its offer</h3>
       <dl className="flex flex-wrap gap-x-6 gap-y-1 text-body-sm">
         <Fact label="Price (MAP Blue)" value={money(plan.price)} />
         <Fact label="Warranty - Parts & Labour" value={plan.warrantyDays} />
@@ -280,7 +280,7 @@ function Content({ built, title, intro }) {
   return (
     <>
       <div>
-        <h3 className="text-title-sm text-on-surface font-medium">{title}</h3>
+        <h3 className="text-title-md text-on-surface font-medium">{title}</h3>
         <p className="text-body-sm text-on-surface-variant mt-0.5">{intro}</p>
       </div>
       <dl className="divide-y divide-outline-variant/50 border-y border-outline-variant/50">

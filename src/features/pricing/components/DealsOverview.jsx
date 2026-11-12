@@ -125,7 +125,7 @@ function RunningNow({ deals, today, noun, onOpen }) {
   }, [deals, tiles]);
 
   return (
-    <section aria-labelledby="deals-running-now" className="rounded-2xl bg-surface border border-outline-variant px-5 py-4 space-y-4">
+    <section aria-labelledby="deals-running-now" className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-5 py-4 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 id="deals-running-now" className="text-title-md text-on-surface font-semibold">Running now</h2>
         <span className="text-body-sm text-on-surface-variant">
@@ -294,7 +294,7 @@ function DealsHistory({ deals, today, noun, onOpen }) {
   const pill = (on) => `px-3 py-1 rounded-full text-label-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${on ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface hover:bg-surface-container-high'}`;
 
   return (
-    <section aria-labelledby="deals-history" className="rounded-2xl bg-surface border border-outline-variant px-5 py-4 space-y-4">
+    <section aria-labelledby="deals-history" className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-5 py-4 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 id="deals-history" className="text-title-md text-on-surface font-semibold">History</h2>
         <div className="inline-flex rounded-full bg-surface-container p-1" role="group" aria-label="History period">

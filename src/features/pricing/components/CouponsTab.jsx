@@ -77,11 +77,11 @@ export default function CouponsTab({ canEdit, confirm }) {
       {error && <div role="alert" className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-3 text-body-sm">{error}</div>}
       {canEdit && (
         <div className="flex items-center gap-2 flex-wrap">
-          <button type="button" onClick={() => setShowNew((v) => !v)} aria-expanded={showNew} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity">
+          <button type="button" onClick={() => setShowNew((v) => !v)} aria-expanded={showNew} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity">
             <Plus className="w-4 h-4" aria-hidden="true" />
             New coupon
           </button>
-          <button type="button" onClick={() => setShowUpload(true)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-outline-variant text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors">
+          <button type="button" onClick={() => setShowUpload(true)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
             <Upload className="w-4 h-4" aria-hidden="true" />
             Upload template
           </button>
@@ -92,12 +92,12 @@ export default function CouponsTab({ canEdit, confirm }) {
       {showUpload && <UploadDialog onClose={() => setShowUpload(false)} onCreated={() => { setShowUpload(false); reload(); }} />}
 
       {coupons === null && !error ? (
-        <div className="rounded-2xl bg-surface p-8 text-center text-on-surface-variant text-body-md">
+        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-8 text-center text-on-surface-variant text-body-md">
           <Loader2 className="w-5 h-5 animate-spin inline-block mr-2 align-middle" aria-hidden="true" />
           Loading coupons…
         </div>
       ) : coupons?.length === 0 && !showNew ? (
-        <div className="rounded-2xl bg-surface px-6 py-12 text-center">
+        <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-6 py-12 text-center">
           <div className="inline-flex w-12 h-12 items-center justify-center rounded-xl bg-surface-container mb-3">
             <Tag className="w-6 h-6 text-on-surface-variant" strokeWidth={1.5} aria-hidden="true" />
           </div>
@@ -146,7 +146,7 @@ function CouponCard({ coupon, canEdit, confirm, open, onToggle, onChanged }) {
   }
 
   return (
-    <section id={`coupon-card-${coupon.id}`} className="rounded-2xl bg-surface border border-outline-variant scroll-mt-28">
+    <section id={`coupon-card-${coupon.id}`} className="rounded-2xl border border-outline-variant bg-surface-container-lowest scroll-mt-28">
       <button type="button" onClick={onToggle} aria-expanded={open} className="w-full px-5 py-4 flex items-center justify-between gap-4 text-left">
         <span className="min-w-0">
           <span className="flex items-center gap-2 flex-wrap">
@@ -255,7 +255,7 @@ function NewCouponForm({ onClose, onCreated }) {
   }
 
   return (
-    <div className="rounded-2xl bg-surface p-6 space-y-4 border border-outline-variant">
+    <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-title-md text-on-surface font-semibold">New coupon</h2>
         <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant">
@@ -315,7 +315,7 @@ function NewCouponForm({ onClose, onCreated }) {
       </label>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-body-sm text-on-surface-variant">{plural(list.skus.length, 'SKU')}{list.skipped.length > 0 ? ` · ${plural(list.skipped.length, 'line')} skipped` : ''}</p>
-        <button type="button" onClick={create} disabled={busy} aria-busy={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-40">
+        <button type="button" onClick={create} disabled={busy} aria-busy={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40">
           {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />}
           Create coupon
         </button>
@@ -382,8 +382,8 @@ function UploadDialog({ onClose, onCreated }) {
       maxWidth="max-w-2xl"
       footer={(
         <>
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-full text-label-lg text-on-surface-variant hover:bg-surface-container-low">Close</button>
-          <button type="button" onClick={create} disabled={!canCreate || busy != null} aria-busy={busy === 'create'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-50">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-full text-label-md text-on-surface-variant hover:bg-surface-container-low">Close</button>
+          <button type="button" onClick={create} disabled={!canCreate || busy != null} aria-busy={busy === 'create'} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 disabled:opacity-50">
             {busy === 'create' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />}
             {ready.length ? `Create ${plural(ready.length, 'coupon')}` : 'Create coupons'}
           </button>

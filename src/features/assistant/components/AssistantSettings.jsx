@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { MessageCircle, ThumbsDown, ThumbsUp, X } from 'lucide-react';
+import { AlertTriangle, MessageCircle, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getAssistantSetting, getAssistantUsage, saveAssistantSetting } from '../api/assistant';
 import { formatDate, formatTimeAgo } from '@/lib/format';
@@ -35,10 +35,14 @@ function Switch({ checked, disabled, onChange, label, describedBy }) {
   );
 }
 
-const FIELD = 'px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30';
+// The Settings page's own field, button and sub-label, so this section reads like the ones above it.
+const FIELD = 'px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary';
+const BUTTON = 'inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40';
+const LABEL = 'block text-label-lg font-medium text-on-surface';
 
 export default function AssistantSettings() {
   const descriptionId = useId();
+  const whoId = useId();
   const addId = useId();
   const limitId = useId();
   const effortId = useId();
@@ -84,7 +88,7 @@ export default function AssistantSettings() {
   const teamGuide = usage?.knowledge?.guide_user ?? null;
 
   return (
-    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
@@ -104,10 +108,11 @@ export default function AssistantSettings() {
       </div>
 
       {!loading && (
-        <div className="mt-5 space-y-5">
+        <div className="mt-4 space-y-5">
           <div>
-            <h3 className="text-label-lg font-medium text-on-surface">Who can use it</h3>
-            <ul className="flex flex-wrap gap-1.5 mt-2">
+            {/* A plain label, like "Promotion status" above: a heading would take the titles' face. */}
+            <p id={whoId} className={LABEL}>Who can use it</p>
+            <ul aria-labelledby={whoId} className="flex flex-wrap gap-1.5 mt-2">
               {emails.map((email) => {
                 const person = personOf(email);
                 return (
@@ -140,7 +145,7 @@ export default function AssistantSettings() {
                   save({ ...setting, emails: [...emails, adding] });
                   setAdding('');
                 }}
-                className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+                className={BUTTON}
               >
                 Add
               </button>
@@ -153,21 +158,21 @@ export default function AssistantSettings() {
 
           <div className="flex flex-wrap items-end gap-4">
             <div>
-              <label htmlFor={limitId} className="block text-label-lg font-medium text-on-surface">Limit per 24 hours (USD)</label>
+              <label htmlFor={limitId} className={LABEL}>Limit per 24 hours (USD)</label>
               <div className="flex items-center gap-2 mt-2">
                 <input id={limitId} type="number" min="1" step="1" value={limit} onChange={(e) => setLimit(e.target.value)} className={`${FIELD} w-28`} />
                 <button
                   type="button"
                   disabled={!limitChanged}
                   onClick={() => save({ ...setting, daily_limit_usd: limitNumber })}
-                  className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+                  className={BUTTON}
                 >
                   Save
                 </button>
               </div>
             </div>
             <div>
-              <label htmlFor={effortId} className="block text-label-lg font-medium text-on-surface">How much it thinks</label>
+              <label htmlFor={effortId} className={LABEL}>How much it thinks</label>
               <select id={effortId} value={setting.effort ?? 'medium'} onChange={(e) => save({ ...setting, effort: e.target.value })} className={`${FIELD} mt-2`}>
                 {EFFORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
@@ -196,7 +201,7 @@ export default function AssistantSettings() {
               )}
               {usage.recent.length > 0 && (
                 <details>
-                  <summary className="text-label-lg text-primary cursor-pointer">Latest questions</summary>
+                  <summary className="cursor-pointer text-label-lg text-primary hover:underline">Latest questions</summary>
                   <ul className="mt-2 divide-y divide-outline-variant">
                     {usage.recent.map((q) => (
                       <li key={q.id} className="py-2 text-body-sm">
@@ -221,7 +226,12 @@ export default function AssistantSettings() {
       )}
 
       {saved && !error && <p role="status" className="sr-only">Saved.</p>}
-      {error && <p role="alert" className="text-body-sm text-error mt-3">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-body-sm rounded-lg px-3 py-2 inline-flex items-start gap-2 bg-error-container/60 text-on-error-container">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          {error}
+        </p>
+      )}
     </section>
   );
 }

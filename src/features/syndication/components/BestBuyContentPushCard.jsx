@@ -139,7 +139,7 @@ export default function BestBuyContentPushCard() {
                 type="button"
                 onClick={() => setSelected(new Set(listed.map((c) => c.sku)))}
                 disabled={busy || !listed.length}
-                className="px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                className="px-3 py-1.5 rounded-full text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
               >
                 Select all shown
               </button>
@@ -147,7 +147,7 @@ export default function BestBuyContentPushCard() {
                 type="button"
                 onClick={() => setSelected(new Set())}
                 disabled={busy || !selected.size}
-                className="px-3 py-1.5 rounded-lg text-label-md font-medium text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                className="px-3 py-1.5 rounded-full text-label-md text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50"
               >
                 Clear
               </button>
@@ -157,7 +157,7 @@ export default function BestBuyContentPushCard() {
                 disabled={busy || !selected.size}
                 aria-label={busy && progress ? `Pushing ${progress.done} of ${progress.total}` : undefined}
                 aria-busy={busy}
-                className="ml-auto inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
+                className="ml-auto inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                 {busy && progress ? `${progress.done}/${progress.total}` : `Push ${selected.size || ''}`}

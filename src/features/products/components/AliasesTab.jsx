@@ -79,7 +79,7 @@ export default function AliasesTab({ product }) {
         ) : rows.length === 0 ? (
           <p className="text-body-md text-on-surface-variant">No aliases yet. Add the marketplace's item number or seller SKU, or import a list.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full min-w-[840px]">
               <thead>
                 <tr className="text-label-md text-on-surface-variant border-b border-outline-variant">
@@ -88,7 +88,7 @@ export default function AliasesTab({ product }) {
                   <th className="text-left font-medium py-2 pr-4">Type</th>
                   <th className="text-left font-medium py-2 pr-4">Name on the marketplace</th>
                   <th className="text-left font-medium py-2 pr-4">Notes</th>
-                  <th className="py-2"></th>
+                  <th className="py-2"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>

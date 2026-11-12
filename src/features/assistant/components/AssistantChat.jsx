@@ -48,7 +48,7 @@ function Lookups({ tools }) {
   return (
     <ul className="flex flex-wrap gap-1.5" aria-label="What was looked up">
       {tools.map((t) => (
-        <li key={t.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container text-label-sm text-on-surface-variant max-w-full">
+        <li key={t.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high text-label-sm text-on-surface-variant max-w-full">
           {t.state === 'running' && <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" aria-hidden="true" />}
           {t.state === 'ok' && <Check className="w-3 h-3 flex-shrink-0" aria-hidden="true" />}
           {t.state === 'failed' && <X className="w-3 h-3 flex-shrink-0 text-error" aria-hidden="true" />}
@@ -63,11 +63,11 @@ function Lookups({ tools }) {
 function AttachmentChip({ file, onRemove = null }) {
   const Icon = file.kind === 'image' ? ImageIcon : FileSpreadsheet;
   return (
-    <span className="inline-flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full bg-surface-container text-label-sm text-on-surface-variant max-w-full">
+    <span className="inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full bg-surface-container-high text-label-sm text-on-surface-variant max-w-full">
       <Icon className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
       <span className="truncate">{file.name}{file.kind === 'table' && file.rows ? ` · ${file.rows}${file.of > file.rows ? ` of ${file.of}` : ''} rows` : ''}</span>
       {onRemove && (
-        <button type="button" onClick={onRemove} aria-label={`Remove ${file.name}`} className="p-[5px] -m-[3px] rounded-full hover:bg-surface-container-high hover:text-on-surface transition-colors">
+        <button type="button" onClick={onRemove} aria-label={`Remove ${file.name}`} className="p-[5px] -m-[3px] rounded-full hover:bg-surface-container-highest hover:text-on-surface transition-colors">
           <X className="w-3 h-3" aria-hidden="true" />
         </button>
       )}
@@ -114,7 +114,10 @@ function Turn({ turn, showCost, onRate, onActionDecided }) {
   return (
     <article className="space-y-3">
       <div className="flex flex-col items-end gap-1.5">
-        <h2 className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary-container text-on-secondary-container px-4 py-2.5 text-body-md font-normal whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {/* A heading for screen readers, written like the rest of the conversation: the body face, not
+            the titles'. The "!" is needed: index.css sets every heading's face and weight outside
+            Tailwind's layers, so a plain utility loses to it. */}
+        <h2 className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary-container text-on-secondary-container px-4 py-2.5 text-body-md font-sans! font-normal! whitespace-pre-wrap [overflow-wrap:anywhere]">
           {turn.question}
         </h2>
         {turn.attachments.length > 0 && (
@@ -178,7 +181,7 @@ function Turn({ turn, showCost, onRate, onActionDecided }) {
               onChange={(e) => setNote(e.target.value)}
               maxLength={500}
               placeholder="What was wrong? (optional)"
-              className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-body-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
             />
             <button type="submit" className="px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">Send</button>
           </form>
@@ -480,18 +483,18 @@ export default function AssistantChat({ variant = 'page', chatId = null, onChatI
       {loadError && <p role="alert" className="text-body-sm text-error py-6">The conversation could not be loaded: {loadError}</p>}
 
       {empty && (
-        <div className={panel ? 'pb-2' : 'rounded-2xl border border-outline-variant bg-surface p-6 mb-4'}>
+        <div className={panel ? 'pb-2' : 'rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 mb-4'}>
           <div className="flex items-center gap-2 text-on-surface">
-            <MessageCircle className="w-5 h-5 text-primary flex-shrink-0" aria-hidden="true" />
+            <MessageCircle className="w-4 h-4 text-on-surface-variant flex-shrink-0" aria-hidden="true" />
             <p className="text-title-md">Try one of these, or write your own — in English or Spanish.</p>
           </div>
-          <ul className={`grid gap-2 mt-4 ${panel ? '' : 'sm:grid-cols-2'}`}>
+          <ul className={`grid gap-3 mt-4 ${panel ? '' : 'sm:grid-cols-2'}`}>
             {SUGGESTIONS.map((s) => (
               <li key={s}>
                 <button
                   type="button"
                   onClick={() => ask(s)}
-                  className="w-full h-full text-left px-4 py-3 rounded-xl border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+                  className="w-full h-full text-left px-4 py-3 rounded-xl border border-outline-variant bg-surface text-body-sm text-on-surface hover:border-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   {s}
                 </button>
@@ -529,7 +532,7 @@ export default function AssistantChat({ variant = 'page', chatId = null, onChatI
         </div>
       )}
       {fileError && <p role="alert" className="text-label-sm text-error mb-2">{fileError}</p>}
-      <div className={`relative flex items-end gap-1 rounded-2xl border border-outline-variant pl-2 pr-2 py-2 focus-within:ring-2 focus-within:ring-primary/30 ${panel ? 'bg-surface-container-low' : 'bg-surface'}`}>
+      <div className={`relative flex items-end gap-1 rounded-2xl border border-outline-variant pl-2 pr-2 py-2 transition-colors focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary ${panel ? 'bg-surface-container-low' : 'bg-surface'}`}>
         <label
           htmlFor={fileId}
           className="relative p-2.5 rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors cursor-pointer flex-shrink-0 focus-within:ring-2 focus-within:ring-primary/40"
@@ -566,7 +569,7 @@ export default function AssistantChat({ variant = 'page', chatId = null, onChatI
           type="submit"
           disabled={busy || reading || !draft.trim()}
           aria-label="Send"
-          className="p-2.5 rounded-full bg-primary text-on-primary hover:opacity-90 transition-opacity disabled:opacity-40 flex-shrink-0"
+          className="p-2.5 rounded-full bg-primary text-on-primary enabled:hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <ArrowUp className="w-4 h-4" aria-hidden="true" />}
         </button>

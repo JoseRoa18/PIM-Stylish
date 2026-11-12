@@ -168,7 +168,7 @@ export default function AvatarNudge() {
                   type="button"
                   onClick={() => fileRef.current?.click()}
                   disabled={status === 'uploading'}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
                 >
                   <Camera className="w-4 h-4" />
                   Choose photo
@@ -176,7 +176,7 @@ export default function AvatarNudge() {
                 <button
                   type="button"
                   onClick={() => setVisible(false)}
-                  className="px-3 py-1.5 rounded-lg text-label-lg text-on-surface-variant hover:bg-on-surface/8 transition-colors"
+                  className="px-3 py-1.5 rounded-full text-label-md text-on-surface-variant hover:bg-on-surface/8 transition-colors"
                 >
                   Later
                 </button>

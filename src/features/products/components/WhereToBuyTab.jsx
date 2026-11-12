@@ -165,7 +165,7 @@ export default function WhereToBuyTab({ product }) {
               onClick={handlePublish}
               disabled={busy != null || dirty || !count}
               title="Write this list to the Stylish pages again (for example after someone changed the section in Wix)"
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container disabled:opacity-40"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
             >
               {busy === 'publish' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Upload className="w-4 h-4" aria-hidden="true" />}
               Publish again
@@ -174,7 +174,7 @@ export default function WhereToBuyTab({ product }) {
               type="button"
               onClick={handleSave}
               disabled={busy != null || !dirty || Object.keys(problems).length > 0}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-40"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 disabled:opacity-40"
             >
               {busy === 'save' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
               Save and publish
@@ -210,7 +210,7 @@ export default function WhereToBuyTab({ product }) {
             return (
               <div key={m.key} className="min-w-0">
                 <div className="flex items-baseline justify-between gap-3 mb-1">
-                  <h3 className="text-title-sm font-semibold text-on-surface">{m.heading}</h3>
+                  <h3 className="text-title-md font-semibold text-on-surface">{m.heading}</h3>
                   <span className="text-label-md text-on-surface-variant">{withLink} of {stores.length} stores</span>
                 </div>
                 <table className="w-full table-fixed text-body-sm">

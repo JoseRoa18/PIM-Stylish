@@ -377,7 +377,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
   useDockClearance(footerRef, !linkLoading && linked && cardExpanded);
 
   return (
-    <section className="rounded-2xl border border-outline-variant bg-surface overflow-hidden">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
       {/* Header */}
       <header className="flex items-start justify-between gap-6 px-8 pt-7 pb-6 flex-wrap">
         <div className="flex items-center gap-4 min-w-0">
@@ -630,7 +630,7 @@ export default function WixSyndicationCard({ product, media, onUpdate, site = DE
                 onClick={handlePush}
                 disabled={busy || !dirty}
                 aria-busy={busy}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/95 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/95 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               >
                 {busy ? (
                   <>
@@ -861,7 +861,7 @@ function FieldInput({ field, value, baselineValue, pimValue, aiHeadline, onChang
                 type="button"
                 onClick={sectionsRebuild.onRebuild}
                 disabled={disabled}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
               >
                 <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
                 Rebuild from PIM
@@ -949,7 +949,7 @@ function AiFormatButton({ value, pimValue, headline, onChange, disabled }) {
         onClick={run}
         disabled={disabled || busy}
         title="Takes the PIM description: bold name on top, clean paragraphs, typos fixed. Never rewords."
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:pointer-events-none"
       >
         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />}
         Auto-format
@@ -1500,7 +1500,7 @@ function NotLinkedNotice({ product, site, canEdit, onLinked }) {
               type="button"
               onClick={handleCreate}
               disabled={busy}
-              className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
+              className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 transition-colors disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
             >
               {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               {busy ? 'Creating…' : 'Create on Wix'}

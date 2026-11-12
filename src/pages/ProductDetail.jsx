@@ -683,25 +683,25 @@ export default function ProductDetail() {
           {!isEditing && (
             <button type="button" onClick={() => setShowHistory(true)}
               title="Field change history"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
               <History className="w-4 h-4" /> History
             </button>
           )}
           {!isEditing && canEdit && (
             <button type="button" onClick={() => setShowClone(true)}
               title="Create a new product as a copy of this one"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
               <CopyIcon className="w-4 h-4" /> Clone
             </button>
           )}
           {isEditing ? (
             <>
               <button type="button" onClick={cancelEditing} disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
                 <X className="w-4 h-4" /> Cancel
               </button>
               <button type="button" onClick={handleSave} disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-60">
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-60">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 {saving ? 'Saving…' : 'Save'}
               </button>
@@ -710,12 +710,12 @@ export default function ProductDetail() {
             <>
               <button type="button" onClick={handleDelete} disabled={deleting}
                 title="Permanently delete this product"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-error hover:bg-error-container hover:text-on-error-container hover:border-error-container transition-colors disabled:opacity-60">
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-error hover:bg-error-container hover:text-on-error-container hover:border-error-container transition-colors disabled:opacity-60">
                 {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                 Delete
               </button>
               <button type="button" onClick={startEditing} onPointerEnter={preloadRichTextEditor} onFocus={preloadRichTextEditor}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors">
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
                 <Pencil className="w-4 h-4" /> Edit
               </button>
             </>
@@ -880,7 +880,7 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
               type="button"
               onClick={handleApply}
               disabled={!canApply}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               Apply to {chosenSkus.size} variant{chosenSkus.size === 1 ? '' : 's'}
@@ -900,7 +900,7 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
       ) : (
         <div className="space-y-5">
           <div>
-            <h4 className="text-label-md text-on-surface-variant mb-2">Fields to copy</h4>
+            <h3 className="text-label-md text-on-surface-variant mb-2">Fields to copy</h3>
             <p className="text-body-sm text-on-surface-variant mb-2">Finish, color and pricing are unchecked by default since they usually differ per variant.</p>
             <div className="space-y-1.5">
               {changes.map((c) => {
@@ -927,7 +927,7 @@ function PropagateVariantsDialog({ product, changes, onClose, title, subtitle })
             </div>
           </div>
           <div>
-            <h4 className="text-label-md text-on-surface-variant mb-2">Apply to these variants</h4>
+            <h3 className="text-label-md text-on-surface-variant mb-2">Apply to these variants</h3>
             <div className="flex flex-wrap gap-2">
               {variants.map((v) => {
                 const on = chosenSkus.has(v.sku);
@@ -1543,7 +1543,7 @@ function SpecsTab({ product, edit }) {
             keys={['length', 'width', 'height']} labels={['Length', 'Width', 'Height']} product={product} edit={edit} />
           {/* Master carton (user, 2026-10-15): it only applies when the product ships on a pallet. */}
           <div className="space-y-4 pt-1">
-            <h4 className="text-label-md text-on-surface-variant">Master Carton — pallet shipments only</h4>
+            <h3 className="text-label-md text-on-surface-variant">Master Carton — pallet shipments only</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Units per Master Carton" attrKey="master_carton_quantity" type="number" product={product} edit={edit} />
               <AttrField label="Master Carton Weight" attrKey="master_carton_weight_lb" type="number" weight={unit} product={product} edit={edit} />
@@ -1934,7 +1934,7 @@ function MarketplacesTab({ product, media, onUpdate }) {
           type="button"
           onClick={runAutoLink}
           disabled={autoLink === 'busy'}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-outline-variant text-label-md font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
         >
           {autoLink === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
           Auto-link channels

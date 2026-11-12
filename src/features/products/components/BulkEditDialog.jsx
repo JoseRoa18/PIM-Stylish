@@ -139,7 +139,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="px-4 py-2 rounded-lg text-label-md font-medium text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50"
+            className="px-4 py-2 rounded-full text-label-md text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
@@ -147,7 +147,7 @@ export default function BulkEditDialog({ selectedSkus, products, onClose, onChan
             type="button"
             onClick={handleApply}
             disabled={!canApply}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary text-label-md font-semibold enabled:hover:brightness-110 transition disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:brightness-110 transition disabled:bg-on-surface/12 disabled:text-on-surface/38 disabled:cursor-not-allowed"
           >
             {busy && <Loader2 className="w-4 h-4 animate-spin" />}
             Apply to {count}

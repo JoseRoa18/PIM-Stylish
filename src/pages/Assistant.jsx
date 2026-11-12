@@ -38,9 +38,10 @@ export default function Assistant() {
         onChatId={(id) => setParams(id ? { chat: id } : {}, { replace: true })}
         header={({ newChat, openChats, busy, canReset }) => (
           <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
-            <div>
+            {/* The description is kept narrow so the buttons stay on the title's right, as on every page. */}
+            <div className="min-w-0">
               <h1 className="text-display-lg text-on-surface">Assistant</h1>
-              <p className="text-body-md text-on-surface-variant mt-1">
+              <p className="text-body-md text-on-surface-variant mt-1 max-w-xl">
                 Ask how the PIM works or what its data says. It reads with your permissions; a change it prepares happens only when you confirm it.
               </p>
             </div>
@@ -57,7 +58,7 @@ export default function Assistant() {
                 type="button"
                 onClick={newChat}
                 disabled={busy || !canReset}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md hover:opacity-90 transition-opacity disabled:opacity-40"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:opacity-50"
               >
                 <Plus className="w-4 h-4" aria-hidden="true" />
                 New chat

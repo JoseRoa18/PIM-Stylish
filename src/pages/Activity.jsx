@@ -207,7 +207,7 @@ export default function Activity() {
       </div>
 
       {/* Timeline */}
-      <div className="bg-surface border border-outline-variant rounded-2xl overflow-hidden">
+      <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
         {loading ? (
           <div role="status" className="py-16 flex items-center justify-center text-on-surface-variant text-body-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading activity…
@@ -218,7 +218,7 @@ export default function Activity() {
             <p className="text-body-sm text-on-surface-variant mt-1">{error.message}</p>
             <button
               onClick={reload}
-              className="mt-3 px-4 py-1.5 rounded-full border border-outline-variant text-body-sm hover:bg-surface-container-low"
+              className="mt-3 px-4 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
             >
               Retry
             </button>

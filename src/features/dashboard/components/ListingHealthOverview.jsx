@@ -85,7 +85,7 @@ export default function ListingHealthOverview({ stats, productCount, marketplace
                   <div className="text-label-md text-on-surface-variant mt-0.5 truncate">
                     {/* Legend dot ties the card to its donut segment color */}
                     <span className={`inline-block w-2 h-2 rounded-full mr-1 ${CATEGORY_VIZ[key].dot}`} />
-                    {c.label} <span className="opacity-60 max-sm:hidden">{c.range}</span>
+                    {c.label} <span className="max-sm:hidden">{c.range}</span>
                   </div>
                 </div>
               </div>

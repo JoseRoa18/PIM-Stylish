@@ -106,7 +106,7 @@ export default function WhereToBuyExcel({ onImported }) {
         onClick={runExport}
         disabled={exporting}
         aria-busy={exporting}
-        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container disabled:opacity-40"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
         title="Download every link with what the check found (Broken, Wrong product, Link to add…) as an Excel"
       >
         {exporting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Download className="w-4 h-4" aria-hidden="true" />}
@@ -117,7 +117,7 @@ export default function WhereToBuyExcel({ onImported }) {
           type="button"
           onClick={() => setOpen(true)}
           aria-haspopup="dialog"
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
           title="Upload the Excel with new links in its New Link column"
         >
           <Upload className="w-4 h-4" aria-hidden="true" />
@@ -134,11 +134,11 @@ export default function WhereToBuyExcel({ onImported }) {
           maxWidth="max-w-5xl"
           footer={(
             <>
-              <button type="button" onClick={close} disabled={busy === 'apply'} className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low disabled:opacity-40">
+              <button type="button" onClick={close} disabled={busy === 'apply'} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-40">
                 {result ? 'Close' : 'Cancel'}
               </button>
               {plan && !result && (
-                <button type="button" onClick={reset} disabled={busy != null} className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low disabled:opacity-40">
+                <button type="button" onClick={reset} disabled={busy != null} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-40">
                   Choose another file
                 </button>
               )}
@@ -148,7 +148,7 @@ export default function WhereToBuyExcel({ onImported }) {
                   onClick={apply}
                   disabled={busy != null}
                   aria-busy={busy === 'apply'}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md hover:bg-primary/90 disabled:opacity-40"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 disabled:opacity-40"
                 >
                   {busy === 'apply' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
                   {busy === 'apply'
@@ -215,7 +215,7 @@ export default function WhereToBuyExcel({ onImported }) {
               )}
 
               {plan.changes.length > 0 && (
-                <div className="overflow-x-auto max-h-[22rem] overflow-y-auto rounded-xl border border-outline-variant">
+                <div className="relative overflow-x-auto max-h-[22rem] overflow-y-auto rounded-xl border border-outline-variant">
                   <table className="w-full min-w-[44rem] table-fixed text-body-sm">
                     <caption className="sr-only">Changes in the file</caption>
                     <colgroup>

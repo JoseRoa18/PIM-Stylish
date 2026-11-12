@@ -178,12 +178,12 @@ export default function Analytics() {
           </nav>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button type="button" onClick={exportCsv} disabled={loading} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60">
+          <button type="button" onClick={exportCsv} disabled={loading} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60">
             <Download className="w-4 h-4" />
             Export week
           </button>
           {canEdit && (
-            <button type="button" onClick={snapshotNow} disabled={snapping} aria-busy={snapping} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:opacity-60">
+            <button type="button" onClick={snapshotNow} disabled={snapping} aria-busy={snapping} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold enabled:hover:opacity-90 transition-opacity disabled:opacity-60">
               <Camera className={`w-4 h-4 ${snapping ? 'animate-pulse' : ''}`} />
               {snapping ? 'Taking snapshot…' : 'Take snapshot'}
             </button>

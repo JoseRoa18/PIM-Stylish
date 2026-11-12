@@ -59,14 +59,14 @@ export default function LowesMerchantDialog({ onConfirm, onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container transition-colors"
+            className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container transition-colors"
           >
             Cancel
           </button>
           <button
             type="submit"
             form={formId}
-            className="px-5 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity"
+            className="px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
           >
             Export
           </button>

@@ -32,7 +32,7 @@ function ReportMenu({ busy, canEdit, onPick }) {
         aria-expanded={open}
         disabled={busy}
         title="Download the PIM's data as Excel: everything, or one subject"
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
       >
         {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <FileSpreadsheet className="w-4 h-4" aria-hidden="true" />}
         {busy ? 'Building report…' : 'Full Report'}
@@ -383,7 +383,7 @@ export default function Catalog() {
             <>
               <Link
                 to="/import"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md font-semibold text-on-surface hover:bg-surface-container-low transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
               >
                 <Upload className="w-4 h-4" />
                 Import

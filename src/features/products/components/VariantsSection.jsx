@@ -85,7 +85,7 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
           <button
             type="button"
             onClick={() => setManaging(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
           >
             <Settings className="w-3.5 h-3.5" />
             Manage
@@ -106,7 +106,7 @@ export default function VariantsSection({ product, onProductChanged, onUnify }) 
             <button
               type="button"
               onClick={() => onUnify?.(drift)}
-              className="flex-shrink-0 self-end sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
+              className="flex-shrink-0 self-end sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
             >
               Review &amp; unify
             </button>
@@ -369,7 +369,7 @@ function ManageVariantsDialog({ product, variants, onClose, onChanged }) {
                       onClick={() => handleAdd(r.sku)}
                       disabled={busy === r.sku}
                       aria-label={`Add ${r.sku}`}
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-label-md font-medium text-on-primary bg-primary hover:opacity-90 transition-opacity disabled:opacity-50"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-label-md font-semibold text-on-primary bg-primary hover:opacity-90 transition-opacity disabled:opacity-50"
                     >
                       {busy === r.sku ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                       Add
@@ -549,7 +549,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
                         onClick={() => handleLinkToExisting(r.sku)}
                         disabled={busy}
                         aria-label={`Link to ${r.sku}`}
-                        className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-label-md font-medium text-on-primary bg-primary hover:opacity-90 transition-opacity disabled:opacity-50"
+                        className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-label-md font-semibold text-on-primary bg-primary hover:opacity-90 transition-opacity disabled:opacity-50"
                       >
                         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                         Link
@@ -579,7 +579,7 @@ function LinkToFamilyDialog({ product, onClose, onChanged }) {
                   type="button"
                   onClick={handleSetFamily}
                   disabled={busy || !newFamily}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-on-primary text-body-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
                 >
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   Set

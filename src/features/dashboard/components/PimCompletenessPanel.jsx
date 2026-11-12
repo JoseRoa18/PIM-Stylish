@@ -96,7 +96,7 @@ export default function PimCompletenessPanel() {
               onClick={reload}
               disabled={loading}
               aria-busy={loading}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
               Recalculate
@@ -136,7 +136,7 @@ export default function PimCompletenessPanel() {
                 <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">
                   <th className="text-left px-6 py-3 font-medium">Category</th>
                   <th className="text-right px-6 py-3 font-medium">Products</th>
-                  <th className="text-right px-6 py-3 font-medium">At 100%</th>
+                  <th className="text-right px-6 py-3 font-medium whitespace-nowrap">At 100%</th>
                   <th className="px-6 py-3 font-medium text-left w-56">Complete</th>
                   <th className="text-right px-6 py-3 font-medium">Avg</th>
                   <th className="text-left px-6 py-3 font-medium">Most common gaps</th>
@@ -209,7 +209,7 @@ export default function PimCompletenessPanel() {
                 : <>No product missing {field.label} matches "{search.trim()}".</>}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">
@@ -276,7 +276,7 @@ export default function PimCompletenessPanel() {
               )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">
@@ -459,7 +459,7 @@ function CopySkus({ skus }) {
       type="button"
       onClick={copy}
       disabled={skus.length === 0}
-      className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-outline-variant text-body-sm text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
+      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-60"
     >
       {copied ? <Check className="w-4 h-4 text-tertiary" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
       {copied ? 'Copied' : `Copy ${skus.length} SKU${skus.length === 1 ? '' : 's'}`}

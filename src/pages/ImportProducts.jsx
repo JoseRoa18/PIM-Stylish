@@ -66,7 +66,7 @@ function BlankTemplateMenu({ onDownload }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-on-surface/8 transition-colors"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-on-surface/8 transition-colors"
       >
         <Download className="w-4 h-4" />
         Blank template
@@ -551,14 +551,14 @@ export default function ImportProducts() {
             <button
               type="button"
               onClick={reset}
-              className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-on-surface/8 transition-colors"
+              className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-on-surface/8 transition-colors"
             >
               Import another file
             </button>
             <button
               type="button"
               onClick={() => navigate('/catalog')}
-              className="px-5 py-2 rounded-full bg-primary text-on-primary text-body-md font-semibold hover:opacity-90 transition-opacity"
+              className="px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity"
             >
               Go to Catalog
             </button>

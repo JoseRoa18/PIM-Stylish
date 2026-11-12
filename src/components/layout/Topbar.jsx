@@ -251,7 +251,10 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
                   : showRecent ? `global-search-recent-${activeIndex}` : undefined
             }
             aria-keyshortcuts="Control+K Meta+K"
-            className="w-full pl-10 pr-10 sm:pr-20 py-2 bg-surface-container border border-outline-variant rounded-full text-body-md placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+            // On a phone the right padding is kept only for the clear button
+            // (shown once something is typed): with the assistant's button in
+            // the bar, "Search…" was cut to "Searc".
+            className={`w-full pl-10 ${query ? 'pr-10' : 'pr-3'} sm:pr-20 py-2 bg-surface-container border border-outline-variant rounded-full text-body-md placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all`}
           />
           {/* Right-side affordances inside the input */}
           <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-on-surface-variant">

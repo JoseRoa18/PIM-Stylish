@@ -93,11 +93,12 @@ export default function Markdown({ text }) {
         if (b.type === 'table') {
           return (
             // relative + tabIndex: a wide table scrolls inside its own box, reachable by keyboard.
-            <div key={k} tabIndex={0} className="relative overflow-x-auto rounded-lg border border-outline-variant [overflow-wrap:normal]">
+            // Drawn like the app's own tables: a card, its header row tinted, in the small label face.
+            <div key={k} tabIndex={0} className="relative overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest [overflow-wrap:normal] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
               <table className="w-full text-body-sm border-collapse">
                 <thead>
-                  <tr className="bg-surface-container-low">
-                    {b.head.map((h, c) => <th key={c} scope="col" className="text-left font-semibold px-3 py-2 border-b border-outline-variant whitespace-nowrap">{inline(h, `${k}.h${c}`)}</th>)}
+                  <tr className="bg-surface-container-low/60 border-b border-outline-variant text-label-md text-on-surface-variant">
+                    {b.head.map((h, c) => <th key={c} scope="col" className="text-left font-medium px-3 py-2 whitespace-nowrap">{inline(h, `${k}.h${c}`)}</th>)}
                   </tr>
                 </thead>
                 <tbody>

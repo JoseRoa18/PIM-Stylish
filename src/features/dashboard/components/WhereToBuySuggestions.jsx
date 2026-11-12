@@ -115,7 +115,7 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         title={data.checking ? `${list.length} ready to use · ${data.checking} more being checked` : `${list.length} ready to use`}
-        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
       >
         <Lightbulb className="w-4 h-4 text-primary" aria-hidden="true" />
         Suggested links
@@ -130,7 +130,7 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
           maxWidth="max-w-6xl"
           footer={(
             <>
-              <button type="button" onClick={close} disabled={busy === 'all'} className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low disabled:opacity-40">
+              <button type="button" onClick={close} disabled={busy === 'all'} className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-40">
                 Close
               </button>
               {canEdit && shown.length > 1 && (
@@ -139,7 +139,7 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
                   onClick={useAll}
                   disabled={busy != null}
                   aria-busy={busy === 'all'}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-body-md hover:bg-primary/90 disabled:opacity-40"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 disabled:opacity-40"
                 >
                   {busy === 'all' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
                   {busy === 'all' && progress ? `Publishing ${progress.done} of ${progress.total}` : `Use all ${shown.length}`}
@@ -173,7 +173,7 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
           {message && <p role="status" className="mt-3 rounded-xl bg-surface-container px-4 py-3 text-body-sm text-on-surface">{message}</p>}
 
           {list.length > 0 ? (
-            <div className="mt-3 overflow-x-auto">
+            <div className="relative mt-3 overflow-x-auto">
               <table className="w-full min-w-[46rem] table-fixed text-body-sm">
                 <caption className="sr-only">Suggested Where to Buy links</caption>
                 <colgroup>

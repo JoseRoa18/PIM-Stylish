@@ -255,7 +255,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                   onClick={runScan}
                   disabled={busy != null}
                   aria-busy={busy === 'scan'}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container disabled:opacity-40"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
                   title="Re-read the WHERE TO BUY sections of both sites"
                 >
                   <RefreshCw className={`w-4 h-4 ${busy === 'scan' ? 'animate-spin' : ''}`} />
@@ -266,7 +266,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                   onClick={runCheck}
                   disabled={busy != null}
                   aria-busy={busy === 'check'}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-on-primary text-label-lg hover:bg-primary/90 disabled:opacity-40"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 disabled:opacity-40"
                   title="Check the links that are due now. The automatic checks run every Monday, Wednesday and Friday from 1 AM (Cambridge time); new links are checked right away."
                 >
                   {busy === 'check' ? `Checking · ${progress?.checked ?? 0}` : 'Check links'}
@@ -305,7 +305,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
               onClick={() => runRepublish(differs[site])}
               disabled={republish != null || busy != null}
               aria-busy={republish != null}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline text-label-lg text-on-surface hover:bg-surface-container disabled:opacity-40"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
             >
               <Upload className="w-4 h-4" aria-hidden="true" />
               {republish ? `Publishing ${republish.done} of ${republish.total}` : "Publish the PIM's links"}
@@ -317,7 +317,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
       {toAddList.length > 0 && (
         <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-title-sm font-semibold text-on-surface">Links to add · {counts.missing ?? 0}</h3>
+            <h3 className="text-title-md font-semibold text-on-surface">Links to add · {counts.missing ?? 0}</h3>
             <p className="text-body-sm text-on-surface-variant">Portals most products of the site link, missing on these pages. Pick one to list its products.</p>
           </div>
           <ul className="mt-3 flex flex-wrap gap-2">

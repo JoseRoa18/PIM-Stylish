@@ -73,7 +73,7 @@ export default function WayfairProductCard({ product, onUpdate, supplier = 'CAN'
                 type="button"
                 onClick={saveGroupId}
                 disabled={savingId || !dirty}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant text-label-md hover:bg-surface-container-low transition-colors disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline-variant text-label-md hover:bg-surface-container-low transition-colors disabled:opacity-40"
               >
                 {savingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save

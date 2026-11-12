@@ -55,14 +55,14 @@ export function ConfirmProvider({ children }) {
               <button
                 type="button"
                 onClick={() => settle(false)}
-                className="px-4 py-2 rounded-full border border-outline-variant text-body-md text-on-surface hover:bg-surface-container-low transition-colors"
+                className="px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
               >
                 {request.cancelLabel}
               </button>
               <button
                 type="button"
                 onClick={() => settle(true)}
-                className={`px-5 py-2 rounded-full text-body-md font-semibold hover:opacity-90 transition-opacity ${
+                className={`px-4 py-2 rounded-full text-label-md font-semibold hover:opacity-90 transition-opacity ${
                   request.destructive
                     ? 'bg-error text-on-error'
                     : 'bg-primary text-on-primary'

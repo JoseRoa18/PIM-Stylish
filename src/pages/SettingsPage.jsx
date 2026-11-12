@@ -119,7 +119,7 @@ function PromoOwnersSection() {
   }
 
   return (
-    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
           <UserCheck className="w-5 h-5" strokeWidth={2} />
@@ -200,7 +200,7 @@ function WarrantySection() {
   }
 
   return (
-    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
           <ShieldCheck className="w-5 h-5" strokeWidth={2} />
@@ -278,7 +278,7 @@ function InventorySection() {
   // PIM products Odoo has no record of (both markets read the same products).
   const notInOdoo = [...new Set(Object.values(markets).flatMap((r) => (r?.ok ? r.notInOdoo ?? [] : [])))].sort();
   return (
-    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
           <Package className="w-5 h-5" strokeWidth={2} />
@@ -327,7 +327,7 @@ function InventorySection() {
           onClick={refresh}
           disabled={busy !== null}
           aria-busy={busy === 'refresh'}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
         >
           {busy === 'refresh' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
           Refresh now
@@ -381,7 +381,7 @@ function OdooSection() {
   }
 
   return (
-    <section className="rounded-2xl bg-surface p-6 border border-outline-variant">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
@@ -538,7 +538,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <section className="rounded-2xl bg-surface p-6 border border-outline-variant space-y-1">
+      <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 space-y-1">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
@@ -625,7 +625,7 @@ export default function SettingsPage() {
             onClick={runNow}
             disabled={running || settings?.enabled === false}
             aria-busy={running}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface text-label-lg font-medium text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
           >
             {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             Run now
