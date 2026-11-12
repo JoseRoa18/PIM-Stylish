@@ -10,9 +10,11 @@ import {
   WTB_SITES,
   WTB_RETAILERS,
   WTB_VIA,
+  WTB_STATUSES,
   groupWhereToBuy,
   linksToAdd,
   summarizeWhereToBuy,
+  linkBucket,
   linkStatus,
   isLinkProblem,
   isWrongProduct,
@@ -31,6 +33,12 @@ import {
 // ("Links to add"), not a problem. "Suggested links" lists the right
 // addresses the PIM found and opened for wrong, broken and missing links;
 // "Use" saves one into the product's list and publishes its pages.
+//
+// The status counters are the filters of the list (user, 2026-11-12): pressed,
+// a counter lists the products that have such a link, most of them first, with
+// those links standing out in the grid (the others fade) and alone in an
+// opened row; pressed again, the usual list. It works with the retailer and
+// SKU filters, and gives way to a "Links to add" portal (and the reverse).
 
 const TONE = {
   ok: 'bg-success',
@@ -71,10 +79,14 @@ function StatusChip({ link, detail }) {
 const STORE_ORDER = new Map(WTB_RETAILERS.map((r, i) => [r.key, i]));
 const byStoreOrder = (a, b) => (STORE_ORDER.get(a.retailer) ?? 99) - (STORE_ORDER.get(b.retailer) ?? 99);
 
-function Cell({ links }) {
+function Cell({ links, hit = null }) {
   if (!links?.length) return <span className="text-on-surface-variant/50">·</span>;
   // The worst link of the cell drives the colour (a retailer may appear twice).
-  const worst = links.reduce((acc, l) => (isLinkProblem(l) ? l : acc), links[0]);
+  // Under a status filter it is the cell's link of that status, and a cell
+  // without one fades.
+  const own = hit ? links.find(hit) : null;
+  const faded = hit && !own ? 'opacity-25' : '';
+  const worst = own ?? links.reduce((acc, l) => (isLinkProblem(l) ? l : acc), links[0]);
   const v = linkStatus(worst);
   const title = links.map((l) => {
     const read = pageReading(l);
@@ -82,12 +94,12 @@ function Cell({ links }) {
   }).join('\n');
   const dot = <span className={`inline-block w-2.5 h-2.5 rounded-full ${worst.verdict === 'missing' ? 'ring-2 ring-inset ring-warning bg-transparent' : TONE[v.tone]}`} />;
   return worst.url ? (
-    <a href={worst.url} target="_blank" rel="noreferrer" title={title} className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-surface-container-high" onClick={(e) => e.stopPropagation()}>
+    <a href={worst.url} target="_blank" rel="noreferrer" title={title} className={`inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-surface-container-high hover:opacity-100 focus-visible:opacity-100 ${faded}`} onClick={(e) => e.stopPropagation()}>
       {dot}
       <span className="sr-only">{v.label}</span>
     </a>
   ) : (
-    <span title={title} className="inline-flex items-center justify-center w-7 h-7">{dot}<span className="sr-only">{v.label}</span></span>
+    <span title={title} className={`inline-flex items-center justify-center w-7 h-7 ${faded}`}>{dot}<span className="sr-only">{v.label}</span></span>
   );
 }
 
@@ -103,6 +115,8 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
   const [onlyProblems, setOnlyProblems] = useState(true);
   const [retailerFilter, setRetailerFilter] = useState('all');
   const [toAdd, setToAdd] = useState(null); // a portal of "Links to add": its products only
+  const [status, setStatus] = useState(null); // a status counter (WTB_STATUSES key): the products with such a link
+  const [allLinks, setAllLinks] = useState(false); // the opened row lists every link, not only the status's
   const [copied, setCopied] = useState(null);
   const [differs, setDiffers] = useState({}); // site → SKUs whose live section is not the PIM's list
   const [republish, setRepublish] = useState(null); // { done, total, errors }
@@ -143,18 +157,30 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
     return WTB_RETAILERS.filter((r) => seen.has(r.key));
   }, [rows]);
 
+  const statusLabel = WTB_STATUSES.find((f) => f.key === status)?.label ?? null;
+  // The links the pressed counter counts — in the chosen retailer, when one is.
+  const hit = useMemo(
+    () => (status ? (l) => linkBucket(l) === status && (retailerFilter === 'all' || l.retailer === retailerFilter) : null),
+    [status, retailerFilter],
+  );
+  // How many such links each product has (the list's last column, and its order).
+  const hits = useMemo(() => new Map(hit ? groups.map((g) => [g.sku, g.links.filter(hit).length]) : []), [groups, hit]);
+
   const filtered = useMemo(() => {
     let list = groups;
     if (toAdd) list = list.filter((g) => g.missing.includes(toAdd));
+    else if (hit) list = list.filter((g) => hits.get(g.sku) > 0).sort((a, b) => hits.get(b.sku) - hits.get(a.sku) || a.sku.localeCompare(b.sku));
     else if (onlyProblems) list = list.filter((g) => g.problems > 0);
-    if (retailerFilter !== 'all') list = list.filter((g) => g.links.some((l) => l.retailer === retailerFilter && (!onlyProblems || isLinkProblem(l))));
+    if (retailerFilter !== 'all' && !hit) list = list.filter((g) => g.links.some((l) => l.retailer === retailerFilter && (!onlyProblems || isLinkProblem(l))));
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((g) => g.sku.toLowerCase().includes(q));
     return list;
-  }, [groups, onlyProblems, retailerFilter, search, toAdd]);
+  }, [groups, onlyProblems, retailerFilter, search, toAdd, hit, hits]);
+  const hitCount = hit ? filtered.reduce((n, g) => n + hits.get(g.sku), 0) : 0;
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [onlyProblems, retailerFilter, search, toAdd]);
+  useEffect(() => { setPage(1); setAllLinks(false); }, [onlyProblems, retailerFilter, search, toAdd, status]);
+  const pickStatus = (key) => { setStatus(key); setToAdd(null); setExpanded(null); };
 
   const copySkus = async (retailer, skus) => {
     try { await navigator.clipboard.writeText(skus.join('\n')); setCopied(retailer); setTimeout(() => setCopied(null), 2000); } catch { /* clipboard blocked */ }
@@ -208,13 +234,34 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
     } finally { setBusy(null); setProgress(null); }
   };
 
-  const counts = summary.byVerdict;
-  const stat = (label, value, tone) => (
+  const counts = summary.byStatus;
+  const stat = (label, value) => (
     <div key={label} className="min-w-[5.5rem]">
-      <p className={`text-title-lg font-semibold tabular-nums ${tone ?? 'text-on-surface'}`}>{value ?? 0}</p>
+      <p className="text-title-lg font-semibold tabular-nums text-on-surface">{value ?? 0}</p>
       <p className="text-label-md text-on-surface-variant">{label}</p>
     </div>
   );
+  // A status counter: the filter of the list below. Its box only shows when it
+  // is pressed or pointed at (padding cancelled by the margin, so the numbers
+  // stay where they were); one at 0 has nothing to list.
+  const statusStat = (f) => {
+    const value = counts[f.key] ?? 0;
+    const on = status === f.key;
+    return (
+      <button
+        key={f.key}
+        type="button"
+        aria-pressed={on}
+        disabled={!value && !on}
+        onClick={() => pickStatus(on ? null : f.key)}
+        title={on ? 'Back to the usual list' : value ? `List the ${value.toLocaleString()} "${f.label}" links below` : undefined}
+        className={`min-w-[5.5rem] -mx-3 -my-2 px-3 py-2 rounded-xl border text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-default ${on ? 'border-primary bg-primary-container/30' : 'border-transparent enabled:hover:bg-surface-container-low enabled:hover:border-outline-variant'}`}
+      >
+        <span className={`block text-title-lg font-semibold tabular-nums ${value && f.tone ? f.tone : 'text-on-surface'}`}>{value}</span>
+        <span className="block text-label-md text-on-surface-variant">{f.label}</span>
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -279,19 +326,14 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
         <div className="mt-5 flex flex-wrap gap-x-8 gap-y-4">
           {stat('Products', summary.products)}
           {stat('Links', summary.links)}
-          {stat('OK', counts.ok, 'text-success')}
-          {stat('Broken', counts.broken, counts.broken ? 'text-error' : undefined)}
-          {stat('Wrong product', summary.wrongProduct, summary.wrongProduct ? 'text-warning' : undefined)}
-          {stat('Out of stock', summary.outOfStock)}
-          {stat('Other finish', summary.otherFinish)}
-          {stat('Not checked yet', counts.pending)}
-          {stat('Check by hand', counts.manual)}
+          <div role="group" aria-label="List the links by their status" className="contents">
+            {WTB_STATUSES.map(statusStat)}
+          </div>
         </div>
-        {summary.notCovered > 0 && (
-          <p className="mt-3 text-body-sm text-on-surface-variant">
-            Walmart USA is not covered yet: its {summary.notCovered} broken or wrong links are not counted above (they stay off the websites).
-          </p>
-        )}
+        <p className="mt-3 text-body-sm text-on-surface-variant">
+          Press a status to list its links below; press it again for the usual list.
+          {counts.not_covered > 0 && ` Walmart USA is not covered yet: its ${counts.not_covered} broken or wrong links are not counted above (they stay off the websites).`}
+        </p>
       </div>
 
       {(differs[site]?.length ?? 0) > 0 && (
@@ -328,7 +370,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                   <button
                     type="button"
                     aria-pressed={active}
-                    onClick={() => setToAdd(active ? null : p.retailer)}
+                    onClick={() => { setToAdd(active ? null : p.retailer); setStatus(null); }}
                     className={`px-3 py-1.5 text-label-lg ${active ? 'text-on-primary-container font-semibold' : 'text-on-surface hover:bg-surface-container'} rounded-l-lg`}
                   >
                     {p.label} <span className="tabular-nums text-warning font-semibold ml-1">{p.skus.length}</span>
@@ -386,13 +428,30 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                 Missing a {WTB_RETAILERS.find((r) => r.key === toAdd)?.label ?? toAdd} link
                 <button type="button" onClick={() => setToAdd(null)} className="px-2 py-0.5 rounded-md text-primary hover:bg-surface-container">Clear</button>
               </span>
+            ) : status ? (
+              <span className="inline-flex items-center gap-2 text-body-sm text-on-surface">
+                <span>Showing: <span className="font-semibold">{statusLabel}</span></span>
+                <button type="button" onClick={() => pickStatus(null)} className="px-2 py-0.5 rounded-md text-primary hover:bg-surface-container">Clear</button>
+              </span>
             ) : (
               <label className="inline-flex items-center gap-2 text-body-sm text-on-surface cursor-pointer">
                 <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} className="accent-primary" />
                 Only broken or wrong links
               </label>
             )}
-            <span className="text-body-sm text-on-surface-variant ml-auto">{filtered.length} of {groups.length} products</span>
+            <span role="status" className="text-body-sm text-on-surface-variant ml-auto">
+              {filtered.length} of {groups.length} products{status ? ` · ${hitCount.toLocaleString()} ${hitCount === 1 ? 'link' : 'links'}` : ''}
+            </span>
+            {status && filtered.length > 0 && (
+              <button
+                type="button"
+                onClick={() => copySkus('status', filtered.map((g) => g.sku))}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
+              >
+                {copied === 'status' ? <Check className="w-3.5 h-3.5 text-success" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
+                {copied === 'status' ? 'Copied' : `Copy ${filtered.length} ${filtered.length === 1 ? 'SKU' : 'SKUs'}`}
+              </button>
+            )}
           </div>
           <div className="relative overflow-x-auto">
             <table className="w-full text-body-sm">
@@ -402,7 +461,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                   {columns.map((c) => (
                     <th key={c.key} className="px-1 py-2 font-semibold text-center whitespace-nowrap" title={c.label}>{c.short}</th>
                   ))}
-                  <th className="px-3 py-2 font-semibold text-right">Issues</th>
+                  <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">{status ? statusLabel : 'Issues'}</th>
                   <th className="w-8"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
@@ -413,14 +472,18 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                   const open = expanded === g.sku;
                   return (
                     <Fragment key={g.sku}>
-                      <tr className="border-t border-outline-variant hover:bg-surface-container-low cursor-pointer" onClick={() => setExpanded(open ? null : g.sku)}>
+                      <tr className="border-t border-outline-variant hover:bg-surface-container-low cursor-pointer" onClick={() => { setExpanded(open ? null : g.sku); setAllLinks(false); }}>
                         <td className="sticky left-0 bg-surface-container-lowest px-4 py-1.5 font-semibold text-on-surface whitespace-nowrap">
                           <Link to={`/catalog/${g.sku}`} className="inline-block py-[3px] -my-[3px] hover:underline" onClick={(e) => e.stopPropagation()}>{g.sku}</Link>
                         </td>
                         {columns.map((c) => (
-                          <td key={c.key} className="px-1 py-1.5 text-center"><Cell links={byRetailer.get(c.key)} /></td>
+                          <td key={c.key} className="px-1 py-1.5 text-center"><Cell links={byRetailer.get(c.key)} hit={hit} /></td>
                         ))}
-                        <td className={`px-3 py-1.5 text-right tabular-nums ${g.problems ? 'text-error font-semibold' : 'text-on-surface-variant'}`}>{g.problems}</td>
+                        {status ? (
+                          <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-on-surface">{hits.get(g.sku)}</td>
+                        ) : (
+                          <td className={`px-3 py-1.5 text-right tabular-nums ${g.problems ? 'text-error font-semibold' : 'text-on-surface-variant'}`}>{g.problems}</td>
+                        )}
                         <td className="px-2 py-1.5 text-on-surface-variant">
                           {/* The row opens on click; this button lets the keyboard do it too
                               (its click reaches the row's onClick). Plain look, no press sink. */}
@@ -442,7 +505,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                                 <col className="w-[13rem]" />
                               </colgroup>
                               <tbody className="divide-y divide-outline-variant/50">
-                                {[...g.links].sort(byStoreOrder).map((l) => {
+                                {(hit && !allLinks ? g.links.filter(hit) : [...g.links]).sort(byStoreOrder).map((l) => {
                                   const checked = l.checked_via && (l.verdict === 'ok' || l.verdict === 'broken');
                                   const when = checked ? `${WTB_VIA[l.checked_via] ?? l.checked_via} · ${fmtWhen(l.checked_at)}` : '';
                                   const read = pageReading(l);
@@ -482,6 +545,14 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                                 })}
                               </tbody>
                             </table>
+                            {hit && (
+                              <p className="mt-2 text-body-sm text-on-surface-variant">
+                                {allLinks ? `Every link of ${g.sku}.` : `The ${hits.get(g.sku)} "${statusLabel}" ${hits.get(g.sku) === 1 ? 'link' : 'links'} of ${g.sku}${retailerFilter !== 'all' ? ' at this retailer' : ''}, of ${g.links.length}.`}{' '}
+                                <button type="button" onClick={() => setAllLinks(!allLinks)} className="text-primary underline underline-offset-2">
+                                  {allLinks ? `Only the "${statusLabel}" ones` : `Show all ${g.links.length}`}
+                                </button>
+                              </p>
+                            )}
                             <p className="mt-2 text-body-sm text-on-surface-variant">
                               Change the links in the product&apos;s <Link to={`/catalog/${encodeURIComponent(g.sku)}?tab=where_to_buy`} className="text-primary underline underline-offset-2">Where to Buy tab</Link> — the PIM writes the product&apos;s pages from it.
                             </p>
@@ -494,7 +565,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                 {pageRows.length === 0 && (
                   <tr className="border-t border-outline-variant">
                     <td colSpan={columns.length + 3} className="px-4 py-8 text-center text-on-surface-variant">
-                      {toAdd ? 'No product misses this link.' : onlyProblems ? 'No broken or wrong links on this site.' : 'No products match.'}
+                      {toAdd ? 'No product misses this link.' : status ? `No "${statusLabel}" links match.` : onlyProblems ? 'No broken or wrong links on this site.' : 'No products match.'}
                     </td>
                   </tr>
                 )}

@@ -130,26 +130,46 @@ export function groupWhereToBuy(rows) {
   return [...bySku.values()].sort((a, b) => b.problems - a.problems || a.sku.localeCompare(b.sku));
 }
 
+// The panel's counters, each one the filter of the list under it (user,
+// 2026-11-12: "que esos status de ok, broken, y eso sean como filtros
+// clikeables para ver como tal cuáles son los broken"). A link falls under
+// exactly one — what its chip says: "Wrong product", "Out of stock", "Other
+// finish" or its verdict (a Broken link that opens another product counts as
+// Broken). `tone` colours the number while it is above 0.
+export const WTB_STATUSES = [
+  { key: 'ok', label: 'OK', tone: 'text-success' },
+  { key: 'broken', label: 'Broken', tone: 'text-error' },
+  { key: 'wrong', label: 'Wrong product', tone: 'text-warning' },
+  { key: 'out_of_stock', label: 'Out of stock' },
+  { key: 'other_finish', label: 'Other finish' },
+  { key: 'pending', label: 'Not checked yet' },
+  { key: 'manual', label: 'Check by hand' },
+];
+
+/**
+ * The counter a link is counted under: one of WTB_STATUSES' keys, 'missing'
+ * (a link to add), 'not_covered' (a broken or wrong link of a store not
+ * covered yet: counted apart, in the note under the counters), or null (a
+ * link to add of such a store: counted nowhere).
+ */
+export function linkBucket(row) {
+  const status = linkStatus(row);
+  const wrong = status === WRONG_PRODUCT || status === WRONG_OPTION;
+  if (NOT_COVERED.has(row.retailer) && (row.verdict === 'missing' || (row.url && (row.verdict === 'broken' || wrong)))) return row.url ? 'not_covered' : null;
+  if (row.url && wrong) return 'wrong';
+  if (row.url && status === OUT_OF_STOCK) return 'out_of_stock';
+  if (row.url && status === OTHER_FINISH) return 'other_finish';
+  return row.verdict;
+}
+
+/** `byStatus`: how many links fall under each counter (linkBucket). */
 export function summarizeWhereToBuy(rows) {
-  const s = { products: new Set(), links: 0, docs: 0, byVerdict: {}, problems: 0, wrongProduct: 0, outOfStock: 0, otherFinish: 0, notCovered: 0, dropbox: 0, pending: 0, lastScan: null, lastCheck: null };
+  const s = { products: new Set(), links: 0, docs: 0, byStatus: {}, problems: 0, dropbox: 0, lastScan: null, lastCheck: null };
   for (const r of rows) {
     s.products.add(r.sku);
     if (r.section === 'documents') s.docs += 1; else if (r.url) s.links += 1;
-    // Each link counts once, under what its chip says ("Wrong product", "Out
-    // of stock", "Other finish" or its verdict — a Broken one that opens
-    // another product counts as Broken). A store not covered yet counts its
-    // broken and wrong links apart, and no link to add.
-    const status = linkStatus(r);
-    const uncovered = NOT_COVERED.has(r.retailer);
-    if (uncovered && (r.verdict === 'missing' || (r.url && (r.verdict === 'broken' || status === WRONG_PRODUCT || status === WRONG_OPTION)))) {
-      if (r.url) s.notCovered += 1;
-    } else if (r.url && (status === WRONG_PRODUCT || status === WRONG_OPTION)) s.wrongProduct += 1;
-    else if (r.url && status === OUT_OF_STOCK) s.outOfStock += 1;
-    else if (r.url && status === OTHER_FINISH) s.otherFinish += 1;
-    else {
-      s.byVerdict[r.verdict] = (s.byVerdict[r.verdict] ?? 0) + 1;
-      if (r.verdict === 'pending') s.pending += 1;
-    }
+    const bucket = linkBucket(r);
+    if (bucket) s.byStatus[bucket] = (s.byStatus[bucket] ?? 0) + 1;
     if (isLinkProblem(r)) s.problems += 1;
     if (r.retailer === 'dropbox') s.dropbox += 1;
     if (!s.lastScan || r.scanned_at > s.lastScan) s.lastScan = r.scanned_at;
