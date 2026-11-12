@@ -53,6 +53,8 @@ const WAITING = {
   taken: 'their UPC is on another Odoo product',
   hs_not_listed: 'their HS code is not on Odoo’s list',
   country_unknown: 'their country is not in Odoo',
+  brand_unknown: 'their brand is not in Odoo',
+  category_unknown: 'their category is not in Odoo',
   refused: 'Odoo gave an error',
 };
 
@@ -85,7 +87,8 @@ const boxOf = (product) => {
 
 /**
  * Which of the fields that travel to Odoo a save changed — the product as it
- * was, the product as it is now ({ attributes, shipping_weight_lb, model_name }):
+ * was, the product as it is now (both with `attributes` and the columns named
+ * in ODOO_COLUMNS: a column left out of one of them reads as changed):
  *   upc             the UPC → Odoo's Barcode
  *   box             Shipping Dimensions → Shipping Length / Width / Height
  *   weight          Shipping Weight → Shipping Weight (Lbs)
@@ -93,21 +96,36 @@ const boxOf = (product) => {
  *   model           Model Name → Model Name
  *   hs              HS Code → HS Code (Odoo's own list)
  *   country         Country of Origin → Country of Origin
- *   title           General Title → the Name, on products the PIM created in Odoo
+ *   title           General Title → "Odoo Description" (the product's name in
+ *                   Odoo, under the label its form gives it) and General Title
+ *   brand           Brand → Brand
+ *   category        Category (and the Product Type, which says the kind of an
+ *                   accessory) → Product Category
+ *   color           Color → Color
+ *   material        Material → Material
+ *   finish          Finish Type → Finish (Odoo's Finish is the type of finish)
  * (The main image, `image`, is sent by the media module when it changes, and
  * the marketplace ids, `ids`, by the Aliases tab when one is added.)
  */
+export const ODOO_COLUMNS = ['shipping_weight_lb', 'model_name', 'brand', 'category', 'product_type', 'color', 'material'];
+
 export function changedOdooFields(before, after) {
   const fields = [];
   const attr = (product, key) => text(product?.attributes?.[key]);
+  const column = (key) => text(before?.[key]) !== text(after?.[key]);
   if (attr(before, 'upc') !== attr(after, 'upc')) fields.push('upc');
   if (boxOf(before) !== boxOf(after)) fields.push('box');
   if (measure(before?.shipping_weight_lb) !== measure(after?.shipping_weight_lb)) fields.push('weight');
   if (measure(before?.attributes?.product_weight_lb) !== measure(after?.attributes?.product_weight_lb)) fields.push('product_weight');
-  if (text(before?.model_name) !== text(after?.model_name)) fields.push('model');
+  if (column('model_name')) fields.push('model');
   if (attr(before, 'hs_code') !== attr(after, 'hs_code')) fields.push('hs');
   if (attr(before, 'country_of_origin') !== attr(after, 'country_of_origin')) fields.push('country');
   if (attr(before, 'general_title_en') !== attr(after, 'general_title_en')) fields.push('title');
+  if (column('brand')) fields.push('brand');
+  if (column('category') || column('product_type')) fields.push('category');
+  if (column('color')) fields.push('color');
+  if (column('material')) fields.push('material');
+  if (attr(before, 'finish_type') !== attr(after, 'finish_type')) fields.push('finish');
   return fields;
 }
 
@@ -128,6 +146,11 @@ export function odooFieldsOf(columnKeys = [], attributeKeys = []) {
   if (attribute.has('hs_code')) fields.push('hs');
   if (attribute.has('country_of_origin')) fields.push('country');
   if (attribute.has('general_title_en')) fields.push('title');
+  if (column.has('brand')) fields.push('brand');
+  if (column.has('category') || column.has('product_type')) fields.push('category');
+  if (column.has('color')) fields.push('color');
+  if (column.has('material')) fields.push('material');
+  if (attribute.has('finish_type')) fields.push('finish');
   return fields;
 }
 
@@ -151,7 +174,7 @@ async function invoke(body) {
  * The function's answer for these SKUs, 100 per call:
  * { off, results: [{ sku, state, note, changes, held }] } — state updated |
  * created | same | held (would_update / would_create on a dry run).
- * `fields`: what to send (upc, box, weight, title). `create`: make the
+ * `fields`: what to send (the keys of changedOdooFields). `create`: make the
  * products Odoo does not have. `dryRun` compares and writes nothing.
  * `task` (optional) counts the SKUs done.
  */

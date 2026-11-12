@@ -366,7 +366,7 @@ function OdooSection() {
   async function toggle(next) {
     if (next && !(await confirm({
       title: 'Send product data to Odoo?',
-      message: 'From now on, what the PIM owns of a product — UPC, shipping box and weight, product weight, model name, HS code, country of origin, main image and marketplace ids — is written to that product in Odoo right away when it is saved in the PIM, and a new product can be created there with it. A product nobody edits is not touched.',
+      message: 'From now on, what the PIM owns of a product — UPC, shipping box and weight, product weight, general title, model name, brand, category, color, material, finish type, HS code, country of origin, main image and marketplace ids — is written to that product in Odoo right away when it is saved in the PIM, and a new product can be created there with it. A product nobody edits is not touched.',
       confirmLabel: 'Turn on',
     }))) return;
     const prev = on;
@@ -390,7 +390,7 @@ function OdooSection() {
           <div>
             <h2 className="text-title-md text-on-surface font-semibold">Odoo</h2>
             <p id={descriptionId} className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-              One way, PIM to Odoo. When a product’s UPC, shipping box, shipping weight, product weight, model name, HS code, country of origin, main image or a marketplace id (Aliases) is saved in the PIM — on its page or through a spreadsheet import — it is written to that product in Odoo right away. A new product is created in Odoo when its “Create it in Odoo too” box is ticked; its name there is the General Title. The PIM never empties a field in Odoo, never sends half a box, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
+              One way, PIM to Odoo. When a product’s UPC, shipping box, shipping weight, product weight, general title, model name, brand, category, color, material, finish type, HS code, country of origin, main image or a marketplace id (Aliases) is saved in the PIM — on its page or through a spreadsheet import — it is written to that product in Odoo right away. The General Title is the product’s Odoo Description. A color, material or finish that Odoo’s list does not have yet is added to it. A new product is created in Odoo when its “Create it in Odoo too” box is ticked. The PIM never empties a field in Odoo, never sends half a box, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
               <Link to="/activity" className="text-primary underline underline-offset-2">Activity Log</Link>.
             </p>
           </div>

@@ -19,11 +19,21 @@
 //                   Best Buy CA → Best Buy.ca SKU · Amazon Canada / USA seller SKU
 //                   → ALIAS AMZ CAN / USA · their ASIN → ASIN Amazon.ca / .com.
 //                   An id the PIM lacks is left as Odoo has it, without a word.
-//   title           attributes.general_title_en    → the product's Name, ONLY on
-//                   products the PIM itself created in Odoo (table
-//                   odoo_created_products; user: "el Odoo description será el
-//                   general title de nosotros"; for the ones Odoo already had:
-//                   "NO, no todavía")
+//   title           attributes.general_title_en    → "Odoo Description", which is the
+//                   product's `name` under the label Odoo's form gives it (user,
+//                   2026-11-11: "el Odoo description será el general title de
+//                   nosotros"; 2026-11-12: "en General Title va en Odoo Description"),
+//                   and Odoo's own General Title field (`general_title`) — on
+//                   every product
+//   brand           products.brand                 → Brand (Odoo's own brands)
+//   category        products.category (+ the kind of an accessory) → Product Category
+//   color           products.color                 → Color
+//   material        products.material              → Material
+//   finish          attributes.finish_type         → Finish (Odoo's Finish holds the
+//                   TYPE of finish — Matte, Brushed… —, the PIM's Finish Type)
+//                   Color / Material / Finish are lists in Odoo. The product takes
+//                   the PIM's word and only that one; a word Odoo's list lacks is
+//                   ADDED to it (user, 2026-11-12: "tal cual el PIM").
 // The PIM's page and its spreadsheet import call this right after a save,
 // with the SKUs and the fields that save changed.
 //
@@ -62,8 +72,10 @@
 //   state   "updated" / "created" (on a dry run "would_update" / "would_create") | "same" | "held"
 //   changes [{ field, before, after }]      held [{ field, reason, note }]
 //   reasons no_<field> (nothing to send: said, not a failure) · bad_upc | incomplete_box |
-//           hs_not_listed | country_unknown | not_in_pim | not_in_odoo | archived | several |
-//           taken | look_alike | no_category | refused
+//           hs_not_listed | country_unknown | brand_unknown | category_unknown | not_in_pim |
+//           not_in_odoo | archived | several | taken | look_alike | no_category | refused
+//   also    added: { color, material, finish } — the words this run added to Odoo's
+//           lists (on a dry run: the ones it would add)
 // Every run that sent, created or held something writes one Activity Log
 // entry (target "odoo") with Odoo's values before the change.
 //
@@ -82,9 +94,22 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 const MAX_SKUS = 100;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-const FIELD_KEYS = ["upc", "box", "weight", "product_weight", "model", "hs", "country", "image", "ids", "title"] as const;
+const FIELD_KEYS = ["upc", "box", "weight", "product_weight", "model", "hs", "country", "image", "ids", "title", "brand", "category", "color", "material", "finish"] as const;
 type FieldKey = typeof FIELD_KEYS[number];
-const LABEL: Record<FieldKey, string> = { upc: "UPC", box: "box", weight: "shipping weight", product_weight: "product weight", model: "model name", hs: "HS code", country: "country of origin", image: "picture", ids: "marketplace id", title: "name" };
+const LABEL: Record<FieldKey, string> = { upc: "UPC", box: "box", weight: "shipping weight", product_weight: "product weight", model: "model name", hs: "HS code", country: "country of origin", image: "picture", ids: "marketplace id", title: "general title", brand: "brand", category: "category", color: "color", material: "material", finish: "finish" };
+// Color, Material and Finish are lists of their own in Odoo (name + code), and a
+// product holds several of them: the PIM's one word replaces whatever is there.
+const TAGS = {
+  color: { model: "product.color", field: "color_ids", list: "colors" },
+  material: { model: "product.material", field: "material_ids", list: "materials" },
+  finish: { model: "product.finish", field: "finish_ids", list: "finishes" },
+} as const;
+type TagKey = keyof typeof TAGS;
+const TAG_KEYS = Object.keys(TAGS) as TagKey[];
+const isTag = (f: string): f is TagKey => f in TAGS;
+// One of Odoo's lists as a run knows it: the entry of each word (lower case), its
+// name as Odoo writes it, the codes in use, what this run added and what Odoo refused.
+type TagList = { ids: Map<string, number>; names: Map<number, string>; codes: Set<string>; added: string[]; failed: Map<string, string> };
 // The marketplace ids the PIM keeps (Aliases tab) and the Odoo field of each.
 const ALIAS_FIELDS: Record<string, { field: string; name: string }> = {
   "Home Depot CA": { field: "homedepot_ca_sku", name: "Home Depot CA" },
@@ -101,7 +126,7 @@ const ID_FIELDS = [...Object.values(ALIAS_FIELDS).map((a) => a.field), ...Object
 // Nothing to send for that field (the PIM has no value): said on the card, not a failure.
 const isSoft = (reason: string) => reason.startsWith("no_") && reason !== "no_category";
 // What Odoo's side can fix: noted in odoo_pending and tried again every hour.
-const RETRY = new Set(["not_in_odoo", "archived", "several", "taken", "hs_not_listed", "country_unknown", "refused"]);
+const RETRY = new Set(["not_in_odoo", "archived", "several", "taken", "hs_not_listed", "country_unknown", "brand_unknown", "category_unknown", "refused"]);
 
 type Change = { field: FieldKey; before: string; after: string; what?: string };
 type Hold = { field: FieldKey | "product"; reason: string; note: string };
@@ -109,16 +134,26 @@ type Result = { sku: string; state: "updated" | "would_update" | "created" | "wo
 type PimProduct = {
   sku: string; brand: string | null; category: string | null; model_name: string | null; product_type: string | null; shipping_weight_lb: number | string | null;
   upc: string | null; box: { length?: unknown; width?: unknown; height?: unknown } | null; title: string | null; product_weight: string | null; hs: string | null; country: string | null;
+  color: string | null; material: string | null; finish_type: string | null;
 };
 type OdooProduct = {
   id: number; default_code: string; barcode: string | false; active: boolean; name: string; product_tmpl_id: [number, string];
   shipping_length_in: number; shipping_width_in: number; shipping_height_in: number; shipping_weight: number;
   overall_product_weight: number; model_name: string | false; hs_code: string | false; country_of_origin: [number, string] | false;
+  general_title: string | false; product_brand_id: [number, string] | false; categ_id: [number, string] | false;
+  color_ids: number[]; material_ids: number[]; finish_ids: number[];
 };
 // A planned write: the Odoo values, which record takes them, and how to tell it was kept.
 type Planned = Change & { on: "product" | "template"; values: Record<string, unknown>; kept: (now: OdooProduct) => boolean };
 // What the lookups of a run know about Odoo.
-type Known = { takenBy: (upc: string, self?: number) => string[]; hsKeys: Set<string>; countries: Map<string, number>; pimMade: Set<string>; images: Map<string, string>; ids: Map<string, { field: string; name: string; value: string }[]> };
+type Known = {
+  takenBy: (upc: string, self?: number) => string[]; hsKeys: Set<string>; countries: Map<string, number>; pimMade: Set<string>; images: Map<string, string>; ids: Map<string, { field: string; name: string; value: string }[]>;
+  brands: Map<string, { id: number; name: string }>; categories: Map<string, number>; tags: Record<TagKey, TagList>;
+};
+// The PIM's word for one of Odoo's lists.
+const pimTag = (p: PimProduct, key: TagKey) => text(key === "color" ? p.color : key === "material" ? p.material : p.finish_type);
+// The entry a planned value points at (0 = not on Odoo's list yet: a dry run).
+const tagId = (v: Record<string, unknown>, key: TagKey) => ((v[TAGS[key].field] as [number, number, number[]][])[0][2][0]);
 
 // The role claim of a JWT, read without a signature check — it only picks
 // which real check to run on the bearer.
@@ -225,7 +260,7 @@ async function odooClient(): Promise<Odoo> {
   return (model, method, args, kwargs = {}) => rpc("object", "execute_kw", [db, uid, key, model, method, args, kwargs], method === "create");
 }
 
-const FIELDS = ["default_code", "barcode", "active", "name", "product_tmpl_id", "shipping_length_in", "shipping_width_in", "shipping_height_in", "shipping_weight", "overall_product_weight", "model_name", "hs_code", "country_of_origin", ...ID_FIELDS];
+const FIELDS = ["default_code", "barcode", "active", "name", "product_tmpl_id", "shipping_length_in", "shipping_width_in", "shipping_height_in", "shipping_weight", "overall_product_weight", "model_name", "hs_code", "country_of_origin", "general_title", "product_brand_id", "categ_id", "color_ids", "material_ids", "finish_ids", ...ID_FIELDS];
 const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 const barcodeOf = (p: { barcode: string | false }) => text(p.barcode || "");
 
@@ -299,7 +334,30 @@ function valueOf(field: FieldKey, p: PimProduct, known: Known): { values?: Recor
   }
   if (field === "title") {
     const title = text(p.title);
-    return title ? { values: { name: title }, show: `“${title}”` } : {};
+    return title ? { values: { general_title: title }, show: `“${title}”` } : none("general title");
+  }
+  if (field === "brand") {
+    const brand = text(p.brand);
+    if (!brand) return none("brand");
+    const there = known.brands.get(brand.toLowerCase());
+    if (!there) return { hold: { field, reason: "brand_unknown", note: `Odoo has no brand named ${brand}: not sent.` } };
+    return { values: { product_brand_id: there.id }, show: there.name };
+  }
+  if (field === "category") {
+    const name = odooCategory(p);
+    const id = known.categories.get(name);
+    if (!id) return { hold: { field, reason: "category_unknown", note: `Odoo has no product category named ${name}: not sent.` } };
+    return { values: { categ_id: id }, show: name };
+  }
+  if (isTag(field)) {
+    const word = pimTag(p, field);
+    if (!word) return none(LABEL[field]);
+    const list = known.tags[field];
+    const refused = list.failed.get(word.toLowerCase());
+    if (refused) return { hold: { field, reason: "refused", note: `Odoo refused to add “${word}” to its list of ${TAGS[field].list}: ${refused}` } };
+    const id = list.ids.get(word.toLowerCase());
+    // 0 = the word is not on Odoo's list yet (a dry run: nothing is added).
+    return { values: { [TAGS[field].field]: [[6, 0, [id ?? 0]]] }, show: id ? `“${list.names.get(id)}”` : `“${word}” (new on Odoo's list of ${TAGS[field].list})` };
   }
   return {};
 }
@@ -323,8 +381,20 @@ function plan(p: PimProduct, rec: OdooProduct, want: Set<FieldKey>, known: Known
     model: { before: text(rec.model_name || "") ? `“${text(rec.model_name || "")}”` : "", same: (v) => text(rec.model_name || "") === v.model_name, kept: (v) => (now) => text(now.model_name || "") === v.model_name },
     hs: { before: text(rec.hs_code || ""), same: (v) => text(rec.hs_code || "") === v.hs_code, kept: (v) => (now) => text(now.hs_code || "") === v.hs_code },
     country: { before: rec.country_of_origin ? rec.country_of_origin[1] : "", same: (v) => (rec.country_of_origin ? rec.country_of_origin[0] : 0) === v.country_of_origin, kept: (v) => (now) => (now.country_of_origin ? now.country_of_origin[0] : 0) === v.country_of_origin },
-    title: { before: text(rec.name) ? `“${text(rec.name)}”` : "", same: (v) => text(rec.name) === v.name, kept: (v) => (now) => text(now.name) === v.name },
+    title: { before: text(rec.general_title || "") ? `“${text(rec.general_title || "")}”` : "", same: (v) => text(rec.general_title || "") === v.general_title, kept: (v) => (now) => text(now.general_title || "") === v.general_title },
+    brand: { before: rec.product_brand_id ? rec.product_brand_id[1] : "", same: (v) => (rec.product_brand_id ? rec.product_brand_id[0] : 0) === v.product_brand_id, kept: (v) => (now) => (now.product_brand_id ? now.product_brand_id[0] : 0) === v.product_brand_id },
+    category: { before: rec.categ_id ? rec.categ_id[1] : "", same: (v) => (rec.categ_id ? rec.categ_id[0] : 0) === v.categ_id, kept: (v) => (now) => (now.categ_id ? now.categ_id[0] : 0) === v.categ_id },
   };
+  // Color / Material / Finish: the same when the product holds the PIM's word and only it.
+  for (const key of TAG_KEYS) {
+    const idsOf = (r: OdooProduct) => (r[TAGS[key].field] ?? []) as number[];
+    const only = (r: OdooProduct, id: number) => id > 0 && idsOf(r).length === 1 && idsOf(r)[0] === id;
+    there[key] = {
+      before: idsOf(rec).map((id) => known.tags[key].names.get(id) ?? `#${id}`).join(" + "),
+      same: (v) => only(rec, tagId(v, key)),
+      kept: (v) => (now) => only(now, tagId(v, key)),
+    };
+  }
 
   // The marketplace ids: each one the PIM has, where Odoo holds something else.
   if (want.has("ids")) {
@@ -338,8 +408,6 @@ function plan(p: PimProduct, rec: OdooProduct, want: Set<FieldKey>, known: Known
 
   for (const field of FIELD_KEYS) {
     if (!want.has(field) || field === "image" || field === "ids") continue;
-    // The Name follows the General Title only on products the PIM created there.
-    if (field === "title" && !known.pimMade.has(p.sku)) continue;
     const v = valueOf(field, p, known);
     if (v.hold) { held.push(v.hold); continue; }
     if (!v.values || there[field].same(v.values)) continue;
@@ -349,6 +417,12 @@ function plan(p: PimProduct, rec: OdooProduct, want: Set<FieldKey>, known: Known
     }
     planned.push({ field, before: there[field].before, after: v.show ?? "", on: field === "upc" ? "product" : "template", values: v.values, kept: there[field].kept(v.values) });
   }
+  // The General Title is also the product's name in Odoo, which its form calls
+  // "Odoo Description" (user, 2026-11-12: "en General Title va en Odoo Description").
+  const title = text(p.title);
+  if (want.has("title") && title && text(rec.name) !== title) {
+    planned.push({ field: "title", what: "Odoo Description", before: text(rec.name) ? `“${text(rec.name)}”` : "", after: `“${title}”`, on: "template", values: { name: title }, kept: (now) => text(now.name) === title });
+  }
   return { planned, held };
 }
 
@@ -356,7 +430,7 @@ const changeText = (c: Change, had = "it had") => {
   if (c.field === "upc") return `UPC ${c.after} (${c.before ? `${had} ${c.before}` : "its Barcode was empty"})`;
   if (c.field === "image") return "the PIM's main image as its picture";
   if (c.field === "ids") return `${c.what ?? "marketplace id"} ${c.after} (${c.before ? `${had} ${c.before}` : `${had} none`})`;
-  return `${LABEL[c.field]} ${c.after} (${c.before ? `${had} ${c.before}` : `${had} none`})`;
+  return `${c.what ?? LABEL[c.field]} ${c.after} (${c.before ? `${had} ${c.before}` : `${had} none`})`;
 };
 
 function finish(sku: string, changes: Change[], held: Hold[], dryRun: boolean, odooId?: number): Result {
@@ -440,7 +514,7 @@ Deno.serve(async (req) => {
 
     // --- the PIM's values -----------------------------------------------------
     const { data: products, error: pErr } = await admin.from("products")
-      .select("sku, brand, category, model_name, product_type, shipping_weight_lb, upc:attributes->>upc, box:attributes->shipping_dimensions_in, title:attributes->>general_title_en, product_weight:attributes->>product_weight_lb, hs:attributes->>hs_code, country:attributes->>country_of_origin")
+      .select("sku, brand, category, model_name, product_type, color, material, shipping_weight_lb, upc:attributes->>upc, box:attributes->shipping_dimensions_in, title:attributes->>general_title_en, product_weight:attributes->>product_weight_lb, hs:attributes->>hs_code, country:attributes->>country_of_origin, finish_type:attributes->>finish_type")
       .in("sku", skus);
     if (pErr) return json({ error: pErr.message }, 500);
     const pim = new Map((products ?? []).map((p) => [(p as PimProduct).sku, p as PimProduct]));
@@ -472,6 +546,8 @@ Deno.serve(async (req) => {
     }
 
     const results = new Map<string, Result>();
+    // The words this run added to Odoo's lists (a dry run: the ones it would add).
+    const added: Record<TagKey, string[]> = { color: [], material: [], finish: [] };
     const holdAll = (sku: string, reason: string, note: string) => results.set(sku, { sku, state: "held", note, reason, changes: [], held: [{ field: "product", reason, note }] });
     const here = skus.filter((sku) => { if (pim.has(sku)) return true; holdAll(sku, "not_in_pim", `The PIM has no product with the SKU ${sku}.`); return false; });
 
@@ -500,9 +576,59 @@ Deno.serve(async (req) => {
         const rows = await odoo("res.country", "search_read", [[["name", "in", names]]], { fields: ["name"], context: { lang: "en_US" } }) as { id: number; name: string }[];
         for (const r of rows) countries.set(r.name.toLowerCase(), r.id);
       }
+      // Odoo's brands and product categories, by name.
+      const brands = new Map<string, { id: number; name: string }>();
+      if (anyWant("brand") || create) {
+        for (const b of await odoo("product.brand", "search_read", [[]], { fields: ["name"] }) as { id: number; name: string }[]) brands.set(text(b.name).toLowerCase(), { id: b.id, name: text(b.name) });
+      }
+      const categories = new Map<string, number>();
+      if (anyWant("category") || create) {
+        for (const c of await odoo("product.category", "search_read", [[]], { fields: ["name"] }) as { id: number; name: string }[]) if (!categories.has(c.name)) categories.set(c.name, c.id);
+      }
+      // Odoo's lists of colors, materials and finishes. The PIM's words they lack
+      // are added to them (user, 2026-11-12: "tal cual el PIM") — only for products
+      // this run can write to: one active record in Odoo, or one it is about to create.
+      const writable = here.filter((sku) => {
+        const records = found.get(sku) ?? [];
+        return records.length ? records.filter((r) => r.active).length === 1 : create;
+      });
+      const tags = {} as Record<TagKey, TagList>;
+      for (const key of TAG_KEYS) {
+        const list: TagList = { ids: new Map(), names: new Map(), codes: new Set(), added: [], failed: new Map() };
+        tags[key] = list;
+        if (!anyWant(key) && !create) continue;
+        const rows = await odoo(TAGS[key].model, "search_read", [[]], { fields: ["name", "code"], context: { ...context, active_test: false } }) as { id: number; name: string; code: string | false }[];
+        for (const r of rows) {
+          if (!list.ids.has(text(r.name).toLowerCase())) list.ids.set(text(r.name).toLowerCase(), r.id);
+          list.names.set(r.id, text(r.name));
+          list.codes.add(text(r.code || ""));
+        }
+        const missing = new Map<string, string>();
+        for (const sku of writable) {
+          if (!wantOf.get(sku)!.has(key) && found.has(sku)) continue;
+          const word = pimTag(pim.get(sku)!, key);
+          if (word && !list.ids.has(word.toLowerCase())) missing.set(word.toLowerCase(), word);
+        }
+        for (const [lower, word] of missing) {
+          if (dryRun) { added[key].push(word); continue; }
+          // Odoo asks for a code with the name: the name in lower case with underscores, as its own entries.
+          const base = word.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || key;
+          let code = base;
+          for (let n = 2; list.codes.has(code); n++) code = `${base}_${n}`;
+          try {
+            const id = await odoo(TAGS[key].model, "create", [{ name: word, code }], { context }) as number;
+            list.ids.set(lower, id);
+            list.names.set(id, word);
+            list.codes.add(code);
+            added[key].push(word);
+          } catch (err) {
+            list.failed.set(lower, (err as Error).message);
+          }
+        }
+      }
       const known: Known = {
         takenBy: (upc, self) => holders.filter((h) => h.id !== self && barcodeOf(h) === upc).map((h) => text(h.default_code)),
-        hsKeys, countries, pimMade: new Set((made ?? []).map((m: { sku: string }) => m.sku)), images, ids,
+        hsKeys, countries, pimMade: new Set((made ?? []).map((m: { sku: string }) => m.sku)), images, ids, brands, categories, tags,
       };
 
       // ---- products Odoo has: compare and write ------------------------------
@@ -569,29 +695,29 @@ Deno.serve(async (req) => {
           for (const r of data ?? []) pimSkus.add(String(r.sku));
           if ((data ?? []).length < 1000) break;
         }
-        const categories = await odoo("product.category", "search_read", [[]], { fields: ["name"] }) as { id: number; name: string }[];
-        const brands = await odoo("product.brand", "search_read", [[]], { fields: ["name"] }) as { id: number; name: string }[];
-
         for (const sku of absent) {
           const p = pim.get(sku)!;
           const alike = [...new Set(byLoose.get(loose(sku)) ?? [])].filter((code) => !pimSkus.has(code));
           if (alike.length) { holdAll(sku, "look_alike", `Odoo has ${alike.join(", ")} — the same SKU written another way? Not created.`); continue; }
           const categoryName = odooCategory(p);
-          const category = categories.find((c) => c.name === categoryName);
-          if (!category) { holdAll(sku, "no_category", `Odoo has no product category named ${categoryName}: not created.`); continue; }
+          const categoryId = categories.get(categoryName);
+          if (!categoryId) { holdAll(sku, "no_category", `Odoo has no product category named ${categoryName}: not created.`); continue; }
           const title = text(p.title);
           const name = title || text(p.model_name) || sku;
-          const values: Record<string, unknown> = { default_code: sku, name, type: "consu", is_storable: true, categ_id: category.id };
-          const brand = brands.find((b) => b.name.toLowerCase() === text(p.brand).toLowerCase());
+          const values: Record<string, unknown> = { default_code: sku, name, type: "consu", is_storable: true, categ_id: categoryId };
+          const brand = brands.get(text(p.brand).toLowerCase());
           if (brand) values.product_brand_id = brand.id;
           if (title) values.general_title = title;
           // Everything the PIM sends, as it has it today (what it lacks is simply left out).
           const held: Hold[] = [];
           for (const field of FIELD_KEYS) {
-            if (field === "title" || field === "image") continue;
+            // (the title, brand and category are set above, the picture below)
+            if (field === "title" || field === "image" || field === "brand" || field === "category") continue;
             const v = valueOf(field, p, known);
             if (v.hold && !isSoft(v.hold.reason)) held.push(v.hold);
             if (!v.values) continue;
+            // A dry run adds nothing to Odoo's lists: the word has no entry to point at yet.
+            if (isTag(field) && tagId(v.values, field) === 0) continue;
             if (field === "upc") {
               const taken = known.takenBy(String(v.values.barcode));
               if (taken.length) { held.push({ field, reason: "taken", note: `In Odoo the UPC ${v.values.barcode} is on ${taken.join(", ")}: Odoo takes a Barcode on one product only.` }); continue; }
@@ -621,8 +747,8 @@ Deno.serve(async (req) => {
 
     // --- what waits for Odoo's side: noted, and tried again every hour ---------
     if (!dryRun) {
-      const { data: rows } = await admin.from("odoo_pending").select("sku, fields, since").in("sku", skus);
-      const before = new Map((rows ?? []).map((r) => [String(r.sku), r as { sku: string; fields: string[]; since: string }]));
+      const { data: rows } = await admin.from("odoo_pending").select("sku, fields, since, reason, note").in("sku", skus);
+      const before = new Map((rows ?? []).map((r) => [String(r.sku), r as { sku: string; fields: string[]; since: string; reason: string | null; note: string | null }]));
       const nowIso = new Date().toISOString();
       for (const r of ordered) {
         const asked = [...(wantOf.get(r.sku) ?? [])];
@@ -637,7 +763,9 @@ Deno.serve(async (req) => {
         const kept = (before.get(r.sku)?.fields ?? []).filter((f) => !asked.includes(f));
         const fields = [...new Set([...kept, ...waiting])];
         if (fields.length) {
-          await admin.from("odoo_pending").upsert({ sku: r.sku, fields, reason: why?.reason ?? null, note: why?.note ?? null, since: before.get(r.sku)?.since ?? nowIso, tried_at: nowIso }, { onConflict: "sku" });
+          // A run about other fields holds nothing new: what was waiting keeps its own reason
+          // (it was written as null, and Settings then read "Odoo gave an error").
+          await admin.from("odoo_pending").upsert({ sku: r.sku, fields, reason: why?.reason ?? before.get(r.sku)?.reason ?? null, note: why?.note ?? before.get(r.sku)?.note ?? null, since: before.get(r.sku)?.since ?? nowIso, tried_at: nowIso }, { onConflict: "sku" });
         } else if (before.has(r.sku)) {
           await admin.from("odoo_pending").delete().eq("sku", r.sku);
         }
@@ -648,6 +776,7 @@ Deno.serve(async (req) => {
     const updated = ordered.filter((r) => r.state === "updated");
     const created = ordered.filter((r) => r.state === "created");
     const heldHard = ordered.filter((r) => r.held.some((h) => !isSoft(h.reason)));
+    const anyAdded = TAG_KEYS.some((key) => added[key].length > 0);
     // An hourly retry that still cannot send says nothing: it is already noted.
     const worthLogging = retry ? updated.length > 0 : (updated.length || created.length || heldHard.length) > 0;
     if (!dryRun && worthLogging) {
@@ -663,16 +792,17 @@ Deno.serve(async (req) => {
       await admin.from("audit_log").insert({
         actor_id: caller.id, actor_email: caller.email, actor_name: caller.id ? null : "PIM automation",
         action: created.length && !updated.length ? "create" : "push", entity_type: "product", entity_id: one ? one.sku : `${touched.length} products`, target: "odoo",
-        summary: `${retry ? "(Hourly retry) " : ""}${summary}`.slice(0, 900),
+        summary: `${retry ? "(Hourly retry) " : ""}${summary}${anyAdded ? `. Added to Odoo's lists: ${TAG_KEYS.filter((key) => added[key].length).map((key) => `${TAGS[key].list} ${added[key].join(", ")}`).join("; ")}` : ""}`.slice(0, 900),
         metadata: {
           retry, created: created.map((r) => ({ sku: r.sku, values: r.values })),
           updated: updated.map((r) => ({ sku: r.sku, changes: r.changes })),
           held: (retry ? [] : heldHard).map((r) => ({ sku: r.sku, held: r.held.filter((h) => !isSoft(h.reason)) })),
+          ...(anyAdded ? { added_to_odoo_lists: added } : {}),
         },
       });
     }
 
-    return json({ ok: true, dryRun, ...(retry ? { retry: true } : {}), results: ordered });
+    return json({ ok: true, dryRun, ...(retry ? { retry: true } : {}), ...(anyAdded ? { added } : {}), results: ordered });
   } catch (err) {
     return json({ error: (err as Error).message }, 500);
   }

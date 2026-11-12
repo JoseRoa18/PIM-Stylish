@@ -3,7 +3,7 @@ import { syncVariantFamilies } from '@/features/products/api/variantFamilies';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { upcKey } from '@/features/import/lib/upcCheck';
 import { updatePatch } from '@/features/import/lib/importChanges';
-import { sendToOdoo, changedOdooFields } from '@/features/odoo/api/odooPush';
+import { sendToOdoo, changedOdooFields, ODOO_COLUMNS } from '@/features/odoo/api/odooPush';
 
 /**
  * Check which of the given SKUs already exist. Returns a Map of
@@ -187,11 +187,9 @@ function sendImportToOdoo(written, existingMap, create) {
   const fresh = { skus: [], fields: new Set() };
   for (const { r, isNew } of written) {
     const prev = isNew ? null : existingMap.get(r.sku);
-    const now = {
-      attributes: { ...(prev?.attributes ?? {}), ...r.attributes },
-      shipping_weight_lb: r.columns.shipping_weight_lb ?? prev?.shipping_weight_lb ?? null,
-      model_name: r.columns.model_name ?? prev?.model_name ?? null,
-    };
+    // Every column Odoo takes: what the file gave, else what the product had.
+    const now = { attributes: { ...(prev?.attributes ?? {}), ...r.attributes } };
+    for (const column of ODOO_COLUMNS) now[column] = r.columns[column] ?? prev?.[column] ?? null;
     const fields = changedOdooFields(prev ?? {}, now);
     const group = isNew ? fresh : changed;
     if (!fields.length && !(isNew && create)) continue;
