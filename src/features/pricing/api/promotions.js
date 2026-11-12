@@ -778,25 +778,34 @@ export async function updatePromotionDates(promotion, { starts_on, ends_on }) {
 }
 
 /**
- * Which of `skus` are already in a MONTHLY promotion whose window overlaps
- * [startsOn, endsOn] on either market. Used to warn before creating a flash
- * deal or special event (rule 2026-09-22).
+ * Which of `skus` are already in a MONTHLY promotion that runs on a day of
+ * [startsOn, endsOn]: { promotion, skus, rows: [{ sku, market, price }] } — a
+ * row per market whose own window overlaps and whose list holds the product,
+ * with the price the promotion gives it there. Used before creating a flash
+ * deal or an event (rule 2026-09-22): the caller says "adds nothing" only
+ * where the deal's price is not under that one (a Purple event lowers an
+ * Orange monthly price — the warning used to name those too, 2026-11-12).
  */
 export async function monthlyOverlap(startsOn, endsOn, skus) {
   const { data, error } = await supabase
     .from('promotions')
-    .select('id, name, period, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku)')
+    .select('id, name, period, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on, promotion_prices(sku, in_ca, in_us, promo_price_cad, promo_price_usd)')
     .eq('kind', 'monthly')
     .in('status', ['draft', 'active']);
   if (error) throw error;
   const wanted = new Set(skus);
   for (const p of data ?? []) {
-    const windows = [promoWindow(p, 'us'), promoWindow(p, 'ca')];
-    if (!windows.some((w) => w.start <= endsOn && w.end >= startsOn)) continue;
-    const hit = (p.promotion_prices ?? []).map((r) => r.sku).filter((s) => wanted.has(s)).sort();
-    if (hit.length) return { promotion: p.name, skus: hit };
+    const rows = [];
+    for (const market of ['ca', 'us']) {
+      const w = promoWindow(p, market);
+      if (!(w.start <= endsOn && w.end >= startsOn)) continue;
+      for (const r of p.promotion_prices ?? []) {
+        if (wanted.has(r.sku) && onMarketList(r, market)) rows.push({ sku: r.sku, market, price: market === 'us' ? r.promo_price_usd : r.promo_price_cad });
+      }
+    }
+    if (rows.length) return { promotion: p.name, skus: [...new Set(rows.map((r) => r.sku))].sort(), rows };
   }
-  return { promotion: null, skus: [] };
+  return { promotion: null, skus: [], rows: [] };
 }
 
 export async function markPromotionActive(promotion) {

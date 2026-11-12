@@ -1204,16 +1204,37 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const hasList = !monthly ? (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : mergedPasteRows.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
-  // those days makes no sense in a flash deal — warn before creating.
+  // those days makes no sense in a flash deal — warn before creating. Only
+  // where the deal really adds nothing: its price on a portal picked is not
+  // under the monthly promotion's in that country. A peak season event at
+  // Purple lowers a product the monthly promotion has at Orange, and the
+  // warning used to name it too (user, 2026-11-12: "¿por qué sale ese mensaje?").
+  // The Stylish stores take no monthly promotion, so they have nothing to repeat.
   const [overlap, setOverlap] = useState(null);
   useEffect(() => {
-    if (monthly || !startsOn || !endsOn) { setOverlap(null); return; }
+    if (monthly || !startsOn || !endsOn) { setOverlap(null); return undefined; }
     const skus = skuList.skus;
-    if (!skus.length) { setOverlap(null); return; }
+    const channels = portals.map((key) => PROMO_CHANNELS.find((ch) => ch.key === key)).filter((ch) => ch && !STYLISH_CHANNELS.includes(ch.key));
+    if (!skus.length || !channels.length) { setOverlap(null); return undefined; }
     let active = true;
-    monthlyOverlap(startsOn, endsOn, skus).then((r) => { if (active) setOverlap(r); }).catch(() => {});
+    Promise.all([monthlyOverlap(startsOn, endsOn, skus), loadCheckProducts(skus)])
+      .then(([found, products]) => {
+        if (!active) return;
+        const same = new Set();
+        for (const row of found.rows) {
+          for (const ch of channels) {
+            if (ch.market !== row.market) continue;
+            const field = LEVEL_FIELDS[promotionLevel({ kind }, ch)]?.[row.market === 'us' ? 'promo_price_usd' : 'promo_price_cad'];
+            const dealPrice = Number(products.get(row.sku)?.[field]);
+            // No price of the deal's level: said by the list's own check, not here.
+            if (dealPrice > 0 && row.price != null && dealPrice >= Number(row.price)) same.add(row.sku);
+          }
+        }
+        setOverlap({ promotion: found.promotion, skus: [...same].sort() });
+      })
+      .catch(() => {});
     return () => { active = false; };
-  }, [monthly, startsOn, endsOn, skuList.skus]);
+  }, [monthly, startsOn, endsOn, skuList.skus, portals, kind]);
 
   // Stock check (user idea 2026-09-29): products with 0 units in a market the
   // promotion reaches (a monthly promotion both, a flash deal / special event
@@ -1659,7 +1680,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       )}
       {overlap?.skus?.length > 0 && (
         <p className="text-body-sm text-on-surface bg-tertiary-container/40 rounded-lg px-3 py-2">
-          {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). This {KIND_NOUN[kind]} adds nothing for them.
+          {overlap.skus.length} of these products are already in the monthly promotion "{overlap.promotion}" on those days at the same price or lower ({overlap.skus.slice(0, 8).join(', ')}{overlap.skus.length > 8 ? ` and ${overlap.skus.length - 8} more` : ''}). This {KIND_NOUN[kind]} adds nothing for them.
         </p>
       )}
       {error && <p role="alert" className="text-body-sm text-on-error-container bg-error-container/60 rounded-lg px-3 py-2">{error}</p>}
@@ -2049,6 +2070,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             <ImportPromoDialog
               promo={promo}
               rows={rows}
+              edit={typeof importModal === 'object' ? importModal : null}
               onClose={() => setImportModal(false)}
               onImported={(text, info) => {
                 setImportModal(false);
@@ -2190,14 +2212,29 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   {/* Marketplace portals (BB&B/Overstock…) ask for the promo's
                       part numbers to hand back their promo file — one click
                       instead of picking SKUs out of the table by hand. */}
+                  <div className="flex items-center gap-2 flex-wrap">
                   {marketRows.length > 0 && (
                     <CopySkusButton skus={marketRows.map((r) => r.sku)} />
                   )}
-                  {canEdit && (promo.kind ?? 'monthly') !== 'monthly' && promo.status !== 'ended' && !editingSkus && (
-                    <button type="button" onClick={() => { setSkuText(rows.map((r) => r.sku).join('\n')); setEditingSkus(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
-                      <Pencil className="w-3.5 h-3.5" /> Edit SKUs
+                  {/* Add or remove products on every kind (user, 2026-11-12: "tanto
+                      en monthly como en todos"). A deal's list is edited here; a
+                      monthly promotion has a list per country, so the one of the
+                      tab shown opens in the import dialog with its SKUs written
+                      out — the same review of what joins and leaves before saving. */}
+                  {canEdit && promo.status !== 'ended' && !editingSkus && (
+                    <button
+                      type="button"
+                      title={(promo.kind ?? 'monthly') === 'monthly' ? `Add or remove products of the ${market === 'us' ? 'USA' : 'Canada'} list` : 'Add or remove products'}
+                      onClick={() => {
+                        if ((promo.kind ?? 'monthly') === 'monthly') setImportModal({ market, skus: marketRows.map((r) => r.sku) });
+                        else { setSkuText(rows.map((r) => r.sku).join('\n')); setEditingSkus(true); }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
+                    >
+                      <Pencil className="w-3.5 h-3.5" aria-hidden="true" /> Edit SKUs
                     </button>
                   )}
+                  </div>
                 </div>
 
                 {marketRows.length > 0 && (
@@ -3543,11 +3580,13 @@ function FillMarketplaceFileDialog({ promo, initial = null, onClose, onDone }) {
 // it's the blank template (new upload path). Then upload the filled file —
 // or paste the market's SKUs (2026-11-11): either way it IS that market's
 // list, and the other market is not touched.
-function ImportPromoDialog({ promo, rows, onClose, onImported }) {
-  const [market, setMarket] = useState(null); // null | 'ca' | 'us'
+// `edit` ({ market, skus }): opened from a market's "Edit SKUs" — that market's
+// list written out to add or remove lines, with no market to pick and no file.
+function ImportPromoDialog({ promo, rows, edit = null, onClose, onImported }) {
+  const [market, setMarket] = useState(edit?.market ?? null); // null | 'ca' | 'us'
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => (edit ? edit.skus.join('\n') : ''));
   const pastedList = useMemo(() => parseSkuList(text), [text]);
 
   const marketCount = (m) => (rows ?? []).filter((r) => onMarketList(r, m)).length;
@@ -3613,7 +3652,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
     setPending(null);
     try {
       const existing = rows ?? await getPromotionPrices(promo.id);
-      await review(marketListRows(existing, pastedList.skus, market), { source: 'list', fileName: null, emptySkus: [] });
+      await review(marketListRows(existing, pastedList.skus, market), { source: 'list', fileName: null, emptySkus: [], edited: Boolean(edit) });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -3650,12 +3689,12 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
   return (
     <Dialog
       onClose={onClose}
-      title="Import a market's list"
+      title={edit ? `Edit the ${marketLabel} list` : "Import a market's list"}
       subtitle={promo.name}
       maxWidth="max-w-lg"
     >
       <div className="space-y-4">
-        <div>
+        <div hidden={Boolean(edit)}>
           <p className="text-label-lg text-on-surface-variant mb-2">Which market?</p>
           <div className="grid grid-cols-2 gap-3">
             {[['ca', 'Canada'], ['us', 'USA']].map(([key, label]) => (
@@ -3685,7 +3724,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
 
         {market && !pending && (
           <div className="rounded-xl bg-surface-container-low/60 p-4 space-y-3">
-            {loaded ? (
+            {edit ? null : loaded ? (
               <p className="text-body-sm text-on-surface-variant">
                 <span className="font-semibold text-on-surface">{marketLabel} is already loaded</span> ({counts[market]} SKUs).
                 A new file replaces the {marketLabel} list: its SKUs at {market === 'us' && (promo.kind ?? 'monthly') === 'monthly' ? 'their Orange prices (the USA takes Orange over the file)' : 'its prices'}, and the SKUs not in it leave the list.
@@ -3696,7 +3735,7 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
                 Download the blank template, fill it, and upload it here.
               </p>
             )}
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap" hidden={Boolean(edit)}>
               <button
                 type="button"
                 onClick={() => (loaded ? downloadPromoMarketData(promo, rows ?? [], market) : downloadPromoTemplate(market))}
@@ -3715,23 +3754,24 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
               </FileDropzone>
             </div>
 
-            <div className="border-t border-outline-variant/60 pt-3 space-y-2">
+            <div className={edit ? 'space-y-2' : 'border-t border-outline-variant/60 pt-3 space-y-2'}>
               <label htmlFor="promo-import-paste" className="block text-label-lg text-on-surface-variant">
-                Or paste the {marketLabel} list — one SKU per line
+                {edit ? `The ${marketLabel} list — one SKU per line. Add or delete lines.` : `Or paste the ${marketLabel} list — one SKU per line`}
               </label>
               <textarea
                 id="promo-import-paste"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                rows={6}
+                rows={edit ? 12 : 6}
                 placeholder={'S-822H\nK-131NR\n…'}
                 disabled={busy}
                 aria-describedby="promo-import-paste-help"
                 className="w-full px-3 py-2 rounded-lg bg-surface border border-outline-variant font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
               <p id="promo-import-paste-help" className="text-body-sm text-on-surface-variant">
-                {loaded ? `It replaces the ${marketLabel} list: the SKUs not pasted leave it.` : `It becomes the ${marketLabel} list.`}{' '}
+                {edit ? `A line you delete leaves the ${marketLabel} list.` : loaded ? `It replaces the ${marketLabel} list: the SKUs not pasted leave it.` : `It becomes the ${marketLabel} list.`}{' '}
                 A new product takes its {levelLabel(promotionLevel(promo))} prices{loaded ? '; one already on the list keeps its price' : ''}.
+                {edit && ' You see what joins and what leaves before anything is saved.'}
               </p>
               <div className="flex items-center gap-3 flex-wrap">
                 <button
@@ -3741,8 +3781,8 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
                   aria-busy={busy}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
                 >
-                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  Save the {marketLabel} list
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : edit ? null : <Plus className="w-4 h-4" />}
+                  {edit ? 'Review the changes' : `Save the ${marketLabel} list`}
                 </button>
                 <span className="text-body-sm text-on-surface-variant">
                   {pastedList.skus.length} SKU{pastedList.skus.length === 1 ? '' : 's'}
@@ -3766,8 +3806,8 @@ function ImportPromoDialog({ promo, rows, onClose, onImported }) {
 // stay and LEAVE it, and confirms. Warnings of the list (lib/promoChecks.js)
 // sit under the plan; what stops a file never gets this far.
 function ImportPlan({ pending, promo, market, marketLabel, busy, onConfirm, onBack }) {
-  const { plan, check, source, fileName, emptySkus } = pending;
-  const from = source === 'list' ? 'The pasted list' : fileName;
+  const { plan, check, source, fileName, emptySkus, edited } = pending;
+  const from = edited ? 'With these changes' : source === 'list' ? 'The pasted list' : fileName;
   const lines = [
     ...marketWarnings(check, market, { level: promotionLevel(promo), withBasics: true }),
     ...(emptySkus?.length ? [{ title: `${emptySkus.length} row${emptySkus.length === 1 ? '' : 's'} of the file left out:`, text: `${listOf(emptySkus)} — no price or cost on ${emptySkus.length === 1 ? 'its' : 'their'} row` }] : []),
