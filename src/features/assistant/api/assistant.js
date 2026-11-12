@@ -4,7 +4,9 @@ import { getAppSetting, saveAppSetting } from '@/features/settings/api/appSettin
 // The in-app assistant (20261111_assistant.sql, 20261111_assistant_more.sql,
 // the `assistant` edge function). It reads the PIM with the permissions of
 // the person asking and changes nothing by itself: a change it prepares is a
-// card the person confirms (assistantActions.js). The conversation lives on
+// card the person confirms (assistantActions.js), and an Excel file it
+// prepares is a card the person downloads (lib/excelFile.js; the table is
+// 20261112_assistant_files.sql). The conversation lives on
 // the server: the page sends a question and shows what the function streams
 // back.
 
@@ -38,15 +40,17 @@ export async function listChats(limit = 40) {
   return data ?? [];
 }
 
-/** A conversation's questions and answers (oldest first) and the changes prepared in it. */
+/** A conversation's questions and answers (oldest first), the changes and the Excel files prepared in it. */
 export async function loadChat(chatId) {
-  const [turns, actions] = await Promise.all([
+  const [turns, actions, files] = await Promise.all([
     supabase.from('assistant_turns').select('id, question, answer, tools, cost_usd, error, rating, rating_note, attachments, created_at').eq('chat_id', chatId).order('id', { ascending: true }),
     supabase.from('assistant_actions').select('id, turn_id, kind, summary, payload, status, result').eq('chat_id', chatId).order('created_at', { ascending: true }),
+    supabase.from('assistant_files').select('id, turn_id, kind, title, spec, summary').eq('chat_id', chatId).order('created_at', { ascending: true }),
   ]);
   if (turns.error) throw turns.error;
   if (actions.error) throw actions.error;
-  return { turns: turns.data ?? [], actions: actions.data ?? [] };
+  if (files.error) throw files.error;
+  return { turns: turns.data ?? [], actions: actions.data ?? [], files: files.data ?? [] };
 }
 
 /** A thumb on one's own answer: 1, -1 or 0 (none), with an optional note. */
@@ -105,7 +109,8 @@ export async function refreshBriefing() {
  * Asks a question. `onEvent` gets what the function streams, in order:
  *   { type: 'chat', chat_id } · { type: 'step' } · { type: 'text', delta } ·
  *   { type: 'retract' } · { type: 'tool', id, label } · { type: 'tool_done', id, ok } ·
- *   { type: 'action', action } · { type: 'done', turn_id, cost_usd, lookups } ·
+ *   { type: 'action', action } · { type: 'file', file } ·
+ *   { type: 'done', turn_id, cost_usd, lookups } ·
  *   { type: 'error', message }
  * `page` = { path, title } of the page it is asked from; `attachments` as
  * lib/attachments.js reads them. Throws when the function refuses the

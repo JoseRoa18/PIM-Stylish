@@ -15,9 +15,12 @@
 // IT WRITES NOTHING TO THE PIM'S DATA. A change it is asked for is only
 // PREPARED (a row in assistant_actions and a card on the page): the person
 // confirms it there, and the page makes it through the app's own save, with
-// that person's permissions. What this function writes: its own tables
-// (assistant_chats / _turns / _actions / _knowledge) and two settings it
-// owns (app_settings 'assistant_briefing', 'assistant_warm').
+// that person's permissions. An Excel file it is asked for is only DESCRIBED
+// (a row in assistant_files and a card with a Download button): the page
+// reads its rows when the person downloads, with that person's session
+// (_shared/assistantExcel.js). What this function writes: its own tables
+// (assistant_chats / _turns / _actions / _files / _knowledge) and two
+// settings it owns (app_settings 'assistant_briefing', 'assistant_warm').
 //
 // This file: who is calling, the conversation's storage and the stream to
 // the page. What the model is told and the question's loop:
@@ -30,6 +33,7 @@
 //   { type: "retract" }                        drop the text since the last "step"
 //   { type: "tool", id, label } / { type: "tool_done", id, ok }
 //   { type: "action", action }                 a change prepared for the person to confirm
+//   { type: "file", file }                     an Excel file prepared for the person to download
 //   { type: "done", turn_id, cost_usd, … }     the answer is complete and saved
 //   { type: "error", message }
 //   page         { path, title } of the page the question was asked from
@@ -60,7 +64,7 @@
 //
 // Deployed with verify_jwt off (the caller is checked here); upload with it
 // _shared/assistantTurn.js, assistantTools.js, assistantTables.js,
-// assistantBriefing.js, assistantGuide.js, serviceRole.ts and what the tools
+// assistantExcel.js, assistantBriefing.js, assistantGuide.js, serviceRole.ts and what the tools
 // import (promoCalendar.ts, completeness.js, listingHealth.js,
 // priceAlignmentReport.js, alignmentSummary.js, wixSites.ts and theirs).
 // Secrets: ANTHROPIC_API_KEY, CRON_SECRET.
@@ -360,6 +364,7 @@ Deno.serve(async (req) => {
       const ping = setInterval(() => write(": keep-alive\n\n"), 15000);
       const started = Date.now();
       const prepared: string[] = [];
+      const files: string[] = [];
 
       send({ type: "chat", chat_id: chat.id });
       const turn = await runAssistantTurn({
@@ -386,6 +391,16 @@ Deno.serve(async (req) => {
             if (error || !data) throw new Error("The change could not be prepared.");
             prepared.push(data.id);
             send({ type: "action", action: { id: data.id, kind: proposal.kind, summary: proposal.summary, payload: proposal.payload, status: "proposed" } });
+            return data.id;
+          },
+          // An Excel file the assistant PREPARES: its description is kept and
+          // shown to the person as a card. Its rows are read by the page when
+          // they press Download, with their own session.
+          saveFile: async (file: { kind: string; title: string; spec: unknown; summary: unknown }) => {
+            const { data, error } = await admin.from("assistant_files").insert({ chat_id: chat.id, user_id: user.id, kind: file.kind, title: file.title, spec: file.spec, summary: file.summary }).select("id").single();
+            if (error || !data) throw new Error("The file could not be prepared.");
+            files.push(data.id);
+            send({ type: "file", file: { id: data.id, kind: file.kind, title: file.title, spec: file.spec, summary: file.summary } });
             return data.id;
           },
         },
@@ -420,6 +435,7 @@ Deno.serve(async (req) => {
           audience,
         }).select("id").single();
         if (row?.id && prepared.length) await admin.from("assistant_actions").update({ turn_id: row.id }).in("id", prepared);
+        if (row?.id && files.length) await admin.from("assistant_files").update({ turn_id: row.id }).in("id", files);
         if (failure) send({ type: "error", message: failure, turn_id: row?.id ?? null });
         else send({ type: "done", turn_id: row?.id ?? null, cost_usd: turn.usage.cost, lookups: turn.tools.length, stop_reason: turn.stopReason, model: turn.model });
       } catch (err) {

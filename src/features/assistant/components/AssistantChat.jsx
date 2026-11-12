@@ -7,12 +7,14 @@ import { ATTACH_ACCEPT, MAX_ATTACHMENTS, readAttachment } from '../lib/attachmen
 import { answerTables, downloadAnswerExcel } from '../lib/answerTables';
 import Markdown from './Markdown';
 import ActionCard from './ActionCard';
+import FileCard from './FileCard';
 import Dialog from '@/components/ui/Dialog';
 import { useDockClearance } from '@/components/ui/useDockClearance';
 import { formatTimeAgo } from '@/lib/format';
 
 // The assistant's conversation: the questions and answers, what was looked
-// up, the changes it prepared (cards to confirm) and the box to ask from.
+// up, the changes it prepared (cards to confirm), the Excel files it prepared
+// (cards to download) and the box to ask from.
 // Drawn by the Assistant page (`variant="page"`: the page itself scrolls and
 // the box is pinned to its bottom) and by the panel that opens over any page
 // (`variant="panel"`: it scrolls inside itself). The conversation lives on
@@ -27,7 +29,7 @@ const SUGGESTIONS = [
 ];
 
 /** A saved question and answer, as it is drawn. */
-const fromRow = (row, actions) => ({
+const fromRow = (row, actions, files) => ({
   key: `t${row.id}`,
   id: row.id,
   question: row.question,
@@ -35,6 +37,7 @@ const fromRow = (row, actions) => ({
   answer: row.answer ?? '',
   tools: (row.tools ?? []).map((t, i) => ({ id: `${row.id}.${i}`, label: t.label ?? t.name, state: t.ok === false ? 'failed' : 'ok' })),
   actions: actions.filter((a) => a.turn_id === row.id),
+  files: files.filter((f) => f.turn_id === row.id),
   status: row.error ? 'error' : 'done',
   error: row.error ?? null,
   cost: row.cost_usd,
@@ -131,6 +134,7 @@ function Turn({ turn, showCost, onRate, onActionDecided }) {
         <Lookups tools={turn.tools} />
         {turn.answer && <Markdown text={turn.answer} />}
         {turn.actions.map((action) => <ActionCard key={action.id} action={action} onDecided={(outcome) => onActionDecided(turn, action, outcome)} />)}
+        {turn.files.map((file) => <FileCard key={file.id} file={file} />)}
         {waiting && (
           <p className="flex items-center gap-2 text-body-sm text-on-surface-variant">
             <ThinkingOrb state="solving" size={20} className="w-5 h-5" aria-hidden="true" />
@@ -299,10 +303,10 @@ export default function AssistantChat({ variant = 'page', chatId = null, onChatI
     setLoadingChat(true);
     setLoadError(null);
     loadChat(chatId)
-      .then(({ turns: rows, actions }) => {
+      .then(({ turns: rows, actions, files: prepared }) => {
         if (!active) return;
         chatIdRef.current = chatId;
-        setTurns(rows.map((row) => fromRow(row, actions)));
+        setTurns(rows.map((row) => fromRow(row, actions, prepared)));
         stickRef.current = true;
       })
       .catch((err) => { if (active) setLoadError(err.message); })
@@ -356,7 +360,7 @@ export default function AssistantChat({ variant = 'page', chatId = null, onChatI
     setFileError(null);
     setAnnounce('The assistant is answering…');
     stickRef.current = true;
-    setTurns((list) => [...list, { key, id: null, question, attachments: attachments.map(({ kind, name }) => ({ kind, name })), answer: '', tools: [], actions: [], status: 'streaming', error: null, cost: null, rating: 0, betweenSteps: false }]);
+    setTurns((list) => [...list, { key, id: null, question, attachments: attachments.map(({ kind, name }) => ({ kind, name })), answer: '', tools: [], actions: [], files: [], status: 'streaming', error: null, cost: null, rating: 0, betweenSteps: false }]);
     if (inputRef.current) {
       inputRef.current.style.height = '';
       inputRef.current.style.overflowY = '';
@@ -405,6 +409,8 @@ export default function AssistantChat({ variant = 'page', chatId = null, onChatI
         patch((t) => ({ ...t, tools: t.tools.map((x) => (x.id === event.id ? { ...x, state: event.ok ? 'ok' : 'failed' } : x)) }));
       } else if (event.type === 'action') {
         patch((t) => ({ ...t, actions: [...t.actions, event.action] }));
+      } else if (event.type === 'file') {
+        patch((t) => ({ ...t, files: [...t.files, event.file] }));
       } else if (event.type === 'done') {
         answer = answer.trimEnd();
         show({ status: 'done', id: event.turn_id ?? null, cost: event.cost_usd, betweenSteps: false });

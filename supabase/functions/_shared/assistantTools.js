@@ -5,7 +5,7 @@
 // back: the assistant sees what that person may see, never more. Nothing in
 // this file writes anything.
 //
-//   ctx = { url, apikey, token, today, guide, db, role, groups, saveAction }
+//   ctx = { url, apikey, token, today, guide, db, role, groups, saveAction, saveFile }
 //     today = the Eastern day, YYYY-MM-DD; guide = the guide's pieces, read in
 //     memory by search_guide / read_guide; db = a supabase-js client carrying
 //     the same session (the Price Alignment report reads through it);
@@ -13,14 +13,18 @@
 //     (['company'] for the ScoreCard Company tab's viewers); saveAction =
 //     (proposal) => id — keeps a change the assistant PROPOSES. The assistant
 //     never makes it: the person confirms it on the page, which saves it
-//     through the app's own code.
+//     through the app's own code. saveFile = (file) => id — keeps the
+//     description of an Excel file the assistant PREPARES (create_excel): the
+//     person downloads it from a card, and the page reads its rows then, with
+//     their own session (assistantExcel.js).
 //
 // Used by the `assistant` edge function (deploy this file with it, and
-// assistantTables.js, assistantTurn.js, promoCalendar.ts). The definitions are
+// assistantTables.js, assistantExcel.js, assistantTurn.js, promoCalendar.ts). The definitions are
 // part of what the model is sent first and cached: changing a name, a
 // description or a schema is paid once, and conversations started before it
 // lose the reasoning they kept.
 import { ASSISTANT_TABLES } from "./assistantTables.js";
+import { checkExcelSpec, EXCEL_FORMATS, EXCEL_LIMITS, loadExcelSheet, SpecError, tableRead } from "./assistantExcel.js";
 import { promoWindow, PROMO_DATE_COLUMNS } from "./promoCalendar.ts";
 import { completenessContext, inCompleteness, scoreCompleteness } from "./completeness.js";
 import { buildListingHealthData, MARKETPLACES } from "./listingHealth.js";
@@ -193,6 +197,54 @@ export const ASSISTANT_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "create_excel",
+    description:
+      `Prepare an Excel file (.xlsx) for the person to download: a card with a Download button appears in the chat. Call it when they ask for an Excel, a spreadsheet, a file or something to download, and offer it instead of writing a table longer than about 30 rows. Each sheet is one of two kinds. (1) READ FROM A TABLE — give \`table\`, \`select\`, \`filters\` and \`order\` exactly as in query_table. The app reads EVERY matching row itself when the person downloads (up to ${EXCEL_LIMITS.queryRows}), with their own permissions: you never copy the rows, and the file can be far longer than what you can read. A related table can be embedded and its fields become columns named "alias.field": from a table that has a sku to its product, \`products(model_name,brand)\` gives products.model_name and products.brand; from products to a table with several rows per product, give it an alias and filter it down to one row — \`ca:product_inventory(available,eta)\` with the filter "ca.market=eq.ca" gives ca.available and ca.eta (and \`us:product_inventory(available)\` with "us.market=eq.us" beside it). A JSON column opens the same way (warehouses.CBG.on_order, channels.Wayfair.u90). (2) TYPED BY YOU — give \`rows\`: a short table you worked out from other lookups (a summary, a comparison, what price_alignment or sales_overview returned), at most ${EXCEL_LIMITS.typedRows} rows. The result gives each sheet's row count and first rows, or says what to fix: read it before you answer. When you are not sure a query is right, try it with query_table first. Only Excel can be made: no Word, PDF or PowerPoint.`,
+    eager_input_streaming: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "The file's title: shown on the card and used as the file's name, e.g. \"Azuni products — prices and stock\". Leave the date out (it is added)." },
+        sheets: {
+          type: "array",
+          description: `The file's sheets, in order (at most ${EXCEL_LIMITS.sheets}).`,
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "The sheet's tab name, at most 31 characters." },
+              table: { type: "string", enum: TABLE_NAMES, description: "A sheet read from the PIM: the table, as in query_table. Leave out for a typed sheet." },
+              select: { type: "string", description: "A sheet read from the PIM: the columns, as in query_table, e.g. \"sku,model_name,upc:attributes->>upc,map_cad,ca:product_inventory(available,eta)\"." },
+              filters: { type: "array", items: { type: "string" }, description: "A sheet read from the PIM: its filters, as in query_table, e.g. [\"brand=eq.Azuni\", \"ca.market=eq.ca\"]." },
+              order: { type: "string", description: "A sheet read from the PIM: its order, e.g. \"category.asc,sku.asc\"." },
+              columns: {
+                type: "array",
+                description: "The sheet's columns, in the order they appear. Read from the PIM: each has `key` — the data's name: a selected column or its alias (sku, upc), or \"alias.field\" for an embedded table or a JSON field — and `header`, its title in the file; leave `columns` out to get every selected column under a title made from its name. Typed: each has `header`, one per cell of the rows.",
+                items: {
+                  type: "object",
+                  properties: {
+                    key: { type: "string", description: "Read from the PIM only: the data's name." },
+                    header: { type: "string", description: "The column's title in the file." },
+                    format: { type: "string", enum: EXCEL_FORMATS, description: "text (default) · number · money · percent (the value is a fraction: 0.95 shows as 95%) · date · datetime · link (a clickable address). Dates and times are shown on Eastern time." },
+                  },
+                  additionalProperties: false,
+                },
+              },
+              rows: {
+                type: "array",
+                description: "A typed sheet's rows: each one a list of cells in the columns' order.",
+                items: { type: "array", items: { type: ["string", "number", "boolean", "null"] } },
+              },
+            },
+            required: ["name"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["title", "sheets"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /** A tool input against its schema (the subset the schemas above use). Returns the problem, or null. */
@@ -206,7 +258,12 @@ export function inputProblem(schema, input) {
     if (prop.type === "string" && typeof value !== "string") return `"${key}" must be text.`;
     if (prop.type === "integer" && !(typeof value === "number" && Number.isInteger(value))) return `"${key}" must be a whole number.`;
     if (prop.type === "boolean" && typeof value !== "boolean") return `"${key}" must be true or false.`;
-    if (prop.type === "array" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) return `"${key}" must be a list of text values.`;
+    if (prop.type === "array") {
+      // a list of objects (create_excel's sheets) is checked in depth by its own tool
+      if (prop.items?.type === "object") {
+        if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object" && !Array.isArray(v)))) return `"${key}" must be a list of objects.`;
+      } else if (!(Array.isArray(value) && value.every((v) => typeof v === "string"))) return `"${key}" must be a list of text values.`;
+    }
     if (prop.enum && !prop.enum.includes(value)) return `"${key}" must be one of: ${prop.enum.join(", ")}.`;
   }
   return null;
@@ -224,6 +281,7 @@ export function toolLabel(name, input) {
   if (name === "price_alignment") return `Reading Price Alignment${input?.store ? `: ${String(input.store).slice(0, 40)}` : ""}`;
   if (name === "propose_action") return "Preparing a change to confirm";
   if (name === "query_table") return `Reading ${String(input?.table ?? "data").replace(/_/g, " ")}`;
+  if (name === "create_excel") return `Preparing an Excel file${input?.title ? `: ${String(input.title).slice(0, 50)}` : ""}`;
   return name;
 }
 
@@ -300,17 +358,9 @@ function fitRows(rows, budget = 40000) {
 const stripHtml = (html) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 
 // ── query_table ─────────────────────────────────────────────────────────────
-const RESERVED = new Set(["select", "order", "limit", "offset", "on_conflict", "columns"]);
-
-function hiddenIn(text, tables) {
-  for (const t of tables) {
-    for (const col of ASSISTANT_TABLES[t]?.hide ?? []) {
-      if (new RegExp(`(^|[^a-z0-9_])${col}([^a-z0-9_]|$)`, "i").test(text)) return col;
-    }
-  }
-  return null;
-}
-
+// What a read may ask for (the readable tables, no "*", no hidden column) is
+// tableRead() in assistantExcel.js: the same rules for this lookup and for an
+// Excel sheet read from a table.
 async function queryTable(ctx, input) {
   const table = input.table;
   if (!(table in ASSISTANT_TABLES)) throw new ToolError(`"${table}" is not one of the readable tables.`);
@@ -322,30 +372,9 @@ async function queryTable(ctx, input) {
   let select = String(input.select ?? "").trim();
   if (!select && grouped) select = [...new Set([...groupBy, ...sum])].join(",");
   if (!select && !countOnly) throw new ToolError("Give `select`: the columns you need.");
-  if (select.includes("*")) throw new ToolError("List the columns you need instead of \"*\" (see <database>).");
-
-  // An embedded table must be one of the readable ones too.
-  const tables = [table];
-  for (const m of select.matchAll(/([a-z_][a-z0-9_]*)(?:![a-z0-9_]+)*\s*\(/gi)) {
-    if (!(m[1] in ASSISTANT_TABLES)) throw new ToolError(`"${m[1]}" cannot be embedded: it is not one of the readable tables.`);
-    tables.push(m[1]);
-  }
-
-  const params = [];
-  for (const filter of input.filters ?? []) {
-    const at = filter.indexOf("=");
-    const key = at > 0 ? filter.slice(0, at).trim() : "";
-    const value = at > 0 ? filter.slice(at + 1).trim() : "";
-    if (!key || !value) throw new ToolError(`Filter "${filter}" is not "column=operator.value".`);
-    if (RESERVED.has(key.toLowerCase())) throw new ToolError(`"${key}" is not a filter: use the ${key} parameter.`);
-    params.push(`${q(key)}=${q(value)}`);
-  }
-  const hidden = hiddenIn([select, input.order ?? "", ...(input.filters ?? [])].join(" "), tables);
-  if (hidden) throw new ToolError(`"${hidden}" is not available to the assistant (bulk data). Use the table's other columns.`);
+  const { params, base } = tableRead({ table, select, filters: input.filters ?? [], order: input.order ?? "" });
 
   if (countOnly) return { table, count: await restCount(ctx, `${table}?${params.join("&")}`) };
-
-  const base = `${table}?select=${q(select)}${params.length ? `&${params.join("&")}` : ""}${input.order ? `&order=${q(input.order)}` : ""}`;
 
   if (grouped) {
     const rows = await restAll(ctx, base);
@@ -1006,7 +1035,45 @@ async function proposeAction(ctx, input) {
   };
 }
 
+// ── create_excel ────────────────────────────────────────────────────────────
+// Only the file's DESCRIPTION is kept: each sheet read from a table is tried
+// here (its first page, with the person's session) so a wrong query comes back
+// to the model instead of reaching the person, and the rows themselves are
+// read by the page when the person downloads (assistantExcel.js).
+const sampleCell = (cell) => (typeof cell === "string" && cell.length > 80 ? `${cell.slice(0, 80)}…` : cell);
+
+async function createExcel(ctx, input) {
+  if (!ctx.saveFile) throw new ToolError("Files cannot be prepared here.");
+  const spec = checkExcelSpec(input);
+  const read = (path, wantCount) => rest(ctx, path, { count: wantCount });
+  const tried = await Promise.all(spec.sheets.map((sheet) => loadExcelSheet(sheet, read, { maxRows: 1000, strict: true })));
+
+  const empty = spec.sheets.filter((_, i) => !tried[i].rows.length).map((sheet) => `"${sheet.name}"`);
+  if (empty.length) {
+    throw new ToolError(`No row matches the sheet ${empty.join(", ")}, so it would be empty. Check its filters (try them with query_table), or leave the sheet out and tell the person there is nothing to list.`);
+  }
+
+  // The columns are settled now, so the download shows exactly what was tried.
+  const sheets = spec.sheets.map((sheet, i) => (sheet.rows ? sheet : { ...sheet, columns: tried[i].columns }));
+  const summary = { sheets: sheets.map((sheet, i) => ({ name: sheet.name, rows: tried[i].total, columns: tried[i].headers.length, source: sheet.rows ? "typed" : sheet.table })) };
+  const id = await ctx.saveFile({ kind: "excel", title: spec.title, spec: { title: spec.title, sheets }, summary });
+  return {
+    prepared: true,
+    file_id: id,
+    title: spec.title,
+    sheets: sheets.map((sheet, i) => ({
+      name: sheet.name,
+      rows: tried[i].total,
+      columns: tried[i].headers,
+      first_rows: tried[i].rows.slice(0, 2).map((row) => row.map(sampleCell)),
+      ...(tried[i].notes.length ? { notes: tried[i].notes } : {}),
+    })),
+    note: "The person now sees a card with a Download button for this file. A sheet read from a table is filled when they press it, from the PIM as it is then and with their own permissions. Tell them in a line or two what the file holds (its sheets, how many rows, the filter used) — do not repeat its rows.",
+  };
+}
+
 const RUNNERS = {
+  create_excel: createExcel,
   listing_health: listingHealth,
   price_alignment: priceAlignment,
   propose_action: proposeAction,
@@ -1020,8 +1087,13 @@ const RUNNERS = {
 };
 
 /** Runs one lookup. The input must have passed inputProblem(). */
-export function runAssistantTool(ctx, name, input) {
+export async function runAssistantTool(ctx, name, input) {
   const run = RUNNERS[name];
   if (!run) throw new ToolError(`There is no tool named "${name}".`);
-  return run(ctx, input);
+  try {
+    return await run(ctx, input);
+  } catch (err) {
+    // what assistantExcel.js refuses (a read, a file's description) is said to the model like any refusal
+    throw err instanceof SpecError ? new ToolError(err.message) : err;
+  }
 }
