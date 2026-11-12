@@ -22,6 +22,14 @@
 // (assistant_chats / _turns / _actions / _files / _knowledge) and two
 // settings it owns (app_settings 'assistant_briefing', 'assistant_warm').
 //
+// AND IT CANNOT: the lookups reach the database only through readOnlyFetch()
+// (_shared/assistantTools.js) — a GET or a HEAD to one of the readable tables.
+// The client the lookups are given is built on it too, so a write, a delete,
+// another table, Storage, Auth or an edge function is refused before it is
+// sent, whatever asked for it (user, 2026-11-12: "es peligroso que se puedan
+// eliminar productos o hacer solicitudes que puedan afectar a la veracidad de
+// los datos o de las conexiones").
+//
 // This file: who is calling, the conversation's storage and the stream to
 // the page. What the model is told and the question's loop:
 // _shared/assistantTurn.js.
@@ -58,7 +66,8 @@
 // (prompt caching, kept 1 hour).
 //
 // Who may use it: app_settings 'assistant' = { enabled, emails, model?,
-// effort?, daily_limit_usd? }. Admins are answered from the developers'
+// effort?, daily_limit_usd?, actions? }. `actions` = { set_obsolete?: false,
+// set_prices?: false }: a kind of change turned off is not prepared at all. Admins are answered from the developers'
 // guide, everyone else from the user guide (_shared/assistantGuide.js). Every
 // question is logged in assistant_turns with who asked and what it cost.
 //
@@ -73,6 +82,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { etToday } from "../_shared/promoCalendar.ts";
 import { isServiceRole } from "../_shared/serviceRole.ts";
 import { ASSISTANT_EFFORT, ASSISTANT_MODEL, assistantKnowledge, assistantQuestion, runAssistantTurn, usageCost, warmAssistant } from "../_shared/assistantTurn.js";
+import { readOnlyFetch } from "../_shared/assistantTools.js";
 import { buildBriefing } from "../_shared/assistantBriefing.js";
 import { guideIndexOf, hashOf, rewritePiece, USER_GUIDE_MODEL } from "../_shared/assistantGuide.js";
 
@@ -284,6 +294,12 @@ Deno.serve(async (req) => {
   const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } });
   const { data: { user } } = await userClient.auth.getUser(token);
   if (!user) return json({ error: "Your session has expired. Sign in again." }, 401);
+  // What the lookups get: the same session, on a client that can only read
+  // the readable tables (its every request goes through the read-only gate).
+  const readClient = createClient(SUPABASE_URL, ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` }, fetch: readOnlyFetch(SUPABASE_URL) },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
   const [{ data: settingRows }, { data: profile }] = await Promise.all([
     admin.from("app_settings").select("key, value").in("key", ["assistant", "scorecard_company_viewers"]),
@@ -381,16 +397,18 @@ Deno.serve(async (req) => {
           token,
           today: etToday(),
           guide: knowledge.guide,
-          db: userClient,
+          db: readClient,
           role,
           groups,
+          // Which kinds of change may be prepared (Settings → Assistant): one set to false is refused.
+          actions: setting.actions && typeof setting.actions === "object" ? setting.actions : {},
           // A change the assistant PREPARES: kept, and shown to the person as a
           // card. Nothing is changed here — they confirm it on the page.
           saveAction: async (proposal: { kind: string; summary: string; payload: unknown }) => {
-            const { data, error } = await admin.from("assistant_actions").insert({ chat_id: chat.id, user_id: user.id, kind: proposal.kind, summary: proposal.summary, payload: proposal.payload }).select("id").single();
+            const { data, error } = await admin.from("assistant_actions").insert({ chat_id: chat.id, user_id: user.id, kind: proposal.kind, summary: proposal.summary, payload: proposal.payload }).select("id, created_at").single();
             if (error || !data) throw new Error("The change could not be prepared.");
             prepared.push(data.id);
-            send({ type: "action", action: { id: data.id, kind: proposal.kind, summary: proposal.summary, payload: proposal.payload, status: "proposed" } });
+            send({ type: "action", action: { id: data.id, kind: proposal.kind, summary: proposal.summary, payload: proposal.payload, status: "proposed", created_at: data.created_at } });
             return data.id;
           },
           // An Excel file the assistant PREPARES: its description is kept and

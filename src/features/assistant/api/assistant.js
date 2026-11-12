@@ -12,7 +12,11 @@ import { getAppSetting, saveAppSetting } from '@/features/settings/api/appSettin
 
 const lower = (v) => String(v ?? '').trim().toLowerCase();
 
-/** app_settings 'assistant' = { enabled, emails, effort?, daily_limit_usd? }. Read once per page load; `fresh` asks again. */
+/**
+ * app_settings 'assistant' = { enabled, emails, effort?, daily_limit_usd?, actions? }.
+ * `actions` = { set_obsolete?: false, set_prices?: false }: a kind of change set to false is
+ * not prepared from the chat. Read once per page load; `fresh` asks again.
+ */
 let settingPromise = null;
 export function getAssistantSetting({ fresh = false } = {}) {
   if (!settingPromise || fresh) {
@@ -44,7 +48,7 @@ export async function listChats(limit = 40) {
 export async function loadChat(chatId) {
   const [turns, actions, files] = await Promise.all([
     supabase.from('assistant_turns').select('id, question, answer, tools, cost_usd, error, rating, rating_note, attachments, created_at').eq('chat_id', chatId).order('id', { ascending: true }),
-    supabase.from('assistant_actions').select('id, turn_id, kind, summary, payload, status, result').eq('chat_id', chatId).order('created_at', { ascending: true }),
+    supabase.from('assistant_actions').select('id, turn_id, kind, summary, payload, status, result, created_at, claimed_at').eq('chat_id', chatId).order('created_at', { ascending: true }),
     supabase.from('assistant_files').select('id, turn_id, kind, title, spec, summary').eq('chat_id', chatId).order('created_at', { ascending: true }),
   ]);
   if (turns.error) throw turns.error;
@@ -57,6 +61,18 @@ export async function loadChat(chatId) {
 export async function rateTurn(turnId, rating, note = null) {
   const { error } = await supabase.rpc('assistant_rate_turn', { p_turn: turnId, p_rating: rating, p_note: note });
   if (error) throw error;
+}
+
+/**
+ * Confirm was pressed on a prepared change: the database says whether this card may still run
+ * (this person's, still open, not older than a day, its kind not turned off) and, once, hands
+ * back the change it kept — { id, kind, summary, payload } — which is what gets applied.
+ * Throws with the reason otherwise; nothing has changed then.
+ */
+export async function claimAction(actionId) {
+  const { data, error } = await supabase.rpc('assistant_claim_action', { p_action: actionId });
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /** How a prepared change ended: 'done' | 'cancelled' | 'failed'. The model is told with the next question. */

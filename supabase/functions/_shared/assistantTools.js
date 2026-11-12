@@ -3,12 +3,19 @@
 // Each lookup is a GET to the database's API carrying the session of the
 // person asking (`ctx.token`), so the database's own rules decide what comes
 // back: the assistant sees what that person may see, never more. Nothing in
-// this file writes anything.
+// this file writes anything — and nothing in it CAN: every request goes
+// through readOnlyFetch() below, which lets only a read of a readable table
+// out (user, 2026-11-12: "es peligroso que se puedan eliminar productos o
+// hacer solicitudes que puedan afectar a la veracidad de los datos o de las
+// conexiones").
 //
-//   ctx = { url, apikey, token, today, guide, db, role, groups, saveAction, saveFile }
+//   ctx = { url, apikey, token, today, guide, db, role, groups, actions, saveAction, saveFile }
 //     today = the Eastern day, YYYY-MM-DD; guide = the guide's pieces, read in
 //     memory by search_guide / read_guide; db = a supabase-js client carrying
-//     the same session (the Price Alignment report reads through it);
+//     the same session (the Price Alignment report reads through it), built
+//     with readOnlyFetch() as its fetch so it cannot write either;
+//     actions = which kinds of change may be prepared ({ set_prices: false }
+//     turns one off — Settings → Assistant);
 //     role = the person's role; groups = the restricted topics they may read
 //     (['company'] for the ScoreCard Company tab's viewers); saveAction =
 //     (proposal) => id — keeps a change the assistant PROPOSES. The assistant
@@ -26,6 +33,7 @@
 import { ASSISTANT_TABLES } from "./assistantTables.js";
 import { checkExcelSpec, EXCEL_FORMATS, EXCEL_LIMITS, loadExcelSheet, SpecError, tableRead } from "./assistantExcel.js";
 import { promoWindow, PROMO_DATE_COLUMNS } from "./promoCalendar.ts";
+import { PRICE_KEYS, priceNotes, priceProblems } from "./priceRules.js";
 import { completenessContext, inCompleteness, scoreCompleteness } from "./completeness.js";
 import { buildListingHealthData, MARKETPLACES } from "./listingHealth.js";
 import { alignTargets, createPriceAlignment } from "./priceAlignmentReport.js";
@@ -162,7 +170,7 @@ export const ASSISTANT_TOOLS = [
   {
     name: "propose_action",
     description:
-      "Prepare a change for the person to confirm. Calling this changes NOTHING: the page shows them a card with what would change, and the change is made only if they press Confirm. So never say a change is done — say it is ready for them to confirm, and what the card shows. Two kinds exist: set_obsolete (mark products obsolete, or take the mark off) and set_prices (a product's MAP Blue / Orange / Purple or MSRP, in CAD or USD). Anything else cannot be changed from the chat: say where in the app it is done. Call this only when the person asks for the change, with exact SKUs (look them up first).",
+      "Prepare a change for the person to confirm. Calling this changes NOTHING: the page shows them a card with what would change, and the change is made only if they press Confirm. So never say a change is done — say it is ready for them to confirm, and what the card shows. Two kinds exist: set_obsolete (mark products obsolete, or take the mark off) and set_prices (a product's MAP Blue / Orange / Purple or MSRP, in CAD or USD). Anything else cannot be changed from the chat — and nothing can be deleted from it: say where in the app it is done. Call this only when the person asks for the change, with exact SKUs (look them up first) and the values they gave. The PIM's own price rules are checked now: a change they refuse is not prepared and the result says why — tell the person, do not try other values on your own. The result may carry `warnings` (a large change, a promotion that uses the level): tell the person each one.",
     eager_input_streaming: true,
     input_schema: {
       type: "object",
@@ -292,8 +300,33 @@ const totalOf = (res) => {
   return /\/(\d+)$/.test(range) ? Number(range.split("/")[1]) : null;
 };
 
+// THE ASSISTANT ONLY READS. The session it carries is the person's, and that
+// person may be an admin: without a gate, one wrong line here — or a request
+// the model was talked into — could change or delete anything they can.
+// So every request to the database leaves through readOnlyFetch(): it must be
+// a GET or a HEAD, to the database's API, to one of the readable tables or to
+// the one read-only function the lookups use. An insert, an update, a delete,
+// another table, Storage, Auth, an edge function: refused before it is sent.
+const READ_FUNCTIONS = new Set(["channel_health_item"]);
+
+/** A `fetch` that can only read the readable tables of `baseUrl`'s database. */
+export function readOnlyFetch(baseUrl) {
+  const root = `${String(baseUrl).replace(/\/+$/, "")}/rest/v1/`;
+  return async (input, init = {}) => {
+    const url = typeof input === "string" ? input : String(input?.url ?? input);
+    const method = String(init?.method ?? (typeof input === "object" ? input?.method : null) ?? "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") throw new ToolError(`The assistant only reads the PIM: a ${method} request was refused.`);
+    if (!url.startsWith(root)) throw new ToolError("The assistant only reads the PIM's tables: a request to another service was refused.");
+    const name = decodeURIComponent(url.slice(root.length).split(/[?#]/)[0]);
+    const allowed = name.startsWith("rpc/") ? READ_FUNCTIONS.has(name.slice(4)) : Object.hasOwn(ASSISTANT_TABLES, name);
+    if (!allowed) throw new ToolError(`The assistant may not read "${name.slice(0, 60)}".`);
+    return fetch(input, init);
+  };
+}
+const gate = (ctx) => (ctx.readFetch ??= readOnlyFetch(ctx.url));
+
 export async function rest(ctx, path, { count = false } = {}) {
-  const res = await fetch(`${ctx.url}/rest/v1/${path}`, { headers: headersOf(ctx, count ? { Prefer: "count=exact" } : {}) });
+  const res = await gate(ctx)(`${ctx.url}/rest/v1/${path}`, { headers: headersOf(ctx, count ? { Prefer: "count=exact" } : {}) });
   const text = await res.text();
   if (!res.ok) {
     let message = text;
@@ -308,7 +341,7 @@ export async function rest(ctx, path, { count = false } = {}) {
 
 /** How many rows match (no row is read). A refused count is asked again as a read, for the database's reason. */
 async function restCount(ctx, path) {
-  const res = await fetch(`${ctx.url}/rest/v1/${path}`, { method: "HEAD", headers: headersOf(ctx, { Prefer: "count=exact" }) });
+  const res = await gate(ctx)(`${ctx.url}/rest/v1/${path}`, { method: "HEAD", headers: headersOf(ctx, { Prefer: "count=exact" }) });
   if (!res.ok) {
     await rest(ctx, `${path}${path.endsWith("?") ? "" : "&"}limit=1`);
     throw new ToolError(`The database refused this count (${res.status}).`);
@@ -363,7 +396,7 @@ const stripHtml = (html) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " "
 // Excel sheet read from a table.
 async function queryTable(ctx, input) {
   const table = input.table;
-  if (!(table in ASSISTANT_TABLES)) throw new ToolError(`"${table}" is not one of the readable tables.`);
+  if (!Object.hasOwn(ASSISTANT_TABLES, table)) throw new ToolError(`"${table}" is not one of the readable tables.`);
   const countOnly = input.count_only === true;
   const groupBy = input.group_by ?? [];
   const sum = input.sum ?? [];
@@ -811,7 +844,7 @@ function readGuide(ctx, input) {
 const HEALTH_ITEM_CHANNELS = ["wayfair", "wayfair_usa", "bestbuy", "walmart_us", "walmart_ca", "wix_sinksdirect_us", "wix_stylish_ca", "wix_stylish_us", "wix_azuni_ca"];
 
 async function restJson(ctx, path) {
-  const res = await fetch(`${ctx.url}/rest/v1/${path}`, { headers: headersOf(ctx) });
+  const res = await gate(ctx)(`${ctx.url}/rest/v1/${path}`, { headers: headersOf(ctx) });
   const text = await res.text();
   if (!res.ok) throw new ToolError(`The database refused this read (${res.status}): ${text.slice(0, 300)}`);
   return text ? JSON.parse(text) : null;
@@ -972,19 +1005,69 @@ async function priceAlignment(ctx, input) {
 // ── propose_action ──────────────────────────────────────────────────────────
 // Only a proposal is kept: the person confirms it on the page, and the page
 // makes the change through the app's own save (its checks, its Activity Log).
+//
+// What is checked HERE, before a card is shown (user, 2026-11-12: validations
+// on what can be asked of the assistant):
+//   · the person's role may edit, and this kind of change is not turned off
+//     (Settings → Assistant);
+//   · only the two kinds below exist — nothing deletes, nothing touches a
+//     connection, a setting, a UPC or an HS code;
+//   · every SKU is a product of the PIM; a price is a plain number above 0;
+//   · the PIM's own price rules (priceRules.js, the database's price_problem())
+//     on the product as it would be: a change they refuse is never prepared;
+//   · what is worth a second look goes on the card as a warning, and a card
+//     with one asks the person to tick that they checked it: a price moving
+//     20 % or more, a level a running or coming promotion uses, many products
+//     at once;
+//   · at most 50 items a card and 3 cards a question.
+// The page checks again when the person confirms (the card is theirs, still
+// open, not older than a day — assistant_claim_action — and the prices did not
+// move since), and the database's own triggers have the last word.
 const PRICE_FIELDS = {
   map_cad: "MAP Blue CAD", map_usd: "MAP Blue USD",
   map_orange_cad: "MAP Orange CAD", map_orange_usd: "MAP Orange USD",
   map_purple_cad: "MAP Purple CAD", map_purple_usd: "MAP Purple USD",
   msrp_cad: "MSRP CAD", msrp_usd: "MSRP USD",
 };
+// The promotion level a price column is, and the market whose list uses it.
+const LEVEL_FIELDS = { map_orange_cad: ["orange", "in_ca"], map_orange_usd: ["orange", "in_us"], map_purple_cad: ["purple", "in_ca"], map_purple_usd: ["purple", "in_us"] };
+// In step with KIND_LEVEL in src/features/pricing/api/promotions.js and promotion_level_of() in SQL.
+const KIND_LEVEL = { monthly: "orange", flash: "orange", mk_event: "orange", special: "purple" };
+// The country of a deal's portals (the channels of src/features/pricing/lib/promoChannels.js: every
+// key ends in _ca / _us but these). A portal this does not know counts for both.
+const PORTAL_MARKET = { bbb: "us", overstock: "us", menards: "us", rona: "ca", bestbuy: "ca" };
+const portalMarket = (key) => PORTAL_MARKET[key] ?? (/_us$/.test(key) ? "us" : /_ca$/.test(key) ? "ca" : null);
+const dealRunsIn = (promo, market) => !(promo.marketplaces ?? []).length || promo.marketplaces.some((key) => [market, null].includes(portalMarket(key)));
+export const ACTION_KINDS = ["set_obsolete", "set_prices"];
 const MAX_ACTION_ITEMS = 50;
+const MAX_CARDS = 3; // per question
+const MAX_PRICE = 100000;
+const BIG_CHANGE = 0.2; // a price moving this much is worth a second look
+const MANY_PRODUCTS = 10;
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 async function proposeAction(ctx, input) {
   if (!["admin", "editor"].includes(ctx.role)) throw new ToolError("This person's role only reads the PIM: no change can be prepared for them.");
   if (!ctx.saveAction) throw new ToolError("Changes cannot be prepared here.");
+  if (!ACTION_KINDS.includes(input.kind)) throw new ToolError(`Only these changes can be prepared: ${ACTION_KINDS.join(", ")}.`);
+  if (ctx.actions?.[input.kind] === false) {
+    throw new ToolError("Preparing this kind of change from the chat is turned off (Settings → Assistant). Nothing was prepared: say so, and where in the app the person can do it themselves.");
+  }
+  if ((ctx.cards ?? 0) >= MAX_CARDS) {
+    throw new ToolError(`At most ${MAX_CARDS} changes can be prepared in one answer. Say which ones are ready to confirm; the rest can be asked for afterwards.`);
+  }
+  ctx.cards = (ctx.cards ?? 0) + 1; // taken now: lookups of one step run together
+  try {
+    return await prepareAction(ctx, input);
+  } catch (err) {
+    ctx.cards -= 1;
+    throw err;
+  }
+}
 
+async function prepareAction(ctx, input) {
+  const warnings = [];
+  let needsCheck = false;
   let summary;
   let payload;
   if (input.kind === "set_obsolete") {
@@ -997,41 +1080,106 @@ async function proposeAction(ctx, input) {
     if (unknown.length) throw new ToolError(`Not in the PIM: ${unknown.join(", ")}. Find the exact SKUs with find_products.`);
     const items = rows.filter((r) => Boolean(r.is_obsolete) !== input.obsolete).map((r) => ({ sku: r.sku, model: r.model_name }));
     if (!items.length) return { prepared: false, note: `Nothing to change: ${skus.length === 1 ? "it already is" : "they already are"} ${input.obsolete ? "obsolete" : "not obsolete"}.` };
+    if (items.length > MANY_PRODUCTS) {
+      warnings.push(`${items.length} products at once: read the list before confirming.`);
+      needsCheck = true;
+    }
     summary = input.obsolete ? `Mark ${plural(items.length, "product")} obsolete` : `Take the obsolete mark off ${plural(items.length, "product")}`;
     payload = { obsolete: input.obsolete, items, unchanged: rows.filter((r) => Boolean(r.is_obsolete) === input.obsolete).map((r) => r.sku) };
   } else {
-    const asked = (input.prices ?? []).map((line) => {
+    // one value per product and field, each a plain price
+    const asked = new Map();
+    for (const line of input.prices ?? []) {
       const [sku, field, value] = String(line).split("|").map((part) => part.trim());
-      const price = Math.round(Number(String(value ?? "").replace(/[$,\s]/g, "")) * 100) / 100;
-      if (!sku || !(field in PRICE_FIELDS) || !(price > 0)) throw new ToolError(`"${line}" is not "SKU | field | new price" with a field of: ${Object.keys(PRICE_FIELDS).join(", ")} and a price above 0.`);
-      return { sku, field, to: price };
-    });
-    if (!asked.length) throw new ToolError("Give the prices to change.");
-    if (asked.length > MAX_ACTION_ITEMS) throw new ToolError(`At most ${MAX_ACTION_ITEMS} prices per change.`);
-    const skus = [...new Set(asked.map((a) => a.sku))];
-    const { rows } = await rest(ctx, `products?select=sku,model_name,${Object.keys(PRICE_FIELDS).join(",")}&sku=in.(${q(skus.map(lit).join(","))})`);
+      const plain = String(value ?? "").replace(/[$,\s]/g, "");
+      const price = /^\d+(\.\d{1,2})?$/.test(plain) ? Number(plain) : NaN;
+      if (!sku || !Object.hasOwn(PRICE_FIELDS, field ?? "") || !(price > 0)) {
+        throw new ToolError(`"${line}" is not "SKU | field | new price" with a field of: ${Object.keys(PRICE_FIELDS).join(", ")} and a price above 0 (digits, at most two decimals).`);
+      }
+      if (price > MAX_PRICE) throw new ToolError(`"${line}": ${price} is not a price the PIM holds. Check the number with the person.`);
+      const key = `${sku}|${field}`;
+      if (asked.has(key) && asked.get(key).to !== price) throw new ToolError(`${sku} has two different values for ${field} in this change. Ask the person which one.`);
+      asked.set(key, { sku, field, to: price });
+    }
+    if (!asked.size) throw new ToolError("Give the prices to change.");
+    if (asked.size > MAX_ACTION_ITEMS) throw new ToolError(`At most ${MAX_ACTION_ITEMS} prices per change.`);
+    const skus = [...new Set([...asked.values()].map((a) => a.sku))];
+    const { rows } = await rest(ctx, `products?select=sku,model_name,${PRICE_KEYS.join(",")}&sku=in.(${q(skus.map(lit).join(","))})`);
     const unknown = skus.filter((s) => !rows.some((r) => r.sku === s));
     if (unknown.length) throw new ToolError(`Not in the PIM: ${unknown.join(", ")}. Find the exact SKUs with find_products.`);
+
     const items = [];
-    for (const a of asked) {
-      const row = rows.find((r) => r.sku === a.sku);
-      const from = row[a.field] == null ? null : Number(row[a.field]);
-      if (from !== a.to) items.push({ sku: a.sku, model: row.model_name, field: a.field, label: PRICE_FIELDS[a.field], from, to: a.to });
+    const refused = [];
+    for (const row of rows) {
+      const mine = [...asked.values()].filter((a) => a.sku === row.sku);
+      const changing = mine.filter((a) => (row[a.field] == null ? null : Number(row[a.field])) !== a.to);
+      if (!changing.length) continue;
+      // the product as it would be, against the PIM's own price rules
+      const after = { ...row, ...Object.fromEntries(changing.map((a) => [a.field, a.to])) };
+      const problems = priceProblems(after, changing.map((a) => a.field));
+      if (problems.length) {
+        refused.push(`${row.sku}: ${problems.join(" ")}`);
+        continue;
+      }
+      const had = new Set(priceNotes(row));
+      for (const note of priceNotes(after)) if (!had.has(note)) warnings.push(`${row.sku}: ${note}`);
+      for (const a of changing) {
+        const from = row[a.field] == null ? null : Number(row[a.field]);
+        const change = from > 0 ? (a.to - from) / from : null;
+        if (change !== null && Math.abs(change) >= BIG_CHANGE) {
+          warnings.push(`${PRICE_FIELDS[a.field]} of ${row.sku} moves ${change > 0 ? "+" : "−"}${Math.round(Math.abs(change) * 100)}% (${from} → ${a.to}): check it is not a typo.`);
+          needsCheck = true;
+        }
+        items.push({ sku: row.sku, model: row.model_name, field: a.field, label: PRICE_FIELDS[a.field], from, to: a.to, ...(change !== null ? { change: Math.round(change * 1000) / 10 } : {}) });
+      }
+    }
+    if (refused.length) {
+      throw new ToolError(`The PIM's price rules refuse this, so nothing was prepared — ${refused.join(" · ")} Tell the person which rule it breaks. Do not try other values on your own.`);
     }
     if (!items.length) return { prepared: false, note: "Nothing to change: the PIM already has those prices." };
+
+    // A level a running or coming promotion uses: its promotion price follows the level, to the stores.
+    const levelItems = items.filter((i) => LEVEL_FIELDS[i.field]);
+    if (levelItems.length) {
+      const members = await restAll(ctx, `promotion_prices?select=sku,in_ca,in_us,promotions(${PROMO_COLUMNS})&sku=in.(${q([...new Set(levelItems.map((i) => i.sku))].map(lit).join(","))})`);
+      for (const item of levelItems) {
+        const [level, list] = LEVEL_FIELDS[item.field];
+        const using = [];
+        for (const m of members) {
+          if (m.sku !== item.sku || !m.promotions) continue;
+          const kind = m.promotions.kind ?? "monthly";
+          if (KIND_LEVEL[kind] !== level) continue;
+          // this country's price: a monthly promotion by its list, a deal by its portals
+          if (kind === "monthly" ? !m[list] : !dealRunsIn(m.promotions, list === "in_ca" ? "ca" : "us")) continue;
+          const { state } = promoState(m.promotions, ctx.today);
+          if (state !== "ended") using.push({ name: m.promotions.name, state });
+        }
+        if (!using.length) continue;
+        const running = using.filter((u) => u.state === "running");
+        const named = (running.length ? running : using).slice(0, 3).map((u) => `"${u.name}"`).join(", ");
+        warnings.push(`${item.sku} is in ${running.length ? "a running" : "a coming"} promotion (${named}${(running.length || using.length) > 3 ? "…" : ""}): its promotion price follows ${item.label}, so the new price goes where that promotion runs.`);
+        if (running.length) needsCheck = true;
+      }
+    }
+    if (items.some((i) => !LEVEL_FIELDS[i.field])) {
+      warnings.push("The stores and marketplaces keep the price they show until it is sent to them: Price Alignment will list the ones that differ.");
+    }
     summary = items.length === 1
       ? `${items[0].label} of ${items[0].sku}: ${items[0].from ?? "empty"} → ${items[0].to}`
       : `Change ${plural(items.length, "price")} on ${plural(new Set(items.map((i) => i.sku)).size, "product")}`;
     payload = { items };
   }
 
+  if (warnings.length) payload.warnings = warnings.slice(0, 12);
+  if (needsCheck) payload.needs_check = true;
   const id = await ctx.saveAction({ kind: input.kind, summary, payload });
   return {
     prepared: true,
     action_id: id,
     summary,
     items: payload.items,
-    note: "The person now sees a card with this change. It has NOT been made: it happens only if they press Confirm, and the PIM's own rules are checked then (a price a rule refuses is reported on the card).",
+    ...(warnings.length ? { warnings: payload.warnings } : {}),
+    note: `The person now sees a card with this change. It has NOT been made: it happens only if they press Confirm${needsCheck ? " (after ticking that they checked it)" : ""}, within 24 hours, and the PIM's own rules are checked again then.${warnings.length ? " Tell them each warning." : ""}`,
   };
 }
 

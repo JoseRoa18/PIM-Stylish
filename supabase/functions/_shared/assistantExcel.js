@@ -60,13 +60,13 @@ function hiddenIn(text, tables) {
  * never a hidden column.
  */
 export function tableRead({ table, select = "", filters = [], order = "" }) {
-  if (!(table in ASSISTANT_TABLES)) throw new SpecError(`"${table}" is not one of the readable tables.`);
+  if (!Object.hasOwn(ASSISTANT_TABLES, table)) throw new SpecError(`"${table}" is not one of the readable tables.`);
   if (select.includes("*")) throw new SpecError("List the columns you need instead of \"*\" (see <database>).");
 
   // An embedded table must be one of the readable ones too.
   const tables = [table];
   for (const m of select.matchAll(/([a-z_][a-z0-9_]*)(?:![a-z0-9_]+)*\s*\(/gi)) {
-    if (!(m[1] in ASSISTANT_TABLES)) throw new SpecError(`"${m[1]}" cannot be embedded: it is not one of the readable tables.`);
+    if (!Object.hasOwn(ASSISTANT_TABLES, m[1])) throw new SpecError(`"${m[1]}" cannot be embedded: it is not one of the readable tables.`);
     tables.push(m[1]);
   }
 

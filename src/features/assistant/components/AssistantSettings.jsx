@@ -4,10 +4,10 @@ import { supabase } from '@/lib/supabase';
 import { getAssistantSetting, getAssistantUsage, saveAssistantSetting } from '../api/assistant';
 import { formatDate, formatTimeAgo } from '@/lib/format';
 
-// Settings → Assistant (admins): who may use it, how much it may spend in 24
-// hours, how hard it thinks, and what it has been asked and has cost. The
-// setting is app_settings 'assistant'; the function reads it on every
-// question, so a change here applies to the next one.
+// Settings → Assistant (admins): who may use it, which changes it may prepare,
+// how much it may spend in 24 hours, how hard it thinks, and what it has been
+// asked and has cost. The setting is app_settings 'assistant'; the function
+// reads it on every question, so a change here applies to the next one.
 
 const EFFORTS = [
   ['low', 'Faster — shorter thinking'],
@@ -15,6 +15,11 @@ const EFFORTS = [
   ['high', 'Deeper — slower, costs more'],
 ];
 const DEFAULT_LIMIT = 5;
+// The two changes the assistant can get ready as a card (setting.actions.<kind>: false = turned off).
+const CHANGES = [
+  ['set_obsolete', 'The obsolete mark', 'put it on products or take it off'],
+  ['set_prices', 'Prices', 'MAP Blue, Orange and Purple, and MSRP'],
+];
 const usd = (v) => `$${Number(v ?? 0).toFixed(2)}`;
 const lower = (v) => String(v ?? '').trim().toLowerCase();
 
@@ -43,6 +48,7 @@ const LABEL = 'block text-label-lg font-medium text-on-surface';
 export default function AssistantSettings() {
   const descriptionId = useId();
   const whoId = useId();
+  const changesId = useId();
   const addId = useId();
   const limitId = useId();
   const effortId = useId();
@@ -156,6 +162,25 @@ export default function AssistantSettings() {
             </p>
           </div>
 
+          <div>
+            <p id={changesId} className={LABEL}>Changes it may prepare</p>
+            <p className="text-body-sm text-on-surface-variant mt-1 max-w-2xl">
+              The assistant only reads the PIM: it cannot delete anything, and it cannot touch Odoo, a marketplace, a store or a setting. These are the only two changes it can get ready, as a card that the person who asked must confirm. Turned off, it says where in the app that change is made instead.
+            </p>
+            <ul aria-labelledby={changesId} className="mt-3 space-y-2.5">
+              {CHANGES.map(([kind, label, hint]) => (
+                <li key={kind} className="flex items-center gap-3">
+                  <Switch
+                    checked={setting.actions?.[kind] !== false}
+                    onChange={(on) => save({ ...setting, actions: { ...(setting.actions ?? {}), [kind]: on } })}
+                    label={label}
+                  />
+                  <span className="text-body-sm text-on-surface">{label} <span className="text-on-surface-variant">— {hint}</span></span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
           <div className="flex flex-wrap items-end gap-4">
             <div>
               <label htmlFor={limitId} className={LABEL}>Limit per 24 hours (USD)</label>
@@ -190,6 +215,12 @@ export default function AssistantSettings() {
                 {' '}
                 <ThumbsDown className="inline w-3.5 h-3.5 -mt-0.5 ml-1" aria-hidden="true" /> {usage.thumbs_down}<span className="sr-only"> wrong answers</span>
               </p>
+              {usage.changes?.prepared > 0 && (
+                <p className="text-body-sm text-on-surface">
+                  <span className="font-medium">Changes prepared:</span> {usage.changes.prepared}
+                  <span className="text-on-surface-variant"> — {usage.changes.confirmed} confirmed, {usage.changes.cancelled} cancelled, {usage.changes.failed} not made, {usage.changes.open} never decided</span>
+                </p>
+              )}
               {usage.by_person.length > 0 && (
                 <ul className="text-body-sm text-on-surface-variant space-y-0.5">
                   {usage.by_person.map((p) => (
