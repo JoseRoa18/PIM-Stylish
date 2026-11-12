@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import Dialog from '@/components/ui/Dialog';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { MARKET_LABEL } from '../lib/boards';
-import { UNITS, GOAL_OPS } from '../lib/format';
+import { UNITS, TARGET_OPS, parseTarget, targetInput } from '../lib/format';
 import { AUTO_KEYS } from '../lib/autoMetrics';
 import { SECTIONS, sectionOf } from '../lib/sections';
 import { createMetric, updateMetric, archiveMetric } from '../api/scorecard';
@@ -13,7 +13,7 @@ const OTHER = '__other__';
 const field = 'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary';
 
 // Admins add, edit and remove a board's measurables: name, market, theme,
-// owner, goal, where the number comes from, and whether the PIM fills it.
+// owner, target, where the number comes from, and whether the PIM fills it.
 export default function MetricDialog({ board, metric = null, defaultMarket = null, people, onClose, onSaved, onRemoved }) {
   const confirm = useConfirm();
   const ids = { name: useId(), market: useId(), section: useId(), owner: useId(), ownerName: useId(), source: useId(), sources: useId(), unit: useId(), op: useId(), goal: useId(), auto: useId() };
@@ -27,7 +27,7 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
     source: metric?.source ?? '',
     unit: metric?.unit ?? 'number',
     goal_op: metric?.goal_op ?? '>=',
-    goal: metric?.goal == null ? '' : String(metric.unit === 'percent' ? Number((metric.goal * 100).toFixed(4)) : metric.goal),
+    goal: targetInput(metric?.unit, metric?.goal),
     auto_key: metric?.auto_key ?? '',
   }));
   const [saving, setSaving] = useState(false);
@@ -43,8 +43,8 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
     e.preventDefault();
     const name = draft.name.trim();
     if (!name) { setError('Give the measurable a name.'); return; }
-    const goalNum = draft.goal === '' ? null : Number(draft.goal);
-    if (goalNum != null && !Number.isFinite(goalNum)) { setError('The goal must be a number.'); return; }
+    const target = draft.unit === 'text' ? { goal: null } : parseTarget(draft.unit, draft.goal);
+    if (target.error) { setError(target.error); return; }
     const fields = {
       name,
       market: draft.market,
@@ -53,8 +53,8 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
       owner_name: draft.owner === OTHER ? draft.owner_name.trim() || null : null,
       source: draft.source.trim() || null,
       unit: draft.unit,
-      goal: goalNum == null ? null : draft.unit === 'percent' ? goalNum / 100 : goalNum,
-      goal_op: goalNum == null ? null : draft.goal_op,
+      goal: target.goal,
+      goal_op: target.goal == null ? null : draft.goal_op,
       auto_key: draft.auto_key || null,
     };
     setSaving(true);
@@ -165,13 +165,13 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
         </div>
         {draft.unit !== 'text' && (
           <fieldset>
-            <legend className="block text-label-md text-on-surface mb-1">Weekly goal</legend>
+            <legend className="block text-label-md text-on-surface mb-1">Weekly target</legend>
             <div className="flex items-center gap-2">
-              <label htmlFor={ids.op} className="sr-only">Goal comparison</label>
+              <label htmlFor={ids.op} className="sr-only">Target comparison</label>
               <select id={ids.op} value={draft.goal_op} onChange={(e) => set({ goal_op: e.target.value })} className={`${field} w-40`}>
-                {GOAL_OPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                {TARGET_OPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
               </select>
-              <label htmlFor={ids.goal} className="sr-only">Goal value</label>
+              <label htmlFor={ids.goal} className="sr-only">Target value</label>
               <input id={ids.goal} inputMode="decimal" value={draft.goal} onChange={(e) => set({ goal: e.target.value })} className={`${field} w-32 text-right tabular-nums`} placeholder="—" />
               <span className="text-body-md text-on-surface-variant">{{ percent: '%', money: '$', hours: 'hours', days: 'days' }[draft.unit] ?? ''}</span>
             </div>

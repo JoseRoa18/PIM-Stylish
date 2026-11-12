@@ -3,23 +3,28 @@ import { createPortal } from 'react-dom';
 import { Check, Copy, Pencil, X, Loader2, MessageSquareText } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import Dialog from '@/components/ui/Dialog';
-import { formatValue, goalLabel, meetsGoal, parseInput, toInput } from '../lib/format';
+import { formatValue, meetsTarget, parseInput, targetLabel, toInput } from '../lib/format';
 import { SECTIONS, sectionOf } from '../lib/sections';
 import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } from '../lib/weeks';
 
 // One market of a board as the EOS grid (user's layout choice, 2026-11-04):
 // rows grouped by theme, one line each — the owner's initials, the
-// measurable, its goal — then the 13 weeks. A week's cell is green when it
-// meets the goal and red when it misses it (with a check / cross, never
-// color alone); its owner or an admin edits it in place. The 13 weeks fit
+// measurable, its target — then the 13 weeks. A week's number is green when
+// it meets the target and red when it misses it — the number and its check /
+// cross, never a filled cell (user, 2026-11-12: with a target on most rows
+// the filled cells were "muy chillones e invasivos") and never color alone;
+// its owner or an admin edits it in place. The 13 weeks fit
 // the page from 1440 px; narrower, the table scrolls inside itself and
 // opens on the latest week.
 //
+// The Target cell is a button for whoever may change it (`canEditTarget(row)`;
+// user, 2026-11-12): it opens the target's dialog (`onEditTarget(row, group)`).
+//
 // The Company tab draws the same grid with its own groups (`groups`: [{ key,
 // label, rows }]) and no owners (`plain`); a row there may be `strong` (a
-// total), carry a `hint` for its tooltip, and be typed for any week, the
-// coming ones too (`anyWeek`: a target).
-export default function ScorecardTable({ board, metrics, values, weeks, thisWeek, canWrite, isAdmin, onSave, onEditMetric, groups: ownGroups = null, plain = false }) {
+// total), carry a `hint` for its tooltip and a `targetHint` for its target's
+// (where a target nobody sets comes from).
+export default function ScorecardTable({ board, metrics, values, weeks, thisWeek, canWrite, isAdmin, onSave, onEditMetric, canEditTarget = null, onEditTarget = null, groups: ownGroups = null, plain = false }) {
   const groups = ownGroups ?? SECTIONS.map((s) => ({ ...s, rows: metrics.filter((m) => sectionOf(m) === s.key) })).filter((g) => g.rows.length);
   // The column of the week in progress: the numbers so far (user, 2026-11-06).
   const runningWeek = addWeeks(thisWeek, 1);
@@ -128,7 +133,21 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                     )}
                   </div>
                 </th>
-                <td className="px-3 py-1.5 border-b border-outline-variant text-right text-on-surface-variant whitespace-nowrap tabular-nums">{goalLabel(m) || <><span aria-hidden>—</span><span className="sr-only">No goal</span></>}</td>
+                <td className="border-b border-outline-variant text-right text-on-surface-variant whitespace-nowrap tabular-nums">
+                  {canEditTarget?.(m) ? (
+                    <button
+                      type="button"
+                      onClick={() => onEditTarget(m, g)}
+                      aria-label={`Target of ${m.name}: ${targetLabel(m) || 'none'}. Change`}
+                      title={targetLabel(m) ? 'Change the target' : 'Set the target'}
+                      className="w-full min-h-[2.25rem] px-3 py-1.5 text-right hover:bg-on-surface/5 hover:text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary rounded-sm"
+                    >
+                      {targetLabel(m) || <span aria-hidden>—</span>}
+                    </button>
+                  ) : (
+                    <div className="px-3 py-1.5" title={m.targetHint}>{targetLabel(m) || <><span aria-hidden>—</span><span className="sr-only">No target</span></>}</div>
+                  )}
+                </td>
                 {weeks.map((w) => (
                   <ValueCell
                     key={w}
@@ -137,7 +156,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                     row={values.get(`${m.id}|${w}`)}
                     current={w === thisWeek}
                     running={w === runningWeek}
-                    editable={canWrite(m) && (m.anyWeek || w <= thisWeek)}
+                    editable={canWrite(m) && w <= thisWeek}
                     onSave={onSave}
                   />
                 ))}
@@ -169,7 +188,7 @@ function HeaderRow({ weeks, thisWeek, mode, height, nameCol, onTip }) {
   return (
     <tr style={height ? { height } : undefined}>
       <th scope="col" className={cn(top, 'sticky left-0', mode === 'sticky' ? 'z-[25]' : 'z-10', 'bg-surface-container-low text-left px-4 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant', nameCol)}>Measurable</th>
-      <th scope="col" className={cn(top, mode === 'sticky' && 'z-20', 'bg-surface-container-low text-right px-3 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant whitespace-nowrap')}>Goal</th>
+      <th scope="col" className={cn(top, mode === 'sticky' && 'z-20', 'bg-surface-container-low text-right px-3 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant whitespace-nowrap')}>Target</th>
       {/* A column holds the numbers of the week before it (W44 = Oct 25 – 31), so its dates are that week's. */}
       {weeks.map((w) => (
         <th key={w} scope="col" data-current={w === thisWeek ? '' : undefined} data-running={w === addWeeks(thisWeek, 1) ? '' : undefined} onMouseEnter={(e) => onTip?.(w, e.currentTarget)} onMouseLeave={() => onTip?.(null)} className={cn(top, mode === 'sticky' && 'z-20', 'px-2 py-2 text-right border-b border-outline-variant whitespace-nowrap min-w-[4rem]', w === thisWeek ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low text-on-surface-variant')}>
@@ -207,16 +226,16 @@ function OwnerBadge({ label }) {
   );
 }
 
-function ValueCell({ metric, week, row, current, running: inProgress, editable, onSave }) {
-  // A number typed ahead (a target) is not "so far": only measured rows are in progress.
-  const running = inProgress && !metric.anyWeek;
+function ValueCell({ metric, week, row, current, running, editable, onSave }) {
   const [draft, setDraft] = useState(null); // text while editing
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false); // a long note open in full
   const shown = formatValue(metric.unit, row);
-  // A week in progress is never judged against the goal: sales at mid-week would always miss it.
-  const ok = running ? null : meetsGoal(metric, row?.value);
-  const tone = ok === true ? 'bg-success-container text-on-success-container' : ok === false ? 'bg-error-container text-on-error-container' : current ? 'bg-primary-container/25' : '';
+  // A week in progress is never judged against the target: sales at mid-week would always miss it.
+  const ok = running ? null : meetsTarget(metric, row?.value);
+  // The cell keeps only the tint of the week under review; on / off target is the number's own color.
+  const column = current ? 'bg-primary-container/25' : '';
+  const ink = ok === true ? 'text-success' : ok === false ? 'text-error' : '';
   const isText = metric.unit === 'text' || (row?.value == null && row?.note);
   const longNote = isText && shown.length > 7;
   const label = `${metric.name}, ${weekTag(week)} (numbers of ${weekRange(addWeeks(week, -1))})`;
@@ -252,7 +271,7 @@ function ValueCell({ metric, week, row, current, running: inProgress, editable, 
           )}
         </span>
       )}
-      {ok != null && <span className="sr-only">{ok ? ' — meets the goal' : ' — misses the goal'}</span>}
+      {ok != null && <span className="sr-only">{ok ? ' — meets the target' : ' — misses the target'}</span>}
       {row?.origin === 'auto' && <span className="sr-only"> — filled by the PIM</span>}
       {running && row && <span className="sr-only"> — so far this week</span>}
     </>
@@ -266,7 +285,7 @@ function ValueCell({ metric, week, row, current, running: inProgress, editable, 
       // height): typing a number never widens the column or moves the row
       // (user, 2026-11-05). size={1}: an input's default 20-character width
       // would otherwise count in the table's column sizing.
-      <td className={cn('border-b border-outline-variant p-0', tone)}>
+      <td className={cn('border-b border-outline-variant p-0', column)}>
         <input
           autoFocus
           size={1}
@@ -284,7 +303,7 @@ function ValueCell({ metric, week, row, current, running: inProgress, editable, 
     );
   }
   return (
-    <td className={cn('border-b border-outline-variant', tone)} title={title}>
+    <td className={cn('border-b border-outline-variant', column, ink)} title={title}>
       {longNote ? (
         // A long note (the AI's "Actions taken" note, a typed comment) opens in
         // full to read or copy (user, 2026-11-05); Edit is in the dialog when the cell is editable.

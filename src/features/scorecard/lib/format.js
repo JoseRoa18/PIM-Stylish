@@ -10,7 +10,10 @@ export const UNITS = [
   { key: 'text', label: 'Text (notes)' },
 ];
 
-export const GOAL_OPS = [
+// A measurable's target (user, 2026-11-12: "en vez de goal debe llamarse
+// target en todo el EOS"). The page says Target everywhere; the stored
+// columns keep their first names, `goal` and `goal_op`.
+export const TARGET_OPS = [
   { key: '>=', label: 'at least' },
   { key: '>', label: 'more than' },
   { key: '<=', label: 'at most' },
@@ -64,8 +67,8 @@ export function parseInput(unit, text) {
   return { value: unit === 'percent' ? num / 100 : num, note: m[1] ? s : null };
 }
 
-/** true / false when the value can be judged against the goal, else null. */
-export function meetsGoal(metric, value) {
+/** true / false when the value can be judged against the target, else null. */
+export function meetsTarget(metric, value) {
   if (metric.goal == null || !metric.goal_op || value == null) return null;
   const v = Number(value);
   const g = Number(metric.goal);
@@ -78,9 +81,35 @@ export function meetsGoal(metric, value) {
   }
 }
 
-/** "≥ 95%" style goal label, or '' without a goal. */
-export function goalLabel(metric) {
+/** "≥ 95%" style target label, or '' without a target. */
+export function targetLabel(metric) {
   if (metric.goal == null || !metric.goal_op) return '';
   const sym = { '>=': '≥', '>': '>', '<=': '≤', '<': '<' }[metric.goal_op];
   return `${sym} ${formatNumber(metric.unit === 'text' ? 'number' : metric.unit, metric.goal)}`;
+}
+
+/** A target in words, for the Activity Log: "at least 95%", or "no target". `target` = { goal, goal_op } or null. */
+export function targetText(unit, target) {
+  if (target?.goal == null || !target.goal_op) return 'no target';
+  return `${TARGET_OPS.find((o) => o.key === target.goal_op)?.label ?? target.goal_op} ${formatNumber(unit === 'text' ? 'number' : unit, target.goal)}`;
+}
+
+/** The text a target's input starts with (a percentage as its percent number). */
+export function targetInput(unit, goal) {
+  if (goal == null) return '';
+  return String(unit === 'percent' ? Number((Number(goal) * 100).toFixed(4)) : Number(goal));
+}
+
+/**
+ * A typed target → { goal } to store (null = no target), or { error }.
+ * "95", "95%", "$80,000" and "1 234.5" are read. The comparison has its own
+ * list, so one typed with the number is refused rather than guessed.
+ */
+export function parseTarget(unit, text) {
+  const s = String(text ?? '').trim();
+  if (!s) return { goal: null };
+  if (/^[<>≤≥=]/.test(s)) return { error: 'Choose the comparison in the list and type only the number.' };
+  const num = Number(s.replace(/[$,%\s]|hours?|hrs?|days?|h|d/gi, ''));
+  if (!/\d/.test(s) || !Number.isFinite(num)) return { error: 'The target must be a number.' };
+  return { goal: unit === 'percent' ? num / 100 : num };
 }

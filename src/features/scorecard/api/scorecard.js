@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { BOARD_BY_KEY, MARKET_LABEL } from '../lib/boards';
-import { formatValue } from '../lib/format';
+import { formatValue, targetText } from '../lib/format';
 import { weekTag } from '../lib/weeks';
 
 // EOS ScoreCard data (tables scorecard_metrics / scorecard_values,
@@ -116,6 +116,24 @@ export async function updateMetric(metric, fields) {
   if (error) throw error;
   const changed = Object.keys(patch).filter((k) => String(patch[k] ?? '') !== String(metric[k] ?? ''));
   logActivity({ action: 'update', entityType: 'scorecard', entityId: metric.id, summary: `EOS ScoreCard · edited ${metricWhere(data)}`, metadata: { changed } });
+  return withOwnerLabel(data);
+}
+
+/**
+ * Set (or, with null, remove) a measurable's target — { goal, goal_op }, the
+ * columns' names; the page says Target. Admins only (RLS). Returns the row.
+ */
+export async function setMetricTarget(metric, target) {
+  const patch = { goal: target?.goal ?? null, goal_op: target?.goal == null ? null : target.goal_op };
+  const { data, error } = await supabase.from('scorecard_metrics').update(patch).eq('id', metric.id).select(METRIC_COLUMNS).single();
+  if (error) throw error;
+  logActivity({
+    action: 'update',
+    entityType: 'scorecard',
+    entityId: metric.id,
+    summary: `EOS ScoreCard · ${metricWhere(metric)} target: ${targetText(metric.unit, patch)} (it was ${targetText(metric.unit, metric)})`,
+    metadata: { target: patch, before: { goal: metric.goal ?? null, goal_op: metric.goal_op ?? null } },
+  });
   return withOwnerLabel(data);
 }
 

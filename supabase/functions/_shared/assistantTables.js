@@ -59,7 +59,7 @@ export const ASSISTANT_TABLES = {
   stylish_event_discounts: { key: "site,sku", note: "Discounts the PIM has put on the Stylish Wix stores for special events." },
   scorecard_metrics: {
     key: "id",
-    note: "EOS ScoreCard rows: board (amazon, wayfair, homedepot_ca, lowes, rona, bbb_overstock, sinksdirect, menards, bestbuy, walmart), market (ca / us), name, unit (percent values are stored as fractions: 0.95 = 95%), goal, auto_key (set = filled by the PIM), archived.",
+    note: "EOS ScoreCard rows: board (amazon, wayfair, homedepot_ca, lowes, rona, bbb_overstock, sinksdirect, menards, bestbuy, walmart), market (ca / us), name, unit (percent values are stored as fractions: 0.95 = 95%), goal and goal_op (the row's Target, as the page calls it: the number and >= / > / <= / <), auto_key (set = filled by the PIM), archived.",
   },
   scorecard_values: { key: "metric_id,week_start", note: "ScoreCard values: metric_id, week_start (the week's SUNDAY; the column holds the numbers of the week before it), value, note." },
   audit_log: {

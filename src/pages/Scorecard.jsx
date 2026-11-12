@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Plus, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { cn } from '@/lib/cn';
 import { etToday } from '@/features/pricing/lib/promoCalendar';
 import { BOARDS, BOARD_BY_KEY, MARKET_LABEL } from '@/features/scorecard/lib/boards';
 import { FIRST_WEEK, addWeeks, spanLabel, weekRange, weekStartOf, weekTag, weeksEnding } from '@/features/scorecard/lib/weeks';
-import { meetsGoal } from '@/features/scorecard/lib/format';
+import { isStatusFilter, judgedWeek, rowsWithStatus, summarizeWeek } from '@/features/scorecard/lib/status';
 import { computeAutoValues, isServerKey } from '@/features/scorecard/lib/autoMetrics';
-import { listMetrics, listPeople, listValues, refreshServerNumbers, saveAutoValues, saveValue } from '@/features/scorecard/api/scorecard';
+import { listMetrics, listPeople, listValues, refreshServerNumbers, saveAutoValues, saveValue, setMetricTarget } from '@/features/scorecard/api/scorecard';
 import ScorecardTable from '@/features/scorecard/components/ScorecardTable';
 import MetricDialog from '@/features/scorecard/components/MetricDialog';
+import TargetDialog from '@/features/scorecard/components/TargetDialog';
 import CompanyBoard from '@/features/scorecard/components/CompanyBoard';
+import WeekStrip, { NoMatch } from '@/features/scorecard/components/WeekStrip';
 import { COMPANY_BOARD, COMPANY_KEY } from '@/features/scorecard/lib/company';
 import { getCompanyViewers } from '@/features/scorecard/api/company';
 
@@ -59,6 +61,7 @@ export default function Scorecard() {
   const [auto, setAuto] = useState(null); // { state: 'running' | 'done' | 'error', text }
   const [people, setPeople] = useState([]);
   const [editing, setEditing] = useState(null); // a measurable, or { isNew: true }
+  const [targeting, setTargeting] = useState(null); // the measurable whose target is being changed
   const autoDone = useRef(new Set());
   const boardTabs = useRef(null);
   // The pinned controls: their height (the table's week header pins under
@@ -182,6 +185,15 @@ export default function Scorecard() {
   // admin; RLS refuses them too. An admin turns "Filled by the PIM" off to type a row.
   const canWrite = (m) => !m.auto_key && (isAdmin || (Boolean(user?.id) && m.owner_id === user.id));
 
+  // A measurable's target is the admins' to set, the PIM's rows included
+  // (user, 2026-11-12): from its cell in the grid, or with the pencil.
+  const canEditTarget = (m) => isAdmin && m.unit !== 'text';
+
+  async function saveTarget(metric, target) {
+    const saved = await setMetricTarget(metric, target);
+    setMetrics((prev) => prev?.map((m) => (m.id === saved.id ? saved : m)) ?? prev);
+  }
+
   async function save(metric, week, parsed) {
     setNotice(null);
     try {
@@ -205,37 +217,30 @@ export default function Scorecard() {
   function selectMarket(mk) {
     setParams((p) => { const n = new URLSearchParams(p); n.set('market', mk); return n; }, { replace: true });
   }
+  // Only the measurables on target, off target or without one in the week the
+  // strip reads (user, 2026-11-12). It is in the address (`show=`), so it stays
+  // while the marketplaces are walked one by one.
+  const statusFilter = isStatusFilter(params.get('show')) ? params.get('show') : null;
+  function setStatusFilter(key) {
+    setParams((p) => { const n = new URLSearchParams(p); if (key) n.set('show', key); else n.delete('show'); return n; }, { replace: true });
+  }
+  // Where the Company tab draws its own strip: the pinned controls' second row.
+  const [stripSlot, setStripSlot] = useState(null);
 
   const shown = metrics?.filter((m) => !m.market || m.market === market) ?? null;
   const autoRows = metrics?.filter((m) => m.auto_key).length ?? 0;
 
-  // The latest shown week at a glance: how many numbers are in, on and off goal.
-  // Never a coming week (until W56 the grid shows them, empty): this week then.
-  const summary = (() => {
-    if (!shown) return null;
-    const week = weeks.at(-1) > thisWeek ? thisWeek : weeks.at(-1);
-    const out = { week, total: 0, filled: 0, on: 0, off: 0, noGoal: 0, mineEmpty: 0 };
-    for (const m of shown) {
-      if (m.unit === 'text') continue;
-      const row = values.get(`${m.id}|${week}`);
-      const has = Boolean(row && (row.value != null || row.note));
-      const ok = meetsGoal(m, row?.value);
-      out.total += 1;
-      if (has) out.filled += 1;
-      if (ok === true) out.on += 1;
-      if (ok === false) out.off += 1;
-      if (m.goal == null) out.noGoal += 1;
-      if (!has && !m.auto_key && user?.id && m.owner_id === user.id) out.mineEmpty += 1;
-    }
-    return out;
-  })();
+  // The latest shown week at a glance — how many numbers are in, on and off
+  // target — and the rows its filter keeps.
+  const summary = shown ? summarizeWeek(shown, values, judgedWeek(weeks, thisWeek), user?.id) : null;
+  const visible = shown ? rowsWithStatus(shown, values, summary.week, statusFilter) : null;
 
   return (
     <div style={{ '--sc-toolbar-h': `${toolbarH}px` }}>
       <header className="mb-3 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-display-lg text-on-surface">EOS ScoreCard</h1>
-          <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, goal and {WEEKS_SHOWN} weeks, Sunday to Saturday, from {weekTag(FIRST_WEEK)}.</p>
+          <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, target and {WEEKS_SHOWN} weeks, Sunday to Saturday, from {weekTag(FIRST_WEEK)}.</p>
         </div>
         {isAdmin && !companyMode && (
           <button type="button" onClick={() => setEditing({ isNew: true })} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity">
@@ -310,24 +315,7 @@ export default function Scorecard() {
                   ))}
                 </div>
               )}
-              {summary && summary.total > 0 && (
-                <p className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-on-surface">{weekTag(summary.week)} · numbers of {weekRange(addWeeks(summary.week, -1))}:</span>
-                  <span>{summary.filled} of {summary.total} filled</span>
-                  {summary.on > 0 && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success-container text-on-success-container">
-                      <Check className="w-3 h-3" aria-hidden />{summary.on} on goal
-                    </span>
-                  )}
-                  {summary.off > 0 && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-error-container text-on-error-container">
-                      <X className="w-3 h-3" aria-hidden />{summary.off} off goal
-                    </span>
-                  )}
-                  {summary.noGoal > 0 && <span><span aria-hidden>· </span>{summary.noGoal} without a goal</span>}
-                  {summary.mineEmpty > 0 && <span className="font-semibold text-on-surface"><span aria-hidden className="font-normal text-on-surface-variant">· </span>{summary.mineEmpty} of yours to fill</span>}
-                </p>
-              )}
+              <WeekStrip summary={summary} filter={statusFilter} onFilter={setStatusFilter} />
             </div>
             <div className="flex items-center gap-2">
               {auto && (
@@ -342,9 +330,10 @@ export default function Scorecard() {
             </div>
           </div>
       )}
+      {companyMode && <div ref={setStripSlot} className="text-body-sm text-on-surface-variant empty:hidden" />}
       </div>
 
-      {companyMode && <CompanyBoard weeks={weeks} thisWeek={thisWeek} />}
+      {companyMode && <CompanyBoard weeks={weeks} thisWeek={thisWeek} isAdmin={isAdmin} stripSlot={stripSlot} filter={statusFilter} onFilter={setStatusFilter} />}
 
       {!companyMode && error && (
         <div role="alert" className="mb-4 rounded-xl bg-error-container text-on-error-container px-4 py-3 text-body-sm flex items-center gap-2">
@@ -363,10 +352,10 @@ export default function Scorecard() {
         <div role="status" aria-label="Loading the scorecard" className="animate-pulse rounded-2xl bg-surface-container h-96" />
       ) : metrics && (
         <>
-          {shown.length ? (
+          {visible.length ? (
             <ScorecardTable
               board={board}
-              metrics={shown}
+              metrics={visible}
               values={values}
               weeks={weeks}
               thisWeek={thisWeek}
@@ -374,15 +363,28 @@ export default function Scorecard() {
               isAdmin={isAdmin}
               onSave={save}
               onEditMetric={setEditing}
+              canEditTarget={canEditTarget}
+              onEditTarget={setTargeting}
             />
+          ) : shown.length ? (
+            <NoMatch filter={statusFilter} week={summary.week} where={`of ${board.label}${boardMarkets.length > 1 ? ` · ${MARKET_LABEL[market]}` : ''}`} onShowAll={() => setStatusFilter(null)} />
           ) : (
             <p className="rounded-2xl border border-outline-variant bg-surface-container-low px-6 py-5 text-body-md text-on-surface">No measurables here yet.</p>
           )}
           <p className="mt-3 text-body-sm text-on-surface-variant">
-            Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the goal, red with a cross misses it; a measurable without a goal is not colored. The week in progress shows its numbers so far, in italics, updated every 3 hours, and takes no color until it closes. Percentages are typed as percent numbers (95 = 95%). Rows marked PIM fill themselves every week and can't be edited; a dot marks each number the PIM filled.
-            {isAdmin ? ' As an admin you can edit every other number; the pencil edits a measurable (owner, goal, theme) — turning "Filled by the PIM" off makes a row typed by hand again.' : ' Every other number is typed by its owner.'}
+            Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the target, red with a cross misses it; a measurable without a target is not colored. The counters over the table — on target, off target, without a target — show only those measurables when pressed, by the numbers of the week they name. The week in progress shows its numbers so far, in italics, updated every 3 hours, and takes no color until it closes. Percentages are typed as percent numbers (95 = 95%). Rows marked PIM fill themselves every week and can't be edited; a dot marks each number the PIM filled.
+            {isAdmin ? ' As an admin you can edit every other number; click the Target of a measurable to set or change it, and the pencil edits the rest (owner, theme) — turning "Filled by the PIM" off makes a row typed by hand again.' : ' Every other number is typed by its owner.'}
           </p>
         </>
+      )}
+
+      {targeting && (
+        <TargetDialog
+          metric={targeting}
+          context={`${board.label}${targeting.market ? ` · ${MARKET_LABEL[targeting.market]}` : ''}`}
+          onSave={(target) => saveTarget(targeting, target)}
+          onClose={() => setTargeting(null)}
+        />
       )}
 
       {editing && (
