@@ -14,11 +14,27 @@
 // new dates all take the same path. Table channel_deal_prices holds what the
 // PIM put on each channel.
 //
+// The cron calls every 10 minutes, and most calls end after a few small reads
+// of the database (user, 2026-11-13: a deal made for the 15th has nothing to
+// do on the 13th, and the app must not get slow):
+//   - no deal runs today on these channels and nothing is on record: two reads;
+//   - else what the PIM wants today is worked out (database only) and a channel
+//     is LOOKED AT — Best Buy's offers read, Walmart's promotions — only when
+//     that changed since its last look, when something on record is due (sent
+//     and not seen yet, refused and to be tried again, a Walmart price to read
+//     again), or when the look is LOOK_EVERY_MS old (app_settings
+//     channel_deals_state: per channel, what was wanted and when to look next).
+//
 //   Best Buy     an offer holds ONE discount. The deal's goes on for its days
-//                (it takes the monthly promotion's place); when the deal is
-//                over the monthly promotion's discount is sent again for the
-//                products in the one running. The live offers are read every
-//                run, so a discount something else sent over is put back.
+//                and takes the place of whatever the offer held — the monthly
+//                promotion's, or one scheduled for later (next month's, sent
+//                when its list was loaded: seen on the first real send,
+//                2026-11-13). When the deal is over the monthly promotion's
+//                discount is sent again for the products in the one running;
+//                else the discount the offer held before (`before`) goes
+//                back, if it is still to end. The live offers are read at
+//                every look (half an hour apart at most), so a discount
+//                something else sent over is put back.
 //   Walmart      a SKU cannot hold two promotions on the same days. The deal
 //                is carved out of what is there (_shared/walmartPromoPlan.js):
 //                what touches its days is deleted, the deal's promotion is
@@ -45,7 +61,8 @@
 // homeDepotCaNlp.js, priceTolerance.js).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { etToday } from "../_shared/promoCalendar.ts";
+import { etToday, promoWindow, windowContains, PROMO_DATE_COLUMNS } from "../_shared/promoCalendar.ts";
+import type { PromoLike } from "../_shared/promoCalendar.ts";
 import { isServiceRole } from "../_shared/serviceRole.ts";
 import { excludedSet } from "../_shared/exclusions.ts";
 import { bbDiscount, discountRunning } from "../_shared/bestbuyDiscount.ts";
@@ -63,6 +80,13 @@ const DEAL_KINDS = ["flash", "mk_event", "special"];
 const TABLE = "channel_deal_prices";
 const RUN_KEY = "channel_deals_run";
 const LOCK_KEY = "channel_deals_lock";
+const STATE_KEY = "channel_deals_state";
+const MARKET: Record<Channel, "ca" | "us"> = { bestbuy: "ca", walmart_ca: "ca", walmart_us: "us" };
+// With nothing new in the PIM and nothing due, a channel is looked at again this
+// often. Best Buy: its offers are read, so a discount something else sent over
+// the deal's is put back. Walmart: only whether a product got listed since — a
+// price on record there is read again once a day (RECHECK_MS).
+const LOOK_EVERY_MS: Record<Channel, number> = { bestbuy: 30 * 60_000, walmart_ca: 2 * 3600_000, walmart_us: 2 * 3600_000 };
 
 const RUN_BUDGET_MS = 110_000;
 const WM_SKUS_PER_RUN = 40;            // each one is a read of its promotions on Walmart
@@ -105,10 +129,16 @@ function etInstant(day: string, time: string): number {
   }
   return new Date(`${day}T${time}-05:00`).getTime();
 }
-// The Pacific calendar day a Mirakl discount ends on (Best Buy keeps whole Pacific days).
+// Best Buy keeps a discount's days as whole days seven hours behind UTC, all
+// year: Oct 22 is stored 2026-10-22T07:00:00Z and Dec 3 is 2026-12-03T07:00:00Z
+// (read on the offers, 2026-11-13) — the Pacific day in summer, an hour off it
+// in winter. Read with the Pacific time zone, a December start came out a day
+// early.
+const BB_DAY_MS = 7 * 3600_000;
+/** The day a Best Buy discount ends on. */
 const pacificDay = (v: unknown): string | null => {
   const t = typeof v === "string" ? Date.parse(v) : NaN;
-  return Number.isFinite(t) ? new Date(t - 1000).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }) : null;
+  return Number.isFinite(t) ? new Date(t - 1000 - BB_DAY_MS).toISOString().slice(0, 10) : null;
 };
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -121,7 +151,9 @@ type Row = {
   channel: Channel; sku: string; promotion_id: number | null; price: number; ends_on: string; mode: "discount" | "created" | "found";
   live_start: string | null; live_end: string | null; pending: Segment[] | null; confirmed: boolean; applied_at: string; checked_at: string | null;
   attempts: number; last_error: string | null; next_try_at: string | null;
+  before: Held | null; // Best Buy: the discount the offer held when the deal's took its place
 };
+type Held = { price: number; start: string; end: string };
 type Segment = { what: string; price: number; start: number; end: number };
 type Deal = { price: number; base: number; id: number | null; name: string; start: string; end: string };
 type Monthly = { price: number; start: string; end: string };
@@ -173,6 +205,22 @@ async function expected(channel: Channel, today: string, prices: ReturnType<type
   }
   return { deals, monthly, baseBySku: baseBySku as Map<string, unknown>, skipped, names: [...names] };
 }
+type Expected = Awaited<ReturnType<typeof expected>>;
+type Look = { sig: string; next_at: number };
+
+/** What the PIM wants on a channel today, as one short text: the same text = nothing new to do. */
+async function signature(today: string, e: Expected): Promise<string> {
+  const text = [
+    today,
+    ...[...e.deals].map(([sku, d]) => `${sku}|${d.price}|${d.base}|${d.id}|${d.start}|${d.end}`).sort(),
+    "#",
+    ...[...e.monthly].map(([sku, m]) => `${sku}|${m.price}|${m.start}|${m.end}`).sort(),
+    "#",
+    ...e.skipped.map((s) => `${s.sku}|${s.reason}`).sort(),
+  ].join("\n");
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
 
 // ============================== Best Buy ==============================
 
@@ -199,6 +247,20 @@ const discountPrice = (d: Record<string, unknown> | null) =>
   !d ? null : typeof d.discount_price === "number" ? d.discount_price : num((d.ranges as { price?: unknown }[] | undefined)?.[0]?.price);
 // The offer's own price: while a discount runs Mirakl's `price` is the discounted one.
 const offerPrice = (o: Offer) => num(o.discount?.origin_price) ?? o.price;
+/** The day a Best Buy discount starts on. */
+const pacificStart = (v: unknown): string | null => {
+  const t = typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(t) ? new Date(t - BB_DAY_MS).toISOString().slice(0, 10) : null;
+};
+/** The discount an offer holds now, to put back later: null when it has none or it has ended. */
+function heldDiscount(o: Offer): Held | null {
+  const d = o.discount;
+  const price = discountPrice(d);
+  const start = pacificStart(d?.start_date);
+  const end = pacificDay(d?.end_date);
+  const ends = typeof d?.end_date === "string" ? Date.parse(d.end_date) : NaN;
+  return price != null && start && end && ends > Date.now() ? { price, start, end } : null;
+}
 /** Does the offer carry this discount (price and last day), still to end? */
 function hasDiscount(o: Offer, price: number, end: string) {
   const d = o.discount;
@@ -208,13 +270,12 @@ function hasDiscount(o: Offer, price: number, end: string) {
 }
 
 type BbJob =
-  | { kind: "set"; sku: string; row: Row | null; line: Line; deal: Deal; why: string }
+  | { kind: "set"; sku: string; row: Row | null; line: Line; deal: Deal; why: string; before: Held | null }
   | { kind: "back"; sku: string; row: Row; line: Line; to: number | null };
 
-async function planBestBuy(today: string, force: boolean, prices: ReturnType<typeof createPriceAlignment>, rows: Map<string, Row>) {
+async function planBestBuy(today: string, force: boolean, e: Expected, rows: Map<string, Row>) {
   const key = Deno.env.get("BESTBUY_API_KEY");
   if (!key) throw new Error("BESTBUY_API_KEY is not set");
-  const e = await expected("bestbuy", today, prices, rows);
   const offers = await readOffers(key);
   const out = {
     jobs: [] as BbJob[], adopt: [] as { sku: string; fields: Partial<Row> }[], drop: [] as string[], skipped: e.skipped, running: e.names, wanted: 0, on: 0, waiting: 0, key,
@@ -239,6 +300,13 @@ async function planBestBuy(today: string, force: boolean, prices: ReturnType<typ
       if (hasDiscount(o, m.price, m.end)) { out.drop.push(sku); continue; }
       if (waits(row, force)) { out.waiting += 1; continue; }
       out.jobs.push({ kind: "back", sku, row, to: m.price, line: line(sku, o, base, bbDiscount(m.price, m.start, m.end)) });
+    } else if (row.before && row.before.end >= today && hasDiscount(o, row.before.price, row.before.end)) {
+      out.drop.push(sku); // what it held before the deal is back already
+    } else if (row.before && row.before.end >= today && (base == null || row.before.price < base)) {
+      // Not in the running monthly promotion: the discount the offer held before
+      // the deal (one scheduled for later) goes back as it was.
+      if (waits(row, force)) { out.waiting += 1; continue; }
+      out.jobs.push({ kind: "back", sku, row, to: row.before.price, line: line(sku, o, base, bbDiscount(row.before.price, row.before.start, row.before.end)) });
     } else if (row.mode === "discount" && discountRunning(o.discount) && same(discountPrice(o.discount), num(row.price))) {
       // Ended early (or the product left the list): the deal's discount is still on.
       // (One the PIM only found at that price — mode "found" — is never taken off.)
@@ -270,7 +338,10 @@ async function planBestBuy(today: string, force: boolean, prices: ReturnType<typ
     }
     if (waits(row, force)) { out.waiting += 1; continue; }
     const why = !row ? "the deal runs today" : !same(num(row.price), d.price) ? "the deal's price changed" : row.ends_on !== d.end ? "the deal's last day changed" : row.confirmed ? "another discount went over it" : "not on Best Buy yet";
-    out.jobs.push({ kind: "set", sku, row, deal: d, why, line: line(sku, o, d.base, bbDiscount(d.price, d.start, d.end)) });
+    // What the offer holds now is noted once, to put back when the deal is over
+    // (never the deal's own discount, sent by a run before this one).
+    const before = row ? row.before ?? null : heldDiscount(o);
+    out.jobs.push({ kind: "set", sku, row, deal: d, why, before, line: line(sku, o, d.base, bbDiscount(d.price, d.start, d.end)) });
   }
   return out;
 }
@@ -283,7 +354,7 @@ async function runBestBuy(plan: Awaited<ReturnType<typeof planBestBuy>>, jobs: B
     const attempts = j.row && !j.row.confirmed ? (j.row.attempts ?? 0) + 1 : j.kind === "back" ? (j.row.attempts ?? 0) + 1 : 0;
     const wait = new Date(Date.now() + (attempts > 1 ? backoff(attempts - 1) : SENT_WAIT_MS)).toISOString();
     if (j.kind === "set") {
-      await saveRow("bestbuy", j.sku, { promotion_id: j.deal.id, price: j.deal.price, ends_on: j.deal.end, mode: "discount", confirmed: false, applied_at: sentAt, attempts, next_try_at: wait, pending: null });
+      await saveRow("bestbuy", j.sku, { promotion_id: j.deal.id, price: j.deal.price, ends_on: j.deal.end, mode: "discount", confirmed: false, applied_at: sentAt, attempts, next_try_at: wait, pending: null, before: j.before });
     } else {
       await admin.from(TABLE).update({ attempts, next_try_at: wait }).eq("channel", "bestbuy").eq("sku", j.sku);
     }
@@ -368,9 +439,8 @@ type WmOp = {
 };
 type WmCandidate = { kind: "set" | "back"; sku: string; row: Row | null; why: string };
 
-async function planWalmart(market: "ca" | "us", today: string, force: boolean, prices: ReturnType<typeof createPriceAlignment>, rows: Map<string, Row>, now: number) {
+async function planWalmart(market: "ca" | "us", force: boolean, e: Expected, rows: Map<string, Row>, now: number) {
   const cfg = WM[market];
-  const e = await expected(cfg.channel, today, prices, rows);
   const skus = [...new Set([...e.deals.keys(), ...rows.keys()])];
   const out = { candidates: [] as WmCandidate[], skipped: e.skipped, running: e.names, wanted: 0, on: 0, waiting: 0, e, wsku: new Map<string, string>() };
   if (!skus.length) return out;
@@ -671,13 +741,24 @@ Deno.serve(async (req) => {
     if (!dryRun) channels = channels.filter((c) => !off.includes(c));
     if (!channels.length) return json({ today, skipped: "The promotion automation is off in Settings for these marketplaces." });
 
-    // Nothing on the channels and no deal for them: most runs end here.
-    const [onChannels, anyDeal] = await Promise.all([
-      admin.from(TABLE).select("sku", { count: "exact", head: true }).in("channel", channels),
-      admin.from("promotions").select("id").in("kind", DEAL_KINDS).neq("status", "ended").overlaps("marketplaces", channels).limit(1),
+    // What is in play: the prices on record and the deals that run TODAY on
+    // these channels. A deal made for another day has nothing to do yet: with
+    // nothing on record either, the run ends here after three small reads.
+    const rowsOf = new Map<Channel, Map<string, Row>>(CHANNELS.map((c) => [c, new Map()]));
+    const [, dealRows] = await Promise.all([
+      (async () => {
+        for (let from = 0; ; from += 1000) {
+          const page = must(await admin.from(TABLE).select("*").in("channel", channels).order("channel").order("sku").range(from, from + 999), "Read the deal prices on the marketplaces") as Row[];
+          for (const r of page) rowsOf.get(r.channel)!.set(r.sku, r);
+          if (page.length < 1000) break;
+        }
+      })(),
+      admin.from("promotions").select(`marketplaces, period, ${PROMO_DATE_COLUMNS}`).in("kind", DEAL_KINDS).neq("status", "ended").overlaps("marketplaces", channels),
     ]);
-    if (onChannels.error) throw new Error(`Read the deal prices on the marketplaces: ${onChannels.error.message}`);
-    if (!onChannels.count && !(must(anyDeal, "Read the deals") as unknown[]).length) return json({ today, nothing_to_do: true, owed: 0 });
+    const dealsNow = must(dealRows, "Read the deals") as (PromoLike & { marketplaces: string[] | null })[];
+    const inPlay = channels.filter((c) => rowsOf.get(c)!.size > 0 ||
+      dealsNow.some((d) => (d.marketplaces ?? []).includes(c) && windowContains(promoWindow(d, MARKET[c]), today)));
+    if (!inPlay.length) return json({ today, nothing_to_do: true, owed: 0 });
 
     const memo = new Map<string, Promise<unknown>>();
     const sharedLoad = (key: string, loader: () => Promise<unknown>) => {
@@ -685,12 +766,37 @@ Deno.serve(async (req) => {
       return memo.get(key);
     };
     const prices = createPriceAlignment({ db: admin, sharedLoad });
-    const rowsOf = new Map<Channel, Map<string, Row>>(CHANNELS.map((c) => [c, new Map()]));
-    for (let from = 0; ; from += 1000) {
-      const page = must(await admin.from(TABLE).select("*").in("channel", channels).order("channel").order("sku").range(from, from + 999), "Read the deal prices on the marketplaces") as Row[];
-      for (const r of page) rowsOf.get(r.channel)!.set(r.sku, r);
-      if (page.length < 1000) break;
+    const totals: Totals = { set: 0, back: 0, failed: 0, new_failures: 0, owed: 0, errors: [] };
+    const report: Record<string, unknown> = {};
+    const lines: Record<string, unknown>[] = [];
+    const failed = (channel: Channel, err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      report[channel] = { ...(report[channel] as Record<string, unknown> ?? {}), error: message };
+      if (totals.errors.length < MAX_LIST) totals.errors.push(`${LABEL[channel]}: ${message}`.slice(0, 260));
+    };
+
+    // What the PIM wants on each channel today — database reads only. A channel
+    // is looked at (Best Buy's offers, Walmart's promotions) only when that
+    // changed since its last look, when something on record is due, or when the
+    // look is old (see `Look`); a dry run, `force` and `limit` always look.
+    const { data: kept } = await admin.from("app_settings").select("value").eq("key", STATE_KEY).maybeSingle();
+    const state = { ...((kept?.value ?? {}) as Partial<Record<Channel, Look>>) };
+    const wanted = new Map<Channel, { e: Expected; sig: string }>();
+    await Promise.all(inPlay.map(async (channel) => {
+      try {
+        const e = await expected(channel, today, prices, rowsOf.get(channel)!);
+        wanted.set(channel, { e, sig: await signature(today, e) });
+      } catch (err) {
+        failed(channel, err);
+      }
+    }));
+    const due = [...wanted.keys()].filter((c) =>
+      dryRun || force || limit != null || state[c]?.sig !== wanted.get(c)!.sig || Date.now() >= (state[c]?.next_at ?? 0));
+    for (const c of channels) {
+      if (due.includes(c) || report[c]) continue;
+      report[c] = wanted.has(c) ? { unchanged: true, next_look: iso(state[c]!.next_at) } : { deals: [], products: 0 };
     }
+    if (!due.length && !totals.errors.length) return json({ today, nothing_to_do: true, owed: 0, channels: report });
 
     // One run at a time (a dry run only reads, so it never waits).
     if (!dryRun) {
@@ -701,27 +807,28 @@ Deno.serve(async (req) => {
       locked = true;
     }
     const deadline = Date.now() + RUN_BUDGET_MS;
-    const totals: Totals = { set: 0, back: 0, failed: 0, new_failures: 0, owed: 0, errors: [] };
-    const report: Record<string, unknown> = {};
-    const lines: Record<string, unknown>[] = [];
+    const busy = new Set<Channel>(); // sent, owed or failed: looked at again by the next run
 
-    await Promise.all(channels.map(async (channel) => {
+    await Promise.all(due.map(async (channel) => {
+      const { e } = wanted.get(channel)!;
       try {
         if (channel === "bestbuy") {
-          const plan = await planBestBuy(today, force, prices, rowsOf.get(channel)!);
+          const plan = await planBestBuy(today, force, e, rowsOf.get(channel)!);
           const take = limit ? plan.jobs.slice(0, limit) : plan.jobs;
           report[channel] = { deals: plan.running, products: plan.wanted, on: plan.on, to_set: plan.jobs.filter((j) => j.kind === "set").length, to_back: plan.jobs.filter((j) => j.kind === "back").length, waiting: plan.waiting, skipped: plan.skipped.slice(0, 200), ...(dryRun ? { monthly_members: plan.monthly_members, monthly_on: plan.monthly_on, sample: plan.sample } : {}) };
           for (const j of take) lines.push(j.kind === "set"
-            ? { channel, action: "discount", sku: j.sku, price: j.deal.price, regular: j.deal.base, from: j.deal.start, to: j.deal.end, deal: j.deal.name, why: j.why }
-            : { channel, action: j.to != null ? "monthly discount back" : "discount off", sku: j.sku, price: j.to, line: j.line });
+            ? { channel, action: "discount", sku: j.sku, price: j.deal.price, regular: j.deal.base, from: j.deal.start, to: j.deal.end, deal: j.deal.name, why: j.why, ...(j.before ? { takes_the_place_of: j.before } : {}) }
+            : { channel, action: j.to != null ? "discount back" : "discount off", sku: j.sku, price: j.to, line: j.line });
           if (dryRun) return;
           for (const a of plan.adopt) await saveRow(channel, a.sku, a.fields);
           for (const sku of plan.drop) await dropRow(channel, sku);
           totals.owed += plan.jobs.length - take.length;
+          // What is sent is seen on Best Buy by the next run, which confirms it.
+          if (plan.jobs.length) busy.add(channel);
           if (take.length) (report[channel] as Record<string, unknown>).import = await runBestBuy(plan, take, totals);
         } else {
-          const market = channel === "walmart_ca" ? "ca" : "us";
-          const plan = await planWalmart(market, today, force, prices, rowsOf.get(channel)!, now);
+          const market = MARKET[channel];
+          const plan = await planWalmart(market, force, e, rowsOf.get(channel)!, now);
           const take = plan.candidates.slice(0, limit ?? WM_SKUS_PER_RUN);
           report[channel] = { deals: plan.running, products: plan.wanted, on: plan.on, to_look_at: plan.candidates.length, waiting: plan.waiting, skipped: plan.skipped.slice(0, 200) };
           if (!take.length) return;
@@ -734,18 +841,49 @@ Deno.serve(async (req) => {
             create: op.creates.map((s) => ({ what: s.what, price: s.price, from: iso(s.start), to: iso(s.end) })),
           });
           totals.owed += plan.candidates.length - take.length;
+          // Something sent, left for later, or a product Walmart could not be read for.
+          if (ops.length || settled.on + settled.back < take.length || plan.candidates.length > take.length) busy.add(channel);
           if (dryRun || !ops.length) return;
           await runWalmart(market, token, ops, deadline, totals);
         }
       } catch (err) {
         // One marketplace failing does not stop the others.
-        const message = err instanceof Error ? err.message : String(err);
-        report[channel] = { ...(report[channel] as Record<string, unknown> ?? {}), error: message };
-        if (totals.errors.length < MAX_LIST) totals.errors.push(`${LABEL[channel]}: ${message}`.slice(0, 260));
+        busy.add(channel);
+        failed(channel, err);
       }
     }));
 
     if (dryRun) return json({ dryRun: true, today, off, channels: report, lines: lines.slice(0, 400), errors: totals.errors });
+
+    // When each channel is looked at next while the PIM wants the same: at once
+    // if this run sent or owes something, else when something on record is due
+    // (a wait that ends, a Walmart price to read again), LOOK_EVERY_MS at most.
+    if (due.length) {
+      const next = new Map<Channel, number>(due.map((c) => [c, busy.has(c) ? 0 : Date.now() + LOOK_EVERY_MS[c]]));
+      try {
+        for (let from = 0; ; from += 1000) {
+          const page = must(await admin.from(TABLE).select("channel, next_try_at, live_end, checked_at").in("channel", due).order("channel").order("sku").range(from, from + 999), "Read the deal prices on the marketplaces") as Row[];
+          for (const r of page) {
+            let at = next.get(r.channel)!;
+            if (r.next_try_at) at = Math.min(at, Date.parse(r.next_try_at));
+            if (r.channel !== "bestbuy") {
+              if (r.live_end) at = Math.min(at, Date.parse(r.live_end));
+              at = Math.min(at, (r.checked_at ? Date.parse(r.checked_at) : 0) + RECHECK_MS);
+            }
+            next.set(r.channel, at);
+          }
+          if (page.length < 1000) break;
+        }
+      } catch (err) {
+        // Not known when something is due: the next run looks.
+        console.error("[channel-deals] next look not worked out:", err instanceof Error ? err.message : err);
+        for (const c of due) next.set(c, 0);
+      }
+      for (const c of due) state[c] = { sig: wanted.get(c)!.sig, next_at: next.get(c)! };
+      const { error: stateErr } = await admin.from("app_settings").upsert({ key: STATE_KEY, value: state, updated_at: new Date().toISOString() }, { onConflict: "key" });
+      // Not saved: without a state every run looks, as before this was kept.
+      if (stateErr) await admin.from("app_settings").delete().eq("key", STATE_KEY);
+    }
 
     await admin.from("app_settings").upsert({ key: LOCK_KEY, value: { until: null }, updated_at: new Date().toISOString() }, { onConflict: "key" });
     locked = false;

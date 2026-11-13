@@ -24,6 +24,8 @@ create table if not exists public.channel_deal_prices (
   live_start timestamptz,                -- the promotion on the channel that carries the price
   live_end timestamptz,
   pending jsonb,                         -- Walmart: promotions still to create once the deleted ones are gone
+  before jsonb,                          -- Best Buy: the discount the offer held when the deal's took its place
+                                         -- ({ price, start, end }) — put back when the deal is over, if still to end
   confirmed boolean not null default false,
   applied_at timestamptz not null default now(),
   checked_at timestamptz,                -- when the channel was last read for this product
@@ -32,6 +34,8 @@ create table if not exists public.channel_deal_prices (
   next_try_at timestamptz,               -- a change sent or refused waits until then
   primary key (channel, sku)
 );
+-- (added the same day, after the first real send showed offers already holding next month's discount)
+alter table public.channel_deal_prices add column if not exists before jsonb;
 create index if not exists channel_deal_prices_promotion on public.channel_deal_prices (promotion_id);
 
 alter table public.channel_deal_prices enable row level security;
