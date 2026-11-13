@@ -38,6 +38,10 @@ export function channelLevelFor(channel, promotion) {
 // monthly promotion's.
 const SD_DEAL_HOW = "Automatic: the deal's price goes on the store the day it starts (at once when that is today) and comes off the day after it ends.";
 
+// A flash deal, MK event or peak season event made for Best Buy or a Walmart
+// goes there by itself too (channel-deals, 2026-11-13): `dealHow` is what its
+// row says while the automation is on.
+const WM_DEAL_HOW = "Automatic: the deal's price goes on Walmart the day it starts and comes off when it ends. A product in the monthly promotion goes back to that price; one already at the deal's price is left as it is.";
 export const PROMO_CHANNELS = [
   { key: 'wix_sinksdirect_ca', label: 'Sinks Direct Canada', monogram: 'SD', market: 'ca', kind: 'api', stamp: 'ca_applied_at',
     how: 'Automatic. Promo MAP CAD goes live on the first Thursday.', dealHow: SD_DEAL_HOW },
@@ -52,7 +56,8 @@ export const PROMO_CHANNELS = [
   { key: 'wix_stylish_us', label: 'Stylish USA', monogram: 'ST', market: 'us', kind: 'api', kinds: ['special'], discounts: true,
     how: "Automatic: the event's discount goes on the store the first day and comes off when it ends. The MSRP stays as it is." },
   { key: 'bestbuy', label: 'Best Buy Canada', monogram: 'BB', market: 'ca', kind: 'api', stamp: 'bb_scheduled_at',
-    how: 'Scheduled discounts sent when the list loads. Check the portal: API discounts have not shown up so far.' },
+    how: 'Scheduled discounts sent when the list loads. Check the portal: API discounts have not shown up so far.',
+    dealHow: "Automatic: the deal's discount goes on Best Buy the day it starts, and when it ends the monthly promotion's comes back for the products in it." },
   { key: 'wayfair_ca', label: 'Wayfair Canada', monogram: 'WF', market: 'ca', kind: 'portal_file', filler: 'wayfair', priceStart: 'wayfair_price_start', priceChange: 'wayfair_price_change', savedStart: 'price_start', auditTarget: 'wayfair',
     how: "Upload the promotions file downloaded from Partner Home. The PIM fills the base cost, keeps only the promotion's rows and adds missing members. Promo MAP lowers the MAP the day it starts, Back to Blue returns it the day it ends." },
   // Wayfair (both markets) always works from the file downloaded from Partner
@@ -86,7 +91,8 @@ export const PROMO_CHANNELS = [
   // Walmart Canada goes by API, and can also produce the Seller Center
   // price & promotion file when a promotions template is uploaded.
   { key: 'walmart_ca', label: 'Walmart Canada', monogram: 'WM', market: 'ca', kind: 'api', stamp: 'wm_ca_scheduled_at', schedule: 'walmart_ca', marketplace: /walmart.*(\bca\b|canada)/i, fill: 'walmart_ca',
-    how: 'Automatic: promotional prices sent through the Walmart API the day before the Canada window opens (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the Seller Center price & promotion file instead.' },
+    how: 'Automatic: promotional prices sent through the Walmart API the day before the Canada window opens (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the Seller Center price & promotion file instead.',
+    dealHow: WM_DEAL_HOW },
   // Home Depot USA runs on Mirakl: its promotions file is the offers import
   // (sku, price, msrp, discount-price + dates). Regular = MAP USD.
   // dateStamps: the time + offset of every date column, as in the filled
@@ -111,7 +117,8 @@ export const PROMO_CHANNELS = [
   // Walmart USA goes by API too (feed `promo`, since 2026-09-28), and can
   // still produce the Seller Center file when a promotions template is uploaded.
   { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us', kind: 'api', stamp: 'wm_us_scheduled_at', schedule: 'walmart_us', marketplace: /walmart.*\bus(a)?\b/i, costSlug: null,
-    how: 'Automatic: promotional prices sent through the Walmart API the day before the 1st (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the promotions file instead.' },
+    how: 'Automatic: promotional prices sent through the Walmart API the day before the 1st (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the promotions file instead.',
+    dealHow: WM_DEAL_HOW },
 ];
 
 /**

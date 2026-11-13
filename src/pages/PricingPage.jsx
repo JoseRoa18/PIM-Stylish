@@ -78,6 +78,7 @@ import StylishDiscountFields, { PromoStylishDiscount } from '@/features/pricing/
 import { buildStylishDiscount, draftHasPrices, emptyStylishDraft, stylishMarkets } from '@/features/pricing/lib/stylishDraft';
 import { STYLISH_CHANNELS, discountFor, CUSTOMER_OFF } from '@/features/pricing/lib/stylishDiscount';
 import { goesToSinksDirect, sendSinksDirectDeals, sinksDirectLive, onSinksDirectSent, SINKS_DIRECT_SITE_OF } from '@/features/pricing/api/sinksDirectDeals';
+import { DEAL_API_CHANNELS, goesToApiChannels, channelDealsLive } from '@/features/pricing/api/channelDeals';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 import { alignTiles, priceSide, PRICE_SIDE_LABEL } from '@/features/pricing/lib/alignmentTiles';
 import { TOLERANCE_FROM, TOLERANCE_HIGH, TOLERANCE_LOW } from '@/features/pricing/lib/priceTolerance';
@@ -2167,8 +2168,12 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                 if (goesToSinksDirect(promo)) sendDealsNow(promo.name);
                 // An updated list re-schedules the Best Buy discounts (the
                 // OF24 import overwrites the previous ones and clears the
-                // SKUs that left).
-                scheduleBestBuyInBackground(promo, onChanged);
+                // SKUs that left) — of the monthly promotion, and of a deal
+                // made for Best Buy. A deal for other portals sends it nothing:
+                // until 2026-11-13 Import list on a Walmart-only flash deal
+                // would have scheduled its 41 products on Best Buy too (found
+                // with every call captured; it had never happened for real).
+                if ((promo.kind ?? 'monthly') === 'monthly' || (promo.marketplaces ?? []).includes('bestbuy')) scheduleBestBuyInBackground(promo, onChanged);
                 // Walmart Canada already scheduled: the SKUs that left the
                 // Canada list lose its promo there (joined ones are sent by
                 // hand from the Walmart row). Its own card, like Best Buy's.
@@ -3004,6 +3009,17 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
     return () => { active = false; off(); };
   }, [promo.id, toSinksDirect]);
 
+  // What a deal made for Best Buy or a Walmart has there now (the edge function
+  // channel-deals, every 10 minutes): read when the card opens.
+  const [apiLive, setApiLive] = useState(null);
+  const toApiChannels = goesToApiChannels(promo);
+  useEffect(() => {
+    if (!toApiChannels) return undefined;
+    let active = true;
+    channelDealsLive(promo.id).then((live) => { if (active) setApiLive(live); }).catch(() => {});
+    return () => { active = false; };
+  }, [promo.id, toApiChannels]);
+
   useEffect(() => {
     let active = true;
     supabase
@@ -3123,6 +3139,22 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
           else status = dealLive ? 'Going on…' : 'Checking…';
           if (on.live) detail += ` ${on.live} product${on.live === 1 ? '' : 's'} carry its price there now.`;
           if (on.failed) detail += ` ${on.failed} could not go: Wix no longer has ${on.failed === 1 ? 'that product' : 'those products'} or refused the change (the Activity Log names them).`;
+        } else if (toApiChannels && DEAL_API_CHANNELS.includes(ch.key) && automation && automation.enabled !== false && automation[ch.key] !== false) {
+          // A deal on Best Buy or a Walmart: what channel-deals has put there.
+          const w = promoWindow(promo, ch.market);
+          const today = etToday();
+          const on = apiLive?.[ch.key] ?? { live: 0, failed: 0, pending: 0 };
+          const place = ch.key === 'bestbuy' ? 'Best Buy' : 'Walmart';
+          detail = ch.dealHow ?? detail;
+          tone = 'muted';
+          if (promo.status === 'ended' || today > w.end) status = on.live + on.pending ? `Taking back ${on.live + on.pending}` : 'Back at regular prices';
+          else if (today < w.start) status = `Starts ${dayOf(w.start)}`;
+          else if (on.live) { status = `${on.live} on ${place}${on.pending ? ` · ${on.pending} on ${on.pending === 1 ? 'its' : 'their'} way` : ''}${on.failed ? ` · ${on.failed} not sent` : ''}`; tone = 'ok'; }
+          else if (on.pending) status = `${on.pending} on ${on.pending === 1 ? 'its' : 'their'} way`;
+          else if (on.failed) { status = `${on.failed} not sent`; tone = 'warn'; }
+          else status = apiLive ? 'Going on…' : 'Checking…';
+          if (on.live) detail += ` ${on.live} product${on.live === 1 ? '' : 's'} carry its price there now.`;
+          if (on.failed) detail += ` ${on.failed} could not go: ${place} refused the change (the Activity Log says why); the PIM tries again by itself.`;
         } else if (ch.key === 'bestbuy') {
           const sch = promo.bb_schedule;
           status = sch ? `${sch.scheduled} scheduled` : 'Not scheduled';
