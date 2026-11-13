@@ -25,6 +25,7 @@ export const AUTO_KEYS = {
   deal_count: { label: '# flash deals, MK events and peak season events of the week', unit: 'number' },
   // Pricing → Coupons (user, 2026-11-09): Amazon and Wayfair, both countries.
   coupon_count: { label: '# coupons of the week (Pricing, Coupons tab)', unit: 'number' },
+  coupon_skus: { label: '# SKUs in the coupons of the week, each product once (Pricing, Coupons tab)', unit: 'number' },
   // Odoo (user, 2026-11-05): a $0 order (a spare part, a warranty
   // replacement, an open box sent free) is no sale; Sales keep the shipping
   // charged, as Odoo's own sales report. Odoo records almost no cancellation

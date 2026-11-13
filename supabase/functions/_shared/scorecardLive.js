@@ -7,7 +7,7 @@
 import { promoWindow, shiftDay, windowContains } from './promoCalendar.ts';
 import { alignmentSummary } from './alignmentSummary.js';
 
-export const LIVE_KEYS = ['map_pct', 'promo_skus', 'flash_skus', 'event_skus', 'flash_count', 'event_count', 'deal_count', 'coupon_count'];
+export const LIVE_KEYS = ['map_pct', 'promo_skus', 'flash_skus', 'event_skus', 'flash_count', 'event_count', 'deal_count', 'coupon_count', 'coupon_skus'];
 
 const DEAL_KINDS_OF = {
   flash_skus: ['flash', 'mk_event'],
@@ -43,7 +43,17 @@ export function createScorecardLive({ db, targets, latestReport }) {
   };
   const promotions = () => load('promotions', () => read(db.from('promotions').select('id, kind, status, period, marketplaces, ended_at, starts_on, ends_on, ca_starts_on, ca_ends_on, us_starts_on, us_ends_on')));
   const pricesOf = (id) => load(`prices:${id}`, () => read(db.from('promotion_prices').select('sku, promo_price_cad, promo_price_usd, in_ca, in_us').eq('promotion_id', id)));
-  const coupons = () => load('coupons', () => read(db.from('coupons').select('marketplace, starts_on, ends_on, ended_at')));
+  const coupons = () => load('coupons', () => read(db.from('coupons').select('id, marketplace, starts_on, ends_on, ended_at')));
+  /** The products of some coupons, each once. Read in pages: the API returns at most 1,000 rows. */
+  const couponSkus = (ids) => load(`couponSkus:${ids.join(',')}`, async () => {
+    const skus = new Set();
+    for (let from = 0; ids.length; from += 1000) {
+      const rows = await read(db.from('coupon_products').select('coupon_id, sku').in('coupon_id', ids).order('coupon_id').order('sku').range(from, from + 999));
+      for (const r of rows) skus.add(r.sku);
+      if (rows.length < 1000) break;
+    }
+    return skus;
+  });
   const exclusions = () => load('exclusions', async () => {
     const rows = await read(db.from('products').select('sku, channel_exclusions').not('channel_exclusions', 'is', null));
     return new Map(rows.map((p) => [p.sku, new Set(p.channel_exclusions ?? [])]));
@@ -87,8 +97,11 @@ export function createScorecardLive({ db, targets, latestReport }) {
           return w.start <= weekEnd && w.end >= week;
         });
         out[key] = key.endsWith('_count') ? deals.length : await countMembers(deals, market, channels);
-      } else if (key === 'coupon_count') {
-        out[key] = (await coupons()).filter((c) => channels.includes(c.marketplace) && c.starts_on <= weekEnd && c.ends_on >= week && !(day10(c.ended_at) != null && day10(c.ended_at) <= week)).length;
+      } else if (key === 'coupon_count' || key === 'coupon_skus') {
+        // A coupon is one marketplace's, and its list was made for it: its products as the Coupons tab
+        // shows them, a product of two coupons of the week counted once.
+        const list = (await coupons()).filter((c) => channels.includes(c.marketplace) && c.starts_on <= weekEnd && c.ends_on >= week && !(day10(c.ended_at) != null && day10(c.ended_at) <= week));
+        out[key] = key === 'coupon_count' ? list.length : (await couponSkus(list.map((c) => c.id).sort((a, b) => a - b))).size;
       } else if (key === 'map_pct') {
         let aligned = 0;
         let comparable = 0;
