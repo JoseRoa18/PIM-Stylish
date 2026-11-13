@@ -54,7 +54,7 @@ export const ASSISTANT_TABLES = {
     note: "A promotion's products: in_ca / in_us = on that market's list; promo_price_cad / promo_price_usd = the promotion price (NULL when not on that market's list); promo_costs JSON.",
     hide: ["set_costs"],
   },
-  coupons: { key: "id", note: "Coupons recorded in the PIM (Amazon and Wayfair only; nothing is sent to the marketplace)." },
+  coupons: { key: "id", note: "Coupons recorded in the PIM (Sinks Direct, Wayfair and Amazon, Canada and USA; a record only: nothing is sent to a marketplace or to a Wix store)." },
   coupon_products: { key: "coupon_id,sku", note: "A coupon's products." },
   stylish_event_discounts: { key: "site,sku", note: "Discounts the PIM has put on the Stylish Wix stores for special events." },
   scorecard_metrics: {

@@ -228,6 +228,29 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     return changes;
   }
 
+  // The switch a target answers to on a product's "Excluded marketplaces" card
+  // (Overstock shares Bed Bath & Beyond's). The Wix stores have none: they are
+  // always on, or ruled by the brand.
+  const SWITCH_OF = { overstock: 'bbb' };
+  const switchOf = (cfg) => (cfg.kind === 'wix' ? null : SWITCH_OF[cfg.promoChannel] ?? cfg.promoChannel ?? null);
+  /**
+   * The products switched off for a target. No promotion ever reaches them
+   * there — every send and every file leaves them out — so the report expects
+   * their regular price (user, 2026-11-13: P-200-2, in November's promotion and
+   * switched off for Best Buy and Walmart Canada, read "Missing promo price" on
+   * both for good).
+   */
+  async function switchedOff(cfg) {
+    const key = switchOf(cfg);
+    if (!key) return new Set();
+    const rows = await sharedLoad('products:exclusions', async () => {
+      const { data, error } = await db.from('products').select('sku, channel_exclusions').not('channel_exclusions', 'is', null).range(0, 4999);
+      if (error) throw error;
+      return data ?? [];
+    });
+    return new Set(rows.filter((p) => (p.channel_exclusions ?? []).includes(key)).map((p) => p.sku));
+  }
+
   // One MAP level column of every product (map_purple_usd…), shared.
   async function levelMapPrices(column) {
     const prods = await sharedLoad(`products:${column}`, async () => {
@@ -320,7 +343,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     if (!data?.length) return null;
     const snapshot = data[0];
     task?.progress(0.4, 'Reading the expected prices…');
-    const { baseBySku, promoBySku } = await loadExpectedPrices(cfg);
+    const [{ baseBySku, promoBySku }, off] = await Promise.all([loadExpectedPrices(cfg), switchedOff(cfg)]);
     task?.progress(0.9, 'Comparing the prices…');
 
     // Mirakl keeps the promo as a discount next to the regular price: the live
@@ -343,7 +366,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     for (const o of snapshot.results ?? []) {
       if (!baseBySku.has(o.sku)) continue; // channel SKU not in the PIM
       const base = baseBySku.get(o.sku) ?? null;
-      const promo = promoBySku.get(o.sku);
+      const promo = off.has(o.sku) ? undefined : promoBySku.get(o.sku); // switched off here: no promotion is sent
       // No price on file: Walmart CA shows prices only through a promo. A SKU
       // that should be on promo and was read with none is a missing promo;
       // any other has no price to compare and stays out.
@@ -440,10 +463,11 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     const rows = (await pageReadings(task?.part(0, 0.6), cfg.retailer)).filter((r) => r.retailer === cfg.retailer);
     if (!rows.some((r) => r.read_at)) return null;
     task?.progress(0.6, 'Reading the expected prices…');
-    const [{ baseBySku, promoBySku }, changedOn, categories] = await Promise.all([
+    const [{ baseBySku, promoBySku }, changedOn, categories, off] = await Promise.all([
       loadExpectedPrices(cfg),
       loadPriceChangeDays(cfg),
       cfg.nlpMinimum ? productCategories() : null,
+      switchedOff(cfg),
     ]);
     task?.progress(0.9, 'Comparing the prices…');
     const currency = cfg.market === 'us' ? 'USD' : 'CAD';
@@ -473,7 +497,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
       if (!readFrom || r.read_at < readFrom) readFrom = r.read_at;
       if (!readTo || r.read_at > readTo) readTo = r.read_at;
       const base = baseBySku.get(sku) ?? null;
-      let promo = promoBySku.get(sku);
+      let promo = off.has(sku) ? undefined : promoBySku.get(sku); // switched off here: no promotion is sent
       if (promo && categories && base != null && NLP_CATEGORIES.has(categories.get(sku)) && nlpDiscount(base, promo.price) < NLP_MIN_DISCOUNT) promo = undefined;
       const expected = promo?.price ?? base;
       results.push({

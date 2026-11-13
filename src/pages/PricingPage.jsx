@@ -287,7 +287,7 @@ export default function PricingPage() {
           {tab === 'flash' && 'Flash deals: short promotions on their own dates, exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
           {tab === 'mk_event' && 'MK events: promotions on their own dates at the Orange level (Bed Bath & Beyond and Overstock at Purple), exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
           {tab === 'special' && 'Peak season events: Way Day, Prime Day, Black Friday, Boxing Day. On their own dates at the Purple level, exported by hand from here. One made for Sinks Direct or the Stylish stores goes on the store by itself on its dates.'}
-          {tab === 'coupons' && 'Coupons on Amazon and Wayfair, by percentage or by money. Several can run at once, each with its products.'}
+          {tab === 'coupons' && 'Coupons on Sinks Direct, Wayfair and Amazon, by percentage or by money. Several can run at once, each with its products.'}
           {tab === 'alignment' && 'What each marketplace shows against the PIM price, promo aware.'}
         </p>
       </div>

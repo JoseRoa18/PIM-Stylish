@@ -4,7 +4,12 @@
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { PROMO_CHANNELS } from './promoChannels';
 
-export const COUPON_MARKETPLACES = PROMO_CHANNELS.filter((c) => ['amazon_ca', 'amazon_us', 'wayfair_ca', 'wayfair_us'].includes(c.key));
+// The marketplaces a coupon can be recorded for, in the portals' own order: the
+// Sinks Direct stores (user, 2026-11-13), Wayfair and Amazon, Canada and USA.
+export const COUPON_MARKETPLACES = PROMO_CHANNELS.filter((c) => ['wix_sinksdirect_ca', 'wix_sinksdirect_us', 'amazon_ca', 'amazon_us', 'wayfair_ca', 'wayfair_us'].includes(c.key));
+/** "Sinks Direct, Wayfair or Amazon": the stores a coupon can be made for, as a sentence names them. */
+const STORE_NAMES = [...new Set(COUPON_MARKETPLACES.map((c) => c.label.replace(/ (Canada|USA)$/, '')))];
+export const COUPON_STORES_TEXT = `${STORE_NAMES.slice(0, -1).join(', ')} or ${STORE_NAMES.at(-1)}`;
 const TYPE_LABEL = { percent: 'Percentage', amount: 'Money' };
 
 const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9%$]/g, '');
@@ -13,7 +18,7 @@ const HEADERS = { couponname: 'name', marketplace: 'marketplace', discounttype: 
 
 const MARKETPLACE_OF = {};
 for (const c of COUPON_MARKETPLACES) {
-  const store = c.key.split('_')[0];
+  const store = c.key.replace(/^wix_/, '').split('_')[0]; // 'wix_sinksdirect_ca' → 'sinksdirect'
   for (const alias of [c.key, c.label, `${store}${c.market}`, c.market === 'us' ? `${store}us` : `${store}canada`]) MARKETPLACE_OF[norm(alias)] = c.key;
 }
 const TYPE_OF = { percentage: 'percent', percent: 'percent', '%': 'percent', porcentaje: 'percent', money: 'amount', amount: 'amount', dinero: 'amount', $: 'amount' };
@@ -44,7 +49,7 @@ function valueOf(raw, type) {
 /** What is wrong with one coupon, in words, or null. */
 export function couponProblem(c) {
   if (!c.name) return 'It needs a name.';
-  if (!c.marketplace) return 'Pick Amazon or Wayfair, and the country.';
+  if (!c.marketplace) return `Pick ${COUPON_STORES_TEXT}, and the country.`;
   if (c.discount_type === 'percent' && !c.discount_value) return 'The percentage must be between 0 and 100.';
   if (!c.starts_on || !c.ends_on) return 'It needs a start day and an end day.';
   if (c.ends_on < c.starts_on) return 'The end day is before the start day.';
@@ -80,7 +85,7 @@ export async function parseCouponFile(file) {
     const start = dayOf(r[field.start]);
     const end = dayOf(r[field.end]);
     const sku = String(r[field.sku] ?? '').trim().toUpperCase();
-    const problem = !name ? 'no coupon name' : !marketplace ? `"${r[field.marketplace]}" is not Amazon or Wayfair, Canada or USA` : !type ? `"${r[field.type]}" is not Percentage or Money`
+    const problem = !name ? 'no coupon name' : !marketplace ? `"${r[field.marketplace]}" is not ${COUPON_STORES_TEXT}, Canada or USA` : !type ? `"${r[field.type]}" is not Percentage or Money`
       : !value ? `"${r[field.value]}" is not a valid discount` : !start ? `"${r[field.start]}" is not a date (YYYY-MM-DD)` : !end ? `"${r[field.end]}" is not a date (YYYY-MM-DD)`
         : end < start ? 'the end day is before the start day' : !sku ? 'no SKU' : null;
     if (problem) { errors.push(`${row}: ${problem}`); continue; }
@@ -115,12 +120,13 @@ export async function downloadCouponTemplate() {
         { title: 'Coupon', color: '1F3864', headers: ['Coupon Name', 'Marketplace', 'Discount Type', 'Discount', 'Start Day', 'End Day'] },
         { title: 'Product', color: '0B7A75', headers: ['SKU'] },
       ],
-      widths: [40, 18, 14, 12, 14, 14, 18],
+      widths: [40, 22, 14, 12, 14, 14, 18],
       rows: [
         example('Black Friday', 'Amazon Canada', TYPE_LABEL.percent, 10, '2026-11-27', '2026-11-30', 'S-611W'),
         example('Black Friday', 'Amazon Canada', TYPE_LABEL.percent, 10, '2026-11-27', '2026-11-30', 'K-131NR'),
         example('Holiday', 'Wayfair USA', TYPE_LABEL.amount, 25, '2026-12-01', '2026-12-15', 'S-822N'),
         example('Holiday', 'Wayfair USA', TYPE_LABEL.amount, 40, '2026-12-01', '2026-12-15', 'K-131NR'),
+        example('Boxing Week', 'Sinks Direct Canada', TYPE_LABEL.percent, 5, '2026-12-26', '2026-12-31', 'S-611W'),
       ],
     },
     {
@@ -133,7 +139,7 @@ export async function downloadCouponTemplate() {
         formats: ['topic', 'wrap'],
         rows: [
           ['Coupon Name', 'The same name on every row of the coupon.'],
-          ['Marketplace', 'Amazon or Wayfair, Canada or USA, from the list. For several marketplaces, repeat the rows with each one: each gets its own coupon.'],
+          ['Marketplace', `${COUPON_STORES_TEXT}, Canada or USA, from the list. For several marketplaces, repeat the rows with each one: each gets its own coupon.`],
           ['Discount Type', 'Percentage or Money, from the list.'],
           ['Discount', 'The number only. Percentage: one for the whole coupon, the same on every row. Money: per product, each row with the amount of its SKU in the marketplace\'s currency.'],
           ['Start Day / End Day', 'The same dates on every row of the coupon (YYYY-MM-DD).'],

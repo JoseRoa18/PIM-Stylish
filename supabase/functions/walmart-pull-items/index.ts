@@ -159,6 +159,11 @@ Deno.serve(async (req) => {
       const pushedAt = new Map<string, string>(); // last whole-promotion send to Walmart CA
       const monthlyToday = new Map<string, number>();
       const dealToday = new Map<string, number>();
+      // A product switched off for Walmart Canada gets no promotion there (the
+      // sends skip it) and the report expects none: not a member here either.
+      const switchedOff = new Set<string>(
+        ((await restGet("products?select=sku&channel_exclusions=cs.%7Bwalmart_ca%7D&limit=2000")) as { sku: string }[]).map((p) => p.sku),
+      );
       for (const pr of promos) {
         const w = promoWindow(pr, "ca");
         const monthly = (pr.kind ?? "monthly") === "monthly";
@@ -166,7 +171,7 @@ Deno.serve(async (req) => {
         const live = windowContains(w, today) && (monthly ? pr.status === "active" : (pr.marketplaces ?? []).includes("walmart_ca"));
         const current = live || (monthly ? pr.period >= monthStart : w.end >= today && (pr.marketplaces ?? []).includes("walmart_ca"));
         for (const row of pr.promotion_prices ?? []) {
-          if (row.promo_price_cad == null) continue;
+          if (row.promo_price_cad == null || switchedOff.has(row.sku)) continue;
           if (current) members.add(row.sku);
           if (pr.wm_ca_scheduled_at && (pushedAt.get(row.sku) ?? "") < pr.wm_ca_scheduled_at) pushedAt.set(row.sku, pr.wm_ca_scheduled_at);
           if (live) (monthly ? monthlyToday : dealToday).set(row.sku, Number(row.promo_price_cad));
@@ -184,7 +189,11 @@ Deno.serve(async (req) => {
       // price (or never read), or a promo on Walmart the PIM doesn't expect today.
       const suspect = (r: Record<string, unknown>) => {
         const expected = dealToday.get(String(r.sku)) ?? monthlyToday.get(String(r.sku)) ?? null;
-        if (expected != null) return !(near(liveOf(r), expected) || near(r.discount_price, expected));
+        // A promotion that already ended is none: the report reads the regular
+        // price there. Three products of a deal sat flagged on a September
+        // reading whose old promo price was the deal's (2026-11-13).
+        const stillOn = r.discount_end == null || String(r.discount_end) >= today;
+        if (expected != null) return !(near(liveOf(r), expected) || (stillOn && near(r.discount_price, expected)));
         return r.discount_price != null && liveOf(r) === r.discount_price;
       };
 
@@ -236,7 +245,13 @@ Deno.serve(async (req) => {
           row.promo_checked_at = new Date().toISOString();
           checkedNow += 1;
           if (d?.status !== "OK") { row.price = null; row.discount_price = null; row.discount_start = null; row.discount_end = null; row.promo_id = null; continue; }
-          const pr = d.payload?.pricingList?.pricing?.[0];
+          // A SKU can hold two promotions on different days (a deal, and what is
+          // left of the monthly one after it — channel-deals): the one whose days
+          // hold now is the price it sells at, else the first.
+          const list = (d.payload?.pricingList?.pricing ?? []) as { effectiveDate?: number; expirationDate?: number }[];
+          const nowMs = Date.now();
+          // deno-lint-ignore no-explicit-any
+          const pr: any = list.find((x) => (x.effectiveDate ?? 0) <= nowMs && nowMs <= (x.expirationDate ?? Infinity)) ?? list[0];
           if (!pr) continue;
           const current = pr.currentPrice?.value?.amount ?? null;
           const comparison = pr.comparisonPrice?.value?.amount ?? null;

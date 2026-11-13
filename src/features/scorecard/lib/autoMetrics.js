@@ -23,7 +23,8 @@ export const AUTO_KEYS = {
   flash_count: { label: '# flash deals of the week', unit: 'number' },
   event_count: { label: '# peak season events of the week', unit: 'number' },
   deal_count: { label: '# flash deals, MK events and peak season events of the week', unit: 'number' },
-  // Pricing → Coupons (user, 2026-11-09): Amazon and Wayfair, both countries.
+  // Pricing → Coupons (user, 2026-11-09): Amazon and Wayfair, both countries; a Sinks Direct
+  // coupon (2026-11-13) counts on that tab once it has these rows.
   coupon_count: { label: '# coupons of the week (Pricing, Coupons tab)', unit: 'number' },
   coupon_skus: { label: '# SKUs in the coupons of the week, each product once (Pricing, Coupons tab)', unit: 'number' },
   // Odoo (user, 2026-11-05): a $0 order (a spare part, a warranty

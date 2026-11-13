@@ -14,7 +14,8 @@
 //
 // Auth: `x-cron-secret` header matching the CRON_SECRET function secret
 // (deployed with --no-verify-jwt so pg_net can call it), or the service_role
-// key as Bearer for manual runs. Body {"sync": true} waits for completion
+// key as Bearer for manual runs and for the functions that ask for one
+// channel's snapshot ({ only: [...] }, see runOnly). Body {"sync": true} waits for completion
 // and returns the full report (for testing); otherwise the work continues
 // in the background and a 202 is returned immediately so short pg_net
 // timeouts can't kill the run.
@@ -125,8 +126,29 @@ async function refreshBestBuy() {
   return { total, priceMismatches };
 }
 
+// Walmart Canada reads 40 promotions a pull, the ones the report would flag
+// first. When more are left — the morning a monthly promotion changes, every
+// member is — the next pulls are left to channel-deals, which takes an owed
+// snapshot every 10 minutes (its state's `photo`): the report is whole within
+// the hour instead of after three more daily pulls (user, 2026-11-13).
+async function oweWalmartCaSnapshot() {
+  try {
+    const rows = await restSelect("app_settings?key=eq.channel_deals_state&select=value");
+    const value = (rows?.[0]?.value ?? {}) as Record<string, Record<string, unknown>>;
+    value.walmart_ca = { sig: "", next_at: 0, ...(value.walmart_ca ?? {}), photo: true, photos: 0 };
+    await rest("app_settings?on_conflict=key", {
+      method: "POST",
+      body: JSON.stringify([{ key: "channel_deals_state", value, updated_at: new Date().toISOString() }]),
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    });
+  } catch (err) {
+    console.error("health-refresh: the next Walmart Canada snapshot was not asked for:", (err as Error).message);
+  }
+}
+
 async function refreshWalmart(market: "us" | "ca") {
-  const { total, items } = await invokeFn("walmart-pull-items", market === "ca" ? { market: "ca" } : {});
+  const pulled = await invokeFn("walmart-pull-items", market === "ca" ? { market: "ca" } : {});
+  const { total, items } = pulled;
 
   const okCount = market === "ca"
     ? items.filter((i: { feedStatus: string }) => i.feedStatus === "SUCCESS").length
@@ -142,7 +164,9 @@ async function refreshWalmart(market: "us" | "ca") {
     partial: false,
     results: items,
   }]);
-  return { total, okCount };
+  const left = market === "ca" ? Math.max(0, Number(pulled.suspects ?? 0) - Number(pulled.promos_checked_now ?? 0)) : 0;
+  if (left > 0) await oweWalmartCaSnapshot();
+  return { total, okCount, ...(market === "ca" ? { promos_read: pulled.promos_checked_now ?? 0, promos_left: left } : {}) };
 }
 
 // Mirror of wixSync.refreshWixCatalog — fleet-level PIM↔Wix drift snapshot,
@@ -375,6 +399,35 @@ async function runRefresh() {
   return report;
 }
 
+// ---- Some channels' snapshots only ----
+//
+// Price Alignment and Listing Health read a channel's LAST snapshot, and the
+// full refresh runs twice a day. A function that has just changed prices on a
+// store asks for that store's snapshot here (sinksdirect-deals, 2026-11-13: a
+// deal made, changed or ended during the day read as wrong prices until the
+// next daily run). Body { only: ["sinksdirect_ca", "bestbuy", "walmart_ca"] }:
+// those pulls and their snapshots, without the re-score or the KPI snapshot.
+// `afterMs`: wait first — a store's catalog can take a few seconds to show a
+// price that was just changed.
+async function runOnly(only: string[], afterMs = 0) {
+  const report: { ok: boolean; only: string[]; steps: Record<string, unknown>; errors: string[] } = { ok: true, only, steps: {}, errors: [] };
+  if (afterMs > 0) await new Promise((r) => setTimeout(r, Math.min(afterMs, 60_000)));
+  await Promise.all(only.map(async (key) => {
+    try {
+      if (key === "bestbuy") report.steps[key] = await refreshBestBuy();
+      else if (key === "walmart_us") report.steps[key] = await refreshWalmart("us");
+      else if (key === "walmart_ca") report.steps[key] = await refreshWalmart("ca");
+      else if (WIX_SITES[key]) report.steps[key] = await refreshWix(WIX_SITES[key]);
+      else throw new Error("not a channel with a snapshot");
+    } catch (err) {
+      report.errors.push(`${key}: ${(err as Error)?.message ?? err}`);
+    }
+  }));
+  report.ok = report.errors.length === 0;
+  console.log("health-refresh (only) report:", JSON.stringify(report));
+  return report;
+}
+
 Deno.serve(async (req) => {
   const cronSecret = Deno.env.get("CRON_SECRET");
   const providedSecret = req.headers.get("x-cron-secret");
@@ -384,11 +437,22 @@ Deno.serve(async (req) => {
   if (!authorized) return json({ error: "unauthorized" }, 401);
 
   let sync = false;
+  let only: string[] | null = null;
+  let afterMs = 0;
   try {
     const body = await req.json();
     sync = body?.sync === true;
+    if (Array.isArray(body?.only) && body.only.length) only = [...new Set(body.only.map(String))] as string[];
+    if (Number.isFinite(Number(body?.after_ms))) afterMs = Math.max(0, Number(body.after_ms));
   } catch {
     // empty body → background mode
+  }
+
+  if (only) {
+    if (sync) return json(await runOnly(only, afterMs));
+    // @ts-ignore — EdgeRuntime is provided by the Supabase runtime
+    EdgeRuntime.waitUntil(runOnly(only, afterMs));
+    return json({ ok: true, started: true, only }, 202);
   }
 
   if (sync) return json(await runRefresh());

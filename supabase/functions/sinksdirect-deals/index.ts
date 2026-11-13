@@ -318,6 +318,24 @@ async function runSite(site: WixSite, jobs: Job[], deadline: number, totals: Tot
   totals.owed += Math.max(0, jobs.length - next);
 }
 
+/** Asks health-refresh for these stores' snapshots (it answers at once and takes them on its own). */
+async function askSnapshot(keys: string[]) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/health-refresh`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      // a store's catalog can take a few seconds to show a price just changed
+      body: JSON.stringify({ only: keys, after_ms: 20_000 }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) console.error(`[sinksdirect-deals] the snapshot of ${keys.join(", ")} was not taken: health-refresh answered ${res.status}`);
+    else await res.body?.cancel();
+  } catch (err) {
+    // The two daily snapshots come anyway.
+    console.error(`[sinksdirect-deals] the snapshot of ${keys.join(", ")} was not asked for:`, err instanceof Error ? err.message : err);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   let locked = false;
@@ -421,7 +439,15 @@ Deno.serve(async (req) => {
     await setLock(null);
     locked = false;
 
-    const report = { at: new Date().toISOString(), ...plan, ...totals, by: actor?.actor_name ?? (viaCron ? "cron" : "service role") };
+    // Price Alignment and Listing Health read a store's LAST snapshot, taken
+    // twice a day: a deal made, changed or ended during the day read as wrong
+    // prices until the next one (user, 2026-11-13, after Best Buy and Walmart
+    // showed it). So the stores whose prices this run changed are read again
+    // now — health-refresh takes their snapshot on its own, nothing waits for it.
+    const snapshot = totals.set || totals.back ? sites.filter((_, i) => work[i].length > 0).map((site) => site.key) : [];
+    if (snapshot.length) await askSnapshot(snapshot);
+
+    const report = { at: new Date().toISOString(), ...plan, ...totals, ...(snapshot.length ? { snapshot } : {}), by: actor?.actor_name ?? (viaCron ? "cron" : "service role") };
     await admin.from("app_settings").upsert({ key: RUN_KEY, value: report, updated_at: report.at }, { onConflict: "key" });
     // The Activity Log hears what changed, and a refusal the first time only.
     if (totals.set || totals.back || totals.new_failures) {

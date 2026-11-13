@@ -2,9 +2,10 @@ import { supabase } from '@/lib/supabase';
 import { logActivity, getActivityActor } from '@/features/activity/api/activityLog';
 import { excludedSkus } from './promotions';
 
-// Coupons on Amazon and Wayfair (user, 2026-11-09): a record kept in the PIM,
-// by percentage or by money, each with its products. Nothing here reaches a
-// marketplace or changes an expected price.
+// Coupons on Amazon and Wayfair (user, 2026-11-09) and on the Sinks Direct
+// stores (2026-11-13): a record kept in the PIM, by percentage or by money,
+// each with its products. Nothing here reaches a marketplace or a store, or
+// changes an expected price.
 
 export async function listCoupons() {
   const { data, error } = await supabase

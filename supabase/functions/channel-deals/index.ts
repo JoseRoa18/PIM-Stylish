@@ -17,7 +17,9 @@
 // The cron calls every 10 minutes, and most calls end after a few small reads
 // of the database (user, 2026-11-13: a deal made for the 15th has nothing to
 // do on the 13th, and the app must not get slow):
-//   - no deal runs today on these channels and nothing is on record: two reads;
+//   - no deal runs today on these channels, nothing is on record and no
+//     snapshot is owed: four small reads (the switch, the prices on record,
+//     the deals, the state);
 //   - else what the PIM wants today is worked out (database only) and a channel
 //     is LOOKED AT — Best Buy's offers read, Walmart's promotions — only when
 //     that changed since its last look, when something on record is due (sent
@@ -44,6 +46,13 @@
 //                Canada goes by the PRICE_AND_PROMOTION feed (Delete, then
 //                Create), the USA by one call per product.
 //
+// A change SEEN on a channel is followed by its snapshot (user, 2026-11-13:
+// "hazlo ya"). Price Alignment and Listing Health do not read a marketplace
+// live: they read its last snapshot (channel_health), taken twice a day by
+// health-refresh or with "Run fresh analysis" — so a deal's price that went on
+// at 10 am was compared with the 6 am snapshot until 1 pm (Best Buy read 62 %
+// aligned with every deal price in place). See takeSnapshot.
+//
 // Left out, each named in the report: a product switched off for the channel,
 // not listed there, without a regular price, or whose deal price is not under
 // it. Honours the promotion automation switches in Settings (enabled, and the
@@ -54,6 +63,7 @@
 //   { dryRun: true, asOf?: "YYYY-MM-DD" }   the plan, nothing sent or written
 //   { channels?: ["bestbuy"], limit?: 3 }   a part of the work (tests)
 //   { force: true }                         do not wait for what was sent or refused
+//   { snapshot: ["bestbuy"] }               take that channel's snapshot in this run
 // The last run's report is app_settings.channel_deals_run.
 // Shared files to upload with it: promoCalendar.ts, serviceRole.ts,
 // exclusions.ts, bestbuyDiscount.ts, walmartPromoPlan.js,
@@ -68,6 +78,7 @@ import { excludedSet } from "../_shared/exclusions.ts";
 import { bbDiscount, discountRunning } from "../_shared/bestbuyDiscount.ts";
 import { createPriceAlignment, alignTargets } from "../_shared/priceAlignmentReport.js";
 import { planDeal, planBack, readWalmartPromos, LEAD_MS } from "../_shared/walmartPromoPlan.js";
+import { priceOff } from "../_shared/priceTolerance.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -206,7 +217,9 @@ async function expected(channel: Channel, today: string, prices: ReturnType<type
   return { deals, monthly, baseBySku: baseBySku as Map<string, unknown>, skipped, names: [...names] };
 }
 type Expected = Awaited<ReturnType<typeof expected>>;
-type Look = { sig: string; next_at: number };
+// `photo`: the channel's snapshot is owed (a change was seen there and it could
+// not be taken in that run); `photos`: how many were tried in a row for it.
+type Look = { sig: string; next_at: number; photo?: boolean; photos?: number; photo_at?: string; photo_note?: string };
 
 /** What the PIM wants on a channel today, as one short text: the same text = nothing new to do. */
 async function signature(today: string, e: Expected): Promise<string> {
@@ -225,8 +238,35 @@ async function signature(today: string, e: Expected): Promise<string> {
 // ============================== Best Buy ==============================
 
 type Offer = { price: number | null; quantity: number; discount: Record<string, unknown> | null };
-async function readOffers(key: string): Promise<Map<string, Offer>> {
+// What a look read, kept for the channel's snapshot: a second read of the offers
+// right after the first is turned away by Best Buy (429, seen 2026-11-13).
+type OffersRead = { total: number; offers: Record<string, unknown>[] };
+/** An offer as the snapshot keeps it: bestbuy-pull-offers' own row — keep the two alike. */
+// deno-lint-ignore no-explicit-any
+function offerRow(o: any): Record<string, unknown> {
+  const refs = Array.isArray(o.product_references) ? o.product_references : o.product_references ? [o.product_references] : [];
+  const barcode = refs.find((r: { reference_type?: string }) => /UPC|EAN|GTIN/i.test(String(r?.reference_type ?? ""))) ?? refs[0];
+  return {
+    sku: o.shop_sku,
+    bb_product_id: o.product_sku ? String(o.product_sku) : null,
+    price: o.price ?? null,
+    discount_price: o.discount?.discount_price ?? null,
+    discount_start: o.discount?.start_date ?? null,
+    discount_end: o.discount?.end_date ?? null,
+    origin_price: o.discount?.origin_price ?? null,
+    quantity: o.quantity ?? 0,
+    active: Boolean(o.active),
+    state: String(o.state_code ?? ""),
+    category_code: o.category_code ?? null,
+    category_label: o.category_label ?? null,
+    product_title: o.product_title ?? null,
+    product_brand: o.product_brand ?? null,
+    upc: barcode?.reference ? String(barcode.reference) : null,
+  };
+}
+async function readOffers(key: string): Promise<{ live: Map<string, Offer>; read: OffersRead }> {
   const live = new Map<string, Offer>();
+  const read: OffersRead = { total: 0, offers: [] };
   let offset = 0;
   for (;;) {
     let res: Response | null = null;
@@ -237,11 +277,15 @@ async function readOffers(key: string): Promise<Map<string, Offer>> {
     }
     if (!res || !res.ok) throw new Error(`Best Buy's offers could not be read (${res?.status ?? "no answer"}) — nothing was sent to Best Buy`);
     const data = await res.json();
-    for (const o of data.offers ?? []) live.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0, discount: o.discount ?? null });
+    read.total = data.total_count ?? 0;
+    for (const o of data.offers ?? []) {
+      live.set(o.shop_sku, { price: o.price ?? null, quantity: o.quantity ?? 0, discount: o.discount ?? null });
+      read.offers.push(offerRow(o));
+    }
     offset += 100;
     if (!data.offers?.length || offset >= (data.total_count ?? 0)) break;
   }
-  return live;
+  return { live, read };
 }
 const discountPrice = (d: Record<string, unknown> | null) =>
   !d ? null : typeof d.discount_price === "number" ? d.discount_price : num((d.ranges as { price?: unknown }[] | undefined)?.[0]?.price);
@@ -276,9 +320,9 @@ type BbJob =
 async function planBestBuy(today: string, force: boolean, e: Expected, rows: Map<string, Row>) {
   const key = Deno.env.get("BESTBUY_API_KEY");
   if (!key) throw new Error("BESTBUY_API_KEY is not set");
-  const offers = await readOffers(key);
+  const { live: offers, read } = await readOffers(key);
   const out = {
-    jobs: [] as BbJob[], adopt: [] as { sku: string; fields: Partial<Row> }[], drop: [] as string[], skipped: e.skipped, running: e.names, wanted: 0, on: 0, waiting: 0, key,
+    jobs: [] as BbJob[], adopt: [] as { sku: string; fields: Partial<Row> }[], drop: [] as string[], skipped: e.skipped, running: e.names, wanted: 0, on: 0, waiting: 0, key, read,
     // how Best Buy writes a discount today, and how many offers carry the monthly promotion's (a check of the reading)
     sample: [...offers].filter(([, o]) => o.discount).slice(0, 2).map(([sku, o]) => ({ sku, price: o.price, discount: o.discount, ends: pacificDay(o.discount?.end_date) })),
     monthly_on: [...e.monthly].filter(([sku, m]) => { const o = offers.get(sku); return o ? hasDiscount(o, m.price, m.end) : false; }).length,
@@ -479,7 +523,8 @@ async function planWalmart(market: "ca" | "us", force: boolean, e: Expected, row
 async function walmartOps(market: "ca" | "us", token: string, plan: Awaited<ReturnType<typeof planWalmart>>, take: WmCandidate[], now: number, dryRun: boolean, totals: Totals) {
   const cfg = WM[market];
   const ops: WmOp[] = [];
-  const settled = { on: 0, back: 0 };
+  // `news`: what a run before this one sent, now read on Walmart (its snapshot is due).
+  const settled = { on: 0, back: 0, news: 0 };
   for (const c of take) {
     const wsku = plan.wsku.get(c.sku) ?? c.sku;
     let promos: ReturnType<typeof readWalmartPromos>;
@@ -508,6 +553,7 @@ async function walmartOps(market: "ca" | "us", token: string, plan: Awaited<Retu
         const own = c.row?.mode === "created" || Math.abs(p.carrier!.end - endMs) < 24 * 3600_000;
         if (!dryRun) await saveRow(cfg.channel, c.sku, { promotion_id: d.id, price: d.price, ends_on: d.end, mode: own ? "created" : "found", live_start: iso(p.carrier!.start), live_end: iso(p.carrier!.end), pending: null, confirmed: true, checked_at: checked, attempts: 0, last_error: null, next_try_at: null });
         settled.on += 1;
+        if (c.row && !c.row.confirmed) settled.news += 1;
         continue;
       }
       ops.push({ kind: "set", sku: c.sku, wsku, row: c.row, base, deal: { ...d, endMs }, deletes: p.deletes, creates: p.creates as Segment[], carrier: p.carrier, why: c.why });
@@ -518,6 +564,7 @@ async function walmartOps(market: "ca" | "us", token: string, plan: Awaited<Retu
       if (!p.deletes.length && !p.creates.length) {
         if (!dryRun) await dropRow(cfg.channel, c.sku);
         settled.back += 1;
+        settled.news += 1;
         continue;
       }
       ops.push({ kind: "back", sku: c.sku, wsku, row, base, deletes: p.deletes, creates: p.creates as Segment[], carrier: null, why: c.why });
@@ -685,6 +732,7 @@ async function runWalmart(market: "ca" | "us", token: string, ops: WmOp[], deadl
     }
   }
   // 3. What happened, product by product.
+  let taken = 0; // changes Walmart took in this run: its snapshot is read at the next one
   for (const op of ops) {
     const st = state.get(op.sku);
     if (st === "failed") continue;
@@ -694,12 +742,99 @@ async function runWalmart(market: "ca" | "us", token: string, ops: WmOp[], deadl
       if (r === "ok") {
         await admin.from(TABLE).update({ confirmed: true, pending: null, checked_at: new Date().toISOString(), attempts: 0, last_error: null, next_try_at: null }).eq("channel", cfg.channel).eq("sku", op.sku);
         totals.set += 1;
+        taken += 1;
       } else totals.owed += 1; // Walmart is still working on it: the next run reads the product again
     } else if (r === "ok") {
       await dropRow(cfg.channel, op.sku);
       totals.back += 1;
+      taken += 1;
     } else totals.owed += 1;
   }
+  return taken;
+}
+
+// ============================== the snapshot ==============================
+//
+// What Price Alignment and Listing Health read of a channel (channel_health).
+// A change this function SAW there — a deal's price in place, or back off — is
+// followed by a fresh one: the same pull and the same row as health-refresh's
+// refreshBestBuy / refreshWalmart and the page's "Run fresh analysis"
+// (refreshBestBuyOffers, refreshWalmartItems). Keep the three alike.
+//
+// Walmart Canada's pull reads 40 promotions a time, the ones the report would
+// flag first: a deal of more products takes a second snapshot at the next run.
+// One not taken (no time left in the run, the pull failed) stays owed in the
+// state (`photo`) and is taken by the next run, SNAPSHOTS_IN_A_ROW at most —
+// the two daily snapshots come anyway.
+const SNAPSHOT_NEEDS_MS: Record<Channel, number> = { bestbuy: 35_000, walmart_ca: 75_000, walmart_us: 30_000 };
+// Walmart Canada: the morning a monthly promotion changes every member is to be
+// read again, 40 a pull — health-refresh leaves the rest owed here.
+const SNAPSHOTS_IN_A_ROW: Record<Channel, number> = { bestbuy: 3, walmart_ca: 6, walmart_us: 3 };
+
+async function pull(name: string, body: unknown, timeoutMs: number): Promise<Record<string, unknown>> {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    method: "POST",
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.error) throw new Error(String(data?.error ?? `${name} answered ${res.status}`));
+  return data;
+}
+
+/**
+ * Takes the channel's snapshot now. `read`: Best Buy's offers as this run's look
+ * read them (no second read); without it they are pulled. `more`: Walmart Canada
+ * still has promotions to read.
+ */
+async function takeSnapshot(channel: Channel, timeoutMs: number, read: OffersRead | null = null): Promise<{ more: boolean; note: string }> {
+  if (channel === "bestbuy") {
+    // Best Buy turns away reads made too close together (429): one more try a little later.
+    const data = read ?? await pull("bestbuy-pull-offers", {}, timeoutMs).catch(async (err) => {
+      if (!/429/.test(String((err as Error)?.message))) throw err;
+      await sleep(9000);
+      return pull("bestbuy-pull-offers", {}, timeoutMs);
+    });
+    const offers = (data.offers ?? []) as Record<string, unknown>[];
+    // Best Buy sells at MAP CAD: the snapshot carries it, so a price difference is read from the row alone.
+    const prods = must(await admin.from("products").select("sku, map_cad"), "Read the MAP prices") as { sku: string; map_cad: number | null }[];
+    const mapBySku = new Map(prods.map((p) => [p.sku, p.map_cad]));
+    const results = offers.map((o) => ({ ...o, map: mapBySku.get(String(o.sku)) ?? null })) as Record<string, unknown>[];
+    // `origin_price`: the offer's own price; `price` is the discounted one while a promotion runs.
+    const own = (o: Record<string, unknown>) => o.origin_price ?? o.price;
+    must(await admin.from("channel_health").insert({
+      channel: "bestbuy",
+      target: "marketplace.bestbuy.ca",
+      total: data.total,
+      in_sync: results.filter((o) => o.active).length,
+      with_diffs: results.filter((o) => o.map != null && own(o) != null && priceOff(Number(own(o)), Number(o.map))).length,
+      errors: results.filter((o) => (Number(o.quantity ?? 0)) === 0).length,
+      partial: false,
+      results,
+    }), "Save Best Buy's snapshot");
+    return { more: false, note: `${results.length} offers read` };
+  }
+  const market = MARKET[channel];
+  const data = await pull("walmart-pull-items", market === "ca" ? { market: "ca" } : {}, timeoutMs);
+  const items = (data.items ?? []) as Record<string, unknown>[];
+  const total = Number(data.total ?? items.length);
+  const ok = market === "ca" ? items.filter((i) => i.feedStatus === "SUCCESS").length : items.filter((i) => i.published === "PUBLISHED").length;
+  must(await admin.from("channel_health").insert({
+    channel: WM[market].snapshot,
+    target: "marketplace.walmartapis.com",
+    total,
+    in_sync: ok,
+    with_diffs: total - ok,
+    errors: 0,
+    partial: false,
+    results: items,
+  }), `Save ${LABEL[channel]}'s snapshot`);
+  if (market !== "ca") return { more: false, note: `${items.length} items read` };
+  // `suspects`: the products whose last reading the report would flag; they are read first.
+  const flagged = Number(data.suspects ?? 0);
+  const readNow = Number(data.promos_checked_now ?? 0);
+  return { more: flagged > readNow, note: `${readNow} promotions read, ${flagged} were to be checked` };
 }
 
 // ============================== the run ==============================
@@ -743,9 +878,11 @@ Deno.serve(async (req) => {
 
     // What is in play: the prices on record and the deals that run TODAY on
     // these channels. A deal made for another day has nothing to do yet: with
-    // nothing on record either, the run ends here after three small reads.
+    // nothing on record either, and no snapshot owed, the run ends here after
+    // these three small reads (the state among them: what was wanted and looked
+    // at before, and the snapshots still owed).
     const rowsOf = new Map<Channel, Map<string, Row>>(CHANNELS.map((c) => [c, new Map()]));
-    const [, dealRows] = await Promise.all([
+    const [, dealRows, kept] = await Promise.all([
       (async () => {
         for (let from = 0; ; from += 1000) {
           const page = must(await admin.from(TABLE).select("*").in("channel", channels).order("channel").order("sku").range(from, from + 999), "Read the deal prices on the marketplaces") as Row[];
@@ -754,11 +891,17 @@ Deno.serve(async (req) => {
         }
       })(),
       admin.from("promotions").select(`marketplaces, period, ${PROMO_DATE_COLUMNS}`).in("kind", DEAL_KINDS).neq("status", "ended").overlaps("marketplaces", channels),
+      admin.from("app_settings").select("value").eq("key", STATE_KEY).maybeSingle(),
     ]);
     const dealsNow = must(dealRows, "Read the deals") as (PromoLike & { marketplaces: string[] | null })[];
+    const state = { ...((kept.data?.value ?? {}) as Partial<Record<Channel, Look>>) };
+    // `snapshot: [...]` asks for a channel's snapshot in this run (tests, a reading wanted now).
+    const askedPhotos: Channel[] = Array.isArray(body.snapshot) ? CHANNELS.filter((c) => body.snapshot.includes(c)) : [];
+    for (const c of askedPhotos) state[c] = { sig: "", next_at: 0, ...state[c], photo: true };
+    const owedPhotos = dryRun ? [] : channels.filter((c) => state[c]?.photo);
     const inPlay = channels.filter((c) => rowsOf.get(c)!.size > 0 ||
       dealsNow.some((d) => (d.marketplaces ?? []).includes(c) && windowContains(promoWindow(d, MARKET[c]), today)));
-    if (!inPlay.length) return json({ today, nothing_to_do: true, owed: 0 });
+    if (!inPlay.length && !owedPhotos.length) return json({ today, nothing_to_do: true, owed: 0 });
 
     const memo = new Map<string, Promise<unknown>>();
     const sharedLoad = (key: string, loader: () => Promise<unknown>) => {
@@ -779,8 +922,6 @@ Deno.serve(async (req) => {
     // is looked at (Best Buy's offers, Walmart's promotions) only when that
     // changed since its last look, when something on record is due, or when the
     // look is old (see `Look`); a dry run, `force` and `limit` always look.
-    const { data: kept } = await admin.from("app_settings").select("value").eq("key", STATE_KEY).maybeSingle();
-    const state = { ...((kept?.value ?? {}) as Partial<Record<Channel, Look>>) };
     const wanted = new Map<Channel, { e: Expected; sig: string }>();
     await Promise.all(inPlay.map(async (channel) => {
       try {
@@ -796,7 +937,7 @@ Deno.serve(async (req) => {
       if (due.includes(c) || report[c]) continue;
       report[c] = wanted.has(c) ? { unchanged: true, next_look: iso(state[c]!.next_at) } : { deals: [], products: 0 };
     }
-    if (!due.length && !totals.errors.length) return json({ today, nothing_to_do: true, owed: 0, channels: report });
+    if (!due.length && !owedPhotos.length && !totals.errors.length) return json({ today, nothing_to_do: true, owed: 0, channels: report });
 
     // One run at a time (a dry run only reads, so it never waits).
     if (!dryRun) {
@@ -808,12 +949,16 @@ Deno.serve(async (req) => {
     }
     const deadline = Date.now() + RUN_BUDGET_MS;
     const busy = new Set<Channel>(); // sent, owed or failed: looked at again by the next run
+    let offersRead: OffersRead | null = null; // Best Buy's offers, when this run looked at them
+    const seen = new Set<Channel>(); // a change was READ on the channel in this run: its snapshot is due now
+    const sent = new Set<Channel>(); // Walmart took a change in this run: its snapshot is read at the next one
 
     await Promise.all(due.map(async (channel) => {
       const { e } = wanted.get(channel)!;
       try {
         if (channel === "bestbuy") {
           const plan = await planBestBuy(today, force, e, rowsOf.get(channel)!);
+          offersRead = plan.read;
           const take = limit ? plan.jobs.slice(0, limit) : plan.jobs;
           report[channel] = { deals: plan.running, products: plan.wanted, on: plan.on, to_set: plan.jobs.filter((j) => j.kind === "set").length, to_back: plan.jobs.filter((j) => j.kind === "back").length, waiting: plan.waiting, skipped: plan.skipped.slice(0, 200), ...(dryRun ? { monthly_members: plan.monthly_members, monthly_on: plan.monthly_on, sample: plan.sample } : {}) };
           for (const j of take) lines.push(j.kind === "set"
@@ -822,6 +967,8 @@ Deno.serve(async (req) => {
           if (dryRun) return;
           for (const a of plan.adopt) await saveRow(channel, a.sku, a.fields);
           for (const sku of plan.drop) await dropRow(channel, sku);
+          // A deal's discount read on the offers, or one that is back off them.
+          if (plan.adopt.length || plan.drop.length) seen.add(channel);
           totals.owed += plan.jobs.length - take.length;
           // What is sent is seen on Best Buy by the next run, which confirms it.
           if (plan.jobs.length) busy.add(channel);
@@ -835,6 +982,7 @@ Deno.serve(async (req) => {
           const token = await wmToken(market);
           const { ops, settled } = await walmartOps(market, token, plan, take, now, dryRun, totals);
           Object.assign(report[channel] as Record<string, unknown>, { already_right: settled.on, nothing_to_take_back: settled.back, to_change: ops.length });
+          if (!dryRun && settled.news) seen.add(channel);
           for (const op of ops) lines.push({
             channel, action: op.kind === "set" ? "deal" : "back", sku: op.sku, walmart_sku: op.wsku, deal: op.deal?.name ?? null, why: op.why,
             delete: op.deletes.map((p) => ({ price: p.price, from: iso(p.start), to: iso(p.end) })),
@@ -844,7 +992,7 @@ Deno.serve(async (req) => {
           // Something sent, left for later, or a product Walmart could not be read for.
           if (ops.length || settled.on + settled.back < take.length || plan.candidates.length > take.length) busy.add(channel);
           if (dryRun || !ops.length) return;
-          await runWalmart(market, token, ops, deadline, totals);
+          if (await runWalmart(market, token, ops, deadline, totals)) sent.add(channel);
         }
       } catch (err) {
         // One marketplace failing does not stop the others.
@@ -854,6 +1002,34 @@ Deno.serve(async (req) => {
     }));
 
     if (dryRun) return json({ dryRun: true, today, off, channels: report, lines: lines.slice(0, 400), errors: totals.errors });
+
+    // A change seen on a channel is followed by its snapshot (see takeSnapshot).
+    // One Walmart took in this very run is read at the next (its promotions may
+    // not show it yet); one that cannot be taken now stays owed in the state.
+    const photos = new Map<Channel, Partial<Look>>();
+    await Promise.all(channels.filter((c) => (seen.has(c) || state[c]?.photo) && !sent.has(c)).map(async (c) => {
+      const tried = state[c]?.photos ?? 0;
+      if (deadline + 25_000 - Date.now() < SNAPSHOT_NEEDS_MS[c]) {
+        photos.set(c, { photo: true, photos: tried, photo_note: "no time left in the run: taken at the next one" });
+        return;
+      }
+      let more = true;
+      let note: string;
+      let at: string | undefined;
+      try {
+        ({ more, note } = await takeSnapshot(c, SNAPSHOT_NEEDS_MS[c], c === "bestbuy" ? offersRead : null));
+        at = new Date().toISOString();
+      } catch (err) {
+        note = `not taken: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200);
+        console.error(`[channel-deals] snapshot of ${c} ${note}`);
+      }
+      const again = more && tried + 1 < SNAPSHOTS_IN_A_ROW[c];
+      photos.set(c, { photo: again, photos: again ? tried + 1 : 0, photo_note: note, ...(at ? { photo_at: at } : {}) });
+    }));
+    for (const c of sent) photos.set(c, { photo: true, photos: 0, photo_note: "sent in this run: read at the next one" });
+    for (const [c, p] of photos) {
+      report[c] = { ...(report[c] as Record<string, unknown> ?? {}), snapshot: `${p.photo_at ? `taken${p.photo ? ", one more to come" : ""} — ` : ""}${p.photo_note}` };
+    }
 
     // When each channel is looked at next while the PIM wants the same: at once
     // if this run sent or owes something, else when something on record is due
@@ -879,7 +1055,11 @@ Deno.serve(async (req) => {
         console.error("[channel-deals] next look not worked out:", err instanceof Error ? err.message : err);
         for (const c of due) next.set(c, 0);
       }
-      for (const c of due) state[c] = { sig: wanted.get(c)!.sig, next_at: next.get(c)! };
+      for (const c of due) state[c] = { ...state[c], sig: wanted.get(c)!.sig, next_at: next.get(c)! };
+    }
+    // A channel that only owes a snapshot has nothing wanted: an empty look.
+    for (const [c, p] of photos) state[c] = { sig: "", next_at: 0, ...state[c], ...p };
+    if (due.length || photos.size) {
       const { error: stateErr } = await admin.from("app_settings").upsert({ key: STATE_KEY, value: state, updated_at: new Date().toISOString() }, { onConflict: "key" });
       // Not saved: without a state every run looks, as before this was kept.
       if (stateErr) await admin.from("app_settings").delete().eq("key", STATE_KEY);
@@ -888,7 +1068,8 @@ Deno.serve(async (req) => {
     await admin.from("app_settings").upsert({ key: LOCK_KEY, value: { until: null }, updated_at: new Date().toISOString() }, { onConflict: "key" });
     locked = false;
     const result = { at: new Date().toISOString(), today, ...totals, channels: report, by: actor?.actor_name ?? (viaCron ? "cron" : "service role") };
-    await admin.from("app_settings").upsert({ key: RUN_KEY, value: result, updated_at: result.at }, { onConflict: "key" });
+    // A run that only took an owed snapshot looked at nothing: the last look's report stays.
+    if (due.length || totals.errors.length) await admin.from("app_settings").upsert({ key: RUN_KEY, value: result, updated_at: result.at }, { onConflict: "key" });
     // The Activity Log hears what changed, and a refusal the first time only.
     if (totals.set || totals.back || totals.new_failures) {
       const s = (n: number) => (n === 1 ? "" : "s");

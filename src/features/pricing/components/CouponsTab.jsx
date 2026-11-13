@@ -34,7 +34,7 @@ function leftOutNote(reviewed) {
   return notes.join(' · ') || null;
 }
 
-/** Coupons on Amazon and Wayfair: several can run at once. */
+/** Coupons on Sinks Direct, Wayfair and Amazon: several can run at once. A record only: nothing is sent anywhere. */
 export default function CouponsTab({ canEdit, confirm }) {
   const [coupons, setCoupons] = useState(null);
   const [error, setError] = useState(null);
