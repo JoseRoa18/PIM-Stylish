@@ -17,6 +17,7 @@ import {
   ExternalLink,
   ArrowUp,
   ArrowDown,
+  Download,
 } from 'lucide-react';
 import FilterDropdown from '@/features/products/components/FilterDropdown';
 import ObsoleteBadge from '@/features/products/components/ObsoleteBadge';
@@ -78,6 +79,7 @@ import { buildStylishDiscount, draftHasPrices, emptyStylishDraft, stylishMarkets
 import { STYLISH_CHANNELS, discountFor, CUSTOMER_OFF } from '@/features/pricing/lib/stylishDiscount';
 import { goesToSinksDirect, sendSinksDirectDeals, sinksDirectLive, onSinksDirectSent, SINKS_DIRECT_SITE_OF } from '@/features/pricing/api/sinksDirectDeals';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
+import { alignTiles, priceSide, PRICE_SIDE_LABEL } from '@/features/pricing/lib/alignmentTiles';
 import { TOLERANCE_FROM, TOLERANCE_HIGH, TOLERANCE_LOW } from '@/features/pricing/lib/priceTolerance';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { startTask } from '@/lib/taskProgress';
@@ -419,19 +421,8 @@ export default function PricingPage() {
 
 // ============================== Price alignment ==============================
 
-// Tiles per site: SinksDirect sites are promo-aware (5 buckets), Stylish
-// brand sites compare only the base price against MSRP (3 buckets — their
-// own storefront sales are not drift).
-function alignTiles(cfg) {
-  const priceName = cfg.priceField.startsWith('map') ? 'MAP' : 'MSRP';
-  return [
-    ...(cfg.promoAware ? [{ key: 'promo_ok', label: 'At promo price', tone: 'ok' }] : []),
-    { key: 'map_ok', label: `At regular ${priceName}`, tone: 'ok' },
-    ...(cfg.promoAware ? [{ key: 'promo_missing', label: 'Missing promo price', tone: 'warn' }] : []),
-    { key: 'misaligned', label: 'Misaligned', tone: 'error' },
-    { key: 'no_map', label: `No ${priceName} in PIM`, tone: 'muted' },
-  ];
-}
+// The tiles of a site (alignTiles) and the side of a problem (priceSide) are in
+// lib/alignmentTiles.js: the Excel of the same list reads them too.
 
 // "Oct 20" — when a store page was read.
 const fmtDay = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
@@ -518,16 +509,14 @@ function AlignmentOverview({ overview, site, onSelect }) {
   );
 }
 
-// Which side of its expected price a problem's live price is on (user,
-// 2026-11-11: "si está por debajo o por arriba, como para filtrar"). 'none' =
-// nothing to compare: no promo on the store, or no price in the PIM. A problem
-// with both prices is never equal to it (it would be aligned).
-const priceSide = (p) => (p.live != null && p.expected != null ? (p.live > p.expected ? 'above' : 'below') : 'none');
+// The problems table's filter: which side of its expected price a problem's
+// live price is on (priceSide — user, 2026-11-11: "si está por debajo o por
+// arriba, como para filtrar").
 const PRICE_SIDES = [
   { key: 'all', label: 'All' },
-  { key: 'above', label: 'Above', icon: ArrowUp, title: (store) => `On ${store} above the expected price`, empty: (store) => `No price on ${store} is above its expected price.` },
-  { key: 'below', label: 'Below', icon: ArrowDown, title: (store) => `On ${store} below the expected price`, empty: (store) => `No price on ${store} is below its expected price.` },
-  { key: 'none', label: 'No price', title: () => 'Nothing to compare: no promo price on the store, or no price in the PIM', empty: (store) => `Every problem on ${store} has both prices.` },
+  { key: 'above', label: PRICE_SIDE_LABEL.above, icon: ArrowUp, title: (store) => `On ${store} above the expected price`, empty: (store) => `No price on ${store} is above its expected price.` },
+  { key: 'below', label: PRICE_SIDE_LABEL.below, icon: ArrowDown, title: (store) => `On ${store} below the expected price`, empty: (store) => `No price on ${store} is below its expected price.` },
+  { key: 'none', label: PRICE_SIDE_LABEL.none, title: () => 'Nothing to compare: no promo price on the store, or no price in the PIM', empty: (store) => `Every problem on ${store} has both prices.` },
 ];
 
 function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
@@ -541,6 +530,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [fixing, setFixing] = useState(null); // sku | 'all'
+  const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(null);
   const [msg, setMsg] = useState(null);
   // Latest report of EVERY channel, for the alignment overview bars.
@@ -597,6 +587,28 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   }
 
   const fixable = cfg.canFix ? (result?.problems.filter((p) => p.expected != null) ?? []) : [];
+
+  // Export (user, 2026-11-13: "descargar la lista con todos los datos
+  // detallados"): the report on screen as an Excel — every problem whatever
+  // the filter shows, every product compared, and what was left out, each row
+  // with its product, promotion, price levels, stock and sales. The Excel code
+  // loads on click; nothing is pulled from the store.
+  const canExport = Boolean(result && !result.legacy && (result.problems.length || result.aligned?.length || result.leftOut?.length));
+  async function exportList() {
+    setExporting(true);
+    setMsg(null);
+    const task = startTask(`Price Alignment Excel — ${cfg.label}`, { detail: 'Reading the products…' });
+    try {
+      const { downloadAlignmentExcel } = await import('@/features/pricing/api/alignmentExcel');
+      const r = await downloadAlignmentExcel(cfg, result, { task });
+      task.finish(`Downloaded · ${r.problems} problem${r.problems === 1 ? '' : 's'} of ${r.compared} products${r.leftOut ? ` · ${r.leftOut} left out` : ''}`);
+    } catch (err) {
+      task.fail(err);
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // The problems table's filter only chooses the rows shown: "Fix all" still
   // pushes every fixable problem (its count and its confirmation say so).
@@ -714,17 +726,30 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
             {`A price within ±${cfg.symbol}${TOLERANCE_HIGH} of an expected price of ${cfg.symbol}${TOLERANCE_FROM} or more, or ±${cfg.symbol}${TOLERANCE_LOW} under ${cfg.symbol}${TOLERANCE_FROM}, counts as aligned.`}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => analyze()}
-          disabled={running}
-          aria-busy={running}
-          title={cfg.kind === 'page' ? 'Read the latest prices the Where to Buy check found (nothing is opened again)' : undefined}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
-        >
-          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : cfg.kind === 'page' ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          {running ? 'Analyzing…' : cfg.kind === 'page' ? 'Reload' : 'Run fresh analysis'}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={exportList}
+            disabled={!canExport || exporting || running}
+            aria-busy={exporting}
+            title={`Download this list as an Excel: every product on ${cfg.short} with its price there, the expected price and the promotion behind it, the PIM's prices, our stock and sales`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+          >
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Download className="w-4 h-4" aria-hidden="true" />}
+            {exporting ? 'Exporting' : 'Export'}
+          </button>
+          <button
+            type="button"
+            onClick={() => analyze()}
+            disabled={running}
+            aria-busy={running}
+            title={cfg.kind === 'page' ? 'Read the latest prices the Where to Buy check found (nothing is opened again)' : undefined}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+          >
+            {running ? <Loader2 className="w-4 h-4 animate-spin" /> : cfg.kind === 'page' ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {running ? 'Analyzing…' : cfg.kind === 'page' ? 'Reload' : 'Run fresh analysis'}
+          </button>
+        </div>
       </div>
 
       {loading && (
@@ -902,7 +927,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                         {cfg.kind === 'page' && (
                           <td className="px-4 py-2 whitespace-nowrap">
                             {p.url ? (
-                              <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline" title={`Read ${p.read_at ? new Date(p.read_at).toLocaleString() : ''}`}>
+                              <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline underline-offset-2" title={`Read ${p.read_at ? new Date(p.read_at).toLocaleString() : ''}`}>
                                 <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
                                 {p.read_at ? fmtDay(p.read_at) : 'Open'}
                                 <span className="sr-only"> — open the {cfg.short} page of {p.sku}</span>
@@ -1055,10 +1080,23 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [customDates, setCustomDates] = useState(!monthly);
   const [startsOn, setStartsOn] = useState('');
   const [endsOn, setEndsOn] = useState('');
-  const [mode, setMode] = useState('file'); // 'file' | 'paste'
+  // 'file' | 'paste'. A monthly promotion opens on its files; a peak season
+  // event on the SKU box it always had, with the files one press away.
+  const [mode, setMode] = useState(monthly ? 'file' : 'paste');
   const [portals, setPortals] = useState([]); // PROMO_CHANNELS keys — flash deals and special events go to the portals picked here
   const [stylish, setStylish] = useState(emptyStylishDraft); // the Stylish stores' discount, when the event goes to one
   const stylishStores = useMemo(() => stylishMarkets(portals), [portals]);
+  // A peak season event takes a price file per country, like the monthly
+  // promotion (user, 2026-11-13: "subir template al igual que en Monthly
+  // dentro de Peak Season Events y que el sistema respete los precios que se
+  // suban"): the file's prices ARE the event's, the Purple level only fills
+  // what a row leaves empty. Not an event for the Stylish stores — those take
+  // their own discount on the MSRP.
+  const takesFiles = monthly || (kind === 'special' && stylishStores.length === 0);
+  const fileMode = takesFiles && mode === 'file';
+  // One list per country (its file, or a monthly promotion's pasted list)
+  // instead of the one SKU box of a deal.
+  const perMarket = monthly || fileMode;
   const [text, setText] = useState('');
   // One file per market — memberships differ, so each market has its own
   // template and slot. Either alone is enough to create the promotion.
@@ -1131,6 +1169,13 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
     return [...bySku.values()];
   }, [files]);
+  // Each file's list, and the promo price it gives each product (null = none:
+  // the level's).
+  const fileLists = useMemo(() => ({ ca: (files.ca?.rows ?? []).map((r) => r.sku), us: (files.us?.rows ?? []).map((r) => r.sku) }), [files]);
+  const fileGiven = useMemo(() => ({
+    ca: new Map((files.ca?.rows ?? []).map((r) => [r.sku, r.promo_price_cad ?? null])),
+    us: new Map((files.us?.rows ?? []).map((r) => [r.sku, r.promo_price_usd ?? null])),
+  }), [files]);
 
   // The pasted lists in the files' shape: each SKU with the markets whose
   // list names it and no price of its own (everything comes from the level).
@@ -1163,8 +1208,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       // A price file gives each market its list (rule 2026-09-30); Canada
       // takes the file's prices over Orange, the USA Orange over the file
       // (monthly rule 2026-10-02, applied by the database). A pasted SKU list
-      // takes everything from the level — one list per market too.
-      const fromFile = monthly && mode === 'file';
+      // takes everything from the level — one list per market too. A peak
+      // season event from files: the file's prices first on both markets, and
+      // the portals it goes to.
+      const fromFile = fileMode;
       const fromPaste = monthly && mode === 'paste';
       let stylishDiscount = null;
       if (stylishStores.length) {
@@ -1178,7 +1225,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       // same card goes on with it (a later one goes up by itself on its day).
       const toStoresNow = !monthly && goesToSinksDirect({ kind, marketplaces: portals }) && startsOn <= etToday();
       const res = fromFile
-        ? await createPromotionFromFile({ ...payload, rows: mergedFileRows, task })
+        ? await createPromotionFromFile({ ...payload, rows: mergedFileRows, marketplaces: monthly ? [] : portals, task: toStoresNow ? task.part(0, 0.3) : task })
         : fromPaste
           ? await createPromotionFromFile({ ...payload, rows: mergedPasteRows, source: 'list', task })
           : await createPromotionFromLevels({ ...payload, skus: [...new Set([...skuList.skus, ...stylishPricedSkus(stylishDiscount)])], marketplaces: monthly ? [] : portals, stylish_discount: stylishDiscount, task: toStoresNow ? task.part(0, 0.3) : task });
@@ -1203,7 +1250,11 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     }
   }
 
-  const hasList = !monthly ? (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0 : mode === 'file' ? mergedFileRows.length > 0 : mergedPasteRows.length > 0;
+  const hasList = monthly
+    ? (mode === 'file' ? mergedFileRows.length > 0 : mergedPasteRows.length > 0)
+    : fileMode
+      ? mergedFileRows.length > 0 && portals.length > 0
+      : (skuList.skus.length > 0 || draftHasPrices(stylish, stylishStores)) && portals.length > 0;
 
   // Rule (Jessica, 2026-09-22): a product already in the monthly promotion on
   // those days makes no sense in a flash deal — warn before creating. Only
@@ -1215,7 +1266,8 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [overlap, setOverlap] = useState(null);
   useEffect(() => {
     if (monthly || !startsOn || !endsOn) { setOverlap(null); return undefined; }
-    const skus = skuList.skus;
+    // An event from files: each country's own list, at the price its file gives.
+    const skus = fileMode ? [...new Set([...fileLists.ca, ...fileLists.us])] : skuList.skus;
     const channels = portals.map((key) => PROMO_CHANNELS.find((ch) => ch.key === key)).filter((ch) => ch && !STYLISH_CHANNELS.includes(ch.key));
     if (!skus.length || !channels.length) { setOverlap(null); return undefined; }
     let active = true;
@@ -1224,10 +1276,11 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         if (!active) return;
         const same = new Set();
         for (const row of found.rows) {
+          if (fileMode && !fileGiven[row.market].has(row.sku)) continue; // not on that country's list
           for (const ch of channels) {
             if (ch.market !== row.market) continue;
             const field = LEVEL_FIELDS[promotionLevel({ kind }, ch)]?.[row.market === 'us' ? 'promo_price_usd' : 'promo_price_cad'];
-            const dealPrice = Number(products.get(row.sku)?.[field]);
+            const dealPrice = Number((fileMode ? fileGiven[row.market].get(row.sku) : null) ?? products.get(row.sku)?.[field]);
             // No price of the deal's level: said by the list's own check, not here.
             if (dealPrice > 0 && row.price != null && dealPrice >= Number(row.price)) same.add(row.sku);
           }
@@ -1236,7 +1289,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       })
       .catch(() => {});
     return () => { active = false; };
-  }, [monthly, startsOn, endsOn, skuList.skus, portals, kind]);
+  }, [monthly, startsOn, endsOn, skuList.skus, portals, kind, fileMode, fileLists, fileGiven]);
 
   // Stock check (user idea 2026-09-29): products with 0 units in a market the
   // promotion reaches (a monthly promotion both, a flash deal / special event
@@ -1247,10 +1300,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   // monthly promotion), or the one SKU list on the portals' markets. Each
   // market is checked on its own list only.
   const marketSkus = useMemo(() => {
-    if (!monthly) return Object.fromEntries(stockMarkets.map((m) => [m, skuList.skus]));
-    if (mode === 'file') return { ca: (files.ca?.rows ?? []).map((r) => r.sku), us: (files.us?.rows ?? []).map((r) => r.sku) };
+    if (!perMarket) return Object.fromEntries(stockMarkets.map((m) => [m, skuList.skus]));
+    if (mode === 'file') return fileLists;
     return { ca: pasteLists.ca.skus, us: pasteLists.us.skus };
-  }, [monthly, mode, files, pasteLists, skuList.skus, stockMarkets]);
+  }, [perMarket, mode, fileLists, pasteLists, skuList.skus, stockMarkets]);
   const stockSkus = useMemo(() => [...new Set(stockMarkets.flatMap((m) => marketSkus[m] ?? []))], [stockMarkets, marketSkus]);
   const [zeroStock, setZeroStock] = useState(null); // { key, ca: [skus], us: [skus] }
   const stockKey = stockMarkets.map((m) => `${m}:${(marketSkus[m] ?? []).join(',')}`).join('|');
@@ -1280,14 +1333,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const [priceCheck, setPriceCheck] = useState(null); // { key, notInPim: [skus], none: { ca: [skus], us: [skus] } }
   const priceCheckKey = `${mode}|${stockKey}`;
   useEffect(() => {
-    if (!monthly || !stockSkus.length) return undefined;
+    if (!perMarket || !stockSkus.length) return undefined;
     let active = true;
     const timer = setTimeout(() => {
-      const given = { ca: new Map(), us: new Map() };
-      if (mode === 'file') {
-        for (const r of files.ca?.rows ?? []) given.ca.set(r.sku, r.promo_price_cad ?? null);
-        for (const r of files.us?.rows ?? []) given.us.set(r.sku, r.promo_price_usd ?? null);
-      }
+      const given = mode === 'file' ? fileGiven : { ca: new Map(), us: new Map() };
       // Chunks of 100 in parallel, so no read can reach the API's 1,000 rows.
       const chunks = [];
       for (let i = 0; i < stockSkus.length; i += 100) chunks.push(stockSkus.slice(i, i + 100));
@@ -1305,15 +1354,16 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           const none = {};
           for (const m of ['ca', 'us']) {
             const col = m === 'ca' ? levelFields.promo_price_cad : levelFields.promo_price_usd;
-            none[m] = (marketSkus[m] ?? []).filter((s) => found.has(s) && found.get(s)[col] == null && given[m].get(s) == null);
+            // only where the promotion goes (an event: the countries of its portals)
+            none[m] = stockMarkets.includes(m) ? (marketSkus[m] ?? []).filter((s) => found.has(s) && found.get(s)[col] == null && given[m].get(s) == null) : [];
           }
           setPriceCheck({ key: priceCheckKey, notInPim: stockSkus.filter((s) => !found.has(s)), none });
         })
         .catch(() => {});
     }, 400);
     return () => { active = false; clearTimeout(timer); };
-  }, [monthly, mode, files, priceCheckKey, stockSkus, marketSkus, levelFields]);
-  const priceNow = monthly && priceCheck?.key === priceCheckKey && stockSkus.length ? priceCheck : null;
+  }, [perMarket, mode, fileGiven, priceCheckKey, stockSkus, stockMarkets, marketSkus, levelFields]);
+  const priceNow = perMarket && priceCheck?.key === priceCheckKey && stockSkus.length ? priceCheck : null;
 
   // Obsolete check (user, 2026-10-16): obsolete products in the list are
   // flagged the same way — a warning, never a block. The mark changes no
@@ -1376,8 +1426,11 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   // and products already in another deal on the same portal and days. A
   // monthly promotion's pasted lists: the last two (its files carry their own
   // check, made when the file is chosen).
-  const checkSkus = monthly ? (mode === 'paste' ? stockSkus : NO_SKUS) : skuList.skus;
-  const listCheckKey = `${kind}|${mode}|${portals.join(',')}|${startsOn}|${endsOn}|${monthly ? stockKey : skuList.skus.join(',')}`;
+  // A peak season event from files: its portals are still looked at (switched
+  // off for one, another deal on those days), each on its own country's list;
+  // what is priced wrong or not at all is said by each file's own check.
+  const checkSkus = monthly ? (mode === 'paste' ? stockSkus : NO_SKUS) : fileMode ? stockSkus : skuList.skus;
+  const listCheckKey = `${kind}|${mode}|${portals.join(',')}|${startsOn}|${endsOn}|${perMarket ? stockKey : skuList.skus.join(',')}`;
   const [listCheck, setListCheck] = useState(null); // { key, deal } | { key, markets: { ca, us } }
   useEffect(() => {
     if (!checkSkus.length) return undefined;
@@ -1395,23 +1448,39 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           } else {
             setListCheck({
               key: listCheckKey,
-              deal: checkDealList({ skus: checkSkus, portals, channels: PROMO_CHANNELS, levelOf: (ch) => promotionLevel({ kind }, ch), levels: LEVEL_FIELDS, products, others }),
+              deal: checkDealList({ skus: checkSkus, portals, channels: PROMO_CHANNELS, levelOf: (ch) => promotionLevel({ kind }, ch), levels: LEVEL_FIELDS, products, others, lists: fileMode ? fileLists : null }),
             });
           }
         })
         .catch(() => {});
     }, 400);
     return () => { active = false; clearTimeout(timer); };
-  }, [listCheckKey, checkSkus, monthly, kind, portals, startsOn, endsOn, pasteLists, levelFields]);
+  }, [listCheckKey, checkSkus, monthly, kind, portals, startsOn, endsOn, pasteLists, levelFields, fileMode, fileLists]);
   const listNow = listCheck?.key === listCheckKey && checkSkus.length ? listCheck : null;
+  // An event from files: a portal picked whose country has no file gets no
+  // product, and a file whose country has no portal goes nowhere — said, never
+  // a block (the other country's list can be imported on the card later).
+  const portalsOf = (m) => portals.map((key) => PROMO_CHANNELS.find((ch) => ch.key === key)).filter((ch) => ch?.market === m);
+  const fileGaps = !monthly && fileMode ? ['ca', 'us'].flatMap((m) => {
+    const country = m === 'ca' ? 'Canada' : 'USA';
+    const mine = portalsOf(m);
+    if (mine.length && !fileLists[m].length && mergedFileRows.length) {
+      return [{ title: `No ${country} file:`, text: `${listOf(mine.map((ch) => ch.label))} ${mine.length === 1 ? 'gets' : 'get'} no product from this event until the ${country} list is loaded — here, or with Import list on its card` }];
+    }
+    if (!mine.length && fileLists[m].length && portals.length) {
+      return [{ title: `The ${country} file goes to no portal:`, text: `no ${country} portal is picked, so its ${fileLists[m].length} product${fileLists[m].length === 1 ? '' : 's'} stay on the event's ${country} list without a marketplace` }];
+    }
+    return [];
+  }) : [];
   const checkLines = [
-    ...(listNow?.deal ? dealWarnings(listNow.deal) : []),
+    ...fileGaps,
+    ...(listNow?.deal ? dealWarnings(listNow.deal, { fromFile: fileMode }) : []),
     ...['ca', 'us'].flatMap((m) => {
-      const check = monthly && mode === 'file' ? files[m]?.check : listNow?.markets?.[m];
+      const check = perMarket && mode === 'file' ? files[m]?.check : listNow?.markets?.[m];
       return check ? marketWarnings(check, m) : [];
     }),
     ...['ca', 'us'].flatMap((m) => {
-      const empty = monthly && mode === 'file' ? files[m]?.emptySkus ?? [] : [];
+      const empty = perMarket && mode === 'file' ? files[m]?.emptySkus ?? [] : [];
       return empty.length ? [{ title: `${empty.length} row${empty.length === 1 ? '' : 's'} of the ${m === 'ca' ? 'Canada' : 'USA'} file left out:`, text: `${listOf(empty)} — no price or cost on ${empty.length === 1 ? 'its' : 'their'} row` }] : [];
     }),
     ...(overNote ? [{ title: overNote }] : []),
@@ -1478,22 +1547,10 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             </div>
           )}
         </div>
-        {!monthly && (
-        <div className="block sm:col-span-3">
-          <span className="text-label-lg text-on-surface-variant">Portals</span>
-          <p className="text-body-sm text-on-surface-variant mt-0.5">Where this {KIND_NOUN[kind]} goes. Pick one or several.</p>
-          <div className="mt-2">
-            <PortalPicker value={portals} onChange={setPortals} kind={kind} />
-          </div>
-          {stylishStores.length > 0 && (
-            <div className="mt-3">
-              <StylishDiscountFields draft={stylish} onChange={setStylish} markets={stylishStores} />
-            </div>
-          )}
-        </div>
-        )}
-        {monthly && (
-        <div className="block">
+        {/* Where the products come from: a price file per country or a pasted
+            list. A monthly promotion and a peak season event (2026-11-13). */}
+        {takesFiles && (
+        <div className="block" role="group" aria-label="Source">
           <span className="text-label-lg text-on-surface-variant">Source</span>
           <div className="mt-1 inline-flex w-full rounded-lg bg-surface-container p-1">
             {[['file', 'Upload file'], ['paste', 'Paste list']].map(([key, label]) => (
@@ -1512,9 +1569,23 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
           </div>
         </div>
         )}
+        {!monthly && (
+        <div className="block sm:col-span-3">
+          <span className="text-label-lg text-on-surface-variant">Portals</span>
+          <p className="text-body-sm text-on-surface-variant mt-0.5">Where this {KIND_NOUN[kind]} goes. Pick one or several.</p>
+          <div className="mt-2">
+            <PortalPicker value={portals} onChange={setPortals} kind={kind} />
+          </div>
+          {stylishStores.length > 0 && (
+            <div className="mt-3">
+              <StylishDiscountFields draft={stylish} onChange={setStylish} markets={stylishStores} />
+            </div>
+          )}
+        </div>
+        )}
       </div>
 
-      {!monthly ? (
+      {!perMarket ? (
         <label className="block">
           <span className="text-label-lg text-on-surface-variant">Products — one SKU per line</span>
           <textarea
@@ -1534,7 +1605,13 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         </label>
       ) : mode === 'file' ? (
         <div className="grid sm:grid-cols-2 gap-4">
-          {[['ca', 'Canada file', 'Its SKUs and the Wayfair Canada base cost are read; every other price comes from the products\' Orange level'], ['us', 'USA file', 'Its SKUs are read; every price comes from the products\' Orange level']].map(([market, title, hint]) => (
+          {/* A peak season event: the file decides. Its promo MAP and promo
+              costs are the event's on every marketplace of that country; the
+              Purple level only fills what a row leaves empty. */}
+          {(monthly
+            ? [['ca', 'Canada file', 'Its SKUs and the Wayfair Canada base cost are read; every other price comes from the products\' Orange level'], ['us', 'USA file', 'Its SKUs are read; every price comes from the products\' Orange level']]
+            : [['ca', 'Canada file', `Its SKUs at the promo MAP and promo costs the file gives — they are the event's prices in Canada. What a row leaves empty comes from the product's ${levelLabel(KIND_LEVEL[kind])} level`], ['us', 'USA file', `Its SKUs at the promo MAP and promo costs the file gives — they are the event's prices in the USA. What a row leaves empty comes from the product's ${levelLabel(KIND_LEVEL[kind])} level`]]
+          ).map(([market, title, hint]) => (
             <div key={market} className="rounded-xl border border-outline-variant p-4 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-label-lg font-semibold text-on-surface">{title}</span>
@@ -1614,7 +1691,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-body-sm text-on-surface-variant">
-          {!monthly
+          {!perMarket
             && `${skuList.skus.length} SKU${skuList.skus.length === 1 ? '' : 's'}${skuList.skipped.length > 0 ? ` · ${skuList.skipped.length} line${skuList.skipped.length === 1 ? '' : 's'} skipped` : ''}`}
         </p>
         <button
@@ -2212,6 +2289,11 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             // price, so a list of 71 read "USA 40" over a table of 71).
             const countFor = (m) => rows.filter((r) => onMarketList(r, m)).length;
             const marketCounts = { ca: countFor('ca'), us: countFor('us') };
+            // A list per country: a monthly promotion, and an event whose
+            // countries hold different products (made from a file per country,
+            // 2026-11-13). "Edit SKUs" then edits the list of the tab shown, so
+            // the other country's list and the file's prices are not touched.
+            const listPerMarket = (promo.kind ?? 'monthly') === 'monthly' || rows.some((r) => onMarketList(r, 'ca') !== onMarketList(r, 'us'));
             return (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -2250,9 +2332,9 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   {canEdit && promo.status !== 'ended' && !editingSkus && (
                     <button
                       type="button"
-                      title={(promo.kind ?? 'monthly') === 'monthly' ? `Add or remove products of the ${market === 'us' ? 'USA' : 'Canada'} list` : 'Add or remove products'}
+                      title={listPerMarket ? `Add or remove products of the ${market === 'us' ? 'USA' : 'Canada'} list` : 'Add or remove products'}
                       onClick={() => {
-                        if ((promo.kind ?? 'monthly') === 'monthly') setImportModal({ market, skus: marketRows.map((r) => r.sku) });
+                        if (listPerMarket) setImportModal({ market, skus: marketRows.map((r) => r.sku) });
                         else { setSkuText(rows.map((r) => r.sku).join('\n')); setEditingSkus(true); }
                       }}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"

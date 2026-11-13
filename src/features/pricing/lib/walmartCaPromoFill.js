@@ -35,8 +35,7 @@ import {
   indexToCol,
 } from '@/features/syndication/exports/templateFiller';
 import { promotionMembersFor, promotionLevel } from '@/features/pricing/api/promotions';
-import { promoWindow, etToday } from '@/features/pricing/lib/promoCalendar';
-import { latestSnapshot } from '@/features/syndication/lib/channels';
+import { promoWindow } from '@/features/pricing/lib/promoCalendar';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { batchTicker, blockingStep } from '@/features/pricing/lib/fileProgress';
 
@@ -64,13 +63,14 @@ function etToUtcSerial(day, secs) {
 // Walmart's flash-deal upload ("DEAL_ITEM.xlsx"): sheet "Upload Template",
 // row 1 section titles, row 2 headers, data from row 3; the columns are found
 // by their headers. Since 2026-11-13 the file is SKU, Regular Price and Promo
-// Price, the three mandatory. Regular Price (user, the same day: "siempre el
-// precio que dice la API de Walmart; si no lo tenemos, colocamos el blue
-// MAP") = the product's own price on Walmart as the PIM last read it through
-// Walmart's API (walmartPrices below), else MAP Blue CAD. The file before it
-// (2026-09-23: SKU and Promo Price, plus three "Informational Only" columns)
-// is no longer taken by Walmart (user: "solo funciona el que acabo de
-// subir") — it is still recognised, to be refused by name.
+// Price, the three mandatory. Regular Price is ALWAYS the product's MAP Blue
+// CAD (user, later the same day: "Regular price debe ser el MAP Blue
+// obligatoriamente del producto, no de la lectura") — for a few hours it was
+// the price read from Walmart's API, which for a product in the running
+// monthly promotion is its promotion price, not its regular one. The file
+// before it (2026-09-23: SKU and Promo Price, plus three "Informational Only"
+// columns) is no longer taken by Walmart (user: "solo funciona el que acabo
+// de subir") — it is still recognised, to be refused by name.
 function locateDeal(grid) {
   for (let r = 0; r < Math.min(12, grid.length); r++) {
     const row = (grid[r] ?? []).map(norm);
@@ -251,26 +251,9 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel, {
   return report;
 }
 
-// Each product's regular price on Walmart Canada today, as the PIM last read
-// it through Walmart's API: the latest walmart_ca snapshot (walmart-pull-items,
-// twice a day, the promotions' products first). That API answers only for a
-// product that has a promotion on Walmart, so a product without one has no
-// price here — and neither has one whose reading belongs to a promotion that
-// is over or has not begun (the reading is of another day's price).
-//   → { read: the snapshot could be read, prices: Map(sku → { price, readAt }) }
-async function walmartPrices(today) {
-  const snap = await latestSnapshot('walmart_ca');
-  const prices = new Map();
-  for (const it of snap?.results ?? []) {
-    if (it?.price == null) continue;
-    if ((it.discount_start && it.discount_start > today) || (it.discount_end && it.discount_end < today)) continue;
-    prices.set(String(it.sku), { price: Number(it.price), readAt: it.promo_checked_at ?? null });
-  }
-  return { read: Boolean(snap), prices };
-}
-
-// The deal file: one row per product — SKU, regular price (Walmart's own,
-// else MAP Blue) and promo price. Nothing else.
+// The deal file: one row per product — SKU, regular price (MAP Blue CAD,
+// always) and promo price (the promotion's own price for the product, else
+// the MAP of the deal's level). Nothing else.
 async function fillDealFile(zip, hit, template, promotion, channel, task = null) {
   const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
@@ -297,9 +280,6 @@ async function fillDealFile(zip, hit, template, promotion, channel, task = null)
     for (const a of aliases ?? []) alias.set(a.sku, a.alias);
   }
 
-  task?.progress(0.75, "Reading Walmart's own prices…");
-  const walmart = await walmartPrices(etToday());
-
   const window = promoWindow(promotion, 'ca');
   const lines = [];
   const noMap = [];
@@ -307,29 +287,19 @@ async function fillDealFile(zip, hit, template, promotion, channel, task = null)
   const atOrAbove = [];
   let aliased = 0;
   let fromList = 0;
-  // where each regular price came from, and when Walmart's were read
-  const regularFrom = { walmart: 0, map: 0, readFrom: null, readTo: null };
   for (const m of members) {
     const p = pim.get(m.sku) ?? {};
-    const map = p.map_cad != null ? Number(p.map_cad) : null;
+    // Regular Price: the product's MAP Blue CAD, never a price read from Walmart.
+    const regular = p.map_cad != null ? Number(p.map_cad) : null;
     const promo = m.promo_price_cad != null ? Number(m.promo_price_cad) : p[promoMapField] != null ? Number(p[promoMapField]) : null;
-    const own = walmart.prices.get(m.sku) ?? null;
-    const regular = own ? own.price : map;
     if (promo == null) { noPromo.push(m.sku); continue; }
     if (regular == null) { noMap.push(m.sku); continue; }
     if (promo >= regular) { atOrAbove.push(m.sku); continue; }
     if (m.promo_price_cad != null) fromList += 1;
     if (alias.has(m.sku)) aliased += 1;
-    if (own) {
-      regularFrom.walmart += 1;
-      if (own.readAt && (!regularFrom.readFrom || own.readAt < regularFrom.readFrom)) regularFrom.readFrom = own.readAt;
-      if (own.readAt && (!regularFrom.readTo || own.readAt > regularFrom.readTo)) regularFrom.readTo = own.readAt;
-    } else {
-      regularFrom.map += 1;
-    }
     lines.push({ sku: m.sku, walmartSku: alias.get(m.sku) ?? m.sku, regular, promo });
   }
-  if (!lines.length) throw new Error(`Nothing to write: no product has a MAP ${tierLabel} below its regular price.`);
+  if (!lines.length) throw new Error(`Nothing to write: no product has a promo price below its MAP Blue.`);
   await blockingStep(task, 0.8, `Filling the sheet · ${lines.length} products…`);
 
   const { cols } = hit;
@@ -349,38 +319,27 @@ async function fillDealFile(zip, hit, template, promotion, channel, task = null)
   await downloadZip(zip, `Walmart_Canada_Deal_${period}`, templateExt(template.storage_path));
   task?.progress(1);
 
-  const report = { deal: true, rows: lines.length, tier, tierLabel, aliased, fromList, noMap, noPromo, atOrAbove, excluded, window, sheet: hit.name, regularFrom, walmartRead: walmart.read };
+  const report = { deal: true, rows: lines.length, tier, tierLabel, aliased, fromList, noMap, noPromo, atOrAbove, excluded, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: channel.key,
-    summary: `Filled Walmart Canada deal file for "${promotion.name}" (${lines.length} products, MAP ${tierLabel})`,
-    metadata: { template: template.file_name, rows: lines.length, tier, regularPrice: { walmart: regularFrom.walmart, map_cad: regularFrom.map, walmartRead: walmart.read }, aliased, noMap: noMap.length, noPromo: noPromo.length, atOrAbove: atOrAbove.length, window },
+    summary: `Filled Walmart Canada deal file for "${promotion.name}" (${lines.length} products, regular price MAP Blue, promo MAP ${tierLabel})`,
+    metadata: { template: template.file_name, rows: lines.length, tier, regularPrice: 'map_cad', fromList, aliased, noMap: noMap.length, noPromo: noPromo.length, atOrAbove: atOrAbove.length, window },
   });
   return report;
-}
-
-const shortDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' });
-
-// "Regular price: Walmart's own on 12 (read Nov 10 – Nov 11), MAP Blue on 34."
-function regularPriceText(r) {
-  const { walmart, map, readFrom, readTo } = r.regularFrom;
-  if (!r.walmartRead) return "Regular price: MAP Blue on all — Walmart's own prices could not be read";
-  if (!walmart) return 'Regular price: MAP Blue on all (Walmart gives no price of its own for them: none is in a promotion there)';
-  const days = readFrom ? ` (read ${shortDay(readFrom) === shortDay(readTo) ? shortDay(readFrom) : `${shortDay(readFrom)} – ${shortDay(readTo)}`})` : '';
-  return `Regular price: Walmart's own price on ${walmart}${days}${map ? `, MAP Blue on ${map}` : ''}`;
 }
 
 const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? ` and ${list.length - n} more` : ''}`;
 
 export function summarizeWalmartCaFill(channel, r) {
   const parts = [r.deal
-    ? `${channel.label} deal file ready. ${r.rows} products (SKU + regular price + promo price = MAP ${r.tierLabel}${r.fromList ? `, ${r.fromList} from the promotion's own list` : ''}), ${r.aliased} under their Walmart SKU. ${regularPriceText(r)}. The dates go in the portal: ${r.window.start} to ${r.window.end}`
+    ? `${channel.label} deal file ready. ${r.rows} products (SKU + regular price = MAP Blue + promo price = MAP ${r.tierLabel}${r.fromList ? `, ${r.fromList} from the promotion's own list` : ''}), ${r.aliased} under their Walmart SKU. The dates go in the portal: ${r.window.start} to ${r.window.end}`
     : `${channel.label} file ready. ${r.rows} products, ${r.window.start} 00:00:00 to ${r.window.end} 23:59:59 Eastern (written in UTC, the way Walmart reads the file), promo price = MAP ${r.tierLabel}${r.fromList ? ` (${r.fromList} from the promotion's own list)` : ''}, ${r.aliased} under their Walmart SKU`];
-  if (r.noMap.length) parts.push(`${r.deal ? 'no regular price (none read from Walmart, no MAP CAD in the PIM)' : 'no MAP CAD in the PIM'}, left out: ${few(r.noMap)}`);
+  if (r.noMap.length) parts.push(`no MAP CAD in the PIM, left out: ${few(r.noMap)}`);
   if (r.noPromo.length) parts.push(`no MAP ${r.tierLabel} in the PIM, left out: ${few(r.noPromo)}`);
-  if (r.atOrAbove.length) parts.push(`promo not below the ${r.deal ? 'regular price' : 'MAP'}, left out: ${few(r.atOrAbove)}`);
+  if (r.atOrAbove.length) parts.push(`promo not below the MAP Blue, left out: ${few(r.atOrAbove)}`);
   if (r.excluded?.length) parts.push(`${r.excluded.length} excluded from ${channel.label}: ${few(r.excluded)}`);
   return parts.join(' · ');
 }

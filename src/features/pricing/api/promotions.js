@@ -488,10 +488,20 @@ export async function createPromotion({ name, period, currency, rows, kind = 'mo
  * from the lists pasted per market (2026-11-11), not from files — only the
  * wording changes. `task` (optional taskProgress reporter): the PIM's SKUs,
  * the promotion, its rows in batches of 200.
+ *
+ * A peak season event is made the same way (user, 2026-11-13: "subir template
+ * al igual que en Monthly dentro de Peak Season Events y que el sistema
+ * respete los precios"): `marketplaces` = the portals it goes to, and the
+ * file's prices and costs ARE the event's — the trigger takes the file first
+ * for every kind but monthly, and the level only for what a row leaves empty.
  */
-export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null, source = 'file', task = null }) {
+export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null, marketplaces = [], source = 'file', task = null }) {
   assertKindDates(kind, starts_on, ends_on);
   await assertMonthFree(kind, period);
+  const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
+  if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${KIND_NOUN[kind] ?? kind} is for.`);
+  // A Stylish store takes the event's own discount on the MSRP, never a MAP file.
+  if (portals.some((key) => STYLISH_CHANNELS.includes(key))) throw new Error('An event for the Stylish stores takes its discount (a percentage or a price per product), not a price file.');
   task?.progress(0, 'Checking the SKUs against the PIM…');
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
@@ -505,7 +515,7 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
   task?.progress(0.2, 'Creating the promotion…');
   const { data: promo, error } = await supabase
     .from('promotions')
-    .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), created_by: getActivityActor()?.id ?? null })
+    .insert({ name, period, status: 'draft', kind, ...dateColumns(kind, starts_on, ends_on), marketplaces: portals.length ? portals : null, created_by: getActivityActor()?.id ?? null })
     .select()
     .single();
   if (error) throw error;
@@ -541,8 +551,8 @@ export async function createPromotionFromFile({ name, period, rows, kind = 'mont
     action: 'create',
     entityType: 'promotion',
     entityId: String(promo.id),
-    summary: `Created promotion "${name}" from ${source === 'list' ? 'pasted lists' : 'file'} (${valid.length} SKUs — Canada ${counts.ca}, USA ${counts.us})`,
-    metadata: { period, skus: valid.length, source, not_in_pim: notInPim.length },
+    summary: `Created ${kind === 'monthly' ? 'promotion' : KIND_NOUN[kind] ?? kind} "${name}" from ${source === 'list' ? 'pasted lists' : 'file'} (${valid.length} SKUs — Canada ${counts.ca}, USA ${counts.us}${portals.length ? `, for ${portals.join(', ')}` : ''})`,
+    metadata: { period, kind, skus: valid.length, source, marketplaces: portals, not_in_pim: notInPim.length },
   });
   return { promotion: promo, added: valid.length, notInPim, counts };
 }

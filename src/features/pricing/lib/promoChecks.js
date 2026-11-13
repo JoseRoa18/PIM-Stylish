@@ -91,10 +91,13 @@ export function marketWarnings(check, market, { level = 'orange', withBasics = f
  * @param {object}   levels     LEVEL_FIELDS
  * @param {Map}      products   sku → product
  * @param {object[]} others     the other deals on those days: [{ name, marketplaces, skus: Set }]
+ * @param {object}   [lists]    { ca: [skus], us: [skus] } — an event made from a file per country (a peak
+ *                              season event, 2026-11-13): each portal is checked on its own country's list
  */
-export function checkDealList({ skus, portals, channels, levelOf, levels, products, others = [] }) {
+export function checkDealList({ skus, portals, channels, levelOf, levels, products, others = [], lists = null }) {
   const known = skus.filter((s) => products.has(s));
   const out = { notInPim: skus.filter((s) => !products.has(s)), portals: [], overlaps: [] };
+  const onList = lists ? { ca: new Set(lists.ca ?? []), us: new Set(lists.us ?? []) } : null;
   for (const key of portals) {
     const ch = channels.find((c) => c.key === key);
     if (!ch) continue;
@@ -102,7 +105,8 @@ export function checkDealList({ skus, portals, channels, levelOf, levels, produc
     const col = ch.market === 'us' ? levels[level].promo_price_usd : levels[level].promo_price_cad;
     const offKey = ch.exclusionKey ?? ch.key;
     const row = { key, label: ch.label, market: ch.market, level, noPrice: [], switchedOff: [], notSold: [], noDiscount: [], bigDiscount: [] };
-    for (const sku of known) {
+    const mine = onList ? known.filter((s) => onList[ch.market]?.has(s)) : known;
+    for (const sku of mine) {
       const p = products.get(sku);
       if ((p.channel_exclusions ?? []).includes(offKey)) { row.switchedOff.push(sku); continue; }
       if (ch.discounts) {
@@ -121,24 +125,29 @@ export function checkDealList({ skus, portals, channels, levelOf, levels, produc
     out.portals.push(row);
     for (const o of others) {
       if (!(o.marketplaces ?? []).includes(key)) continue;
-      const shared = known.filter((s) => o.skus.has(s));
+      const shared = mine.filter((s) => o.skus.has(s));
       if (shared.length) out.overlaps.push({ promotion: o.name, portal: ch.label, skus: shared });
     }
   }
   return out;
 }
 
-/** The warnings of a deal's list, as lines to show: [{ title, text }]. */
-export function dealWarnings(check) {
+/**
+ * The warnings of a deal's list, as lines to show: [{ title, text }].
+ * `fromFile`: the event's prices come from a file per country, whose own check
+ * (checkMarketList) already says what is priced wrong or not at all — only
+ * what is about the portals is said here.
+ */
+export function dealWarnings(check, { fromFile = false } = {}) {
   const lines = [];
-  if (check.notInPim.length) lines.push({ title: `${check.notInPim.length} not in the PIM (skipped):`, text: listOf(check.notInPim, 40) });
+  if (!fromFile && check.notInPim.length) lines.push({ title: `${check.notInPim.length} not in the PIM (skipped):`, text: listOf(check.notInPim, 40) });
   for (const p of check.portals) {
     const cur = CURRENCY[p.market];
-    if (p.noPrice.length) lines.push({ title: `${p.label}: ${p.noPrice.length} with no ${levelName(p.level)} price in ${cur}:`, text: `${listOf(p.noPrice)} — no deal price for ${p.noPrice.length === 1 ? 'it' : 'them'} until the product's Pricing tab has it` });
+    if (!fromFile && p.noPrice.length) lines.push({ title: `${p.label}: ${p.noPrice.length} with no ${levelName(p.level)} price in ${cur}:`, text: `${listOf(p.noPrice)} — no deal price for ${p.noPrice.length === 1 ? 'it' : 'them'} until the product's Pricing tab has it` });
     if (p.switchedOff.length) lines.push({ title: `${p.label}: ${p.switchedOff.length} switched off for this marketplace:`, text: `${listOf(p.switchedOff)} — left out of its file and its sends` });
     if (p.notSold.length) lines.push({ title: `${p.label}: ${count(p.notSold.length, 'Azuni product')} not sold on that store:`, text: listOf(p.notSold) });
-    if (p.noDiscount.length) lines.push({ title: `${p.label}: ${p.noDiscount.length} whose ${levelName(p.level)} price is not under the regular MAP:`, text: `${listOf(p.noDiscount)} — the deal lowers nothing for ${p.noDiscount.length === 1 ? 'it' : 'them'}` });
-    if (p.bigDiscount.length) lines.push({ title: `${p.label}: ${p.bigDiscount.length} more than ${Math.round(BIG_DISCOUNT * 100)}% under the regular MAP:`, text: `${listOf(p.bigDiscount)} — check ${p.bigDiscount.length === 1 ? 'it is' : 'they are'} not a typo` });
+    if (!fromFile && p.noDiscount.length) lines.push({ title: `${p.label}: ${p.noDiscount.length} whose ${levelName(p.level)} price is not under the regular MAP:`, text: `${listOf(p.noDiscount)} — the deal lowers nothing for ${p.noDiscount.length === 1 ? 'it' : 'them'}` });
+    if (!fromFile && p.bigDiscount.length) lines.push({ title: `${p.label}: ${p.bigDiscount.length} more than ${Math.round(BIG_DISCOUNT * 100)}% under the regular MAP:`, text: `${listOf(p.bigDiscount)} — check ${p.bigDiscount.length === 1 ? 'it is' : 'they are'} not a typo` });
   }
   for (const o of check.overlaps) {
     lines.push({ title: `${o.portal}: ${o.skus.length} already in "${o.promotion}" on those days:`, text: `${listOf(o.skus, 8)} — two deals on the same product and days` });

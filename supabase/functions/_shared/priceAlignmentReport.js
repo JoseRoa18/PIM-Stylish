@@ -260,6 +260,10 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     // The products found at their expected price: counted above, and listed
     // so one product can be looked up on every store (the assistant).
     const aligned = [];
+    // The products left out of the comparison, each with its reason: counted
+    // in `notOnStore` (and a page store's own counters), and listed for the
+    // Price Alignment Excel (user, 2026-11-13). Nothing else reads the list.
+    const leftOut = [];
     let total = 0;
     let notOnStore = 0;
     let legacy = false;
@@ -269,7 +273,11 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
       if (outOfScope?.has(r.sku)) continue; // brand the store never carries
       // Rule (user, 2026-09-23): a product the store does not carry is not a
       // price problem — it stays out of the report and its score.
-      if (r.state === 'missing') { notOnStore += 1; continue; }
+      if (r.state === 'missing') {
+        notOnStore += 1;
+        leftOut.push({ sku: r.sku, reason: 'not_on_store', ...(r.url ? { url: r.url, read_at: r.read_at ?? null } : {}) });
+        continue;
+      }
       // An uncounted row (BB&B / Overstock: read sold out or SKU not confirmed)
       // is listed with the problems when it is one, but counts nowhere.
       const counted = !r.uncounted;
@@ -296,7 +304,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     }
 
     problems.sort((a, b) => a.sku.localeCompare(b.sku));
-    return { ranAt: snapshot.run_at, total, counts, problems, aligned, legacy, notOnStore };
+    return { ranAt: snapshot.run_at, total, counts, problems, aligned, leftOut, legacy, notOnStore };
   }
 
   /**
@@ -446,16 +454,22 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     }
     const results = [];
     const left = { noPrice: 0, soldOut: 0, otherProduct: 0, otherCurrency: 0, readBeforeChange: 0 };
+    // The same pages one by one, with what each one showed (the Excel's "Left out").
+    const leftOut = [];
+    const leave = (counter, reason, sku, r) => {
+      left[counter] += 1;
+      leftOut.push({ sku, reason, url: r.url ?? null, read_at: r.read_at ?? null, price: r.price ?? null, currency: r.currency ?? null, page_model: r.page_model ?? null, in_stock: r.in_stock ?? null, page_note: r.page_note ?? null });
+    };
     let readFrom = null;
     let readTo = null;
     for (const [sku, r] of bySku) {
       if (!baseBySku.has(sku)) continue; // not a PIM product
-      if (r.verdict === 'broken' && r.sku_check !== 'other') { results.push({ sku, state: 'missing' }); continue; }
+      if (r.verdict === 'broken' && r.sku_check !== 'other') { results.push({ sku, state: 'missing', url: r.url, read_at: r.read_at }); continue; }
       // 'listing' (the right listing on its default option): the price read is the default finish's.
-      if (r.sku_check === 'other' || r.sku_check === 'variant' || r.sku_check === 'listing' || (r.sku_check === 'unknown' && r.page_model)) { left.otherProduct += 1; continue; }
-      if (r.price == null || !r.read_at) { left[r.in_stock === false ? 'soldOut' : 'noPrice'] += 1; continue; }
-      if (r.currency && r.currency !== currency) { left.otherCurrency += 1; continue; }
-      if (changedOn.has(sku) && etDay(r.read_at) < changedOn.get(sku)) { left.readBeforeChange += 1; continue; }
+      if (r.sku_check === 'other' || r.sku_check === 'variant' || r.sku_check === 'listing' || (r.sku_check === 'unknown' && r.page_model)) { leave('otherProduct', 'other_product', sku, r); continue; }
+      if (r.price == null || !r.read_at) { leave(r.in_stock === false ? 'soldOut' : 'noPrice', r.in_stock === false ? 'sold_out' : 'no_price', sku, r); continue; }
+      if (r.currency && r.currency !== currency) { leave('otherCurrency', 'other_currency', sku, r); continue; }
+      if (changedOn.has(sku) && etDay(r.read_at) < changedOn.get(sku)) { leave('readBeforeChange', 'read_before_change', sku, r); continue; }
       if (!readFrom || r.read_at < readFrom) readFrom = r.read_at;
       if (!readTo || r.read_at > readTo) readTo = r.read_at;
       const base = baseBySku.get(sku) ?? null;
@@ -481,7 +495,8 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
         page_note: r.page_note,
       });
     }
-    return { ...classifySnapshot({ run_at: readTo, results }), readFrom, readTo, ...left };
+    const report = classifySnapshot({ run_at: readTo, results });
+    return { ...report, leftOut: [...report.leftOut, ...leftOut], readFrom, readTo, ...left };
   }
 
   /**
