@@ -43,8 +43,9 @@ export const AUTO_KEYS = {
   reviews_5plus: { label: '# products with more than 5 approved reviews on the store (Wix Reviews)', unit: 'number', server: true, store: true },
   no_profit_skus: { label: '# SKUs priced on the store this week below Odoo\'s average cost + their real shipping cost per unit (ShipStation labels, 180 days)', unit: 'number', server: true, store: true, alsoOn: ['bbb_overstock'] },
   skus_not_sold_90d: { label: '# SKUs without a sale in 90 days — the products the marketplace lists (its ids or its Where to Buy link in the PIM) vs Odoo orders', unit: 'number', server: true },
-  // Amazon sells from two stocks (2026-11-16): what it holds itself (FBA — Odoo's AMZ-CAN / AMZ-USA warehouses) and our warehouse.
-  oos_loss: { label: 'Loss due to out of stock — products at 0 units × their weekly sales of the 8 weeks before (Amazon: at 0 both at Amazon and in our warehouse)', unit: 'money', server: true },
+  // Amazon sells from two stocks (2026-11-16): what it holds itself (FBA — Odoo's AMZ-CAN / AMZ-USA warehouses) and our
+  // warehouse. Every product Amazon holds none of counts, whatever we have (user: "tiene que ser todo").
+  oos_loss: { label: 'Loss due to out of stock — products at 0 units × their weekly sales of the 8 weeks before (Amazon: every product Amazon holds none of — what it sold from Amazon’s stock, and from ours too when our warehouse has none)', unit: 'money', server: true },
   obsolete_skus: { label: '# SKUs marked obsolete in the PIM', unit: 'number', server: true },
   // The marketplace tabs (user, 2026-11-05): returns read over 4 weeks (bodega validates them in batches).
   return_rate: { label: 'Return rate — orders with a return Odoo received in the last 4 weeks ÷ the paid orders placed in them', unit: 'percent', server: true },

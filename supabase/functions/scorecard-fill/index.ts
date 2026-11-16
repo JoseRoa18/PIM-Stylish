@@ -65,7 +65,7 @@ interface MarketSource {
   company: number;      // Odoo company whose costs and currency apply (2 = Stylish International, CAD; 1 = Stylish USA, USD)
   wholesale?: { blue: string; orange: string; purple: string }; // the price levels the marketplace pays us (products columns)
   stock?: Market;       // product_inventory market of the stock it sells from (our warehouse of that country)
-  fba?: string;         // Amazon: the Odoo warehouse that holds what Amazon itself ships (FBA) — sold from as well as ours
+  fba?: string;         // Amazon: the Odoo warehouse that holds what Amazon itself ships (FBA); `ships` names the orders sent from ours instead
   listed?: Listed;      // the SKUs it lists, by the PIM's ids for it
   wix?: string;         // Sinks Direct: WIX_SITES key of the store (its orders, reviews, price)
   wixSites?: string[];  // Sinks Direct: Activity Log site keys of the store's pushes
@@ -92,8 +92,10 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
   amazon: {
     // 2026-11-16 (user: every marketplace's "Loss due to out of stock" and "# SKUs not sold" from the PIM): Amazon
     // sells from two stocks — what it holds itself (FBA: Odoo's AMZ-CAN / AMZ-USA warehouses, kept by the transfers
-    // sent there and by every FBA order) and our warehouse (the FBM offers). Amazon.com has no seller SKUs in the
-    // PIM, so what it lists = the products with an Amazon.com Where to Buy link, as on Menards, Best Buy and Walmart.
+    // sent there and by every FBA order) and our warehouse (the FBM offers) — and a product Amazon holds none of
+    // counts as out of stock whatever we have (user, the same day: "tiene que ser todo"). Amazon.com has no seller
+    // SKUs in the PIM, so what it lists = the products with an Amazon.com Where to Buy link, as on Menards, Best
+    // Buy and Walmart.
     ca: { odoo: sold([MP.amazonFbm, MP.amazonFba], CA), company: CA, stock: "ca", fba: "AMZCAN", listed: { amazon: "ca" }, ships: [MP.amazonFbm], promo: ["amazon_ca"], pages: ["amazon_ca"] },
     us: { odoo: sold([MP.amazonFbm, MP.amazonFba], US), company: US, stock: "us", fba: "AMZUSA", listed: { wtb: "amazon_us" }, ships: [MP.amazonFbm], promo: ["amazon_us"], pages: ["amazon_us"] },
   },
@@ -915,15 +917,13 @@ Deno.serve(async (req) => {
         if (returns) diag.returnsReceived = returns.length;
 
         let stock: Map<string, number> | null = null;
+        let held: Map<string, number> | null = null; // Amazon: the units Amazon holds itself (FBA), by SKU
         if (keys.has("oos_loss") && src.stock) {
           const { data: inv, error } = await admin.from("product_inventory").select("sku, available").eq("market", src.stock);
           if (error) throw error;
           stock = new Map((inv ?? []).map((r) => [r.sku, Number(r.available) || 0]));
           if (src.fba) {
-            // Amazon also sells what it holds itself: a product is out of stock
-            // there only when neither Amazon nor our warehouse has a unit.
-            const held = await warehouseStock(odoo, src.fba, skuOf);
-            for (const [sku, units] of held) if (stock.has(sku)) stock.set(sku, stock.get(sku)! + Math.max(0, units));
+            held = await warehouseStock(odoo, src.fba, skuOf);
             diag.fbaProducts = [...held.values()].filter((u) => u > 0).length;
           }
         }
@@ -1052,7 +1052,34 @@ Deno.serve(async (req) => {
           }
           if (column === thisColumn) {
             value.obsolete_skus = (population ?? live).filter((p) => p.is_obsolete).length;
-            if (stock) {
+            if (stock && held) {
+              // Amazon (user, 2026-11-16: "tiene que ser todo"): every product
+              // Amazon holds none of counts, whatever we have. It loses what it
+              // sold from Amazon's own stock (the FBA orders) in the 8 weeks before
+              // the data week — and, with none in our warehouse either, what it
+              // sold from ours too (the orders we ship, `ships`). A product Amazon
+              // still holds loses nothing: it can be bought there.
+              const weShip = new Set(src.ships ?? []);
+              const mpOf = new Map(orders.map((o) => [o.id, o.mp]));
+              const fromAmazon = new Map<string, number>();
+              const fromOurs = new Map<string, number>();
+              for (const l of linesIn(addDays(from, -56), from)) {
+                if (!l.sku) continue;
+                const mp = mpOf.get(l.orderId);
+                const into = mp != null && weShip.has(mp) ? fromOurs : fromAmazon;
+                into.set(l.sku, (into.get(l.sku) ?? 0) + l.subtotal);
+              }
+              let loss = 0;
+              const out0: string[] = [];
+              for (const sku of new Set([...fromAmazon.keys(), ...fromOurs.keys()])) {
+                if ((held.get(sku) ?? 0) > 0) continue;
+                const ours = stock.get(sku);
+                const lost = (fromAmazon.get(sku) ?? 0) + (ours != null && ours <= 0 ? fromOurs.get(sku) ?? 0 : 0);
+                if (lost > 0) { loss += lost / 8; out0.push(`${sku} ${Math.round(lost / 8)}`); }
+              }
+              diag.outAtAmazon = out0.sort((a, b) => Number(b.split(" ")[1]) - Number(a.split(" ")[1])).join(", ");
+              value.oos_loss = round2(loss);
+            } else if (stock) {
               // Products at 0 units now that sold in the 8 weeks before the
               // data week: their average weekly sales is what the store loses.
               const bySku = new Map<string, number>();
