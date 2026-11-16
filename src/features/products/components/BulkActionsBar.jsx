@@ -25,6 +25,7 @@ import { listMediaFor } from '@/features/media/api/media';
 import { startTask } from '@/lib/taskProgress';
 import { useDockClearance } from '@/components/ui/useDockClearance';
 import WixStoresPushDialog from '@/features/syndication/components/WixStoresPushDialog';
+import { logListingExport } from '@/features/syndication/lib/listingExportLog';
 
 // The exporters, the PIM round-trip export and the Wix push load on click
 // (performance pass 2026-09-29) — they stay out of the Catalog's first download.
@@ -434,6 +435,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
 
       task.progress(0.1);
       const res = await generateLowesSet(templates, productList, undefined, { task: task.part(0.1, 1), merchantEmail });
+      logListingExport(marketplace, templatePurpose(templates[0]), productList.map((p) => p.sku));
       task.finish(`Downloaded · ${res.files} file${res.files === 1 ? '' : 's'}, ${res.media.files} product file${res.media.files === 1 ? '' : 's'}, ${noun(res.count)}`);
       setResult({
         type: 'success',
@@ -502,6 +504,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         const catProducts = productList.filter((p) => p.category === cat);
         const slice = labelTask(task.part(0.1 + (0.9 * i) / sets.length, 0.1 + (0.9 * (i + 1)) / sets.length), sets.length > 1 ? `Set ${i + 1} of ${sets.length}: ${cat}` : '');
         const res = await generateMenardsFromTemplates(catTemplates, catProducts, { task: slice });
+        logListingExport(marketplace, templatePurpose(catTemplates[0]), catProducts.map((p) => p.sku));
         files += res.files;
         countTotal += res.count;
         for (const r of res.results) {
@@ -651,6 +654,10 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       for (const [i, { tmpl, label, products: productList }] of groups.entries()) {
         const slice = labelTask(task.part(0.1 + (0.9 * i) / groups.length, 0.1 + (0.9 * (i + 1)) / groups.length), groups.length > 1 ? `Template ${i + 1} of ${groups.length} · ${label}` : '');
         const res = await generate(tmpl.storage_path, productList, `${prefix}_${label.replace(/[^a-z0-9_]+/gi, '_')}`, { task: slice });
+        // The products written into the file (one the exporter left out is not in it).
+        // (an exporter names them as the SKU, or as "SKU (why)").
+        const notWritten = new Set((res.skipped ?? []).map((s) => String(s).split(' (')[0]));
+        logListingExport(marketplace, templatePurpose(tmpl), productList.map((p) => p.sku).filter((sku) => !notWritten.has(sku)));
         warnings += res.warnings?.length ?? 0;
         if (res.skipped?.length) leftOut.push(`${res.skipped.join(', ')} (${res.skippedReason ?? 'not written'})`);
         if (res.missingData?.length) missingData.push(...res.missingData);

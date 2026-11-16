@@ -69,6 +69,8 @@ interface MarketSource {
   listed?: Listed;      // the SKUs it lists, by the PIM's ids for it
   wix?: string;         // Sinks Direct: WIX_SITES key of the store (its orders, reviews, price)
   wixSites?: string[];  // Sinks Direct: Activity Log site keys of the store's pushes
+  exports?: string[];   // the Activity Log targets of its listing files downloaded from the PIM (new listing / update)
+  wayfair?: "CAN" | "USA"; // Wayfair: the supplier whose API pushes (content, attributes, new listings) count as listings updated
   ships?: number[];     // the Odoo marketplaces of it WE ship (Amazon: FBM, not FBA); none = all
   promo: string[];      // its promotion channel keys (promotions.marketplaces) — for the AI note
   pages: string[];      // its store-page retailer keys (where_to_buy_readings) — for the AI note
@@ -96,29 +98,29 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
     // counts as out of stock whatever we have (user, the same day: "tiene que ser todo"). Amazon.com has no seller
     // SKUs in the PIM, so what it lists = the products with an Amazon.com Where to Buy link, as on Menards, Best
     // Buy and Walmart.
-    ca: { odoo: sold([MP.amazonFbm, MP.amazonFba], CA), company: CA, stock: "ca", fba: "AMZCAN", listed: { amazon: "ca" }, ships: [MP.amazonFbm], promo: ["amazon_ca"], pages: ["amazon_ca"] },
-    us: { odoo: sold([MP.amazonFbm, MP.amazonFba], US), company: US, stock: "us", fba: "AMZUSA", listed: { wtb: "amazon_us" }, ships: [MP.amazonFbm], promo: ["amazon_us"], pages: ["amazon_us"] },
+    ca: { odoo: sold([MP.amazonFbm, MP.amazonFba], CA), company: CA, stock: "ca", fba: "AMZCAN", listed: { amazon: "ca" }, ships: [MP.amazonFbm], promo: ["amazon_ca"], pages: ["amazon_ca"], exports: ["amazon_ca"] },
+    us: { odoo: sold([MP.amazonFbm, MP.amazonFba], US), company: US, stock: "us", fba: "AMZUSA", listed: { wtb: "amazon_us" }, ships: [MP.amazonFbm], promo: ["amazon_us"], pages: ["amazon_us"], exports: ["amazon_us"] },
   },
   wayfair: {
-    ca: { odoo: sold([MP.wayfair], CA), company: CA, stock: "ca", listed: { wayfair: "ca" }, promo: ["wayfair_ca"], pages: ["wayfair_ca"] },
-    us: { odoo: sold([MP.wayfair], US), company: US, stock: "us", listed: { wayfair: "us" }, promo: ["wayfair_us"], pages: ["wayfair_us"] },
+    ca: { odoo: sold([MP.wayfair], CA), company: CA, stock: "ca", listed: { wayfair: "ca" }, promo: ["wayfair_ca"], pages: ["wayfair_ca"], exports: ["wayfair_ca"], wayfair: "CAN" },
+    us: { odoo: sold([MP.wayfair], US), company: US, stock: "us", listed: { wayfair: "us" }, promo: ["wayfair_us"], pages: ["wayfair_us"], exports: ["wayfair_us"], wayfair: "USA" },
   },
   // The key stays homedepot_ca: the tab holds both countries since 2026-11-09.
   homedepot_ca: {
-    ca: { odoo: sold([MP.homedepot], CA), company: CA, stock: "ca", listed: { alias: "Home Depot CA" }, promo: ["homedepot_ca"], pages: ["homedepot_ca"] },
-    us: { odoo: sold([MP.homedepot], US), company: US, stock: "us", listed: { alias: "Home Depot US" }, promo: ["homedepot_us"], pages: ["homedepot_us"] },
+    ca: { odoo: sold([MP.homedepot], CA), company: CA, stock: "ca", listed: { alias: "Home Depot CA" }, promo: ["homedepot_ca"], pages: ["homedepot_ca"], exports: ["homedepot_ca"] },
+    us: { odoo: sold([MP.homedepot], US), company: US, stock: "us", listed: { alias: "Home Depot US" }, promo: ["homedepot_us"], pages: ["homedepot_us"], exports: ["homedepot_us"] },
   },
-  lowes: { us: { odoo: sold([MP.lowes], US), company: US, stock: "us", listed: { alias: "Lowe's US" }, promo: ["lowes_us"], pages: ["lowes_us"] } },
+  lowes: { us: { odoo: sold([MP.lowes], US), company: US, stock: "us", listed: { alias: "Lowe's US" }, promo: ["lowes_us"], pages: ["lowes_us"], exports: ["lowes_us"] } },
   // Menards has no aliases in the PIM: what it lists = the products with a Menards link.
-  menards: { us: { odoo: sold([MP.menards], US), company: US, stock: "us", listed: { wtb: "menards" }, promo: ["menards"], pages: ["menards"] } },
+  menards: { us: { odoo: sold([MP.menards], US), company: US, stock: "us", listed: { wtb: "menards" }, promo: ["menards"], pages: ["menards"], exports: ["menards"] } },
   // The same: what each lists = the products with its Where to Buy link.
   bestbuy: { ca: { odoo: sold([MP.bestbuy], CA), company: CA, stock: "ca", listed: { wtb: "bestbuy_ca" }, promo: ["bestbuy"], pages: ["bestbuy_ca"], align: ["bestbuy"] } },
   walmart: {
-    ca: { odoo: sold([MP.walmart], CA), company: CA, stock: "ca", listed: { wtb: "walmart_ca" }, promo: ["walmart_ca"], pages: ["walmart_ca"] },
+    ca: { odoo: sold([MP.walmart], CA), company: CA, stock: "ca", listed: { wtb: "walmart_ca" }, promo: ["walmart_ca"], pages: ["walmart_ca"], exports: ["walmart_ca"] },
     us: { odoo: sold([MP.walmart], US), company: US, stock: "us", listed: { wtb: "walmart_us" }, promo: ["walmart_us"], pages: ["walmart_us"] },
   },
-  rona: { ca: { odoo: sold([MP.rona], CA), company: CA, stock: "ca", listed: { alias: "Rona" }, promo: ["rona"], pages: ["rona"] } },
-  bbb_overstock: { us: { odoo: sold([MP.bbb, MP.overstock], US), company: US, stock: "us", listed: { alias: "BB&B / Overstock" }, promo: ["bbb", "overstock"], pages: ["bbb_us", "overstock_us"], wholesale: { blue: "cost_usd_lowes_sod_bbb", orange: "cost_usd_lowes_sod_bbb_orange", purple: "cost_usd_lowes_sod_bbb_purple" } } },
+  rona: { ca: { odoo: sold([MP.rona], CA), company: CA, stock: "ca", listed: { alias: "Rona" }, promo: ["rona"], pages: ["rona"], exports: ["rona"] } },
+  bbb_overstock: { us: { odoo: sold([MP.bbb, MP.overstock], US), company: US, stock: "us", listed: { alias: "BB&B / Overstock" }, promo: ["bbb", "overstock"], pages: ["bbb_us", "overstock_us"], exports: ["bbb"], wholesale: { blue: "cost_usd_lowes_sod_bbb", orange: "cost_usd_lowes_sod_bbb_orange", purple: "cost_usd_lowes_sod_bbb_purple" } } },
 };
 /** The same domain read from another model: sale.order fields under `prefix` (order_id., sale_id.). */
 const via = (domain: unknown[], prefix: string) => domain.map((leaf) => (Array.isArray(leaf) ? [`${prefix}${leaf[0]}`, leaf[1], leaf[2]] : leaf));
@@ -148,6 +150,10 @@ const SHIP_KEYS = ["on_time_ship", "late_ship_rate"];
 const SHIP_BUSINESS_DAYS = 2;
 const SETTINGS_KEY = "scorecard_fill";
 const FIRST_COLUMN = "2026-11-01"; // W44: the scorecard starts there
+// "# Listings Optimized per Week" on the marketplaces (user, 2026-11-16: "lo que el PIM envía o exporta"): the
+// listing files downloaded from the PIM are noted in the Activity Log from this day on, so a week that ended
+// before it has no number there — the PIM did not see it — instead of a 0.
+const LISTING_LOG_FROM = "2026-11-16";
 
 // ---- dates (Eastern) --------------------------------------------------------
 const DAY = 86400000;
@@ -946,6 +952,37 @@ Deno.serve(async (req) => {
           };
           pushes = (data ?? []).filter((p) => p.entity_id && onSite(p.metadata as Record<string, unknown> | null));
         }
+        if (keys.has("listings_updated") && (src.exports || src.wayfair)) {
+          // A marketplace: the products whose listing file for it was downloaded
+          // from the PIM (entries written by lib/listingExportLog.js and BB&B's
+          // exporter: metadata { listing: true, skus }) and, on Wayfair, the ones
+          // the PIM pushed through its API (not the sandbox, not a refused push).
+          const since = isoOf(etMidnightUtc(addDays(oldest, -7)));
+          const until = isoOf(etMidnightUtc(newest));
+          if (src.exports) {
+            const { data, error } = await admin.from("audit_log").select("occurred_at, metadata")
+              .eq("action", "export").eq("entity_type", "product").in("target", src.exports)
+              .gte("occurred_at", since).lt("occurred_at", until).limit(5000);
+            if (error) throw error;
+            for (const e of data ?? []) {
+              const md = e.metadata as { listing?: boolean; skus?: unknown } | null;
+              if (md?.listing !== true || !Array.isArray(md.skus)) continue;
+              for (const sku of md.skus) if (typeof sku === "string" && exact.has(sku)) pushes.push({ entity_id: sku, occurred_at: e.occurred_at, metadata: null });
+            }
+          }
+          if (src.wayfair) {
+            const { data, error } = await admin.from("audit_log").select("entity_id, occurred_at, summary, metadata")
+              .eq("action", "push").eq("entity_type", "product").eq("target", "wayfair")
+              .gte("occurred_at", since).lt("occurred_at", until).limit(5000);
+            if (error) throw error;
+            for (const e of data ?? []) {
+              const md = (e.metadata ?? {}) as { env?: string; error?: unknown; supplier?: string };
+              const supplier = md.supplier ?? /Wayfair (CAN|USA)/.exec(String(e.summary ?? ""))?.[1];
+              if (md.env === "sandbox" || md.error || supplier !== src.wayfair || !e.entity_id || !exact.has(e.entity_id)) continue;
+              pushes.push({ entity_id: e.entity_id, occurred_at: e.occurred_at, metadata: null });
+            }
+          }
+        }
 
         // Shipping: the paid orders of the columns' weeks and when they were fully shipped.
         let shipped: Map<number, { done: string | null; any: boolean }> | null = null;
@@ -1029,7 +1066,9 @@ Deno.serve(async (req) => {
               notes.returns_note = list.length ? `Received back this week: ${list.join(", ")}. Total ${money([...back.values()].reduce((t, x) => t + x.value, 0))}.` : "No returns this week.";
             }
           }
-          if (keys.has("listings_updated")) {
+          // Sinks Direct: every week (its pushes were always noted). A marketplace:
+          // from the week the listing files began to be noted.
+          if (keys.has("listings_updated") && (src.wixSites || ((src.exports || src.wayfair) && column > LISTING_LOG_FROM))) {
             value.listings_updated = new Set(pushes.filter((p) => p.occurred_at >= isoOf(etMidnightUtc(from)) && p.occurred_at < isoOf(etMidnightUtc(column))).map((p) => p.entity_id)).size;
           }
           if (shipped) {

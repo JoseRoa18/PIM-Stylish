@@ -57,7 +57,8 @@ export const AUTO_KEYS = {
   // What the Where to Buy check reads on each store page (2026-11-16); Amazon counts ratings.
   reviews_15plus: { label: '# products whose page on the store shows more than 15 reviews (read from the store pages)', unit: 'number', server: true },
   top_losers_sales: { label: 'Sales of the tab\'s list of top losers — products only, Odoo orders of the week (BB&B / Overstock)', unit: 'money', server: true },
-  listings_updated: { label: '# listings updated — products the PIM pushed to the store that week', unit: 'number', server: true },
+  // 2026-11-16, every marketplace: what the PIM sends or exports (the listing files are noted from that day on).
+  listings_updated: { label: '# listings optimized — products the PIM pushed to the store or marketplace that week, or whose listing file for it was downloaded from the PIM', unit: 'number', server: true },
   // Written by AI (Gemini) from the week's data only: the channel's top losers vs
   // their 8-week average, the cause the PIM can see (no stock, store page sold
   // out or broken) and the actions the PIM recorded (user, 2026-11-05).

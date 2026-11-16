@@ -61,6 +61,7 @@ import Skeleton from '@/components/ui/Skeleton';
 import VariantsSection from '@/features/products/components/VariantsSection';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import { templateMatchesProduct, purposesIn, templatePurpose, templatePurposeLabel } from '@/features/templates/api/templates';
+import { logListingExport } from '@/features/syndication/lib/listingExportLog';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import LowesMerchantDialog from '@/features/templates/components/LowesMerchantDialog';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -2176,6 +2177,8 @@ function ExportTemplatesCard({ product, media }) {
           `${marketplace} templates are uploaded but the export mapping isn't built yet — Wayfair, Amazon, BB&B and Menards are supported so far.`
         );
       }
+      // The download is a listing the PIM sent out (the EOS ScoreCard counts them); BB&B's exporter notes its own.
+      if (!/bb&b|bbb|overstock/i.test(marketplace)) logListingExport(marketplace, purpose, [product.sku]);
       task.finish(done);
     } catch (err) {
       task.fail(err);

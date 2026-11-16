@@ -600,7 +600,8 @@ export async function generateBBBFromTemplateBulk(templateStoragePath, productLi
     entityId: `${productList.length} products`,
     target: 'bbb',
     summary: `Exported ${productList.length} product(s) to a BB&B template`,
-    metadata: { count: productList.length, skus: productList.map((p) => p.product?.sku).filter(Boolean) },
+    // `listing` + `skus`: the shape the EOS ScoreCard counts (lib/listingExportLog.js).
+    metadata: { listing: true, purpose: 'new_listing', count: productList.length, skus: productList.map((p) => p.product?.sku).filter(Boolean) },
   });
   return { count: productList.length, fillReport };
 }
@@ -644,7 +645,7 @@ export async function generateBBBSet(groups, { task = null } = {}) {
     entityId: `${total} products`,
     target: 'bbb',
     summary: `Exported ${total} product(s) to ${filled.length} BB&B template file(s)`,
-    metadata: { count: total, files: filled.map((f) => f.name) },
+    metadata: { listing: true, purpose: 'new_listing', count: total, files: filled.map((f) => f.name), skus: todo.flatMap((g) => g.productList.map((p) => p.product?.sku)).filter(Boolean) },
   });
   return {
     count: total,
@@ -711,5 +712,6 @@ export async function generateBBBFromTemplate(templateStoragePath, product, medi
     entityId: product.sku,
     target: 'bbb',
     summary: `Exported ${product.sku} to a BB&B template`,
+    metadata: { listing: true, purpose: 'new_listing', skus: [product.sku] },
   });
 }
