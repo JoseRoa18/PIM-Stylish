@@ -10,6 +10,19 @@ import { weekTag } from '../lib/weeks';
 
 const METRIC_COLUMNS = 'id, board, market, section, name, source, owner_id, owner_name, unit, goal, goal_op, auto_key, position, archived, owner:profiles(full_name, email)';
 
+/**
+ * The tabs only some people see: { board: [emails, lower case] } (app_settings
+ * 'scorecard_restricted_boards', 20261116_scorecard_operations.sql). A board
+ * that is not in it is open to everyone. The database refuses a restricted
+ * board's rows to everyone else whatever the page does.
+ */
+export async function getRestrictedBoards() {
+  const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'scorecard_restricted_boards').maybeSingle();
+  if (error) throw error;
+  const value = data?.value && typeof data.value === 'object' && !Array.isArray(data.value) ? data.value : {};
+  return Object.fromEntries(Object.entries(value).map(([board, emails]) => [board, (Array.isArray(emails) ? emails : []).map((e) => String(e).trim().toLowerCase()).filter(Boolean)]));
+}
+
 export async function listMetrics(board) {
   const { data, error } = await supabase
     .from('scorecard_metrics')

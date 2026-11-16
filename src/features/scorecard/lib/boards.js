@@ -63,5 +63,39 @@ export const BOARDS = [
   },
 ];
 
-export const BOARD_BY_KEY = Object.fromEntries(BOARDS.map((b) => [b.key, b]));
+// The tabs that are a department's own EOS scorecard, not a marketplace's
+// (user, 2026-11-16: "Debemos crear ahora el EOS para Operations"). They keep
+// their measurables in the same tables (scorecard_metrics.board = the key) and
+// draw the same grid, with these differences:
+//   · `sections` — their own themes, in order (a marketplace tab uses SECTIONS
+//     of sections.js). Every measurable names one.
+//   · `shared` — a measurable may belong to both countries (market NULL): it
+//     shows under Canada and under USA.
+//   · the rows the PIM fills are its own kind (`ops` keys in autoMetrics.js),
+//     worked out by scorecard-fill for this board when it is asked for by name
+//     (`serverFill`; supabase/functions/_shared/scorecardOperations.ts).
+//   · no `channels` / `align`: nothing is read from the PIM's promotions or
+//     Price Alignment in the browser.
+// Who sees one is app_settings 'scorecard_restricted_boards' (see
+// 20261116_scorecard_operations.sql): while its key is there, only the emails
+// listed; without it, everyone.
+export const DEPARTMENT_BOARDS = [
+  {
+    key: 'operations',
+    label: 'Operations',
+    department: true,
+    shared: true,
+    serverFill: true,
+    markets: { ca: {}, us: {} },
+    sections: [
+      { key: 'care', label: 'Customer care' },
+      { key: 'returns', label: 'Returns' },
+      { key: 'inventory', label: 'Inventory & purchasing' },
+      { key: 'warehouse', label: 'Warehouse' },
+      { key: 'shipping', label: 'On-time shipping' },
+    ],
+  },
+];
+
+export const BOARD_BY_KEY = Object.fromEntries([...DEPARTMENT_BOARDS, ...BOARDS].map((b) => [b.key, b]));
 export const MARKET_LABEL = { ca: 'Canada', us: 'USA' };

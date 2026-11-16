@@ -18,9 +18,9 @@
 // opens two or three pieces.
 //
 // A piece about something only a few people may see (RESTRICTED: the
-// ScoreCard's Company tab) is marked `only`: it is left out of the index, the
-// assistant opens it only for those people, and it never reaches the team's
-// guide.
+// ScoreCard's Company tab, and its Operations tab while that one is not open
+// to everyone) is marked `only`: it is left out of the index, the assistant
+// opens it only for those people, and it never reaches the team's guide.
 //
 // Then the team's guide: people who are not admins are answered from a USER
 // GUIDE — each piece rewritten without the programmers' detail
@@ -56,6 +56,8 @@ const skipUserGuide = process.argv.includes('--no-user-guide')
 // with "(Under: <its title>)".
 const RESTRICTED = [
   { only: 'company', test: (text) => /^(- )?\*\*Company tab\*\*/.test(text) || /^\(Under: Company tab\)/.test(text) },
+  // Take this line out when the tab is opened to everyone (app_settings 'scorecard_restricted_boards').
+  { only: 'operations', test: (text) => /^(- )?\*\*Operations tab\*\*/.test(text) || /^\(Under: Operations tab\)/.test(text) },
 ]
 const env = {}
 for (const file of ['.env.local', '.env.secrets.local']) {

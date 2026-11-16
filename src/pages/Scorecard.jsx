@@ -4,11 +4,11 @@ import { AlertCircle, ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-
 import { useAuth } from '@/features/auth/AuthContext';
 import { cn } from '@/lib/cn';
 import { etToday } from '@/features/pricing/lib/promoCalendar';
-import { BOARDS, BOARD_BY_KEY, MARKET_LABEL } from '@/features/scorecard/lib/boards';
+import { BOARDS, BOARD_BY_KEY, DEPARTMENT_BOARDS, MARKET_LABEL } from '@/features/scorecard/lib/boards';
 import { FIRST_WEEK, addWeeks, spanLabel, weekRange, weekStartOf, weekTag, weeksEnding } from '@/features/scorecard/lib/weeks';
 import { isStatusFilter, judgedWeek, rowsWithStatus, summarizeWeek } from '@/features/scorecard/lib/status';
 import { computeAutoValues, isServerKey } from '@/features/scorecard/lib/autoMetrics';
-import { listMetrics, listPeople, listValues, refreshServerNumbers, saveAutoValues, saveValue, setMetricTarget } from '@/features/scorecard/api/scorecard';
+import { getRestrictedBoards, listMetrics, listPeople, listValues, refreshServerNumbers, saveAutoValues, saveValue, setMetricTarget } from '@/features/scorecard/api/scorecard';
 import ScorecardTable from '@/features/scorecard/components/ScorecardTable';
 import MetricDialog from '@/features/scorecard/components/MetricDialog';
 import TargetDialog from '@/features/scorecard/components/TargetDialog';
@@ -23,11 +23,26 @@ const WEEKS_SHOWN = 13;
 const AUTO_FRESH_MS = 15 * 60 * 1000;
 
 // EOS ScoreCard (user, 2026-11-03): the weekly measurables of each
-// marketplace, one tab per sheet of the company's scorecard workbook.
+// marketplace, one tab per sheet of the company's scorecard workbook — and,
+// since 2026-11-16, of a department (Operations), for the people it is open to.
 export default function Scorecard() {
   const { user, isAdmin, canEdit } = useAuth();
   const [params, setParams] = useSearchParams();
-  const boardKey = BOARD_BY_KEY[params.get('board')] ? params.get('board') : BOARDS[0].key;
+  const requested = params.get('board');
+  // A department's tab can be for some people only (user, 2026-11-16: "por los
+  // momentos hazlo solo visible para mí"): `restricted` says who sees which —
+  // null while it is read, false if it could not be, and then no department
+  // tab is offered. Nobody else gets the button, its address shows them the
+  // first marketplace, and the database refuses them its rows.
+  const [restricted, setRestricted] = useState(null);
+  useEffect(() => {
+    getRestrictedBoards().then(setRestricted).catch(() => setRestricted(false));
+  }, []);
+  const email = user?.email?.toLowerCase() ?? '';
+  const departmentTabs = restricted ? DEPARTMENT_BOARDS.filter((b) => !(b.key in restricted) || restricted[b.key].includes(email)) : [];
+  // A department's tab asked for before that is known: nothing loads until it is.
+  const waiting = restricted === null && DEPARTMENT_BOARDS.some((b) => b.key === requested);
+  const boardKey = [...departmentTabs, ...BOARDS].some((b) => b.key === requested) ? requested : BOARDS[0].key;
   const board = BOARD_BY_KEY[boardKey];
   // The Company tab — the whole company in one grid — is for its viewers only
   // (user, 2026-11-11): nobody else gets its button, and its address shows
@@ -95,7 +110,7 @@ export default function Scorecard() {
   // The board's measurables and the shown weeks' values. (The Company tab
   // loads its own.)
   useEffect(() => {
-    if (companyMode) return undefined;
+    if (companyMode || waiting) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -110,7 +125,7 @@ export default function Scorecard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [boardKey, weeks, companyMode]);
+  }, [boardKey, weeks, companyMode, waiting]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -240,7 +255,7 @@ export default function Scorecard() {
       <header className="mb-3 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-display-lg text-on-surface">EOS ScoreCard</h1>
-          <p className="text-body-md text-on-surface-variant mt-1">Each marketplace's weekly measurables: owner, target and {WEEKS_SHOWN} weeks, Sunday to Saturday, from {weekTag(FIRST_WEEK)}.</p>
+          <p className="text-body-md text-on-surface-variant mt-1">{board.department && !companyMode ? `The weekly measurables of ${board.label}` : "Each marketplace's weekly measurables"}: owner, target and {WEEKS_SHOWN} weeks, Sunday to Saturday, from {weekTag(FIRST_WEEK)}.</p>
         </div>
         {isAdmin && !companyMode && (
           <button type="button" onClick={() => setEditing({ isNew: true })} className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity">
@@ -259,7 +274,7 @@ export default function Scorecard() {
       <div ref={stickSentinel} aria-hidden className="h-px -mb-px" />
       <div ref={toolbar} className={cn('lg:sticky lg:top-0 lg:z-30 -mx-4 px-4 sm:-mx-8 sm:px-8 pt-3 pb-3 mb-3 bg-background flex flex-col gap-3 transition-shadow', stuck && 'lg:border-b lg:border-outline-variant lg:shadow-sm')}>
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div ref={boardTabs} role="group" aria-label="Marketplace" className="flex gap-1 max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container-low p-1">
+        <div ref={boardTabs} role="group" aria-label="Scorecard" className="flex gap-1 max-w-full overflow-x-auto scrollbar-hide rounded-full bg-surface-container-low p-1">
           {seesCompany && (
             <button
               type="button"
@@ -270,13 +285,14 @@ export default function Scorecard() {
               {COMPANY_BOARD.label}
             </button>
           )}
-          {BOARDS.map((b) => (
+          {/* the departments this person sees, then the marketplaces */}
+          {[...departmentTabs, ...BOARDS].map((b) => (
             <button
               key={b.key}
               type="button"
-              aria-pressed={!companyMode && b.key === boardKey}
+              aria-pressed={!companyMode && !waiting && b.key === boardKey}
               onClick={() => selectBoard(b.key)}
-              className={cn('px-4 py-1.5 rounded-full text-body-md whitespace-nowrap transition-colors', !companyMode && b.key === boardKey ? 'bg-secondary-container text-on-secondary-container font-semibold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high')}
+              className={cn('px-4 py-1.5 rounded-full text-body-md whitespace-nowrap transition-colors', !companyMode && !waiting && b.key === boardKey ? 'bg-secondary-container text-on-secondary-container font-semibold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high')}
             >
               {b.label}
             </button>
@@ -371,10 +387,19 @@ export default function Scorecard() {
           ) : (
             <p className="rounded-2xl border border-outline-variant bg-surface-container-low px-6 py-5 text-body-md text-on-surface">No measurables here yet.</p>
           )}
+          {board.department ? (
+            // A department's tab: the PIM's rows come from ShipStation, Odoo, the marketplace tabs and the PIM's stock.
+            <p className="mt-3 text-body-sm text-on-surface-variant">
+              {restricted && board.key in restricted ? 'For now only the people this tab was opened to see it. ' : ''}
+              Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the target, red with a cross misses it; a measurable without a target is not colored. The counters over the table — on target, off target, without a target — show only those measurables when pressed, by the numbers of the week they name. A measurable of both countries shows under Canada and under USA. Rows marked PIM fill themselves — from ShipStation's labels, Odoo, the marketplace tabs and the PIM's stock; hover a row to see how — and can't be edited; a dot marks each number the PIM filled. The week in progress shows their numbers so far, in italics, and takes no color until it closes; stock and days of inventory are today's, on this week's column. Percentages are typed as percent numbers (95 = 95%), and what is typed that is not a number is kept as a note.
+              {isAdmin ? ' Every other number is typed, by its owner or by an admin, once its week has ended; click the Target of a measurable to set or change it, and the pencil edits the rest (owner, theme, country) — turning "Filled by the PIM" off makes a row typed by hand again.' : ' Every other number is typed by its owner.'}
+            </p>
+          ) : (
           <p className="mt-3 text-body-sm text-on-surface-variant">
             Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the target, red with a cross misses it; a measurable without a target is not colored. The counters over the table — on target, off target, without a target — show only those measurables when pressed, by the numbers of the week they name. The week in progress shows its numbers so far, in italics, updated every 3 hours, and takes no color until it closes. Percentages are typed as percent numbers (95 = 95%). Rows marked PIM fill themselves every week and can't be edited; a dot marks each number the PIM filled.
             {isAdmin ? ' As an admin you can edit every other number; click the Target of a measurable to set or change it, and the pencil edits the rest (owner, theme) — turning "Filled by the PIM" off makes a row typed by hand again.' : ' Every other number is typed by its owner.'}
           </p>
+          )}
         </>
       )}
 

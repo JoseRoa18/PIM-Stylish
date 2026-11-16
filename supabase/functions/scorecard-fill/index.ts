@@ -19,6 +19,12 @@
 // holds the numbers of the week BEFORE it (Oct 25–31), the week reviewed in
 // that week's meeting. Days are Eastern time (Cambridge, Ontario).
 //
+// The Operations tab (board "operations", a department's, 2026-11-16) is filled
+// here too, when it is asked for by name: its rows' numbers are worked out by
+// _shared/scorecardOperations.ts with this function's own tools (ShipStation's
+// labels, Odoo's orders, returns, manufacturing orders and counts, the
+// marketplace tabs' on-time numbers, the PIM's stock).
+//
 // Body: { mode: "fill" | "preview", boards?: string[], backfill?: number, refresh?: number, running?: true | "only" }
 //   running  — also the column of the week now running (its numbers so far,
 //              user 2026-11-06: updated every 3 hours by the cron), replaced
@@ -42,6 +48,7 @@ import { priceOff } from "../_shared/priceTolerance.js";
 import { promoWindow, windowContains, prevPeriod, periodOfDay, PROMO_DATE_COLUMNS } from "../_shared/promoCalendar.ts";
 import { alignTargets, createPriceAlignment } from "../_shared/priceAlignmentReport.js";
 import { createScorecardLive, LIVE_KEYS } from "../_shared/scorecardLive.js";
+import { OPS_BOARD, OPS_KEYS, operationsValues } from "../_shared/scorecardOperations.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -168,10 +175,10 @@ const inWeek = (iso: string | null | undefined, fromDay: string, toDay: string) 
   const t = Date.parse(iso);
   return t >= etMs(fromDay) && t < etMs(toDay);
 };
-/** End (exclusive, ms) of the Nth business day after the order's Eastern day. */
-function shipDeadline(orderIso: string): number {
+/** End (exclusive, ms) of the Nth business day after the order's Eastern day (N = 2 unless another is asked for). */
+function shipDeadline(orderIso: string, days = SHIP_BUSINESS_DAYS): number {
   let d = etDayOf(orderIso);
-  for (let n = 0; n < SHIP_BUSINESS_DAYS;) {
+  for (let n = 0; n < days;) {
     d = addDays(d, 1);
     const w = weekday(d);
     if (w !== 0 && w !== 6) n += 1;
@@ -180,6 +187,29 @@ function shipDeadline(orderIso: string): number {
 }
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const ratio = (a: number, b: number) => (b ? Math.round((a / b) * 10000) / 10000 : null);
+/**
+ * Of these orders: how many were fully shipped by their deadline, and how many
+ * after it — or not yet, with the deadline gone. An order with nothing to ship
+ * from our warehouses, or with no label to date it, is left out; the others
+ * are still in time. One still open in Odoo 14 days after it was placed is
+ * left out too: the marketplace cancelled it and Odoo was not told (it would
+ * read as late for ever) — a backorder that ships later counts as late then.
+ * `deadlineOf`: the rule (the end of the 2nd business day unless another is given).
+ */
+function shipTally(ids: Iterable<number>, shipped: Map<number, { done: string | null; any: boolean; unknown?: boolean }>, orderDate: Map<number, string>, now: number, diag: Record<string, any>, deadlineOf: (orderIso: string) => number = shipDeadline) {
+  let onTime = 0;
+  let late = 0;
+  for (const id of ids) {
+    const s = shipped.get(id);
+    if (!s?.any || s.unknown) continue; // nothing to ship from our warehouses, or no label to date it
+    const placedAt = Date.parse(orderDate.get(id)!);
+    const deadline = deadlineOf(orderDate.get(id)!);
+    if (s.done) { if (Date.parse(s.done) < deadline) onTime += 1; else late += 1; } else if (now >= deadline) {
+      if (now - placedAt <= 14 * DAY) late += 1; else diag.openPast14Days = (diag.openPast14Days ?? 0) + 1;
+    }
+  }
+  return { onTime, late };
+}
 
 // ---- Odoo (JSON-RPC, read only) ----------------------------------------------
 type Odoo = (model: string, method: string, args: unknown[], kwargs?: Record<string, unknown>) => Promise<any>;
@@ -670,6 +700,9 @@ Deno.serve(async (req) => {
     const mode: string = body.mode ?? "fill";
     if (!["fill", "preview"].includes(mode)) return json({ error: `Unknown mode "${mode}".` }, 400);
     const boards: string[] = (Array.isArray(body.boards) ? body.boards : Object.keys(BOARDS)).filter((b: string) => BOARDS[b]);
+    // The Operations tab (a department's, not a marketplace's): only when it is
+    // asked for by name — its own cron and its "Refresh PIM numbers".
+    const wantsOps = Array.isArray(body.boards) && body.boards.includes(OPS_BOARD);
     const backfill = Math.max(0, Math.min(26, Number(body.backfill) || 0));
     const refresh = Math.max(0, Math.min(backfill, Number(body.refresh) || 0));
     const today = etToday();
@@ -696,7 +729,7 @@ Deno.serve(async (req) => {
         if (boards.includes(a.board) && SERVER_KEYS.includes(a.key)) metrics.push({ id: `assume-${i}`, board: a.board, market: a.market, name: `(assumed) ${a.key}`, auto_key: a.key });
       }
     }
-    if (!metrics?.length) return json({ ok: true, mode, columns: loop, note: "No measurable of these boards is filled by the server.", values: [] });
+    if (!metrics?.length && !wantsOps) return json({ ok: true, mode, columns: loop, note: "No measurable of these boards is filled by the server.", values: [] });
 
     // The PIM's products and how Odoo's codes map onto them.
     const { data: products, error: pErr } = await admin.from("products").select("sku, brand, model_name, workflow_status, is_obsolete, map_cad, map_usd, msrp_cad, msrp_usd, wix_product_id, cost_usd_lowes_sod_bbb, cost_usd_lowes_sod_bbb_orange, cost_usd_lowes_sod_bbb_purple");
@@ -968,21 +1001,8 @@ Deno.serve(async (req) => {
           }
           if (shipped) {
             // The week's paid orders: shipped by their deadline, after it, or
-            // not yet with the deadline gone; the others are still on time to ship.
-            // One still open in Odoo 14 days after it was placed is left out:
-            // the marketplace cancelled it and Odoo was not told (it would read
-            // as late for ever) — a backorder that ships later counts as late then.
-            let onTime = 0;
-            let late = 0;
-            for (const id of paidOrders) {
-              const s = shipped.get(id);
-              if (!s?.any || s.unknown) continue; // nothing to ship from our warehouses, or no label to date it
-              const placedAt = Date.parse(orderDate.get(id)!);
-              const deadline = shipDeadline(orderDate.get(id)!);
-              if (s.done) { if (Date.parse(s.done) < deadline) onTime += 1; else late += 1; } else if (now >= deadline) {
-                if (now - placedAt <= 14 * DAY) late += 1; else diag.openPast14Days = (diag.openPast14Days ?? 0) + 1;
-              }
-            }
+            // not yet with the deadline gone (shipTally).
+            const { onTime, late } = shipTally(paidOrders, shipped, orderDate, now, diag);
             value.on_time_ship = ratio(onTime, onTime + late);
             value.late_ship_rate = ratio(late, onTime + late);
           }
@@ -1136,6 +1156,28 @@ Deno.serve(async (req) => {
       }
     }
 
+    // The Operations tab: its rows' numbers, with this function's own tools
+    // (_shared/scorecardOperations.ts says where each one comes from).
+    if (wantsOps) {
+      const { data: opsRows, error: oErr } = await admin.from("scorecard_metrics").select("id, market, name, auto_key").eq("board", OPS_BOARD).in("auto_key", OPS_KEYS).eq("archived", false);
+      if (oErr) throw oErr;
+      const rows = [...(opsRows ?? [])];
+      // A preview can try keys on rows that do not have them yet, as above.
+      if (mode === "preview" && Array.isArray(body.assume)) {
+        for (const [i, a] of (body.assume as { board: string; market: string | null; key: string }[]).entries()) {
+          if (a.board === OPS_BOARD && OPS_KEYS.includes(a.key)) rows.push({ id: `assume-ops-${i}`, market: a.market ?? null, name: `(assumed) ${a.key}`, auto_key: a.key });
+        }
+      }
+      const diag: Record<string, any> = {};
+      diagnostics[OPS_BOARD] = diag;
+      if (rows.length) {
+        out.push(...await operationsValues({
+          admin, odoo, rows, loop, thisColumn, runColumn, now, diag,
+          tools: { addDays, etMidnightUtc, isoOf, etMs, etDayOf, weekday, round2, ratio, shipDeadline, shippedAt, shipTally, receivedReturns, costsBySku, usdPerUnit },
+        }));
+      }
+    }
+
     let written = 0;
     let replacedCount = 0;
     if (mode === "fill") {
@@ -1184,7 +1226,7 @@ Deno.serve(async (req) => {
         if (error) throw error;
       }
       written = current.length + past.length;
-      await admin.from("app_settings").upsert({ key: SETTINGS_KEY, value: { at: new Date().toISOString(), ok: true, boards, column: thisColumn, running: running ? body.running : false, backfill, refresh, values: written } }, { onConflict: "key" });
+      await admin.from("app_settings").upsert({ key: SETTINGS_KEY, value: { at: new Date().toISOString(), ok: true, boards: wantsOps ? [...boards, OPS_BOARD] : boards, column: thisColumn, running: running ? body.running : false, backfill, refresh, values: written } }, { onConflict: "key" });
     }
     return json({ ok: true, mode, column: thisColumn, dataWeek: [addDays(thisColumn, -7), addDays(thisColumn, -1)], ...(running ? { runningColumn: runColumn, runningSince: thisColumn } : {}), backfill, refresh, written, replacedTyped: replacedCount, values: out, ...(mode === "preview" ? { diagnostics } : {}) });
   } catch (err) {

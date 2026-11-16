@@ -4,11 +4,12 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { MARKET_LABEL } from '../lib/boards';
 import { UNITS, TARGET_OPS, parseTarget, targetInput } from '../lib/format';
 import { AUTO_KEYS } from '../lib/autoMetrics';
-import { SECTIONS, sectionOf } from '../lib/sections';
+import { SECTIONS, sectionOf, sectionsFor } from '../lib/sections';
 import { createMetric, updateMetric, archiveMetric } from '../api/scorecard';
 
-const SOURCES = ['PIM', 'Portal', 'Amazon portal', 'Seller board', 'Asana', 'Odoo', 'Rithum', 'Return file', 'P2S', 'Bazaarvoice', 'SharePoint (Operations)'];
+const SOURCES = ['PIM', 'Portal', 'Amazon portal', 'Seller board', 'Asana', 'Odoo', 'Rithum', 'Return file', 'P2S', 'Bazaarvoice', 'SharePoint (Operations)', 'Zoho', 'PowerBI operations dashboard', 'ShipStation'];
 const OTHER = '__other__';
+const BOTH = ''; // a department's measurable of both countries (market NULL)
 
 const field = 'w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary';
 
@@ -18,10 +19,19 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
   const confirm = useConfirm();
   const ids = { name: useId(), market: useId(), section: useId(), owner: useId(), ownerName: useId(), source: useId(), sources: useId(), unit: useId(), op: useId(), goal: useId(), auto: useId() };
   const markets = Object.keys(board.markets);
+  // A department's tab has its own themes (each measurable names one), may
+  // hold a measurable of both countries, and the numbers the PIM fills there
+  // are its own kind (`ops`).
+  const sections = sectionsFor(board);
+  const ownSections = sections !== SECTIONS;
+  const autoKeys = Object.entries(AUTO_KEYS).filter(([, a]) => (board.department
+    ? a.ops
+    // the server's numbers (Odoo orders, stock…) exist only for boards it fills; a Wix store's own (its orders, reviews) only on Sinks Direct
+    : !a.ops && (!a.server || board.serverFill) && (!a.store || board.key === 'sinksdirect' || a.alsoOn?.includes(board.key))));
   const [draft, setDraft] = useState(() => ({
     name: metric?.name ?? '',
-    market: metric?.market ?? (markets.includes(defaultMarket) ? defaultMarket : markets[0]),
-    section: metric?.section ?? '',
+    market: metric && board.shared ? metric.market ?? BOTH : metric?.market ?? (markets.includes(defaultMarket) ? defaultMarket : markets[0]),
+    section: ownSections ? (sections.some((s) => s.key === metric?.section) ? metric.section : sections[0].key) : metric?.section ?? '',
     owner: metric?.owner_id ?? (metric?.owner_name ? OTHER : ''),
     owner_name: metric?.owner_name ?? '',
     source: metric?.source ?? '',
@@ -94,7 +104,7 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
       onSubmit={submit}
       onClose={onClose}
       title={metric ? 'Edit measurable' : `New measurable · ${board.label}`}
-      subtitle="Its owner types the weekly number. A measurable the PIM fills gets its number by itself every week, and nobody can edit it."
+      subtitle={autoKeys.length ? 'Its owner types the weekly number. A measurable the PIM fills gets its number by itself every week, and nobody can edit it.' : 'Its owner types the weekly number; without an owner, an admin does.'}
       maxWidth="max-w-xl"
       footer={(
         <>
@@ -117,6 +127,7 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
             <label htmlFor={ids.market} className="block text-label-md text-on-surface mb-1">Market</label>
             <select id={ids.market} value={draft.market} onChange={(e) => set({ market: e.target.value })} className={field}>
               {markets.map((mk) => <option key={mk} value={mk}>{MARKET_LABEL[mk]}</option>)}
+              {board.shared && <option value={BOTH}>Both countries</option>}
             </select>
           </div>
           <div>
@@ -131,8 +142,8 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
         <div>
           <label htmlFor={ids.section} className="block text-label-md text-on-surface mb-1">Theme</label>
           <select id={ids.section} value={draft.section} onChange={(e) => set({ section: e.target.value })} className={field}>
-            <option value="">From its name ({SECTIONS.find((s) => s.key === sectionOf({ name: draft.name, unit: draft.unit }))?.label})</option>
-            {SECTIONS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            {!ownSections && <option value="">From its name ({SECTIONS.find((s) => s.key === sectionOf({ name: draft.name, unit: draft.unit }))?.label})</option>}
+            {sections.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
           </select>
         </div>
         {draft.owner === OTHER && (
@@ -142,14 +153,15 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
             <p className="text-body-sm text-on-surface-variant mt-1">Without a PIM user, an admin types this measurable's numbers.</p>
           </div>
         )}
+        {autoKeys.length > 0 && (
         <div>
           <label htmlFor={ids.auto} className="block text-label-md text-on-surface mb-1">Filled by the PIM</label>
           <select id={ids.auto} value={draft.auto_key} onChange={(e) => pickAuto(e.target.value)} className={field}>
             <option value="">No — its owner types it</option>
-            {/* the server's numbers (Odoo orders, stock…) exist only for boards it fills; a Wix store's own (its orders, reviews) only on Sinks Direct */}
-            {Object.entries(AUTO_KEYS).filter(([, a]) => (!a.server || board.serverFill) && (!a.store || board.key === 'sinksdirect' || a.alsoOn?.includes(board.key))).map(([k, a]) => <option key={k} value={k}>{a.label}</option>)}
+            {autoKeys.map(([k, a]) => <option key={k} value={k}>{a.label}</option>)}
           </select>
         </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor={ids.source} className="block text-label-md text-on-surface mb-1">Source</label>

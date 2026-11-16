@@ -9,10 +9,18 @@ export const SECTIONS = [
   { key: 'returns', label: 'Returns & refunds' },
   { key: 'notes', label: 'Actions & notes' },
 ];
-const KEYS = new Set(SECTIONS.map((s) => s.key));
 
-export function sectionOf(metric) {
-  if (metric.section && KEYS.has(metric.section)) return metric.section;
+/** The themes of a tab: a department's own (boards.js), else the marketplaces'. */
+export const sectionsFor = (board) => board?.sections ?? SECTIONS;
+
+/**
+ * The theme a measurable sits under, among `sections` (its tab's). On a
+ * marketplace tab a measurable without one is placed by its name; on a tab
+ * with its own themes it goes under the last one.
+ */
+export function sectionOf(metric, sections = SECTIONS) {
+  if (metric.section && sections.some((s) => s.key === metric.section)) return metric.section;
+  if (sections !== SECTIONS) return sections.at(-1).key;
   const n = metric.name.toLowerCase();
   if (metric.unit === 'text' || /actio?n?s? taken|actiosn taken/.test(n)) return 'notes';
   if (/return|refund|reimburs|shipping que/.test(n)) return 'returns';

@@ -4,7 +4,8 @@ import { Check, Copy, Pencil, X, Loader2, MessageSquareText } from 'lucide-react
 import { cn } from '@/lib/cn';
 import Dialog from '@/components/ui/Dialog';
 import { formatValue, meetsTarget, parseInput, targetLabel, toInput } from '../lib/format';
-import { SECTIONS, sectionOf } from '../lib/sections';
+import { sectionOf, sectionsFor } from '../lib/sections';
+import { AUTO_KEYS } from '../lib/autoMetrics';
 import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } from '../lib/weeks';
 
 // One market of a board as the EOS grid (user's layout choice, 2026-11-04):
@@ -25,7 +26,9 @@ import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } fro
 // total), carry a `hint` for its tooltip and a `targetHint` for its target's
 // (where a target nobody sets comes from).
 export default function ScorecardTable({ board, metrics, values, weeks, thisWeek, canWrite, isAdmin, onSave, onEditMetric, canEditTarget = null, onEditTarget = null, groups: ownGroups = null, plain = false }) {
-  const groups = ownGroups ?? SECTIONS.map((s) => ({ ...s, rows: metrics.filter((m) => sectionOf(m) === s.key) })).filter((g) => g.rows.length);
+  // The tab's themes: a department's own, else the marketplaces' (sections.js).
+  const sections = sectionsFor(board);
+  const groups = ownGroups ?? sections.map((s) => ({ ...s, rows: metrics.filter((m) => sectionOf(m, sections) === s.key) })).filter((g) => g.rows.length);
   // The column of the week in progress: the numbers so far (user, 2026-11-06).
   const runningWeek = addWeeks(thisWeek, 1);
   const scroller = useRef(null);
@@ -117,7 +120,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                 <th scope="row" className={`sticky left-0 z-10 bg-surface-container-lowest group-hover:bg-surface-container-low text-left font-normal pl-3 pr-2 py-1.5 border-b border-outline-variant ${nameCol}`}>
                   <div className="flex items-center gap-2 min-w-0">
                     {!plain && <OwnerBadge label={m.owner_label} />}
-                    <span className={cn('min-w-0 flex-1 truncate text-body-md text-on-surface', m.strong && 'font-semibold')} title={[m.name, m.hint, m.owner_label && `Owner: ${m.owner_label}`, m.auto_key ? 'Filled by the PIM' : m.source && `Source: ${m.source}`].filter(Boolean).join('\n')}>
+                    <span className={cn('min-w-0 flex-1 truncate text-body-md text-on-surface', m.strong && 'font-semibold')} title={[m.name, m.hint, m.owner_label && `Owner: ${m.owner_label}`, m.auto_key ? `Filled by the PIM${AUTO_KEYS[m.auto_key] ? `: ${AUTO_KEYS[m.auto_key].label}` : ''}` : m.source && `Source: ${m.source}`].filter(Boolean).join('\n')}>
                       {m.name}
                     </span>
                     {m.auto_key && (

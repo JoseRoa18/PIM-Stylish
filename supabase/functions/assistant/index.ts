@@ -302,7 +302,7 @@ Deno.serve(async (req) => {
   });
 
   const [{ data: settingRows }, { data: profile }] = await Promise.all([
-    admin.from("app_settings").select("key, value").in("key", ["assistant", "scorecard_company_viewers"]),
+    admin.from("app_settings").select("key, value").in("key", ["assistant", "scorecard_company_viewers", "scorecard_restricted_boards"]),
     admin.from("profiles").select("email, full_name, role").eq("id", user.id).maybeSingle(),
   ]);
   const setting = settingRows?.find((r: any) => r.key === "assistant")?.value ?? {};
@@ -311,8 +311,14 @@ Deno.serve(async (req) => {
   if (setting.enabled !== true || !email || !lower(setting.emails).includes(email)) return json({ error: "The assistant is not available for your account yet." }, 403);
   const role = String(profile?.role ?? "viewer");
   const audience: Audience = role === "admin" ? "admin" : "user";
-  // The restricted topics this person may read about (the guide's pieces marked `only`).
+  // The restricted topics this person may read about (the guide's pieces marked
+  // `only`): the ScoreCard's Company tab, and each tab of the ScoreCard that is
+  // for some people only (its key is the group: "operations").
   const groups = lower(settingRows?.find((r: any) => r.key === "scorecard_company_viewers")?.value?.emails).includes(email) ? ["company"] : [];
+  const restrictedBoards = settingRows?.find((r: any) => r.key === "scorecard_restricted_boards")?.value;
+  if (restrictedBoards && typeof restrictedBoards === "object" && !Array.isArray(restrictedBoards)) {
+    for (const [board, emails] of Object.entries(restrictedBoards)) if (lower(emails).includes(email)) groups.push(board);
+  }
 
   const question = String(body.message ?? "").trim();
   if (!question) return json({ error: "Write a question." }, 400);
