@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DollarSign, ArrowRight } from 'lucide-react';
-import { formatTimeAgo } from '@/lib/format';
 import { OVERVIEW_SEGMENTS, alignmentSummary } from '@/features/pricing/lib/alignmentSummary';
 
 /**
@@ -111,17 +110,16 @@ export default function PriceAlignmentCard() {
                 <div key={g.key} className={g.heading ? 'border-t border-outline-variant/60 pt-2' : ''}>
                   {g.heading && <p className="px-6 pb-1 text-label-md text-on-surface-variant">{g.heading}</p>}
                   <ul className="px-4 pb-4 space-y-0.5" aria-label={g.heading ?? 'Channels'}>
-                    {g.list.map(({ key, target, report, counts, parts, total, comparable: rowComparable, aligned: rowAligned, pct }) => {
+                    {g.list.map(({ key, target, counts, parts, total, comparable: rowComparable, aligned: rowAligned, pct }) => {
                       const breakdown = counts
                         ? parts.filter((p) => p.n > 0).map((p) => `${p.label}: ${p.n}`).join(' · ')
                         : 'no saved report yet';
-                      const updated = report?.ranAt ? `${target.kind === 'page' ? 'read' : 'updated'} ${formatTimeAgo(report.ranAt)}` : null;
                       return (
                         <li key={key}>
                           <Link
                             to="/pricing"
                             state={{ pricingTab: 'alignment', alignSite: key }}
-                            title={`${target.label} — ${breakdown}${updated ? ` · ${updated}` : ''}`}
+                            title={`${target.label} — ${breakdown}`}
                             className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-container-low transition-colors"
                           >
                             <span className="w-32 flex-shrink-0 truncate text-label-lg text-on-surface">
@@ -135,7 +133,7 @@ export default function PriceAlignmentCard() {
                                   ))
                                 : <span className="h-full w-full bg-surface-container" />}
                             </span>
-                            <span className="sr-only">{`${pct != null ? `${pct}% aligned. ` : ''}${breakdown}${updated ? `, ${updated}` : ''}`}</span>
+                            <span className="sr-only">{`${pct != null ? `${pct}% aligned. ` : ''}${breakdown}`}</span>
                             <span className="w-16 flex-shrink-0 text-right tabular-nums text-label-lg text-on-surface" aria-hidden="true">
                               {pct != null ? `${pct}%` : '—'}
                               <span className="block text-label-md text-on-surface-variant font-normal">

@@ -1,3 +1,4 @@
+import { supabase } from '@/lib/supabase';
 import { etToday, promoWindow } from '../lib/promoCalendar';
 import { dropShared, latestReport, dropPageReadings } from './expectedPrices';
 import { alignTargets } from '../../../../supabase/functions/_shared/priceAlignmentReport.js';
@@ -79,6 +80,78 @@ export async function runPriceAlignment(target = DEFAULT_WIX_SITE, { task = null
   task?.progress(0.7);
   dropShared(`snapshot:${cfg.channel}`); // the pull just wrote a new one
   return loadLatestAlignment(target, { task: task?.part(0.7, 1) });
+}
+
+// "Read again" asks the Where to Buy check for a few products a call (each
+// page takes 10–60 s to open) and a few calls at a time.
+const REREAD_PER_CALL = 3;
+const REREAD_CALLS = 4;
+
+/**
+ * "Read again" (user, 2026-11-16: a store had changed a price hours after its
+ * page was read — C233 on Wayfair.ca — and the list still showed the old one).
+ * Opens NOW the pages of these products on a store read from its pages
+ * (where-to-buy-audit, mode "reread": admins and editors) and keeps what each
+ * one shows, so the report read after it compares today's price. Each page is
+ * a paid request: only what a person asks for goes through here.
+ * `task` (optional taskProgress reporter) counts the products asked.
+ * → { asked, bySku: { [sku]: { state, price, note } }, read, waiting, broken, unanswered }
+ *   state: 'read' (the page was opened), 'waiting' (Lowe's and Menards answer
+ *   in a few minutes), 'broken' (the link no longer opens the product),
+ *   'unanswered' (the store gave no answer: the check tries it again by itself).
+ */
+export async function rereadStorePages(target, skus, { task = null } = {}) {
+  const cfg = ALIGN_TARGETS[target];
+  if (cfg?.kind !== 'page') throw new Error('Only a store read from its pages can be read again');
+  const list = [...new Set(skus)];
+  const parts = [];
+  for (let i = 0; i < list.length; i += REREAD_PER_CALL) parts.push(list.slice(i, i + REREAD_PER_CALL));
+  const bySku = Object.fromEntries(list.map((sku) => [sku, { state: 'unanswered', price: null, note: null }]));
+  // The best answer among a product's links to the store (its pages can carry two).
+  const RANK = { read: 3, waiting: 2, broken: 1, unanswered: 0 };
+  const stateOf = (l) => (l.kind === 'ok' ? 'read' : l.kind === 'submitted' || l.kind === 'waiting' ? 'waiting' : l.kind === 'broken' ? 'broken' : 'unanswered');
+  let refused = null;
+  let done = 0;
+  let next = 0;
+  task?.count(0, list.length, `Opening ${list.length === 1 ? 'the page' : `${list.length} pages`} on ${cfg.short}…`);
+  const lane = async () => {
+    while (next < parts.length && !refused) {
+      const part = parts[next++];
+      try {
+        const { data, error } = await supabase.functions.invoke('where-to-buy-audit', { body: { mode: 'reread', retailer: cfg.retailer, skus: part } });
+        if (error) {
+          // The function's own words (a role that may not ask, a wrong store).
+          const said = await error.context?.json?.().catch(() => null);
+          if (said?.error) { refused = new Error(said.error); break; }
+          throw error;
+        }
+        if (data?.error) { refused = new Error(data.error); break; }
+        for (const l of data?.links ?? []) {
+          const state = stateOf(l);
+          if (bySku[l.sku] && RANK[state] >= RANK[bySku[l.sku].state]) bySku[l.sku] = { state, price: l.page?.price ?? null, note: l.note ?? null };
+        }
+      } catch {
+        // No answer to this call (a timeout, the network): its pages stay
+        // "unanswered" — the check's own batches read them within minutes.
+      }
+      done += part.length;
+      task?.count(done, list.length, `${done} of ${list.length} ${list.length === 1 ? 'page' : 'pages'} on ${cfg.short}`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(REREAD_CALLS, parts.length) }, lane));
+  dropPageReadings(); // what was just read is read fresh
+  if (refused) throw refused;
+  const count = (state) => list.filter((sku) => bySku[sku].state === state).length;
+  const out = { asked: list.length, bySku, read: count('read'), waiting: count('waiting'), broken: count('broken'), unanswered: count('unanswered') };
+  logActivity({
+    action: 'sync',
+    entityType: 'channel',
+    entityId: cfg.key,
+    target: 'pim',
+    summary: `Price Alignment: ${list.length === 1 ? `the ${cfg.label} page of ${list[0]}` : `${list.length} ${cfg.label} pages`} read again (${out.read} read${out.waiting ? `, ${out.waiting} answering later` : ''}${out.broken ? `, ${out.broken} no longer on the store` : ''}${out.unanswered ? `, ${out.unanswered} without an answer` : ''})`,
+    metadata: { store: cfg.key, asked: list.length, read: out.read, waiting: out.waiting, broken: out.broken, unanswered: out.unanswered, skus: list.slice(0, 200) },
+  });
+  return out;
 }
 
 /**

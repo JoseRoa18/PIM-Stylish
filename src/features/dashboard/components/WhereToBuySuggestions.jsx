@@ -27,7 +27,6 @@ const STORE_ORDER = new Map(WTB_RETAILERS.map((r, i) => [r.key, i]));
 const storeLabel = (k) => WTB_RETAILERS.find((r) => r.key === k)?.label ?? k;
 const shortUrl = (u) => String(u ?? '').replace(/^https?:\/\/(www\.)?/, '');
 const priceText = (s) => (s.price == null ? '' : `${s.currency === 'USD' ? '$' : s.currency === 'CAD' ? 'C$' : ''}${Number(s.price).toFixed(2)}`);
-const fmt = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 
 export default function WhereToBuySuggestions({ skus, onApplied }) {
   const { canEdit } = useAuth();
@@ -215,7 +214,7 @@ export default function WhereToBuySuggestions({ skus, onApplied }) {
                             target="_blank"
                             rel="noreferrer"
                             className="flex items-center gap-1.5 min-w-0 text-primary hover:underline"
-                            title={[s.url, s.detail, s.status_note, s.checked_at ? `Opened ${fmt(s.checked_at)}` : null].filter(Boolean).join('\n')}
+                            title={[s.url, s.detail, s.status_note].filter(Boolean).join('\n')}
                           >
                             <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
                             <span className="truncate">{shortUrl(s.url)}</span>

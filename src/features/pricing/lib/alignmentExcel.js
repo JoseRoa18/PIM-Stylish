@@ -46,14 +46,8 @@ const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '' : 
 const round = (n, places) => Math.round(n * 10 ** places) / 10 ** places;
 const yesNo = (v) => (v === true ? 'Yes' : v === false ? 'No' : '');
 
-// "2026-11-13 06:00" in the reader's own time.
-const stamp = (iso) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+// When a price was read or pulled is written nowhere in the file (user,
+// 2026-11-16: no reading dates, on the screens or in the Excel files).
 
 // "November 2026" from a promotion's period ('2026-11-01').
 const monthName = (period) => {
@@ -65,14 +59,14 @@ const monthName = (period) => {
 export const alignmentFileName = (cfg, date) => `Stylish_Price_Alignment_${String(cfg.label).replace(/['’]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')}_${date}.xlsx`;
 
 const PRODUCT = { title: 'Product', color: '1F3864', headers: ['SKU', 'Model Name', 'Brand', 'Category', 'UPC', 'Obsolete'] };
-const PAGE_HEADERS = ['Page', 'Read', 'SKU Confirmed', 'In Stock on the Store', 'Page Note'];
+const PAGE_HEADERS = ['Page', 'SKU Confirmed', 'In Stock on the Store', 'Page Note'];
 const WIDTHS = {
   SKU: 14, 'Model Name': 30, Brand: 10, Category: 20, UPC: 15, Obsolete: 10,
   Status: 21, 'Above / Below': 11, Expected: 12, Difference: 12, 'Difference %': 11,
   'Expected From': 20, Promotion: 32, 'Promotion Starts': 12, 'Promotion Ends': 12,
   'MAP Blue': 11, 'MAP Orange': 11, 'MAP Purple': 11, MSRP: 11,
   'Our Stock': 11, 'Sold 30 d': 9, 'Sold 90 d': 9,
-  Page: 46, Read: 16, 'SKU Confirmed': 11, 'In Stock on the Store': 12, 'Page Note': 38,
+  Page: 46, 'SKU Confirmed': 11, 'In Stock on the Store': 12, 'Page Note': 38,
   Reason: 42, 'Page Shows': 16, 'Price Read': 11, Currency: 9,
 };
 
@@ -103,7 +97,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
     const p = product.get(sku) ?? {};
     return [sku, p.model_name ?? '', p.brand ?? '', p.category ? labels.category(p.category) : '', p.upc ?? '', p.is_obsolete ? 'Yes' : ''];
   };
-  const pageCells = (e) => [e.url ?? '', stamp(e.read_at), e.url ? (e.unconfirmed ? 'No' : 'Yes') : '', yesNo(e.in_stock), e.page_note ?? ''];
+  const pageCells = (e) => [e.url ?? '', e.url ? (e.unconfirmed ? 'No' : 'Yes') : '', yesNo(e.in_stock), e.page_note ?? ''];
 
   // ---- the price sheets ----
   const sections = [
@@ -166,7 +160,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
   const leftSections = [
     PRODUCT,
     { title: 'Left out of the comparison', color: '455A64', headers: ['Reason'] },
-    ...(isPage ? [{ title: 'What the store page showed', color: '6A1B9A', headers: ['Page', 'Read', 'Page Shows', 'Price Read', 'Currency', 'In Stock on the Store', 'Page Note'] }] : []),
+    ...(isPage ? [{ title: 'What the store page showed', color: '6A1B9A', headers: ['Page', 'Page Shows', 'Price Read', 'Currency', 'In Stock on the Store', 'Page Note'] }] : []),
   ];
   const leftHeaders = leftSections.flatMap((s) => s.headers);
   const reasonLabel = Object.fromEntries(REASONS.map((r) => [r.key, r.label(cfg)]));
@@ -175,7 +169,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
   const leftRows = leftOut.map((e) => [
     ...productCells(e.sku),
     reasonLabel[e.reason] ?? e.reason,
-    ...(isPage ? [e.url ?? '', stamp(e.read_at), e.page_model ?? '', num(e.price), e.currency ?? '', yesNo(e.in_stock), e.page_note ?? ''] : []),
+    ...(isPage ? [e.url ?? '', e.page_model ?? '', num(e.price), e.currency ?? '', yesNo(e.in_stock), e.page_note ?? ''] : []),
   ]);
   const leftSheet = {
     name: 'Left out', sections: leftSections, rows: leftRows,
@@ -189,9 +183,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
   const total = report.total ?? 0;
   const sides = { above: 0, below: 0, none: 0 };
   for (const p of report.problems ?? []) sides[priceSide(p)] += 1;
-  const when = isPage
-    ? (report.readFrom ? `prices read on the store's pages ${stamp(report.readFrom)} – ${stamp(report.readTo)}` : 'prices read on the store\'s pages')
-    : `live prices pulled ${stamp(report.ranAt)}`;
+  const when = isPage ? "prices read on the store's pages" : `live prices pulled from ${cfg.short}`;
   const summary = {
     name: 'Summary',
     title: `Price Alignment — ${cfg.label}`,
@@ -283,7 +275,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
           ['Our Stock', `Our own units available in ${country} (Odoo); "${NOT_TRACKED}" = Odoo does not have the product.`],
           ['Sold 30 d / 90 d', `Units sold in ${country} over the last 30 and 90 days, every marketplace together (Odoo).`],
           ...(isPage ? [
-            ['Page / Read', 'The store page the price was read on, and when.'],
+            ['Page', 'The store page the price was read on.'],
             ['SKU Confirmed', 'No = the page names no model the PIM can match to this SKU: the price is compared, but look at the page.'],
             ['In Stock on the Store', 'What the page said when it was read.'],
           ] : []),

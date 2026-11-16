@@ -65,7 +65,7 @@ import SortButton from '@/features/pricing/components/SortButton';
 import { nextSort, ariaSort, sortRows } from '@/features/pricing/lib/tableSort';
 import Dialog from '@/components/ui/Dialog';
 import FileDropzone from '@/components/ui/FileDropzone';
-import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
+import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, rereadStorePages, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
@@ -425,8 +425,10 @@ export default function PricingPage() {
 // The tiles of a site (alignTiles) and the side of a problem (priceSide) are in
 // lib/alignmentTiles.js: the Excel of the same list reads them too.
 
-// "Oct 20" — when a store page was read.
-const fmtDay = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+// Price Alignment never says when a price was read or pulled (user,
+// 2026-11-16: "no muestres nada de eso de última lectura"): a price a person
+// doubts is read again with "Read again", and a store's problems are read a
+// second time by themselves the morning they are found.
 
 // What a Price Alignment card says when its report is in.
 const alignDone = (r) => (r ? `${r.problems.length} problem${r.problems.length === 1 ? '' : 's'} · ${r.total} products` : 'No report yet');
@@ -460,7 +462,7 @@ function AlignmentOverview({ overview, site, onSelect }) {
           Buy check (user, 2026-10-20). */}
       {[
         { key: 'api', heading: null, keys: ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind !== 'page') },
-        { key: 'page', heading: 'Read from the store pages · every 3 days', keys: ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page') },
+        { key: 'page', heading: 'Read from the store pages', keys: ALIGN_TARGET_KEYS.filter((k) => ALIGN_TARGETS[k].kind === 'page') },
       ].map((group) => (
         <div key={group.key} role="group" aria-label={group.heading ?? 'Our stores and API channels'} className={group.heading ? 'mt-3 pt-3 border-t border-outline-variant/60' : ''}>
           {group.heading && <p className="px-2.5 pb-1 text-label-md text-on-surface-variant">{group.heading}</p>}
@@ -531,6 +533,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [fixing, setFixing] = useState(null); // sku | 'all'
+  const [rereading, setRereading] = useState(null); // sku | 'all' — store pages being read again
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -588,6 +591,59 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
   }
 
   const fixable = cfg.canFix ? (result?.problems.filter((p) => p.expected != null) ?? []) : [];
+
+  // "Read again" (user, 2026-11-16: Wayfair had changed C233's price hours
+  // after its page was read, and the list still showed the old one). On a
+  // store read from its pages an editor has the page of one problem — or of
+  // every problem of the channel, with "Run fresh analysis" — opened now; the
+  // report is then read again, so a price the store put right leaves the list.
+  // Only the problems both prices of which are known: a read changes nothing
+  // of a product without a price in the PIM.
+  const canReread = canEdit && cfg.kind === 'page';
+  const rereadable = canReread ? (result?.problems.filter((p) => p.url && p.live != null && p.expected != null) ?? []) : [];
+  async function reread(list) {
+    const one = list.length === 1 ? list[0] : null;
+    setRereading(one ? one.sku : 'all');
+    setMsg(null);
+    const task = startTask(one ? `Read ${one.sku} again — ${cfg.label}` : `Price Alignment — ${cfg.label}`, {
+      detail: one ? `Opening its page on ${cfg.short}…` : `Opening the ${list.length} pages with a problem…`,
+    });
+    try {
+      const r = await rereadStorePages(site, list.map((p) => p.sku), { task: task.part(0, 0.9) });
+      const fresh = await runPriceAlignment(site, { task: task.part(0.9, 1) });
+      setResult(fresh);
+      setOverview((prev) => (prev ? { ...prev, [site]: fresh } : prev));
+      const still = new Set((fresh?.problems ?? []).map((p) => p.sku));
+      const later = r.waiting ? `${cfg.label} answers in about 15 minutes — reload then.` : null;
+      let text;
+      if (one) {
+        const a = r.bySku[one.sku];
+        text = a.state === 'read'
+          ? (still.has(one.sku)
+            ? `${one.sku}: ${cfg.short} still shows ${a.price != null ? money(a.price) : 'that price'}.`
+            : `${one.sku}: ${cfg.short} shows ${a.price != null ? `${money(a.price)} now` : 'another price now'} — no longer a problem.`)
+          : a.state === 'waiting' ? `${one.sku}: ${later}`
+          : a.state === 'broken' ? `${one.sku}: its ${cfg.short} link no longer opens the product, so it left the comparison.`
+          : `${one.sku}: ${cfg.short} gave no answer — it is tried again by itself within minutes.`;
+      } else {
+        const read = list.filter((p) => r.bySku[p.sku].state === 'read');
+        const cleared = read.filter((p) => !still.has(p.sku)).length;
+        text = [
+          `${r.read} of ${r.asked} pages read again: ${cleared} no longer a problem, ${read.length - cleared} still off.`,
+          later,
+          r.broken ? `${r.broken} link${r.broken === 1 ? '' : 's'} no longer open the product.` : null,
+          r.unanswered ? `${r.unanswered} without an answer — tried again by themselves within minutes.` : null,
+        ].filter(Boolean).join(' ');
+      }
+      setMsg({ tone: 'success', text });
+      task.finish(one ? text.replace(`${one.sku}: `, '') : `${r.read} of ${r.asked} read again · ${alignDone(fresh)}`);
+    } catch (err) {
+      task.fail(err);
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setRereading(null);
+    }
+  }
 
   // Export (user, 2026-11-13: "descargar la lista con todos los datos
   // detallados"): the report on screen as an Excel — every problem whatever
@@ -739,17 +795,49 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Download className="w-4 h-4" aria-hidden="true" />}
             {exporting ? 'Exporting' : 'Export'}
           </button>
-          <button
-            type="button"
-            onClick={() => analyze()}
-            disabled={running}
-            aria-busy={running}
-            title={cfg.kind === 'page' ? 'Read the latest prices the Where to Buy check found (nothing is opened again)' : undefined}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
-          >
-            {running ? <Loader2 className="w-4 h-4 animate-spin" /> : cfg.kind === 'page' ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            {running ? 'Analyzing…' : cfg.kind === 'page' ? 'Reload' : 'Run fresh analysis'}
-          </button>
+          {/* A store read from its pages: "Reload" shows what the check has
+              read since (nothing is opened), and an editor's "Run fresh
+              analysis" opens the pages of its problems again. */}
+          {canReread ? (
+            <>
+              <button
+                type="button"
+                onClick={() => analyze()}
+                disabled={running || rereading !== null}
+                aria-busy={running}
+                title="Show the latest prices the check has read (nothing is opened again)"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40"
+              >
+                {running ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
+                Reload
+              </button>
+              <button
+                type="button"
+                onClick={() => (rereadable.length ? reread(rereadable) : analyze())}
+                disabled={running || rereading !== null || loading}
+                aria-busy={rereading === 'all'}
+                title={rereadable.length
+                  ? `Open again the ${cfg.short} page of ${rereadable.length === 1 ? 'the problem' : `each of the ${rereadable.length} problems`} below and compare what it shows now`
+                  : 'No problem to read again: shows the latest prices the check has read'}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+              >
+                {rereading === 'all' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Play className="w-4 h-4" aria-hidden="true" />}
+                {rereading === 'all' ? 'Reading the pages…' : 'Run fresh analysis'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => analyze()}
+              disabled={running}
+              aria-busy={running}
+              title={cfg.kind === 'page' ? 'Show the latest prices the check has read (nothing is opened again)' : undefined}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+            >
+              {running ? <Loader2 className="w-4 h-4 animate-spin" /> : cfg.kind === 'page' ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              {running ? 'Analyzing…' : cfg.kind === 'page' ? 'Reload' : 'Run fresh analysis'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -800,7 +888,6 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
             {cfg.kind === 'page'
               ? [
                   `${result.total} products with a price read on the store's pages`,
-                  result.readFrom ? `read ${fmtDay(result.readFrom)}${fmtDay(result.readFrom) !== fmtDay(result.readTo) ? ` – ${fmtDay(result.readTo)}` : ''}` : null,
                   'expected prices as the PIM has them now',
                   result.notOnStore ? `${result.notOnStore} broken link${result.notOnStore === 1 ? '' : 's'} left out` : null,
                   result.otherProduct ? `${result.otherProduct} link${result.otherProduct === 1 ? '' : 's'} opening another product or finish left out` : null,
@@ -808,9 +895,9 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                   result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again (that morning, 9:10 Eastern)` : null,
                   result.soldOut ? `${result.soldOut} sold out without a price` : null,
                   result.noPrice ? `${result.noPrice} read without a price` : null,
-                  'each link is read again every 3 days and the morning a promotion starts or ends',
+                  'each link is read again every Monday, Wednesday and Friday, the problems once more that morning, and a promotion\'s products the morning it starts or ends',
                 ].filter(Boolean).join(' · ')
-              : `${result.total} products on the store · live prices pulled ${new Date(result.ranAt).toLocaleString()} · expected prices as the PIM has them now${result.notOnStore ? ` · ${result.notOnStore} not on the store, left out` : ''}`}
+              : `${result.total} products on the store · expected prices as the PIM has them now${result.notOnStore ? ` · ${result.notOnStore} not on the store, left out` : ''}`}
           </p>
 
           {result.total === 0 ? (
@@ -928,12 +1015,26 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                         {cfg.kind === 'page' && (
                           <td className="px-4 py-2 whitespace-nowrap">
                             {p.url ? (
-                              <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline underline-offset-2" title={`Read ${p.read_at ? new Date(p.read_at).toLocaleString() : ''}`}>
+                              <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline underline-offset-2">
                                 <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                                {p.read_at ? fmtDay(p.read_at) : 'Open'}
-                                <span className="sr-only"> — open the {cfg.short} page of {p.sku}</span>
+                                Open
+                                <span className="sr-only"> the {cfg.short} page of {p.sku}</span>
                               </a>
                             ) : '—'}
+                            {/* Read again: this page, now (editors). */}
+                            {canReread && p.url && p.live != null && p.expected != null && (
+                              <button
+                                type="button"
+                                onClick={() => reread([p])}
+                                disabled={rereading !== null || running}
+                                aria-busy={rereading === p.sku}
+                                aria-label={`Read the ${cfg.short} page of ${p.sku} again`}
+                                title="Read this page again now"
+                                className="ml-1.5 inline-flex align-middle p-[5px] rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                              >
+                                {rereading === p.sku ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />}
+                              </button>
+                            )}
                             {p.unconfirmed && (
                               <span className="ml-2 px-1.5 py-0.5 rounded text-label-md bg-surface-container text-on-surface-variant" title="The page names no model the PIM can match to this SKU">SKU not confirmed</span>
                             )}

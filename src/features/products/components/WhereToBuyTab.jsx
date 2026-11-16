@@ -50,7 +50,6 @@ const PUBLISH_TEXT = {
   later: 'queued — Wix asked to wait, updated within minutes',
 };
 const VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperapi: 'ScraperAPI', price2spy: 'Price2Spy' };
-const fmt = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 const shortUrl = (u) => String(u ?? '').replace(/^https?:\/\/(www\.)?/, '');
 const SUGGESTION_WHY = {
   wrong_link: 'The current link opens another product',
@@ -243,7 +242,7 @@ export default function WhereToBuyTab({ product }) {
                       // behind the status (hover / screen reader), so every row
                       // keeps one line.
                       const detail = saved ? [
-                        check?.checked_at && (check.verdict === 'ok' || check.verdict === 'broken') ? `Checked by ${VIA[check.checked_via] ?? 'the PIM'} · ${fmt(check.checked_at)}` : null,
+                        check?.checked_at && (check.verdict === 'ok' || check.verdict === 'broken') ? `Checked by ${VIA[check.checked_via] ?? 'the PIM'}` : null,
                         check?.verdict !== 'ok' ? check?.note : null,
                         wrong && check.sku_check === 'variant' ? `The page shows ${check.page_model ?? 'another option'}, another option of the same product. Not shown on the Stylish websites until the link opens ${product.sku} — use the suggested link or edit it.` : null,
                         wrong && check.sku_check === 'other' ? `The page shows ${check.page_model ?? 'another product'}, not ${product.sku}. Not shown on the Stylish websites until the link is fixed.` : null,
@@ -251,7 +250,7 @@ export default function WhereToBuyTab({ product }) {
                         otherFinish ? `The link opens the right listing, but the store preselects ${check.page_model ?? 'another finish'} (its default option, with its own price); ${product.sku} is one click away. Shown on the websites — use the suggested link so it opens ${product.sku}'s own option.` : null,
                         check?.read_at && !isWrong(check) && check.page_model && check.sku_check === 'unknown' ? `The page shows model ${check.page_model} (not a PIM SKU) — check that it is ${product.sku}.` : null,
                         check?.page_note ? `On the page: ${check.page_note}.` : null,
-                        price ? `Price on the page: ${price}${check.was_price != null ? ` (was ${check.currency === 'USD' ? '$' : 'C$'}${Number(check.was_price).toFixed(2)})` : ''}${check.in_stock === false ? ', sold out' : ''} · read ${fmt(check.read_at)}${PAGE_STORE_KEYS.has(r.key) ? ' — Pricing → Price Alignment compares it with the MAP' : ''}` : null,
+                        price ? `Price on the page: ${price}${check.was_price != null ? ` (was ${check.currency === 'USD' ? '$' : 'C$'}${Number(check.was_price).toFixed(2)})` : ''}${check.in_stock === false ? ', sold out' : ''}${PAGE_STORE_KEYS.has(r.key) ? ' — Pricing → Price Alignment compares it with the MAP' : ''}` : null,
                         check?.verdict === 'broken' ? 'Not shown on the Stylish websites until it works again (fix the link or wait for the next check).' : null,
                       ].filter(Boolean).join('\n') : '';
                       // The PIM's suggestion for this store (the newest checked one),
@@ -266,7 +265,7 @@ export default function WhereToBuyTab({ product }) {
                             {reviews && (
                               <span
                                 className="mt-0.5 flex items-center gap-1 text-label-md font-normal text-on-surface-variant tabular-nums"
-                                title={`What ${r.label} shows for this product${check.read_at ? ` · read ${fmt(check.read_at)}` : ''}`}
+                                title={`What ${r.label} shows for this product`}
                               >
                                 {reviews.rating != null && <Star className="w-3 h-3 flex-shrink-0 fill-current" aria-hidden="true" />}
                                 <span className="truncate">
@@ -326,7 +325,7 @@ export default function WhereToBuyTab({ product }) {
                                   target="_blank"
                                   rel="noreferrer"
                                   className={`min-w-0 max-w-full truncate underline underline-offset-2 ${using ? '' : 'text-primary'}`}
-                                  title={[suggestion.url, SUGGESTION_WHY[suggestion.reason], suggestion.detail, suggestion.status_note, suggestion.checked_at ? `Opened ${fmt(suggestion.checked_at)}` : null].filter(Boolean).join('\n')}
+                                  title={[suggestion.url, SUGGESTION_WHY[suggestion.reason], suggestion.detail, suggestion.status_note].filter(Boolean).join('\n')}
                                 >
                                   {shortUrl(suggestion.url)}
                                 </a>

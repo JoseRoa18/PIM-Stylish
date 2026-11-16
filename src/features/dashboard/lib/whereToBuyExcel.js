@@ -59,21 +59,15 @@ const SECTIONS = [
   { title: 'Status', color: '455A64', headers: ['Priority', 'Status', 'Why'] },
   { title: 'Link on the Stylish pages', color: '0B5394', headers: ['Current Link'] },
   { title: 'Your change — fill in to upload', color: '1E5631', headers: ['What to Do', 'New Link'] },
-  { title: 'What the store page showed', color: '4E342E', headers: ['Page Shows', 'Price', 'Was', 'Currency', 'In Stock', 'Rating', 'Reviews', 'Read', 'Last Check', 'Checked Via'] },
+  { title: 'What the store page showed', color: '4E342E', headers: ['Page Shows', 'Price', 'Was', 'Currency', 'In Stock', 'Rating', 'Reviews', 'Checked Via'] },
   { title: 'Suggested by the PIM', color: '6A1B9A', headers: ['Suggested Link'] },
 ];
 const HEADERS = SECTIONS.flatMap((s) => s.headers);
 const col = (h) => HEADERS.indexOf(h);
 const FORMATS = HEADERS.map((h) => ({ 'Current Link': 'link', 'Suggested Link': 'link', Price: 'money', Was: 'money' }[h] ?? null));
 
-// "2026-10-21 08:04" in the reader's own time.
-const stamp = (iso) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+// When a page was read or a link checked is written nowhere in the file
+// (user, 2026-11-16: no reading dates, on the screens or in the Excel files).
 
 // Why a link has its status, in a few words.
 function whyOf(status, check) {
@@ -203,8 +197,8 @@ const sheetRow = (r) => {
     r.sku, r.model, r.category, r.upc, r.store, r.code, r.country, r.stock ?? NOT_TRACKED, r.priority, r.status, r.why, r.url, r.todo, '',
     read?.page_model ?? '', read?.price != null ? Number(read.price) : '', read?.was_price != null ? Number(read.was_price) : '',
     read?.currency ?? '', read ? ({ true: 'Yes', false: 'No' }[String(read.in_stock)] ?? '') : '',
-    reviews?.rating ?? '', reviews ? reviews.count : '', stamp(read?.read_at),
-    stamp(c?.checked_at), c?.checked_via ? (WTB_VIA[c.checked_via] ?? c.checked_via) : '', r.suggested,
+    reviews?.rating ?? '', reviews ? reviews.count : '',
+    c?.checked_via ? (WTB_VIA[c.checked_via] ?? c.checked_via) : '', r.suggested,
   ];
 };
 
@@ -218,7 +212,7 @@ const cellColor = (values, c) => {
 const WIDTHS = {
   SKU: 13, 'Model Name': 30, Category: 16, UPC: 15, Store: 20, 'Store Code': 18, Country: 9, 'Our Stock': 11, Priority: 9, Status: 15, Why: 40,
   'Current Link': 46, 'What to Do': 60, 'New Link': 46,
-  'Page Shows': 13, Price: 10, Was: 10, Currency: 9, 'In Stock': 8, Rating: 8, Reviews: 9, Read: 16, 'Last Check': 16, 'Checked Via': 12, 'Suggested Link': 40,
+  'Page Shows': 13, Price: 10, Was: 10, Currency: 9, 'In Stock': 8, Rating: 8, Reviews: 9, 'Checked Via': 12, 'Suggested Link': 40,
 };
 
 // What shoppers say on each store, per product: { sku → { model, category,

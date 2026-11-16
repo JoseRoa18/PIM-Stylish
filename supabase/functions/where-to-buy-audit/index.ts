@@ -47,6 +47,13 @@
 //                candidate before it is shown (where_to_buy_suggestions).
 //                Cron every 10 minutes; the candidates are looked for hourly
 //                and opened on the check days.
+// mode "problem-reread" — the pages Price Alignment lists as price problems
+//                are made due again, so each one is confirmed by a second
+//                read (user, 2026-11-16: "solo los que tienen errores"). Cron
+//                where-to-buy-problem-reread, 10 AM Eastern on the pass days.
+// mode "reread" — { retailer, skus }: "Read again" on Price Alignment — those
+//                products' pages of that store are opened now, in this call
+//                (admins and editors).
 // mode "publish" — writes the next products of the publish queue to the
 //                Stylish pages (cron every 5 minutes; the check calls also
 //                drain it when they have time left).
@@ -91,6 +98,11 @@ import { normSku } from "../_shared/pageReaders/common.js";
 import { PAGE_STORES, readingCounts } from "../_shared/pageStores.js";
 import { priceOff } from "../_shared/priceTolerance.js";
 import { etToday, periodOfDay, prevPeriod, promoWindow, shiftDay, PROMO_DATE_COLUMNS, type Market } from "../_shared/promoCalendar.ts";
+// Price Alignment's own report (the Pricing page's code), for the problems
+// read again: priceAlignmentReport.js and what it imports (homeDepotCaNlp.js
+// with the files above) go up with the function.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createPriceAlignment, alignTargets } from "../_shared/priceAlignmentReport.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -1559,7 +1571,9 @@ async function siblingsOf(rows: DueRow[]): Promise<DueRow[]> {
   return out;
 }
 
-async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean } = {}) {
+// `skus` checks those products' links now, due or not (`dueOnly`: only the
+// due ones); with `retailer`, only their links to that store.
+async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean; retailer?: string } = {}) {
   const started = Date.now();
   const deadline = started + BATCH_MS;
   // Due rows beyond a batch (or a host's share of it) wait for the next call.
@@ -1571,7 +1585,7 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean 
     return taken;
   };
   const rows = opts.skus?.length
-    ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
+    ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}${opts.retailer ? `&retailer=eq.${encodeURIComponent(opts.retailer)}` : ""}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
     : [
       ...await pool(`retailer=${inList(UNLOCKER_RETAILERS)}`, "verdict.desc,next_check_at.asc.nullsfirst", 1000, UNLOCKER_PER_HOST, UNLOCKER_BATCH),
       ...await pool(`retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}`, "next_check_at.asc.nullsfirst", 1000, DIRECT_PER_HOST, opts.limit ?? DIRECT_BATCH),
@@ -1890,6 +1904,84 @@ async function dealReread(opts: { asOf?: string; run: "morning" | "afternoon"; d
     if (changes.length) console.log(`[where-to-buy] deals ${today} ${opts.run}: ${changes.join("; ")}`);
   }
   return { day: today, run: opts.run, dryRun: Boolean(opts.dryRun), changes, stores, rows: rows.length, scraperCredits: credits };
+}
+
+// ---------------------------------------------------------------- price problems, read again
+// A store can change a price hours after its page was read (user, 2026-11-16:
+// C233 read C$472 on Wayfair.ca at 2:51 AM and showed C$502 that afternoon —
+// Price Alignment listed it "Below" until the next pass). Two answers:
+//   - mode "problem-reread" (cron where-to-buy-problem-reread, 10 AM Eastern
+//     on the pass days): the pages Price Alignment lists as price problems
+//     are made due again, so each one is confirmed by a second read the same
+//     morning — only those (user: "solo los que tienen errores"). The problems
+//     are the Pricing page's own report (_shared/priceAlignmentReport.js),
+//     store by store; the checks themselves run in the usual batches. Left
+//     out: a page read in the last 3 hours (a promotion's or a deal's own
+//     re-read), a problem with nothing to compare (no price in the PIM, no
+//     price on the page) and the stores opened with ScraperAPI's counted
+//     credits (BB&B, Overstock: their share of the month is paced).
+//   - mode "reread" ({ retailer, skus }): a person's "Read again" on Price
+//     Alignment — those products' pages of that store are opened now, in the
+//     call (REREAD_MAX products; the page asks a few at a time). BB&B and
+//     Overstock answer while the day's share of ScraperAPI lasts.
+const PROBLEM_REREAD_KEY = "where_to_buy_problem_reread";
+const PROBLEM_REREAD_HOUR = 10;      // Eastern
+const PROBLEM_FRESH_MS = 3 * 3600e3; // a page read since then is not read again
+const REREAD_MAX = 12;
+type AlignProblem = { sku: string; live: number | null; expected: number | null; url?: string | null };
+
+// The price problems of every store read from its pages: store → SKUs.
+async function priceProblems(): Promise<Map<string, string[]>> {
+  const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  const shared = new Map<string, Promise<unknown>>();
+  const sharedLoad = (key: string, loader: () => Promise<unknown>) => {
+    if (!shared.has(key)) shared.set(key, loader());
+    return shared.get(key)!;
+  };
+  const { latestReport } = createPriceAlignment({ db, sharedLoad });
+  const out = new Map<string, string[]>();
+  for (const [key, cfg] of Object.entries(alignTargets({}) as Record<string, { kind: string }>)) {
+    if (cfg.kind !== "page") continue;
+    const report = await latestReport(cfg) as { problems: AlignProblem[] } | null;
+    out.set(key, (report?.problems ?? []).filter((p) => p.live != null && p.expected != null && p.url).map((p) => p.sku));
+  }
+  return out;
+}
+
+async function problemReread(opts: { dryRun?: boolean } = {}) {
+  const problems = await priceProblems();
+  const now = new Date().toISOString();
+  const recent = new Date(Date.now() - PROBLEM_FRESH_MS).toISOString();
+  const stores: Record<string, { problems: number; rows: number; pages: number }> = {};
+  const leftOut: Record<string, number> = {};
+  for (const [retailer, skus] of problems) {
+    if (!skus.length) continue;
+    if (SCRAPERAPI_FIRST.has(retailer)) { leftOut[retailer] = skus.length; continue; }
+    const rows: Array<{ id: string; url: string }> = [];
+    for (const part of chunk(skus, 100)) {
+      rows.push(...await rest<Array<{ id: string; url: string }>>(
+        `where_to_buy_links?select=id,url&retailer=eq.${retailer}&sku=${inList(part)}&url=not.is.null&verdict=in.(ok,pending)&or=(read_at.is.null,read_at.lt.${recent})`,
+        { headers: { Prefer: "count=none" } },
+      ));
+    }
+    if (!opts.dryRun) {
+      for (const ids of chunk(rows.map((r) => r.id), 100)) {
+        await rest(`where_to_buy_links?id=${inList(ids)}`, { method: "PATCH", body: JSON.stringify({ next_check_at: now }) });
+      }
+    }
+    stores[retailer] = { problems: skus.length, rows: rows.length, pages: new Set(rows.map((r) => r.url)).size };
+  }
+  const total = (k: "problems" | "rows" | "pages") => Object.values(stores).reduce((a, s) => a + s[k], 0);
+  const report = { at: now, day: etToday(), problems: total("problems"), rows: total("rows"), pages: total("pages"), stores, leftOut };
+  if (!opts.dryRun) {
+    await rest("app_settings?on_conflict=key", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ key: PROBLEM_REREAD_KEY, value: report, updated_at: now }),
+    });
+    console.log(`[where-to-buy] price problems read again: ${report.pages} pages of ${report.problems} problems (${Object.entries(stores).map(([k, s]) => `${k} ${s.pages}`).join(", ")})`);
+  }
+  return { dryRun: Boolean(opts.dryRun), ...report };
 }
 
 // ---------------------------------------------------------------- suggestions
@@ -2539,6 +2631,17 @@ async function authKind(req: Request): Promise<"cron" | "user" | "p2s" | null> {
   if (P2S_INBOUND_SECRET && req.headers.get("x-p2s-secret") === P2S_INBOUND_SECRET) return "p2s";
   return null;
 }
+// What opens store pages at a person's word costs money: the cron, or a
+// signed-in admin or editor (profiles.role).
+async function maySpend(kind: string, req: Request): Promise<boolean> {
+  if (kind === "cron") return true;
+  if (kind !== "user") return false;
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: req.headers.get("authorization") ?? "" } });
+  const id = r.ok ? (await r.json())?.id : null;
+  if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return false;
+  const role = (await rest<Array<{ role: string | null }>>(`profiles?select=role&id=eq.${id}`))[0]?.role;
+  return role === "admin" || role === "editor";
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -2605,6 +2708,27 @@ Deno.serve(async (req) => {
       if (kind === "cron" && !body.asOf && hour !== 7 && hour !== 15) return json({ ok: true, skipped: "runs at 7 AM and 3 PM Eastern" });
       const run = body.run === "morning" || body.run === "afternoon" ? body.run : hour < 12 ? "morning" : "afternoon";
       return json({ ok: true, ...(await dealReread({ asOf: body.asOf, run, dryRun: body.dryRun === true })) });
+    }
+    if (mode === "problem-reread") {
+      // The cron fires at 14:00 and 15:00 UTC on Monday, Wednesday and Friday;
+      // the call at 10 AM Eastern (EDT or EST) runs. A dry run only counts.
+      const dryRun = body.dryRun === true;
+      const e = eastern(new Date());
+      if (kind === "cron" && !dryRun && body.force !== true && (e.hour !== PROBLEM_REREAD_HOUR || !PASS_WEEKDAYS.includes(e.weekday))) {
+        return json({ ok: true, skipped: "runs at 10 AM Eastern on Monday, Wednesday and Friday" });
+      }
+      if (!dryRun && !(await maySpend(kind, req))) return json({ error: "Only admins and editors can have the store pages read again" }, 403);
+      return json({ ok: true, ...(await problemReread({ dryRun })) });
+    }
+    if (mode === "reread") {
+      // body: { retailer, skus } — "Read again" on Price Alignment.
+      if (!(await maySpend(kind, req))) return json({ error: "Only admins and editors can have a store page read again" }, 403);
+      const retailer = String(body.retailer ?? "");
+      if (!(PAGE_STORES as Array<{ key: string }>).some((s) => s.key === retailer)) return json({ error: "retailer: a store read from its pages is required" }, 400);
+      const skus = Array.isArray(body.skus) ? [...new Set<string>(body.skus.map((s: unknown) => String(s).trim()).filter(Boolean))].slice(0, REREAD_MAX) : [];
+      if (!skus.length) return json({ error: "skus[] is required" }, 400);
+      const result = await check({ skus, retailer });
+      return json({ ok: true, retailer, checked: result.checked, byKind: result.byKind, ms: result.ms, links: result.links ?? [] });
     }
     if (mode === "suggest") return json({ ok: true, ...(await suggest({ build: body.build === true, dryRun: body.dryRun === true })) });
     // ScraperAPI's credits and today's allowance (reads the account; spends nothing).

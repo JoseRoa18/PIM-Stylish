@@ -58,12 +58,6 @@ const CHIP_TONE = {
 
 const PAGE_SIZE = 50;
 
-const fmtWhen = (iso) => {
-  if (!iso) return 'never';
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-};
-
 // `detail` (the reason, who checked it and when) shows on hover and is read
 // by screen readers, so each link keeps one line.
 function StatusChip({ link, detail }) {
@@ -273,7 +267,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
               Every retailer link on the product pages, opened to confirm it reaches the product page.
             </p>
             <p className="text-body-sm text-on-surface-variant mt-1">
-              Scanned {fmtWhen(summary.lastScan)} · last check {fmtWhen(summary.lastCheck)} · links are checked every Monday, Wednesday and Friday from 1 AM (Cambridge time), new ones right away · stores that block the PIM are opened through Bright Data or ScraperAPI
+              Links are checked every Monday, Wednesday and Friday from 1 AM (Cambridge time), new ones right away · stores that block the PIM are opened through Bright Data or ScraperAPI
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -507,7 +501,8 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                               <tbody className="divide-y divide-outline-variant/50">
                                 {(hit && !allLinks ? g.links.filter(hit) : [...g.links]).sort(byStoreOrder).map((l) => {
                                   const checked = l.checked_via && (l.verdict === 'ok' || l.verdict === 'broken');
-                                  const when = checked ? `${WTB_VIA[l.checked_via] ?? l.checked_via} · ${fmtWhen(l.checked_at)}` : '';
+                                  // Who opened it — never when (user, 2026-11-16: no reading dates on screen).
+                                  const when = checked ? (WTB_VIA[l.checked_via] ?? l.checked_via) : '';
                                   const read = pageReading(l);
                                   const wrong = isWrongProduct(l);
                                   const detail = [
@@ -534,7 +529,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                                           <span className="text-on-surface-variant">No link yet</span>
                                         )}
                                       </td>
-                                      <td className={`pr-3 text-label-md truncate ${wrong ? 'text-warning font-semibold' : 'text-on-surface-variant'}`} title={read ? `On the page (${fmtWhen(l.read_at)}): ${read.text}` : undefined}>
+                                      <td className={`pr-3 text-label-md truncate ${wrong ? 'text-warning font-semibold' : 'text-on-surface-variant'}`} title={read ? `On the page: ${read.text}` : undefined}>
                                         {read ? read.text : ''}
                                       </td>
                                       <td className="text-label-md text-on-surface-variant truncate" title={detail || undefined}>
