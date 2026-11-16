@@ -47,7 +47,7 @@ async function loadExportData(task = null) {
   const [products, pim, audit, suggestions, inventory, aliases, amazon, bestBuy] = await settleAll([
     loadProducts(),
     loadLinks(),
-    readAll('where_to_buy_links', 'id, sku, retailer, url, verdict, note, checked_at, checked_via, page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at', {
+    readAll('where_to_buy_links', 'id, sku, retailer, url, verdict, note, checked_at, checked_via, page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at, rating, review_count', {
       filter: (q) => q.in('site', SITES).eq('section', 'where_to_buy'),
       order: ['id'],
     }),

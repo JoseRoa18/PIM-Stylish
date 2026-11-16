@@ -13,7 +13,7 @@ export const SUGGESTION_COLUMNS = 'id, sku, retailer, url, reason, source, detai
 
 /**
  * { links: { [retailer]: url }, checks: { [retailer]: { verdict, note, checked_at, checked_via,
- *   page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at } },
+ *   page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at, rating, review_count } },
  *   suggestions: { [retailer]: [suggestion] }, sites: [{ key, label, linked }] } — `sites` are
  *   the Stylish sites the product's brand is sold on; `linked` = the PIM knows its Wix product
  *   there (it can be published).
@@ -22,7 +22,7 @@ export async function loadProductWhereToBuy(product) {
   const sku = product.sku;
   const [{ data: rows, error }, { data: checks, error: e2 }, { data: wix, error: e3 }, { data: suggested, error: e4 }] = await Promise.all([
     supabase.from('product_where_to_buy').select('retailer, url, source, updated_at').eq('sku', sku),
-    supabase.from('where_to_buy_links').select('site, retailer, url, verdict, note, checked_at, checked_via, page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at').eq('sku', sku).not('url', 'is', null),
+    supabase.from('where_to_buy_links').select('site, retailer, url, verdict, note, checked_at, checked_via, page_model, sku_check, page_note, price, was_price, currency, in_stock, read_at, rating, review_count').eq('sku', sku).not('url', 'is', null),
     supabase.from('wix_links').select('site').eq('sku', sku).in('site', WTB_SITES.map((s) => s.key)),
     supabase.from('where_to_buy_suggestions').select(SUGGESTION_COLUMNS).eq('sku', sku).eq('status', 'ready').order('checked_at', { ascending: false }),
   ]);

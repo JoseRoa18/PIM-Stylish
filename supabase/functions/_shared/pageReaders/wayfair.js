@@ -6,37 +6,8 @@
 // (pdpContext.variantId). A listing (TKJS1134) covers several options; the URL selects one with ?piid=… and the page
 // renders that option, or the listing's DEFAULT option when the URL has no piid or one that is not an option of the
 // listing (parsedParams.isOptionIdMismatched). The page's language (en-CA / fr-CA) does not matter: no label is read.
-import { decode, money, uniq, currencyOfMarket, absUrl } from './common.js';
-
-// The flight payload: the JSON strings of every self.__next_f.push([1,"…"]) joined.
-function flightOf(html) {
-  let s = '';
-  for (const m of html.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g)) { try { s += JSON.parse(m[1]); } catch { /* broken chunk */ } }
-  return s;
-}
-
-// The flight's JSON rows, parsed: "<id>:<JSON>\n". A text row "<id>:T<hex UTF-8 bytes>,<text>" is skipped by its length.
-function rowsOf(s) {
-  const out = [];
-  let i = 0;
-  while (i < s.length) {
-    const m = /^([0-9a-f]+):(T([0-9a-f]+),)?/.exec(s.slice(i, i + 24));
-    if (!m) { const nl = s.indexOf('\n', i); if (nl < 0) break; i = nl + 1; continue; }
-    i += m[0].length;
-    if (m[2]) {
-      for (let bytes = parseInt(m[3], 16); bytes > 0 && i < s.length; i++) {
-        const c = s.charCodeAt(i);
-        if (c >= 0xd800 && c < 0xdc00) { bytes -= 4; i++; } else bytes -= c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
-      }
-      continue;
-    }
-    const nl = s.indexOf('\n', i);
-    const body = s.slice(i, nl < 0 ? s.length : nl);
-    i = nl < 0 ? s.length : nl + 1;
-    if (/^[[{]/.test(body)) { try { out.push(JSON.parse(body)); } catch { /* not JSON */ } }
-  }
-  return out;
-}
+// The flight payload and its JSON rows: flightOf / flightRows in common.js (Rona's new page uses them too).
+import { decode, money, uniq, currencyOfMarket, absUrl, flightOf, flightRows as rowsOf } from './common.js';
 
 // Option ids of a URL: ?piid=94128987%2C94128991 → "94128987,94128991" (sorted: the order does not matter).
 const piidsOf = (url) => (String(url ?? '').match(/[?&]piid=([^&#]*)/i)?.[1] ?? '').replace(/%2C/gi, ',').split(/[^\d]+/).filter(Boolean).sort().join(',');

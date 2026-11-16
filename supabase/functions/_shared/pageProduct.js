@@ -21,6 +21,9 @@
 //            option an item of its own) — to suggest the link that opens the
 //            right product when a link opens another option
 //   subSku   BB&B / Overstock: the sub-SKU of the option shown ("…-000-001")
+//   reviewCount, rating  how many reviews the store shows for it and its
+//            average out of 5 (pageReaders/reviews.js; null = the page does
+//            not say)
 //   canonical the page's own address of its product
 // null = no product data on the page (not found, bot check, home, brand,
 // category or search page).
@@ -37,10 +40,11 @@ import { readers as wayfair } from "./pageReaders/wayfair.js";
 import { readers as homeDepot } from "./pageReaders/homeDepot.js";
 import { readers as bestBuy } from "./pageReaders/bestBuy.js";
 import { readers as amazon } from "./pageReaders/amazon.js";
-import { readers as lowesRona } from "./pageReaders/lowesRona.js";
+import { readers as lowesRona, ronaServiceUrl as ronaUrlOf, ronaService } from "./pageReaders/lowesRona.js";
 import { readers as walmart } from "./pageReaders/walmart.js";
 import { readers as beyond } from "./pageReaders/beyond.js";
 import { readers as dealers } from "./pageReaders/dealers.js";
+import { reviewsOf, reviewReading } from "./pageReaders/reviews.js";
 
 const READERS = { ...wayfair, ...homeDepot, ...bestBuy, ...amazon, ...lowesRona, ...walmart, ...beyond, ...dealers };
 
@@ -88,6 +92,8 @@ export function menardsRead(rec, siblings = []) {
     optionLinks: siblings.filter((s) => s && !s.error && s.url).map((s) => ({ model: s.mpn ?? null, name: s.title ?? null, itemId: s.item_id ?? null, gtin: s.gtin ?? null, url: s.url })),
     canonical: rec.url ?? null,
     source: "menards-scraper",
+    // star_rating / review_count: empty on the one record looked at (P-201, 2026-11-16) — kept when the scraper fills them.
+    ...(reviewReading(rec.star_rating, rec.review_count) ?? {}),
   });
 }
 
@@ -115,6 +121,7 @@ export function lowesRecordRead(rec) {
     itemId: rec.sku ?? rec.marketplace_pn ?? null,
     canonical: rec.url ?? null,
     source: "lowes-scraper",
+    ...(reviewReading(rec.rating, rec.reviews_count) ?? {}), // rating 4.9, reviews_count 83 (P-201, 2026-11-16)
     ...(gone ? { gone: true, note: `Lowe's no longer sells it ("${availability.slice(0, 60)}")` } : {}),
   });
 }
@@ -148,7 +155,9 @@ function clean(read) {
     inStock: typeof read.inStock === "boolean" ? read.inStock : null,
     itemId: read.itemId ? String(read.itemId).slice(0, 40) : null,
     subSku: read.subSku ? String(read.subSku).slice(0, 40) : null,
-    reviewCount: Number.isInteger(read.reviewCount) ? read.reviewCount : null,
+    reviewCount: Number.isInteger(read.reviewCount) && read.reviewCount >= 0 ? read.reviewCount : null,
+    // The average out of 5, only next to a count of at least one review.
+    rating: Number.isInteger(read.reviewCount) && read.reviewCount > 0 && typeof read.rating === "number" && read.rating > 0 && read.rating <= 5 ? Math.round(read.rating * 100) / 100 : null,
     optionLinks: optionLinksOf(read.optionLinks),
     canonical: /^https?:\/\//i.test(String(read.canonical ?? "")) ? String(read.canonical).slice(0, 500) : null,
     source: read.source ? String(read.source).slice(0, 120) : null,
@@ -179,12 +188,37 @@ export function readProductPage(html, retailer, url) {
   try {
     const own = READERS[retailer];
     const read = own ? own(html, url ?? "") : readGeneric(html);
+    if (!read) return null;
     // The page's own address of its product (for a link found by an id: the
-    // store's full address of it).
-    return clean(read ? { canonical: canonicalOf(html), ...read } : read);
+    // store's full address of it), and its reviews when the page says them
+    // (a store's own count — BB&B's 0 for a page without a rating block —
+    // stays when it does not).
+    return clean({ canonical: canonicalOf(html), ...read, ...(reviewsOf(html, retailer) ?? {}) });
   } catch {
     return null; // a page the reader does not understand reads as nothing
   }
+}
+
+// ---------------------------------------------------------------- rona's price
+// Rona's new page (2026-11) has no price in it: the page asks Rona's own item
+// service, and so does the check (pageReaders/lowesRona.js).
+/** The service address to ask for a reading of Rona's new page that has no price; else null. */
+export function ronaServiceUrl(read) {
+  return read && read.source === "next-flight" && read.price === null && read.itemId ? ronaUrlOf(read.itemId) : null;
+}
+/** That reading with the service's price, regular price and stock; as it was when the answer has no price. */
+export function withRonaService(read, body) {
+  const got = ronaService(body);
+  if (!read || !got) return read;
+  const price = got.price > 0 && got.price < 100000 ? got.price : null;
+  if (price === null) return read;
+  return {
+    ...read, price, currency: "CAD",
+    wasPrice: got.wasPrice !== null && got.wasPrice > price && got.wasPrice < 100000 ? got.wasPrice : null,
+    inStock: got.inStock,
+    note: null, // the only note of such a reading is "the price was not read"
+    source: "next-flight + item service",
+  };
 }
 
 // ---------------------------------------------------------------- the SKU check

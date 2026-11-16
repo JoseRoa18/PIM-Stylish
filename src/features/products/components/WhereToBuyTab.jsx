@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ExternalLink, Lightbulb, Loader2, Upload } from 'lucide-react';
+import { AlertCircle, ExternalLink, Lightbulb, Loader2, Star, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { loadProductWhereToBuy, saveProductWhereToBuy, publishWhereToBuy, dismissWhereToBuySuggestion } from '../api/whereToBuy';
 import { WTB_MARKETS, WTB_RETAILERS, wtbUrlProblem, cleanWtbUrl } from '../lib/whereToBuy';
 import { PAGE_STORE_KEYS, readingCounts } from '@/features/pricing/lib/pageStores';
+import { linkReviews, reviewsText } from '@/features/dashboard/lib/whereToBuy';
 import { startTask } from '@/lib/taskProgress';
 
 // Product page → Where to Buy. The store links of the Stylish websites, owned
@@ -11,7 +12,9 @@ import { startTask } from '@/lib/taskProgress';
 // the WHERE TO BUY section of both Stylish pages (Canada and USA) from it.
 // Each row shows what the Listing Health check last found on that address —
 // and what the page showed: its product's model (a link that opens another
-// product says so) and its price (2026-10-20). Under a link that opens the
+// product says so), its price (2026-10-20) and, under the store's name, the
+// rating and the number of reviews the store shows for it (2026-11-16: read
+// from the same page, on the stores whose page says them). Under a link that opens the
 // wrong product, a broken one or a missing one, the PIM may suggest the right
 // address — found and opened by the audit, its page shows this product. "Use"
 // puts it in the field; nothing changes until "Save and publish".
@@ -234,6 +237,8 @@ export default function WhereToBuyTab({ product }) {
                       // The price shows only when the page is this product's
                       // (another product's price would mislead).
                       const price = saved && check?.verdict !== 'broken' && readingCounts(check) ? priceText(check) : '';
+                      // What shoppers say on the store: only when the page read is this product's.
+                      const reviews = saved ? linkReviews(check) : null;
                       // The reason, who checked it and what the page showed sit
                       // behind the status (hover / screen reader), so every row
                       // keeps one line.
@@ -258,6 +263,18 @@ export default function WhereToBuyTab({ product }) {
                         <tr className="h-12 align-middle">
                           <th scope="row" className="pr-3 text-left font-semibold text-on-surface">
                             <label htmlFor={id} className="block truncate" title={r.label}>{r.label}</label>
+                            {reviews && (
+                              <span
+                                className="mt-0.5 flex items-center gap-1 text-label-md font-normal text-on-surface-variant tabular-nums"
+                                title={`What ${r.label} shows for this product${check.read_at ? ` · read ${fmt(check.read_at)}` : ''}`}
+                              >
+                                {reviews.rating != null && <Star className="w-3 h-3 flex-shrink-0 fill-current" aria-hidden="true" />}
+                                <span className="truncate">
+                                  <span className="sr-only">{reviews.rating != null ? 'Rated ' : 'On the store: '}</span>
+                                  {reviewsText(reviews)}
+                                </span>
+                              </span>
+                            )}
                           </th>
                           <td className="pr-3">
                             {canEdit ? (

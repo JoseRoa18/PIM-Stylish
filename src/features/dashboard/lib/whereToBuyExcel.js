@@ -8,6 +8,10 @@
 //   To fix        Broken and Wrong product links, by priority
 //   Links to add  the stores a product's pages do not link yet
 //   All links     every row
+//   Reviews       one row per product: the rating and the number of reviews
+//                 each store's page shows, and across all of them (user,
+//                 2026-11-16: "solo necesito la cantidad de reviews y el
+//                 rating global")
 //   How to use    the statuses and the upload steps
 // The three link sheets have the same columns; a person writes the new
 // address in "New Link" (green), REMOVE takes a link off, and the file comes
@@ -25,7 +29,7 @@
 
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
 import { WTB_RETAILERS, cleanWtbUrl, wtbUrlProblem } from '@/features/products/lib/whereToBuy';
-import { WTB_VERDICTS, WRONG_PRODUCT, OUT_OF_STOCK, OTHER_FINISH, WTB_VIA, NOT_COVERED, linkStatus } from './whereToBuy';
+import { WTB_VERDICTS, WRONG_PRODUCT, OUT_OF_STOCK, OTHER_FINISH, WTB_VIA, NOT_COVERED, linkStatus, linkReviews } from './whereToBuy';
 
 const CATEGORY = new Map(CATEGORY_OPTIONS.map((c) => [c.value, c.label]));
 const STORE_ORDER = new Map(WTB_RETAILERS.map((r, i) => [r.key, i]));
@@ -55,7 +59,7 @@ const SECTIONS = [
   { title: 'Status', color: '455A64', headers: ['Priority', 'Status', 'Why'] },
   { title: 'Link on the Stylish pages', color: '0B5394', headers: ['Current Link'] },
   { title: 'Your change — fill in to upload', color: '1E5631', headers: ['What to Do', 'New Link'] },
-  { title: 'What the store page showed', color: '4E342E', headers: ['Page Shows', 'Price', 'Was', 'Currency', 'In Stock', 'Read', 'Last Check', 'Checked Via'] },
+  { title: 'What the store page showed', color: '4E342E', headers: ['Page Shows', 'Price', 'Was', 'Currency', 'In Stock', 'Rating', 'Reviews', 'Read', 'Last Check', 'Checked Via'] },
   { title: 'Suggested by the PIM', color: '6A1B9A', headers: ['Suggested Link'] },
 ];
 const HEADERS = SECTIONS.flatMap((s) => s.headers);
@@ -194,10 +198,12 @@ export function whereToBuyRows({ products, pim, audit, suggestions, inventory = 
 const sheetRow = (r) => {
   const c = r.check;
   const read = c?.read_at ? c : null;
+  const reviews = linkReviews(c);
   return [
     r.sku, r.model, r.category, r.upc, r.store, r.code, r.country, r.stock ?? NOT_TRACKED, r.priority, r.status, r.why, r.url, r.todo, '',
     read?.page_model ?? '', read?.price != null ? Number(read.price) : '', read?.was_price != null ? Number(read.was_price) : '',
-    read?.currency ?? '', read ? ({ true: 'Yes', false: 'No' }[String(read.in_stock)] ?? '') : '', stamp(read?.read_at),
+    read?.currency ?? '', read ? ({ true: 'Yes', false: 'No' }[String(read.in_stock)] ?? '') : '',
+    reviews?.rating ?? '', reviews ? reviews.count : '', stamp(read?.read_at),
     stamp(c?.checked_at), c?.checked_via ? (WTB_VIA[c.checked_via] ?? c.checked_via) : '', r.suggested,
   ];
 };
@@ -212,8 +218,53 @@ const cellColor = (values, c) => {
 const WIDTHS = {
   SKU: 13, 'Model Name': 30, Category: 16, UPC: 15, Store: 20, 'Store Code': 18, Country: 9, 'Our Stock': 11, Priority: 9, Status: 15, Why: 40,
   'Current Link': 46, 'What to Do': 60, 'New Link': 46,
-  'Page Shows': 13, Price: 10, Was: 10, Currency: 9, 'In Stock': 8, Read: 16, 'Last Check': 16, 'Checked Via': 12, 'Suggested Link': 40,
+  'Page Shows': 13, Price: 10, Was: 10, Currency: 9, 'In Stock': 8, Rating: 8, Reviews: 9, Read: 16, 'Last Check': 16, 'Checked Via': 12, 'Suggested Link': 40,
 };
+
+// What shoppers say on each store, per product: { sku → { model, category,
+// stores: Map(retailer → { count, rating }) } } from the rows whose page said it.
+function reviewsByProduct(rows) {
+  const bySku = new Map();
+  for (const r of rows) {
+    const reviews = linkReviews(r.check);
+    if (!reviews) continue;
+    if (!bySku.has(r.sku)) bySku.set(r.sku, { sku: r.sku, model: r.model, category: r.category, stores: new Map() });
+    bySku.get(r.sku).stores.set(r.retailer, reviews);
+  }
+  return bySku;
+}
+// The reviews of several stores together: how many, their average weighted by
+// the reviews of each store, and how many stores have at least one.
+function allStores(list) {
+  const rated = list.filter((x) => x.count > 0 && x.rating != null);
+  const ratedCount = rated.reduce((n, x) => n + x.count, 0);
+  return {
+    count: list.reduce((n, x) => n + x.count, 0),
+    rating: ratedCount ? Math.round((rated.reduce((n, x) => n + x.rating * x.count, 0) / ratedCount) * 100) / 100 : '',
+    stores: list.filter((x) => x.count > 0).length,
+  };
+}
+
+// The Reviews sheet: a band per store with its Rating and Reviews, after the
+// product and its numbers across every store. Only the stores whose page said
+// something, and the products with at least one such store.
+const STORE_BANDS = ['01579B', '4E342E', '1E5631', '6A1B9A', '0B5394', '455A64'];
+function reviewsSheet(rows) {
+  const products = reviewsByProduct(rows);
+  const stores = WTB_RETAILERS.filter((s) => [...products.values()].some((p) => p.stores.has(s.key)));
+  if (!stores.length) return null;
+  const sections = [
+    { title: 'Product', color: '1F3864', headers: ['SKU', 'Model Name', 'Category'] },
+    { title: 'All stores', color: '263238', headers: ['Reviews', 'Rating', 'Stores with reviews'] },
+    ...stores.map((s, i) => ({ title: `${s.label} (${COUNTRY[s.market]})`, color: STORE_BANDS[i % STORE_BANDS.length], headers: ['Rating', 'Reviews'] })),
+  ];
+  const sheetRows = [...products.values()].sort((a, b) => a.sku.localeCompare(b.sku)).map((p) => {
+    const all = allStores([...p.stores.values()]);
+    return [p.sku, p.model, p.category, all.count, all.rating, all.stores,
+      ...stores.flatMap((s) => { const x = p.stores.get(s.key); return x ? [x.rating ?? '', x.count] : ['', '']; })];
+  });
+  return { name: 'Reviews', sections, rows: sheetRows, widths: [13, 30, 16, 10, 9, 12, ...stores.flatMap(() => [9, 10])] };
+}
 
 // New Link is wide enough to paste an address, and its empty cells keep the
 // current link from spilling over them.
@@ -236,6 +287,13 @@ export function whereToBuySheets(rows, date) {
   const links = rows.filter((r) => r.url).length;
   const byStore = WTB_RETAILERS.map((s) => ({ s, list: rows.filter((r) => r.retailer === s.key) })).filter((x) => x.list.length);
   const statusCols = STATUS_ORDER.map((s) => s.label);
+  // Reviews: per store, the products with at least one review, the reviews and
+  // their average; the total counts a product once.
+  const reviewed = [...reviewsByProduct(rows).values()];
+  const reviewStores = WTB_RETAILERS
+    .map((s) => ({ s, all: allStores(reviewed.map((p) => p.stores.get(s.key)).filter(Boolean)) }))
+    .filter((x) => reviewed.some((p) => p.stores.has(x.s.key)));
+  const everyStore = allStores(reviewed.flatMap((p) => [...p.stores.values()]));
   const summary = {
     name: 'Summary',
     title: 'Stylish — Where to Buy links',
@@ -266,6 +324,14 @@ export function whereToBuySheets(rows, date) {
         rows: PRIORITIES.map((p) => [`${p.n}. ${p.label}`, toFix.filter((r) => r.priority === p.n).length, toAdd.filter((r) => r.priority === p.n).length]),
         total: ['All', toFix.length, toAdd.length],
       },
+      ...(reviewStores.length ? [{
+        title: 'Reviews by store',
+        note: 'What each store\'s page shows for the product, read with its price (the "Reviews" sheet has every product). The rating is the average weighted by each product\'s reviews.',
+        headers: ['Store', 'Country', 'Products with reviews', 'Reviews', 'Rating'],
+        formats: ['topic', 'center', 'count', 'count', 'center'],
+        rows: reviewStores.map(({ s, all }) => [s.label, COUNTRY[s.market], all.stores, all.count, all.rating]),
+        total: ['All stores', '', reviewed.filter((p) => [...p.stores.values()].some((x) => x.count > 0)).length, everyStore.count, ''],
+      }] : []),
     ],
   };
   const howTo = {
@@ -295,9 +361,19 @@ export function whereToBuySheets(rows, date) {
           ['Note', 'An address must be a page of that store (a Wayfair.ca link on the Wayfair.ca row). Walmart USA is not covered yet: its links are only on "All links".'],
         ],
       },
+      {
+        title: 'Rating and reviews',
+        headers: ['Where', 'What it is'],
+        formats: ['topic', 'wrap'],
+        rows: [
+          ['Rating / Reviews', 'What the store\'s page shows for the product: its average rating out of 5 and how many reviews it has (Amazon and Walmart count ratings). Read from the page with its price, every time the link is checked. Empty = the page did not say: the store draws no rating for a product nobody reviewed, or it is a store whose reviews cannot be read (the small dealers, Menards so far). Never read from a page that shows another product.'],
+          ['"Reviews" sheet', 'One row per product: the reviews of every store together (the rating is the average weighted by each store\'s reviews), then each store\'s rating and reviews. To read only: nothing on it is uploaded.'],
+        ],
+      },
     ],
   };
-  return [summary, linkSheet('To fix', toFix), linkSheet('Links to add', toAdd), linkSheet('All links', rows), howTo];
+  const reviews = reviewsSheet(rows);
+  return [summary, linkSheet('To fix', toFix), linkSheet('Links to add', toAdd), linkSheet('All links', rows), ...(reviews ? [reviews] : []), howTo];
 }
 
 /** The Store column's dropdown: the stores' labels. */

@@ -86,7 +86,7 @@
 
 import { resolveWixSite, siteSells } from "../_shared/wixSites.ts";
 import { WTB_RETAILERS, wtbRetailer, cleanWtbUrl, linksToShow, isHiddenLink, withWhereToBuySection } from "../_shared/whereToBuy.js";
-import { readProductPage, menardsRead, lowesRecordRead, pimCatalog, skuCheck, SURE_READERS } from "../_shared/pageProduct.js";
+import { readProductPage, menardsRead, lowesRecordRead, pimCatalog, skuCheck, SURE_READERS, ronaServiceUrl, withRonaService } from "../_shared/pageProduct.js";
 import { normSku } from "../_shared/pageReaders/common.js";
 import { PAGE_STORES, readingCounts } from "../_shared/pageStores.js";
 import { priceOff } from "../_shared/priceTolerance.js";
@@ -311,9 +311,13 @@ interface Reading {
   page_model: string | null; page_item_id: string | null; sku_check: string | null; page_note: string | null;
   price: number | null; was_price: number | null; currency: string | null; in_stock: boolean | null; read_at: string | null;
   page_options: OptionLink[] | null;
-  review_count?: number | null; // kept when a later read has no answer: only a page that shows it writes it
+  // How many reviews the store shows for the product and its average out of 5
+  // (pageReaders/reviews.js). Kept when a later read does not say: only a page
+  // that shows them writes them.
+  review_count?: number | null;
+  rating?: number | null;
 }
-const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null, page_options: null, review_count: null };
+const NO_READING: Reading = { page_model: null, page_item_id: null, sku_check: null, page_note: null, price: null, was_price: null, currency: null, in_stock: null, read_at: null, page_options: null, review_count: null, rating: null };
 interface Row extends Reading {
   site: string; sku: string; wix_product_id: string | null; section: string; market: string | null;
   retailer: string; label: string | null; url: string | null; host: string | null;
@@ -325,7 +329,7 @@ interface Row extends Reading {
 }
 // The checker's state on a link, carried over by URL when a scan rebuilds the rows.
 type LinkState = Pick<Row, "verdict" | "http_status" | "final_url" | "note" | "checked_at" | "next_check_at" | "checked_via" | "fail_count" | "signal_count" | "signal_at" | "job_id" | "job_at" | keyof Reading>;
-const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,signal_at,job_id,job_at,page_model,page_item_id,sku_check,page_note,price,was_price,currency,in_stock,read_at,page_options,review_count";
+const STATE_COLUMNS = "url,verdict,http_status,final_url,note,checked_at,next_check_at,checked_via,fail_count,signal_count,signal_at,job_id,job_at,page_model,page_item_id,sku_check,page_note,price,was_price,currency,in_stock,read_at,page_options,review_count,rating";
 type Base = { site: string; sku: string; wix_product_id: string | null; scanned_at: string };
 type Link = { retailer: string; url: string };
 interface PimLinks { skus: Set<string>; brands: Map<string, string>; links: Map<string, Link[]> }
@@ -886,7 +890,7 @@ interface OptionLink { model: string | null; name: string | null; subSku: string
 interface PageRead {
   ids: string[]; options: string[]; gtins: string[]; price: number | null; wasPrice: number | null; currency: string | null;
   inStock: boolean | null; itemId: string | null; source: string | null; optionDefaulted: boolean; gone: boolean; note: string | null;
-  subSku: string | null; reviewCount?: number | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
+  subSku: string | null; reviewCount?: number | null; rating?: number | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
 }
 interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string; soldOut?: string }
 
@@ -968,6 +972,7 @@ function judgePage(status: number | null, body: string, row: DueRow, via: Method
 // tried again soon, not counted as a failure.
 const brightData = { inFlight: 0, coolUntil: 0, limited: 0 };
 const BD_MAX_IN_FLIGHT = 20;
+const RONA_SERVICE_MS = 25000; // Rona's item service answers in ~8 s through the unlocker
 const RATE_LIMIT_RE = /rate limit/i;
 async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
   const url = row.url;
@@ -991,7 +996,31 @@ async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
     if (RATE_LIMIT_RE.test(j.headers?.["x-brd-error"] ?? "")) { brightData.limited += 1; brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     // 5xx / 403 / 429 here are the store or the unlocker turning the page down.
     if (code === null || code >= 500 || code === 403 || code === 429) return { kind: "none", via: "brightdata", status: code, note: j.headers?.["x-brd-error"] ?? `HTTP ${code}` };
-    return judgePage(code, j.body ?? "", row, "brightdata");
+    const out = judgePage(code, j.body ?? "", row, "brightdata");
+    // Rona's new page (2026-11) has no price in it: its own item service gives
+    // the price and the stock — one more request, in this link's own turn. A
+    // call with no time left for it leaves the link for the next one (5
+    // minutes): on the first afternoon 11 of ~80 products were read at the end
+    // of a call and kept no price, with the service answering for each. The
+    // service is asked twice at most; without an answer the reading stays as
+    // the page gave it (no price, and its note says so) until the next pass.
+    const ask = out.kind === "ok" && out.page ? ronaServiceUrl(out.page) : null;
+    if (ask) {
+      if (Date.now() + RONA_SERVICE_MS + 3000 >= deadline) return { kind: "later", via: "brightdata" };
+      for (let attempt = 0; attempt < 2 && ronaServiceUrl(out.page!) && Date.now() + RONA_SERVICE_MS + 3000 < deadline; attempt++) {
+        try {
+          const r2 = await fetch("https://api.brightdata.com/request", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ zone: BRIGHTDATA_ZONE, url: ask, format: "json" }),
+            signal: AbortSignal.timeout(RONA_SERVICE_MS),
+          });
+          const j2 = r2.ok ? await r2.json() as { status_code?: number; body?: string } : null;
+          if (j2?.status_code === 200) out.page = withRonaService(out.page!, j2.body ?? "");
+        } catch { /* no answer in time */ }
+      }
+    }
+    return out;
   } catch (e) {
     return { kind: "none", via: "brightdata", note: (e as Error).name === "TimeoutError" ? "no answer in 60 s" : (e as Error).message.slice(0, 80) };
   } finally { brightData.inFlight -= 1; }
@@ -1404,7 +1433,7 @@ function readingFor(o: Judged, now: string): Partial<Reading> {
   const model = {
     page_model: o.check?.model ?? o.page.ids[0] ?? null, page_item_id: o.page.itemId, sku_check: o.check?.check ?? null, page_note: o.page.note,
     page_options: o.page.optionLinks?.length ? o.page.optionLinks : null,
-    ...(o.page.reviewCount != null ? { review_count: o.page.reviewCount } : {}),
+    ...(o.page.reviewCount != null ? { review_count: o.page.reviewCount, rating: o.page.rating ?? null } : {}),
   };
   if (o.priceBlind) return model; // the last price read stays as it was
   return { ...model, price: o.page.price, was_price: o.page.wasPrice, currency: o.page.currency, in_stock: o.page.inStock, read_at: now };

@@ -1,6 +1,7 @@
 // Page readers for Lowe's USA and Rona (Where to Buy audit + Price Alignment).
 // Plain JavaScript, regex / JSON parsing only: runs unchanged in Node and Deno.
 import { meta, money, uniq, jsonLdProducts, jsonLdOffer } from './common.js';
+import { ronaRecord } from './reviews.js';
 
 // ── Lowe's USA ── lowes.com/pd/<slug>/<product id>
 // The server writes the whole page state as window['__PRELOADED_STATE__'] = {…}. The MAIN product is
@@ -84,6 +85,50 @@ function readLowes(page, url) {
 // The carousels ("customers also viewed", "similar products") draw their own article #s and price-box
 // prices outside that record — never read. The wishlist's "unitPrice" is the REGULAR price: not read.
 // A dead product answers HTTP 404 "RONA - Erreur générique" / "Oupelay! Erreur 404" without a record → null.
+// Since 2026-11 Rona serves a NEW page to part of its visitors (a Next.js page, no js-product-ddo; the
+// first reading that came back empty is of 2026-11-13, and on 11-16 half of Rona's links read as
+// nothing). The product's own record there gives its model #, article # and GTIN (ronaRecord in
+// reviews.js) — and THE PRICE IS NOT IN THE PAGE: it is drawn after loading, and the only prices in the
+// HTML are the carousels' (never read). The page asks Rona's own item service for them — ronaService
+// below, which the Where to Buy check asks too (one more request) — so this reading has no price of its
+// own: `source: 'next-flight'` with a note, until the service's answer is joined to it
+// (pageProduct.js withRonaService).
+function readRonaNext(html) {
+  const rec = ronaRecord(html);
+  if (!rec) return null;
+  return {
+    ids: uniq([rec.mpn]), gtins: uniq([rec.gtin]), options: [], price: null, wasPrice: null, currency: 'CAD', inStock: null,
+    itemId: String(rec.sku), source: 'next-flight', note: "Rona's new page draws its price after loading: the price was not read",
+  };
+}
+
+// Rona's item service — what its new page asks for the price and the stock of a product (found in the
+// page's scripts, 2026-11-16: API_ROUTES root "/v2/api"):
+//   GET /v2/api/services/item/availability/productId?id=<article #>&locale=en&storeId=<store>
+//   → { isBuyable, isOnlineExclusive, inventory: { isAvailable, quantity, leadTime },
+//       price: { finalPrice = paid now, basePrice = the regular price (only while on sale),
+//                displayType, promoEndDateString… } }
+// It wants a real store: none answers 400 "Missing or invalid params", the site's own 10151 a 500, an
+// unknown article a 500. RONA+ Cambridge (83224, five km from our warehouse) is the one asked; our
+// products are online-exclusive parcel items and B-101C read the same at Vancouver (83704). Through
+// Bright Data's Web Unlocker it answers in ~8 s. Checked that day against what the OLD page had read
+// the same morning: A-04 82, A-801C 19 (sold out on both), K130SK147S 367, ST-06 41, B-101C 290 was 308.
+export const RONA_STORE = '83224';
+export const ronaServiceUrl = (article) => `https://www.rona.ca/v2/api/services/item/availability/productId?id=${encodeURIComponent(String(article))}&locale=en&storeId=${RONA_STORE}`;
+/** The service's answer as { price, wasPrice, inStock }, or null when it is not an answer with a price. */
+export function ronaService(body) {
+  let j;
+  try { j = typeof body === 'string' ? JSON.parse(body) : body; } catch { return null; }
+  const price = money(j?.price?.finalPrice);
+  if (price === null) return null;
+  const base = money(j.price.basePrice);
+  return {
+    price,
+    wasPrice: base !== null && base > price ? base : null,
+    inStock: typeof j.inventory?.isAvailable === 'boolean' ? j.inventory.isAvailable : null,
+  };
+}
+
 function readRona(page) {
   const html = String(page ?? '');
   const m = html.match(/<script[^>]*id=["']js-product-ddo["'][^>]*>([\s\S]*?)<\/script>/i);
@@ -91,7 +136,7 @@ function readRona(page) {
   try { ddo = m ? JSON.parse(m[1]) : null; } catch { /* broken record: fall back on the microdata */ }
   const model = ddo?.manufacturerPartNumber ?? meta(html, 'mpn') ?? html.match(/\["manufacturerNumber"\]\s*=\s*"([^"]*)"/)?.[1];
   const article = ddo?.partNumber ?? meta(html, 'sku') ?? html.match(/\["articleNumber"\]\s*=\s*"([^"]*)"/)?.[1];
-  if (!model && !article) return null;
+  if (!model && !article) return readRonaNext(html);
 
   const snippet = html.match(/BEGIN RonaProdDetailPriceSnippet\.jsp([\s\S]*?)END RonaProdDetailPriceSnippet\.jsp/)?.[1] ?? '';
   const price = money(ddo?.effectivePrice ?? meta(html, 'price'));

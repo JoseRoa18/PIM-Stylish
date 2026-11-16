@@ -90,16 +90,34 @@ export const linkStatus = (row) => {
 };
 export const isLinkProblem = (row) => !NOT_COVERED.has(row.retailer) && (isProblem(row.verdict) || isWrongProduct(row));
 
+// The reviews a store page shows for the product (user, 2026-11-16: "solo
+// necesito la cantidad de reviews y el rating global"): { count, rating } — how
+// many, and the average out of 5 (null with no review). Only when the page
+// read is this product's: a link that opens another product, or another option
+// of it, says nothing about it. A Wayfair listing's reviews are those of all
+// its options, so an "Other finish" page counts. null = the page did not say.
+export function linkReviews(row) {
+  if (!row || row.verdict === 'broken' || row.review_count == null || isWrongProduct(row)) return null;
+  const count = Number(row.review_count);
+  if (!Number.isFinite(count) || count < 0) return null;
+  return { count, rating: count > 0 && row.rating != null ? Number(row.rating) : null };
+}
+// "4.8 · 98 reviews" / "No reviews" (stores write the average with one decimal).
+export const reviewsText = (reviews) => (!reviews ? ''
+  : reviews.count === 0 ? 'No reviews'
+    : `${reviews.rating != null ? `${reviews.rating.toFixed(1)} · ` : ''}${reviews.count.toLocaleString('en-US')} ${reviews.count === 1 ? 'review' : 'reviews'}`);
+
 // "S-611W · C$749.00" — what the page showed the last time it was read.
 export function pageReading(row) {
   if (!row?.read_at) return null;
   const symbol = row.currency === 'USD' ? '$' : row.currency === 'CAD' ? 'C$' : '';
   const price = row.price != null ? `${symbol}${Number(row.price).toFixed(2)}` : null;
   const was = row.was_price != null ? `was ${symbol}${Number(row.was_price).toFixed(2)}` : null;
+  const reviews = linkReviews(row);
   return {
     model: row.page_model ?? null,
     price,
-    text: [row.page_model, price, was, row.in_stock === false ? 'sold out' : null, row.page_note].filter(Boolean).join(' · ') || 'No model or price on the page',
+    text: [row.page_model, price, was, row.in_stock === false ? 'sold out' : null, reviews ? (reviews.count === 0 ? 'no reviews' : `★ ${reviewsText(reviews)}`) : null, row.page_note].filter(Boolean).join(' · ') || 'No model or price on the page',
   };
 }
 
