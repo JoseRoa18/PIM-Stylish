@@ -1,9 +1,12 @@
 // The themes an EOS ScoreCard tab is grouped by (user's layout choice,
 // 2026-11-04), in the order they show. A measurable's `section` names one;
-// without it the theme is read from its name.
+// without it the theme is read from its name. Sales and the ads are two
+// themes (user, 2026-11-16; they were one, "Sales & ads"): what was sold, and
+// what the advertising spent and sold.
 export const SECTIONS = [
   { key: 'pricing', label: 'Pricing & promotions' },
-  { key: 'sales', label: 'Sales & ads' },
+  { key: 'sales', label: 'Sales' },
+  { key: 'ads', label: 'Sales Ads' },
   { key: 'catalog', label: 'Catalog, stock & reviews' },
   { key: 'operations', label: 'Shipping & service' },
   { key: 'returns', label: 'Returns & refunds' },
@@ -27,6 +30,8 @@ export function sectionOf(metric, sections = SECTIONS) {
   if (/not sales/.test(n)) return 'catalog';
   if (/map %|promo|flash|event|coupon/.test(n)) return 'pricing';
   if (/cancel|on-time|late ship|tracking|deliver|defect|unresponsive|response time|csat|replacement parts/.test(n)) return 'operations';
-  if (/sales|units sold|ads|cpc|keyword|acos|spent|profitab|loss due/.test(n)) return 'sales';
+  // The ads first: "Ads Sales" and "Total Spent with 0 Sales" are ads rows.
+  if (/\bads?\b|cpc|keyword|acos|spent/.test(n)) return 'ads';
+  if (/sales|units sold|profitab|loss due/.test(n)) return 'sales';
   return 'catalog';
 }

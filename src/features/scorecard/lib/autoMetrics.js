@@ -42,8 +42,9 @@ export const AUTO_KEYS = {
   returns_not_received: { label: '$ refunded in the week on orders whose goods never came back (Wix refunds, Odoo returns)', unit: 'money', server: true, store: true },
   reviews_5plus: { label: '# products with more than 5 approved reviews on the store (Wix Reviews)', unit: 'number', server: true, store: true },
   no_profit_skus: { label: '# SKUs priced on the store this week below Odoo\'s average cost + their real shipping cost per unit (ShipStation labels, 180 days)', unit: 'number', server: true, store: true, alsoOn: ['bbb_overstock'] },
-  skus_not_sold_90d: { label: '# SKUs without a sale in 90 days — PIM products vs Odoo orders', unit: 'number', server: true },
-  oos_loss: { label: 'Loss due to out of stock — products at 0 units × their weekly sales of the 8 weeks before', unit: 'money', server: true },
+  skus_not_sold_90d: { label: '# SKUs without a sale in 90 days — the products the marketplace lists (its ids or its Where to Buy link in the PIM) vs Odoo orders', unit: 'number', server: true },
+  // Amazon sells from two stocks (2026-11-16): what it holds itself (FBA — Odoo's AMZ-CAN / AMZ-USA warehouses) and our warehouse.
+  oos_loss: { label: 'Loss due to out of stock — products at 0 units × their weekly sales of the 8 weeks before (Amazon: at 0 both at Amazon and in our warehouse)', unit: 'money', server: true },
   obsolete_skus: { label: '# SKUs marked obsolete in the PIM', unit: 'number', server: true },
   // The marketplace tabs (user, 2026-11-05): returns read over 4 weeks (bodega validates them in batches).
   return_rate: { label: 'Return rate — orders with a return Odoo received in the last 4 weeks ÷ the paid orders placed in them', unit: 'percent', server: true },
@@ -52,6 +53,8 @@ export const AUTO_KEYS = {
   azuni_skus_sold: { label: '# Azuni SKUs sold in the week (Odoo orders)', unit: 'number', server: true },
   returns_note: { label: 'Return actions — what came back in the week, by SKU (Odoo returns)', unit: 'text', server: true },
   reviews_new: { label: 'New reviews — what the store listings gained since the last week (their pages)', unit: 'number', server: true },
+  // What the Where to Buy check reads on each store page (2026-11-16); Amazon counts ratings.
+  reviews_15plus: { label: '# products whose page on the store shows more than 15 reviews (read from the store pages)', unit: 'number', server: true },
   top_losers_sales: { label: 'Sales of the tab\'s list of top losers — products only, Odoo orders of the week (BB&B / Overstock)', unit: 'money', server: true },
   listings_updated: { label: '# listings updated — products the PIM pushed to the store that week', unit: 'number', server: true },
   // Written by AI (Gemini) from the week's data only: the channel's top losers vs

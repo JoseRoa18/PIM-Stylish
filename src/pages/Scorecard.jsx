@@ -219,6 +219,7 @@ export default function Scorecard() {
         else next.delete(`${metric.id}|${week}`);
         return next;
       });
+      if (statusFilter === 'empty') setJustFilled((prev) => ({ scope: fillScope, ids: new Set([...(prev.scope === fillScope ? prev.ids : []), metric.id]) }));
     } catch (err) {
       setNotice({ tone: 'error', text: `${metric.name}, ${weekTag(week)}: ${err.message}` });
     }
@@ -236,6 +237,10 @@ export default function Scorecard() {
   // strip reads (user, 2026-11-12). It is in the address (`show=`), so it stays
   // while the marketplaces are walked one by one.
   const statusFilter = isStatusFilter(params.get('show')) ? params.get('show') : null;
+  // Under "left to fill" a measurable filled just now stays in the list, to be
+  // read back and corrected; it leaves when the filter, the tab or the country changes.
+  const fillScope = `${boardKey}|${market}|${statusFilter}`;
+  const [justFilled, setJustFilled] = useState({ scope: '', ids: new Set() });
   function setStatusFilter(key) {
     setParams((p) => { const n = new URLSearchParams(p); if (key) n.set('show', key); else n.delete('show'); return n; }, { replace: true });
   }
@@ -248,7 +253,7 @@ export default function Scorecard() {
   // The latest shown week at a glance — how many numbers are in, on and off
   // target — and the rows its filter keeps.
   const summary = shown ? summarizeWeek(shown, values, judgedWeek(weeks, thisWeek), user?.id) : null;
-  const visible = shown ? rowsWithStatus(shown, values, summary.week, statusFilter) : null;
+  const visible = shown ? rowsWithStatus(shown, values, summary.week, statusFilter, justFilled.scope === fillScope ? justFilled.ids : null) : null;
 
   return (
     <div style={{ '--sc-toolbar-h': `${toolbarH}px` }}>
@@ -391,12 +396,12 @@ export default function Scorecard() {
             // A department's tab: the PIM's rows come from ShipStation, Odoo, the marketplace tabs and the PIM's stock.
             <p className="mt-3 text-body-sm text-on-surface-variant">
               {restricted && board.key in restricted ? 'For now only the people this tab was opened to see it. ' : ''}
-              Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the target, red with a cross misses it; a measurable without a target is not colored. The counters over the table — on target, off target, without a target — show only those measurables when pressed, by the numbers of the week they name. A measurable of both countries shows under Canada and under USA. Rows marked PIM fill themselves — from ShipStation's labels, Odoo, the marketplace tabs and the PIM's stock; hover a row to see how — and can't be edited; a dot marks each number the PIM filled. The week in progress shows their numbers so far, in italics, and takes no color until it closes; stock and days of inventory are today's, on this week's column. Percentages are typed as percent numbers (95 = 95%), and what is typed that is not a number is kept as a note.
+              Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the target, red with a cross misses it; a measurable without a target is not colored. The counters over the table — left to fill, on target, off target, without a target — show only those measurables when pressed, by the numbers of the week they name; "left to fill" lists the ones a person types that are still empty. A measurable of both countries shows under Canada and under USA. Rows marked PIM fill themselves — from ShipStation's labels, Odoo, the marketplace tabs and the PIM's stock; hover a row to see how — and can't be edited; a dot marks each number the PIM filled. The week in progress shows their numbers so far, in italics, and takes no color until it closes; stock and days of inventory are today's, on this week's column. Percentages are typed as percent numbers (95 = 95%), and what is typed that is not a number is kept as a note.
               {isAdmin ? ' Every other number is typed, by its owner or by an admin, once its week has ended; click the Target of a measurable to set or change it, and the pencil edits the rest (owner, theme, country) — turning "Filled by the PIM" off makes a row typed by hand again.' : ' Every other number is typed by its owner.'}
             </p>
           ) : (
           <p className="mt-3 text-body-sm text-on-surface-variant">
-            Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the target, red with a cross misses it; a measurable without a target is not colored. The counters over the table — on target, off target, without a target — show only those measurables when pressed, by the numbers of the week they name. The week in progress shows its numbers so far, in italics, updated every 3 hours, and takes no color until it closes. Percentages are typed as percent numbers (95 = 95%). Rows marked PIM fill themselves every week and can't be edited; a dot marks each number the PIM filled.
+            Each column holds the numbers of the week before it ({weekTag(thisWeek)} = {weekRange(addWeeks(thisWeek, -1))}), the week reviewed in that week's meeting. Green with a check meets the target, red with a cross misses it; a measurable without a target is not colored. The counters over the table — left to fill, on target, off target, without a target — show only those measurables when pressed, by the numbers of the week they name; "left to fill" lists the ones a person types that are still empty. The week in progress shows its numbers so far, in italics, updated every 3 hours, and takes no color until it closes. Percentages are typed as percent numbers (95 = 95%). Rows marked PIM fill themselves every week and can't be edited; a dot marks each number the PIM filled.
             {isAdmin ? ' As an admin you can edit every other number; click the Target of a measurable to set or change it, and the pencil edits the rest (owner, theme) — turning "Filled by the PIM" off makes a row typed by hand again.' : ' Every other number is typed by its owner.'}
           </p>
           )}

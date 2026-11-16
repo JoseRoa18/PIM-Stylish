@@ -96,9 +96,11 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
           </table>
         </div>
       )}
-      {/* `relative`: the cells' sr-only texts are placed inside this box instead of widening the page. */}
+      {/* `relative`: the cells' sr-only texts are placed inside this box instead of widening the page.
+          While it scrolls sideways it takes the keyboard's focus: a viewer's grid, or a filtered one, can hold no button. */}
       <div
         ref={scroller}
+        tabIndex={fits ? undefined : 0}
         onScroll={(e) => { if (copy.current) copy.current.scrollLeft = e.currentTarget.scrollLeft; }}
         className={cn('relative rounded-2xl border border-outline-variant bg-surface-container-lowest', fits ? 'overflow-clip' : 'overflow-x-auto')}
       >

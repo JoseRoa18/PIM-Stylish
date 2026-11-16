@@ -1,14 +1,16 @@
-import { Check, Minus, X } from 'lucide-react';
+import { Check, Minus, PencilLine, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { STATUS_FILTERS } from '../lib/status';
 import { addWeeks, weekRange, weekTag } from '../lib/weeks';
 
-// The latest week at a glance — how many numbers are in, on target, off
-// target, without one — and the filter of the grid below (user, 2026-11-12):
-// each counter is a button, pressed it shows only those measurables, pressed
-// again all of them. A counter at 0 is left out unless it is the one pressed.
+// The latest week at a glance — how many numbers are in, left to fill, on
+// target, off target, without one — and the filter of the grid below (user,
+// 2026-11-12; "left to fill" 2026-11-16): each counter is a button, pressed it
+// shows only those measurables, pressed again all of them. A counter at 0 is
+// left out unless it is the one pressed.
 
 const LOOK = {
+  empty: { icon: PencilLine, idle: 'bg-secondary-container text-on-secondary-container hover:brightness-95', pressed: 'bg-on-surface text-surface' },
   on: { icon: Check, idle: 'bg-success-container/60 text-on-success-container hover:bg-success-container', pressed: 'bg-success text-on-success' },
   off: { icon: X, idle: 'bg-error-container/60 text-on-error-container hover:bg-error-container', pressed: 'bg-error text-on-error' },
   none: { icon: Minus, idle: 'bg-surface-container-high text-on-surface-variant hover:text-on-surface', pressed: 'bg-on-surface text-surface' },

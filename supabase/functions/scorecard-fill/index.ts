@@ -64,8 +64,9 @@ interface MarketSource {
   odoo: unknown[];      // Odoo domain on sale.order selecting the channel's orders
   company: number;      // Odoo company whose costs and currency apply (2 = Stylish International, CAD; 1 = Stylish USA, USD)
   wholesale?: { blue: string; orange: string; purple: string }; // the price levels the marketplace pays us (products columns)
-  stock?: Market;       // product_inventory market of the stock it sells from (none: Amazon FBA's stock is Amazon's)
-  listed?: Listed;      // the SKUs it lists (none: no list in the PIM — Amazon.com)
+  stock?: Market;       // product_inventory market of the stock it sells from (our warehouse of that country)
+  fba?: string;         // Amazon: the Odoo warehouse that holds what Amazon itself ships (FBA) — sold from as well as ours
+  listed?: Listed;      // the SKUs it lists, by the PIM's ids for it
   wix?: string;         // Sinks Direct: WIX_SITES key of the store (its orders, reviews, price)
   wixSites?: string[];  // Sinks Direct: Activity Log site keys of the store's pushes
   ships?: number[];     // the Odoo marketplaces of it WE ship (Amazon: FBM, not FBA); none = all
@@ -89,8 +90,12 @@ const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
     us: { odoo: [["wix_site_name", "=", "sinksdirectusa.com"]], company: US, wix: "sinksdirect_us", wixSites: ["sinksdirect_us"], stock: "us", listed: "catalog", promo: ["wix_sinksdirect_us"], pages: ["sinksdirect_us"] },
   },
   amazon: {
-    ca: { odoo: sold([MP.amazonFbm, MP.amazonFba], CA), company: CA, listed: { amazon: "ca" }, ships: [MP.amazonFbm], promo: ["amazon_ca"], pages: ["amazon_ca"] },
-    us: { odoo: sold([MP.amazonFbm, MP.amazonFba], US), company: US, ships: [MP.amazonFbm], promo: ["amazon_us"], pages: ["amazon_us"] },
+    // 2026-11-16 (user: every marketplace's "Loss due to out of stock" and "# SKUs not sold" from the PIM): Amazon
+    // sells from two stocks — what it holds itself (FBA: Odoo's AMZ-CAN / AMZ-USA warehouses, kept by the transfers
+    // sent there and by every FBA order) and our warehouse (the FBM offers). Amazon.com has no seller SKUs in the
+    // PIM, so what it lists = the products with an Amazon.com Where to Buy link, as on Menards, Best Buy and Walmart.
+    ca: { odoo: sold([MP.amazonFbm, MP.amazonFba], CA), company: CA, stock: "ca", fba: "AMZCAN", listed: { amazon: "ca" }, ships: [MP.amazonFbm], promo: ["amazon_ca"], pages: ["amazon_ca"] },
+    us: { odoo: sold([MP.amazonFbm, MP.amazonFba], US), company: US, stock: "us", fba: "AMZUSA", listed: { wtb: "amazon_us" }, ships: [MP.amazonFbm], promo: ["amazon_us"], pages: ["amazon_us"] },
   },
   wayfair: {
     ca: { odoo: sold([MP.wayfair], CA), company: CA, stock: "ca", listed: { wayfair: "ca" }, promo: ["wayfair_ca"], pages: ["wayfair_ca"] },
@@ -127,11 +132,13 @@ const SERVER_KEYS = [
   "top_losers_sales",
   // 2026-11-09, BB&B / Overstock: what comes back in the week, and the reviews that are new on the store pages.
   "returns_note", "reviews_new",
+  // 2026-11-16: the products whose store page shows more than 15 reviews (read with the Where to Buy check).
+  "reviews_15plus",
   // The "Actions taken for top losers" note, written by AI from the week's data (user, 2026-11-05).
   "losers_note",
 ];
 // Read from today's state (stock, marks, reviews, prices): only this week's column gets them.
-const SNAPSHOT_KEYS = new Set(["oos_loss", "obsolete_skus", "reviews_5plus", "no_profit_skus", "losers_note", "reviews_new"]);
+const SNAPSHOT_KEYS = new Set(["oos_loss", "obsolete_skus", "reviews_5plus", "no_profit_skus", "losers_note", "reviews_new", "reviews_15plus"]);
 const WIX_KEYS = ["cancel_rate", "odr", "returns_not_received"];
 const SHIP_KEYS = ["on_time_ship", "late_ship_rate"];
 // On time = fully shipped by the end of the 2nd business day after the order
@@ -481,6 +488,25 @@ async function receivedReturns(odoo: Odoo, pickDomain: unknown[], sinceDay: stri
       return s + (m && line ? (Number(m.quantity) || Number(m.product_uom_qty) || 0) * line.unit : 0);
     }, 0),
   }));
+}
+
+/**
+ * Units free to sell in one Odoo warehouse — on hand less reserved — by PIM
+ * SKU. Read with both companies allowed, as Odoo's own stock screen.
+ */
+async function warehouseStock(odoo: Odoo, code: string, skuOf: (code: string | null) => string | null): Promise<Map<string, number>> {
+  const groups = await odoo("stock.quant", "read_group", [[["location_id.warehouse_id.code", "=", code], ["location_id.usage", "=", "internal"]], ["quantity:sum", "reserved_quantity:sum"], ["product_id"]], { lazy: false, context: { allowed_company_ids: [US, CA] } }) as { product_id: [number, string] | false; quantity: number; reserved_quantity: number }[];
+  const ids = groups.filter((g) => g.product_id).map((g) => (g.product_id as [number, string])[0]);
+  const codeOf = new Map<number, string | null>();
+  for (let i = 0; i < ids.length; i += 400) {
+    for (const p of await odoo("product.product", "read", [ids.slice(i, i + 400)], { fields: ["default_code"], context: { allowed_company_ids: [US, CA] } }) as { id: number; default_code: string | false }[]) codeOf.set(p.id, p.default_code || null);
+  }
+  const out = new Map<string, number>();
+  for (const g of groups) {
+    const sku = g.product_id ? skuOf(codeOf.get(g.product_id[0]) ?? null) : null;
+    if (sku) out.set(sku, (out.get(sku) ?? 0) + (Number(g.quantity) || 0) - (Number(g.reserved_quantity) || 0));
+  }
+  return out;
 }
 
 /** The SKUs a channel lists, per the PIM's ids for it (null = every live product). */
@@ -893,6 +919,13 @@ Deno.serve(async (req) => {
           const { data: inv, error } = await admin.from("product_inventory").select("sku, available").eq("market", src.stock);
           if (error) throw error;
           stock = new Map((inv ?? []).map((r) => [r.sku, Number(r.available) || 0]));
+          if (src.fba) {
+            // Amazon also sells what it holds itself: a product is out of stock
+            // there only when neither Amazon nor our warehouse has a unit.
+            const held = await warehouseStock(odoo, src.fba, skuOf);
+            for (const [sku, units] of held) if (stock.has(sku)) stock.set(sku, stock.get(sku)! + Math.max(0, units));
+            diag.fbaProducts = [...held.values()].filter((u) => u > 0).length;
+          }
         }
         let pushes: { entity_id: string; occurred_at: string; metadata: Record<string, unknown> | null }[] = [];
         if (keys.has("listings_updated") && src.wixSites) {
@@ -1124,6 +1157,26 @@ Deno.serve(async (req) => {
               reviewState[key] = { column, prev, first };
               reviewsChanged = true;
               diag.reviewListings = Object.keys(items).length;
+            }
+            if (keys.has("reviews_15plus")) {
+              // The products whose page on the tab's stores shows more than 15
+              // reviews (Amazon counts ratings): what the Where to Buy check read
+              // on the page, only when the page is this product's — not a broken
+              // link, another product or another option of it (the app's linkReviews).
+              const most = new Map<string, number>();
+              for (let from_ = 0; ; from_ += 1000) {
+                const { data, error } = await admin.from("where_to_buy_links").select("sku, review_count, verdict, sku_check").in("retailer", src.pages).not("review_count", "is", null).order("id").range(from_, from_ + 999);
+                if (error) throw error;
+                for (const r of data ?? []) {
+                  if (r.verdict === "broken" || r.sku_check === "other" || r.sku_check === "variant") continue;
+                  most.set(r.sku, Math.max(most.get(r.sku) ?? 0, Number(r.review_count) || 0));
+                }
+                if ((data ?? []).length < 1000) break;
+              }
+              const liveSkus = new Set(live.map((p) => p.sku));
+              // No page read yet says nothing: the row is left as it is.
+              if (most.size) value.reviews_15plus = [...most].filter(([sku, n]) => liveSkus.has(sku) && n > 15).length;
+              diag.reviewPagesRead = most.size;
             }
             if (keys.has("losers_note")) {
               // Written once per column (a closed week), again only on request
