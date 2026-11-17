@@ -89,6 +89,15 @@ const colorCategory = (finish) => {
   return '';
 };
 
+// Walmart Canada's Product Tax Code — required to publish on Walmart.ca (the
+// spec's hidden sheet says Required, Integer). Walmart keeps its list of codes
+// inside Seller Center and no connection returns a listed product's own, so
+// this is the code Seller Center shows on our listed products: read there by
+// the user on a sink and on a faucet (2026-11-17, the same on both), and every
+// product takes it. A category that turns out to carry another code gets its
+// own case in the rule.
+const WALMART_CA_TAX_CODE = 2038347;
+
 const sizeString = (p) => {
   const d = attr(p).external_dimensions_in ?? {};
   return d.length && d.width ? `${d.length}"L x ${d.width}"W` : '';
@@ -119,7 +128,8 @@ export const WALMART_RULES = {
 
   countryOfOriginAssembly: (p) => walmartCountry(attr(p).country_of_origin || 'China'),
   countryOfOriginTextiles: () => 'Imported',
-  // productTaxCode: Walmart-account-specific — left for the business to fill.
+  // Left blank until 2026-11-17 ("falta el product tax code"): Walmart does not publish without it.
+  productTaxCode: () => WALMART_CA_TAX_CODE,
 
   // "Measure/Unit" pair right after tax code = shipping weight.
   measure: (p) => num(p.shipping_weight_lb),
