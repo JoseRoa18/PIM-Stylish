@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertCircle, ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
+import { AlertCircle, Check, ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { cn } from '@/lib/cn';
 import { etToday } from '@/features/pricing/lib/promoCalendar';
@@ -160,7 +160,7 @@ export default function Scorecard() {
         for (const v of saved) next.set(`${v.metric_id}|${v.week_start}`, v);
         return next;
       });
-      if (report) setAuto({ state: 'done', text: `${saved.length} number${saved.length === 1 ? '' : 's'} of ${weekTag(thisWeek)} and ${weekTag(runningWeek)} filled from the PIM.` });
+      if (report) setAuto({ state: 'done', count: saved.length, text: `${saved.length} number${saved.length === 1 ? '' : 's'} of ${weekTag(thisWeek)} and ${weekTag(runningWeek)} filled from the PIM.` });
       return saved.length;
     } catch (err) {
       if (!report) throw err;
@@ -182,7 +182,7 @@ export default function Scorecard() {
         setValues(vals);
       }
       n += await fillAuto(metrics, vals, { force: true, report: false });
-      setAuto({ state: 'done', text: `${n} number${n === 1 ? '' : 's'} of ${weekTag(thisWeek)} and ${weekTag(runningWeek)} filled from the PIM.` });
+      setAuto({ state: 'done', count: n, text: `${n} number${n === 1 ? '' : 's'} of ${weekTag(thisWeek)} and ${weekTag(runningWeek)} filled from the PIM.` });
     } catch (err) {
       setAuto({ state: 'error', text: `The PIM's numbers could not be worked out: ${err.message}` });
     }
@@ -224,6 +224,13 @@ export default function Scorecard() {
       setNotice({ tone: 'error', text: `${metric.name}, ${weekTag(week)}: ${err.message}` });
     }
   }
+
+  // The refresh button says "N numbers updated" for a moment, then offers the refresh again.
+  useEffect(() => {
+    if (auto?.state !== 'done') return undefined;
+    const t = setTimeout(() => setAuto((a) => (a?.state === 'done' ? null : a)), 5000);
+    return () => clearTimeout(t);
+  }, [auto]);
 
   function selectBoard(key) {
     setMetrics(null);
@@ -308,7 +315,7 @@ export default function Scorecard() {
             <ChevronLeft className="w-4 h-4" aria-hidden />
           </button>
           <span className="px-2 text-body-sm text-on-surface-variant tabular-nums whitespace-nowrap">
-            {weeks.length > 1 ? `${weekTag(weeks[0])} – ${weekTag(weeks.at(-1))}` : weekTag(weeks[0])} · {spanLabel(weeks[0], weeks.at(-1))}
+            {weeks.length > 1 ? `${weekTag(weeks[0])} – ${weekTag(weeks.at(-1))}` : weekTag(weeks[0])} · {spanLabel(addWeeks(weeks[0], -1), addWeeks(weeks.at(-1), -1))}
           </span>
           <button type="button" onClick={() => setEndWeek((w) => addWeeks(w, WEEKS_SHOWN))} disabled={endWeek >= runningWeek} aria-label={`${WEEKS_SHOWN} weeks later`} title={`${WEEKS_SHOWN} weeks later`} className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             <ChevronRight className="w-4 h-4" aria-hidden />
@@ -339,13 +346,17 @@ export default function Scorecard() {
               <WeekStrip summary={summary} filter={statusFilter} onFilter={setStatusFilter} />
             </div>
             <div className="flex items-center gap-2">
-              {auto && (
-                <span role={auto.state === 'error' ? 'alert' : 'status'} className={auto.state === 'error' ? 'text-error' : ''}>{auto.text}</span>
-              )}
+              {/* Only an error takes room here. "N numbers filled" used to add a line to these pinned
+                  controls a few seconds after a tab opened, and the table jumped under whoever was reading it
+                  (2026-11-17): the button says it for a moment instead, and a screen reader hears the sentence. */}
+              {auto?.state === 'error' && <span role="alert" className="text-error">{auto.text}</span>}
+              {auto && auto.state !== 'error' && <span role="status" className="sr-only">{auto.text}</span>}
               {canEdit && autoRows > 0 && weeks.includes(thisWeek) && (
-                <button type="button" onClick={refreshAll} disabled={auto?.state === 'running'} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50">
-                  <RefreshCw className={cn('w-3.5 h-3.5', auto?.state === 'running' && 'animate-spin')} aria-hidden />
-                  Refresh PIM numbers
+                <button type="button" onClick={refreshAll} disabled={auto?.state === 'running'} title={auto?.state === 'done' ? auto.text : undefined} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50">
+                  {auto?.state === 'done'
+                    ? <Check className="w-3.5 h-3.5 text-success" aria-hidden />
+                    : <RefreshCw className={cn('w-3.5 h-3.5', auto?.state === 'running' && 'animate-spin')} aria-hidden />}
+                  {auto?.state === 'done' ? (auto.count ? `${auto.count} number${auto.count === 1 ? '' : 's'} updated` : 'Up to date') : 'Refresh PIM numbers'}
                 </button>
               )}
             </div>

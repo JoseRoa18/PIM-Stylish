@@ -198,8 +198,17 @@ Deno.serve(async (req) => {
       };
 
       const etDay = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : null);
+      // Walmart Canada shows a price only through a promotion, so a reading
+      // whose promotion is over says nothing about today: it is carried as
+      // "no promotion" (the time it was read is kept). Found 2026-11-17: the
+      // day after a flash deal ended, its 40 products outside the monthly
+      // promotion stood "misaligned" at the deal's price — Walmart had kept
+      // them as BASE prices, which `suspect` never asks to read again — and
+      // Walmart Canada's MAP % read 76 with nothing wrong on Walmart.
+      const over = (r: Record<string, unknown>) => r.discount_end != null && String(r.discount_end) < today;
       const enriched: Array<Record<string, unknown>> = items.map((it) => {
-        const prev = prevBySku.get(it.sku) ?? {};
+        const seen = prevBySku.get(it.sku) ?? {};
+        const prev = over(seen) ? { promo_checked_at: seen.promo_checked_at } : seen;
         return {
           ...it,
           price: prev.price ?? null, discount_price: prev.discount_price ?? null,

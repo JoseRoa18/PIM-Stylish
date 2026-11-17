@@ -84,7 +84,11 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
   }, [tip]);
   const cols = 2 + weeks.length;
   const pinned = !fits && layout;
-  const nameCol = 'w-[17rem] min-w-[17rem] max-w-[17rem]';
+  // Wider from xl: at 17rem the owner, the PIM chip and the pencil left the name ~18 characters, and a meeting
+  // read "Loss Due to Out of …" and two rows both called "Refunds Lost $ (Accumulat…" (2026-11-17). The room
+  // comes from the weeks that are still empty (3.5rem each, not 4), so the 13 weeks fit at 1920 as before.
+  // A plain grid (the company view: no owner, no pencil) keeps 17rem — its names fit.
+  const nameCol = plain ? 'w-[17rem] min-w-[17rem] max-w-[17rem]' : 'w-[17rem] min-w-[17rem] max-w-[17rem] xl:w-[21rem] xl:min-w-[21rem] xl:max-w-[21rem]';
 
   return (
     <div>
@@ -196,7 +200,7 @@ function HeaderRow({ weeks, thisWeek, mode, height, nameCol, onTip }) {
       <th scope="col" className={cn(top, mode === 'sticky' && 'z-20', 'bg-surface-container-low text-right px-3 py-2.5 text-label-md text-on-surface-variant border-b border-outline-variant whitespace-nowrap')}>Target</th>
       {/* A column holds the numbers of the week before it (W44 = Oct 25 – 31), so its dates are that week's. */}
       {weeks.map((w) => (
-        <th key={w} scope="col" data-current={w === thisWeek ? '' : undefined} data-running={w === addWeeks(thisWeek, 1) ? '' : undefined} onMouseEnter={(e) => onTip?.(w, e.currentTarget)} onMouseLeave={() => onTip?.(null)} className={cn(top, mode === 'sticky' && 'z-20', 'px-2 py-2 text-right border-b border-outline-variant whitespace-nowrap min-w-[4rem]', w === thisWeek ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low text-on-surface-variant')}>
+        <th key={w} scope="col" data-current={w === thisWeek ? '' : undefined} data-running={w === addWeeks(thisWeek, 1) ? '' : undefined} onMouseEnter={(e) => onTip?.(w, e.currentTarget)} onMouseLeave={() => onTip?.(null)} className={cn(top, mode === 'sticky' && 'z-20', 'px-2 py-2 text-right border-b border-outline-variant whitespace-nowrap min-w-[3.5rem]', w === thisWeek ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low text-on-surface-variant')}>
           <span className="block text-label-md">{weekTag(w)}</span>
           <span className="block text-label-sm font-normal">
             <span aria-hidden>{weekStartLabel(addWeeks(w, -1))}</span>
@@ -272,7 +276,7 @@ function ValueCell({ metric, week, row, current, running, editable, onSave }) {
               <span className="sr-only">{shown}</span>
             </>
           ) : (
-            <span className={cn(isText ? 'text-left whitespace-nowrap' : 'tabular-nums', running && 'italic text-on-surface-variant')}>{shown}</span>
+            <span className={cn('whitespace-nowrap', isText ? 'text-left' : 'tabular-nums', running && 'italic text-on-surface-variant')}>{shown}</span>
           )}
         </span>
       )}

@@ -21,6 +21,8 @@ export const TARGET_OPS = [
 ];
 
 const trim = (n, max) => Number(n.toFixed(max)).toLocaleString('en-US', { maximumFractionDigits: max });
+// Money: whole dollars from $100; under it the cents, both of them ("$9.30", never "$9.3") — a round amount stays "$25".
+const dollars = (a) => (a >= 100 || Number.isInteger(Number(a.toFixed(2))) ? trim(a, 0) : a.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
 /** The number as shown in a cell (no note). */
 export function formatNumber(unit, value) {
@@ -28,7 +30,7 @@ export function formatNumber(unit, value) {
   const v = Number(value);
   switch (unit) {
     case 'percent': return `${trim(v * 100, Math.abs(v) < 0.1 ? 2 : 1)}%`;
-    case 'money': return `${v < 0 ? '−' : ''}$${trim(Math.abs(v), Math.abs(v) >= 100 ? 0 : 2)}`;
+    case 'money': return `${v < 0 ? '−' : ''}$${dollars(Math.abs(v))}`;
     case 'hours': return `${trim(v, 1)} h`;
     case 'days': return `${trim(v, 1)} d`;
     default: return trim(v, 2);
