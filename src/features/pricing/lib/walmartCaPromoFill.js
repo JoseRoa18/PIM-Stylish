@@ -71,38 +71,15 @@ function etToUtcSerial(day, secs) {
 // before it (2026-09-23: SKU and Promo Price, plus three "Informational Only"
 // columns) is no longer taken by Walmart (user: "solo funciona el que acabo
 // de subir") — it is still recognised, to be refused by name.
-//
-// MK events have a file of their own since 2026-11-17 ("DEAL_ITEM (4).xlsx",
-// Templates purpose "MK events"; user: "aplícalo solo para MK Events"): SKU
-// and Promo Price, the two mandatory, then Flash Deal Type — a list of the
-// file's own, "Weekly Deal" / "Limited Time Deal" — and three "Informational
-// Only" columns nobody fills. No Regular Price. It is told from the earlier
-// file by its Flash Deal Type column; a flash deal or a peak season event is
-// never filled from it (they keep the file with Regular Price).
 function locateDeal(grid) {
   for (let r = 0; r < Math.min(12, grid.length); r++) {
     const row = (grid[r] ?? []).map(norm);
     const sku = row.findIndex((h) => /^sku\b/.test(h));
     const promo = row.findIndex((h) => /^promo ?price\b/.test(h));
     const regular = row.findIndex((h) => /^regular ?price\b/.test(h));
-    const type = row.findIndex((h) => /^flash ?deal ?type\b/.test(h));
-    if (sku !== -1 && promo !== -1) return { headerRow: r, dataStart: r + 1, cols: { sku, promo, regular, type } };
+    if (sku !== -1 && promo !== -1) return { headerRow: r, dataStart: r + 1, cols: { sku, promo, regular } };
   }
   return null;
-}
-
-// The values a column's dropdown takes, read from the file itself (a list
-// written inline: "Weekly Deal,Limited Time Deal").
-function dropdownOf(sheetXml, colIndex) {
-  const col = indexToCol(colIndex + 1);
-  for (const m of sheetXml.matchAll(/<dataValidation\b([^>]*)>([\s\S]*?)<\/dataValidation>/g)) {
-    if (!/type="list"/.test(m[1])) continue;
-    const ref = m[1].match(/sqref="([^"]*)"/)?.[1] ?? '';
-    if (!ref.split(/\s+/).some((r) => new RegExp(`^${col}\\d+(:${col}\\d+)?$`).test(r))) continue;
-    const list = m[2].match(/<formula1>\s*(?:&quot;|")([\s\S]*?)(?:&quot;|")\s*<\/formula1>/)?.[1];
-    if (list) return list.split(',').map((v) => v.trim()).filter(Boolean);
-  }
-  return [];
 }
 
 function locate(grid) {
@@ -133,7 +110,7 @@ function locate(grid) {
 }
 
 /**
- * @param template  marketplace_templates row (Walmart CA, purpose "promotions", "flash_deals" or — MK events only — "mk_events")
+ * @param template  marketplace_templates row (Walmart CA, purpose "promotions" or "flash_deals")
  * @param promotion promotions row (kind decides the MAP level: monthly and flash → Orange, special event → Purple; see KIND_LEVEL)
  * @param channel   PROMO_CHANNELS entry for Walmart Canada
  * @param task      optional taskProgress reporter: template 20%, members,
@@ -157,15 +134,10 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel, {
     const d = locateDeal(grid);
     if (d) { deal = { name, path, xml, grid, ...d }; break; }
   }
-  // The MK events file: Flash Deal Type and no Regular Price.
-  const mkFile = Boolean(deal && deal.cols.regular === -1 && deal.cols.type !== -1);
-  if (deal && deal.cols.regular === -1 && !mkFile) {
+  if (deal && deal.cols.regular === -1) {
     throw new Error(`"${template.file_name}" is Walmart Canada's earlier deal file (SKU and Promo Price only), which Walmart no longer takes. Upload the current one in Templates: SKU, Regular Price, Promo Price.`);
   }
-  if (mkFile && (promotion.kind ?? 'monthly') !== 'mk_event') {
-    throw new Error(`"${template.file_name}" is Walmart Canada's file for MK events (SKU, Promo Price, Flash Deal Type). Mark it "MK events" in Templates: a flash deal or a peak season event takes the file with SKU, Regular Price and Promo Price.`);
-  }
-  if (deal) return fillDealFile(zip, { ...deal, mkFile }, template, promotion, channel, task);
+  if (deal) return fillDealFile(zip, deal, template, promotion, channel, task);
   if (!hit) throw new Error(`No sheet in "${template.file_name}" has the Walmart price columns (sku, promotionPrice) or the deal columns (SKU, Promo Price). Send me the file and I map it.`);
   const { cols } = hit;
   if (cols.start === -1 || cols.end === -1) throw new Error('The file has no promotionPriceStartDateTime / promotionPriceEndDateTime columns.');
@@ -282,12 +254,6 @@ export async function fillWalmartCaPromoTemplate(template, promotion, channel, {
 // The deal file: one row per product — SKU, regular price (MAP Blue CAD,
 // always) and promo price (the promotion's own price for the product, else
 // the MAP of the deal's level). Nothing else.
-// The MK events file (`hit.mkFile`) has no Regular Price column: SKU and
-// promo price, by the same rules — a product still needs a MAP Blue above its
-// promo price to go. Its Flash Deal Type is left for the person to choose in
-// the file (its dropdown stays): Walmart's own guides do not say what tells a
-// "Weekly Deal" from a "Limited Time Deal", so the PIM writes neither until
-// the user says which (asked 2026-11-17).
 async function fillDealFile(zip, hit, template, promotion, channel, task = null) {
   const tier = promotionLevel(promotion, channel);
   const tierLabel = tier === 'orange' ? 'Orange' : 'Purple';
@@ -343,33 +309,24 @@ async function fillDealFile(zip, hit, template, promotion, channel, task = null)
   for (const [idx, l] of lines.entries()) {
     const rn = lastUsed + 2 + idx;
     // a row's cells go in column order, wherever the file puts each column
-    const cells = [[cols.sku, l.walmartSku], [cols.regular, l.regular], [cols.promo, l.promo]]
-      .filter(([c]) => c !== -1) // the MK events file has no Regular Price
-      .sort((a, b) => a[0] - b[0]);
+    const cells = [[cols.sku, l.walmartSku], [cols.regular, l.regular], [cols.promo, l.promo]].sort((a, b) => a[0] - b[0]);
     rowsXml += `<row r="${rn}">` + cells.map(([c, v]) => buildCell(`${indexToCol(c + 1)}${rn}`, v)).join('') + '</row>';
   }
   zip.file(hit.path, injectRows(hit.xml, rowsXml, lastUsed + 1 + lines.length));
 
   const period = String(promotion.period).slice(0, 7);
   await blockingStep(task, 0.85, 'Writing the file…');
-  await downloadZip(zip, `Walmart_Canada_${hit.mkFile ? 'MK_Event' : 'Deal'}_${period}`, templateExt(template.storage_path));
+  await downloadZip(zip, `Walmart_Canada_Deal_${period}`, templateExt(template.storage_path));
   task?.progress(1);
 
-  // The Flash Deal Type's own choices and where its column is, for the message.
-  const dealTypes = hit.mkFile ? dropdownOf(hit.xml, cols.type) : [];
-  const report = {
-    deal: true, mkFile: Boolean(hit.mkFile), dealTypes, dealTypeColumn: hit.mkFile ? indexToCol(cols.type + 1) : null,
-    rows: lines.length, tier, tierLabel, aliased, fromList, noMap, noPromo, atOrAbove, excluded, window, sheet: hit.name,
-  };
+  const report = { deal: true, rows: lines.length, tier, tierLabel, aliased, fromList, noMap, noPromo, atOrAbove, excluded, window, sheet: hit.name };
   logActivity({
     action: 'export',
     entityType: 'promotion',
     entityId: String(promotion.id),
     target: channel.key,
-    summary: hit.mkFile
-      ? `Filled Walmart Canada MK events file for "${promotion.name}" (${lines.length} products, promo MAP ${tierLabel})`
-      : `Filled Walmart Canada deal file for "${promotion.name}" (${lines.length} products, regular price MAP Blue, promo MAP ${tierLabel})`,
-    metadata: { template: template.file_name, layout: hit.mkFile ? 'mk_events' : 'deal', rows: lines.length, tier, ...(hit.mkFile ? {} : { regularPrice: 'map_cad' }), fromList, aliased, noMap: noMap.length, noPromo: noPromo.length, atOrAbove: atOrAbove.length, window },
+    summary: `Filled Walmart Canada deal file for "${promotion.name}" (${lines.length} products, regular price MAP Blue, promo MAP ${tierLabel})`,
+    metadata: { template: template.file_name, rows: lines.length, tier, regularPrice: 'map_cad', fromList, aliased, noMap: noMap.length, noPromo: noPromo.length, atOrAbove: atOrAbove.length, window },
   });
   return report;
 }
@@ -377,9 +334,7 @@ async function fillDealFile(zip, hit, template, promotion, channel, task = null)
 const few = (list, n = 8) => `${list.slice(0, n).join(', ')}${list.length > n ? ` and ${list.length - n} more` : ''}`;
 
 export function summarizeWalmartCaFill(channel, r) {
-  const parts = [r.mkFile
-    ? `${channel.label} MK events file ready. ${r.rows} products (SKU + promo price = MAP ${r.tierLabel}${r.fromList ? `, ${r.fromList} from the event's own list` : ''}), ${r.aliased} under their Walmart SKU. Flash Deal Type is left for you to choose in column ${r.dealTypeColumn}${r.dealTypes.length ? ` (${r.dealTypes.join(' or ')})` : ''}. The dates go in the portal: ${r.window.start} to ${r.window.end}`
-    : r.deal
+  const parts = [r.deal
     ? `${channel.label} deal file ready. ${r.rows} products (SKU + regular price = MAP Blue + promo price = MAP ${r.tierLabel}${r.fromList ? `, ${r.fromList} from the promotion's own list` : ''}), ${r.aliased} under their Walmart SKU. The dates go in the portal: ${r.window.start} to ${r.window.end}`
     : `${channel.label} file ready. ${r.rows} products, ${r.window.start} 00:00:00 to ${r.window.end} 23:59:59 Eastern (written in UTC, the way Walmart reads the file), promo price = MAP ${r.tierLabel}${r.fromList ? ` (${r.fromList} from the promotion's own list)` : ''}, ${r.aliased} under their Walmart SKU`];
   if (r.noMap.length) parts.push(`no MAP CAD in the PIM, left out: ${few(r.noMap)}`);

@@ -125,10 +125,7 @@ export const PROMO_CHANNELS = [
  * The promotions template uploaded for a template-kind channel, if any.
  * Flash deals and special events take the marketplace's "Flash deals & events"
  * file when one is uploaded (Rona and Walmart Canada use a different layout);
- * otherwise the monthly promotions file serves every kind. An MK event takes
- * the marketplace's "MK events" file first, when it has one (Walmart Canada,
- * user 2026-11-17: "aplícalo solo para MK Events") — a flash deal or a peak
- * season event never does.
+ * otherwise the monthly promotions file serves every kind.
  */
 export function promoTemplateFor(channel, templates, kind = 'monthly') {
   return promoTemplatesFor(channel, templates, kind)[0] ?? null;
@@ -146,10 +143,6 @@ export function promoTemplatesFor(channel, templates, kind = 'monthly') {
   const mine = (templates ?? [])
     .filter((t) => channel.marketplace.test(t.marketplace ?? ''))
     .sort((a, b) => String(b.uploaded_at ?? '').localeCompare(String(a.uploaded_at ?? '')));
-  if (kind === 'mk_event') {
-    const mk = mine.filter((t) => templatePurpose(t) === 'mk_events');
-    if (mk.length) return mk;
-  }
   if (kind !== 'monthly') {
     const flash = mine.filter((t) => templatePurpose(t) === 'flash_deals');
     if (flash.length) return flash;
