@@ -68,7 +68,7 @@ import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, rereadStorePages, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
-import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
+import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor, goesByFile } from '@/features/pricing/lib/promoChannels';
 import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promoCalendar';
 import PromoCalendar from '@/features/pricing/components/PromoCalendar';
 import { initialCalendar } from '@/features/pricing/lib/promoCalendarItems';
@@ -133,6 +133,7 @@ const LIBS = {
   rona: lazyLib(() => import('@/features/pricing/lib/ronaPromoFill')),
   homeDepotCa: lazyLib(() => import('@/features/pricing/lib/homeDepotCaPromoFill')),
   walmartCa: lazyLib(() => import('@/features/pricing/lib/walmartCaPromoFill')),
+  walmartUs: lazyLib(() => import('@/features/pricing/lib/walmartUsDealFill')),
   lowes: lazyLib(() => import('@/features/pricing/lib/lowesPromoFill')),
 };
 
@@ -3182,7 +3183,11 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       task.progress(0.03, 'Loading the file tools…');
       const opts = { task: task.part(0.05, 1) };
       let text;
-      if (channel.fill === 'amazon') {
+      if (goesByFile(channel, current) && channel.fileFill === 'walmart_us_deal') {
+        // Walmart USA's MK events: the file a person uploads in Seller Center.
+        const m = await LIBS.walmartUs.load();
+        text = m.summarizeWalmartUsDealFill(channel, await m.fillWalmartUsDealTemplate(template, current, channel, opts));
+      } else if (channel.fill === 'amazon') {
         const m = await LIBS.amazon.load();
         text = m.summarizeAmazonFill(channel, await m.fillAmazonPromoTemplate(template, current, channel, opts));
       } else if (channel.fill === 'mirakl') {
@@ -3236,7 +3241,12 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       // (Beyond: flash deals at Purple, everywhere else Orange) says so.
       const pinnedLevel = channelLevelFor(ch, promo);
       if (pinnedLevel) detail = `${detail} ${pinnedLevel.charAt(0).toUpperCase() + pinnedLevel.slice(1)} level prices, read from the products when the file is generated.`.trim();
-      if (ch.kind === 'api') {
+      // A deal this channel takes by a file a person uploads (Walmart USA's MK
+      // events, user 2026-11-17): nothing is sent or scheduled for it — its
+      // row only says whether the file was generated, and offers Generate.
+      const byFile = goesByFile(ch, promo);
+      if (byFile) detail = ch.fileHow ?? detail;
+      if (ch.kind === 'api' && !byFile) {
         if (ch.discounts) {
           // A Stylish store: what stylish-event-discounts has put on it.
           const w = promoWindow(promo, ch.market);
@@ -3350,6 +3360,14 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
       } else if (history[ch.auditTarget ?? ch.key]) {
         status = `Generated ${day(history[ch.auditTarget ?? ch.key])}`;
         tone = 'ok';
+      } else if (byFile && !template) {
+        status = 'No template';
+        tone = 'warn';
+        detail = `Upload ${ch.label}'s MK events file in Templates, marked MK events. ${ch.fileHow ?? ''}`.trim();
+      } else if (byFile) {
+        status = 'Not generated';
+        tone = 'muted';
+        detail = `${detail} From ${template.file_name}.`;
       } else if (ch.kind === 'template' && !template) {
         status = 'No template';
         tone = 'warn';
@@ -3359,7 +3377,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
         tone = 'muted';
         if (template) detail = `Generated from ${template.file_name}.`;
       }
-      return { ...ch, template, templates: templatesAll, status, tone, detail, sendAction };
+      return { ...ch, template, templates: templatesAll, status, tone, detail, sendAction, byFile };
     });
   // A promotion made for chosen marketplaces shows those only.
   const targeted = Boolean(promo.marketplaces?.length);
@@ -3429,7 +3447,7 @@ function PromoChannelsPanel({ promo, canEdit, onFillFile, onMsg, onChanged, defa
                   Generate<span className="sr-only"> {ch.label}</span>
                 </button>
               )}
-              {canEdit && ch.kind === 'template' && !ch.template && (
+              {canEdit && (ch.kind === 'template' || ch.byFile) && !ch.template && (
                 <Link to="/templates" className="text-label-md text-primary font-medium hover:underline">Upload template</Link>
               )}
             </span>

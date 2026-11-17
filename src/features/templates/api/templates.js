@@ -23,6 +23,10 @@ export const TEMPLATE_PURPOSES = [
   { value: 'prices', label: 'Prices', hint: 'Send cost or price changes' },
   { value: 'promotions', label: 'Monthly promotions', hint: 'Load the monthly promotional prices and dates' },
   { value: 'flash_deals', label: 'Flash deals & events', hint: 'The file a marketplace wants for flash deals, MK events and peak season events (when it differs from the monthly one)' },
+  // A marketplace that hands out a file of its own for MK events (Walmart
+  // USA, 2026-11-17): only an MK event is filled from it. Without one, an MK
+  // event takes the "Flash deals & events" file like the other two kinds.
+  { value: 'mk_events', label: 'MK events', hint: 'The file a marketplace wants for its MK events only, when it differs from its flash deals file. Flash deals and peak season events never use it' },
 ];
 const PURPOSE_LABEL = Object.fromEntries(TEMPLATE_PURPOSES.map((p) => [p.value, p.label]));
 export const templatePurposeLabel = (value) => PURPOSE_LABEL[value ?? 'new_listing'] ?? value;

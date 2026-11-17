@@ -99,8 +99,12 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
    * pulling the channel again (the pull only refreshes the LIVE prices).
    * `today` (an Eastern day, 'YYYY-MM-DD') reads another day's prices: the
    * dry runs of sinksdirect-deals. A deal's entry carries its promotion `id`.
+   * `skipKinds` leaves deals of those kinds out, as if they did not run: what
+   * a SENDER must not put on the channel (channel-deals: Walmart USA's MK
+   * events go by a file a person uploads). The report never passes it — the
+   * store is still expected at such a deal's price.
    */
-  async function loadExpectedPrices(cfg, { today = null } = {}) {
+  async function loadExpectedPrices(cfg, { today = null, skipKinds = null } = {}) {
     const prods = await sharedLoad(`products:${cfg.priceField}`, async () => {
       const { data, error } = await db
         .from('products')
@@ -158,6 +162,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
         return data ?? [];
       });
       const running = (deals ?? [])
+        .filter((deal) => !skipKinds?.includes(deal.kind))
         .map((deal) => ({ deal, w: promoWindow(deal, cfg.market) }))
         .filter(({ w }) => windowContains({ start: dealLiveDay(cfg, w), end: w.end }, todayET))
         .sort((a, b) => a.w.start.localeCompare(b.w.start)); // overlapping deals: the later start wins

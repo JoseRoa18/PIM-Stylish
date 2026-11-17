@@ -118,14 +118,28 @@ export const PROMO_CHANNELS = [
   // still produce the Seller Center file when a promotions template is uploaded.
   { key: 'walmart_us', label: 'Walmart USA', monogram: 'WM', market: 'us', kind: 'api', stamp: 'wm_us_scheduled_at', schedule: 'walmart_us', marketplace: /walmart.*\bus(a)?\b/i, costSlug: null,
     how: 'Automatic: promotional prices sent through the Walmart API the day before the 1st (Settings). Walmart turns them on and off by itself. Schedule sends by hand; Generate fills the promotions file instead.',
-    dealHow: WM_DEAL_HOW },
+    dealHow: WM_DEAL_HOW,
+    // Its MK events go by FILE, never through the API (user, 2026-11-17: "se
+    // programa la subida de deals, la idea es que no se programe, sino que
+    // genere el archivo y ese sí sería el que subimos"): the row of such a
+    // deal only generates Walmart's own MK events file (Templates purpose "MK
+    // events") for a person to upload in Seller Center, and channel-deals
+    // leaves those deals alone (`BY_FILE` there — keep the two in step).
+    // Flash deals and peak season events stay automatic.
+    fileKinds: ['mk_event'], fileFill: 'walmart_us_deal',
+    fileHow: "By file: Generate fills Walmart's MK events file with each product's SKU and promo price, for you to upload in Seller Center. Nothing is sent to Walmart by itself for an MK event." },
 ];
+
+/** Does this channel take this promotion by a file a person uploads, never through its API? */
+export const goesByFile = (channel, promotion) => Boolean(channel?.fileKinds?.includes(promotion?.kind ?? 'monthly'));
 
 /**
  * The promotions template uploaded for a template-kind channel, if any.
  * Flash deals and special events take the marketplace's "Flash deals & events"
  * file when one is uploaded (Rona and Walmart Canada use a different layout);
- * otherwise the monthly promotions file serves every kind.
+ * otherwise the monthly promotions file serves every kind. An MK event takes
+ * the marketplace's "MK events" file first, when it has one (Walmart USA,
+ * 2026-11-17) — a flash deal or a peak season event never does.
  */
 export function promoTemplateFor(channel, templates, kind = 'monthly') {
   return promoTemplatesFor(channel, templates, kind)[0] ?? null;
@@ -143,6 +157,10 @@ export function promoTemplatesFor(channel, templates, kind = 'monthly') {
   const mine = (templates ?? [])
     .filter((t) => channel.marketplace.test(t.marketplace ?? ''))
     .sort((a, b) => String(b.uploaded_at ?? '').localeCompare(String(a.uploaded_at ?? '')));
+  if (kind === 'mk_event') {
+    const mk = mine.filter((t) => templatePurpose(t) === 'mk_events');
+    if (mk.length) return mk;
+  }
   if (kind !== 'monthly') {
     const flash = mine.filter((t) => templatePurpose(t) === 'flash_deals');
     if (flash.length) return flash;

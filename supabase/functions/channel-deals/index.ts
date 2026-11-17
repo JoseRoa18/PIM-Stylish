@@ -53,6 +53,9 @@
 // at 10 am was compared with the 6 am snapshot until 1 pm (Best Buy read 62 %
 // aligned with every deal price in place). See takeSnapshot.
 //
+// Walmart USA's MK events are not sent at all (BY_FILE): they go by the file a
+// person generates in Pricing and uploads in Seller Center.
+//
 // Left out, each named in the report: a product switched off for the channel,
 // not listed there, without a regular price, or whose deal price is not under
 // it. Honours the promotion automation switches in Settings (enabled, and the
@@ -88,6 +91,13 @@ const CHANNELS = ["bestbuy", "walmart_ca", "walmart_us"] as const;
 type Channel = typeof CHANNELS[number];
 const LABEL: Record<Channel, string> = { bestbuy: "Best Buy", walmart_ca: "Walmart Canada", walmart_us: "Walmart USA" };
 const DEAL_KINDS = ["flash", "mk_event", "special"];
+// The kinds of deal a channel takes by a FILE a person uploads, never through
+// its API (user, 2026-11-17: on Walmart USA an MK event must not be sent — "la
+// idea es que no se programe, sino que genere el archivo y ese sí sería el
+// que subimos"). Such a deal is left alone here, as if it did not run: a
+// product that is also in a flash deal or a peak season event still gets that
+// one's price. Keep in step with `fileKinds` in src/features/pricing/lib/promoChannels.js.
+const BY_FILE: Partial<Record<Channel, string[]>> = { walmart_us: ["mk_event"] };
 const TABLE = "channel_deal_prices";
 const RUN_KEY = "channel_deals_run";
 const LOCK_KEY = "channel_deals_lock";
@@ -192,7 +202,7 @@ async function refused(channel: Channel, sku: string, row: Row | null, message: 
 /** What a channel should carry today, from the PIM: the deals' products and the monthly promotion's. */
 async function expected(channel: Channel, today: string, prices: ReturnType<typeof createPriceAlignment>, rows: Map<string, Row>) {
   const cfg = (alignTargets({}) as Record<string, Record<string, unknown>>)[channel];
-  const { baseBySku, promoBySku } = await prices.loadExpectedPrices(cfg, { today });
+  const { baseBySku, promoBySku } = await prices.loadExpectedPrices(cfg, { today, skipKinds: BY_FILE[channel] ?? null });
   const deals = new Map<string, Deal>();
   const monthly = new Map<string, Monthly>();
   const skipped: Skip[] = [];
