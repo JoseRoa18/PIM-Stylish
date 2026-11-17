@@ -2,20 +2,22 @@
 // "necesito que la mayoría de todo eso se pueda traer automático, sea de
 // ShipStation, de Odoo o de algún otro sitio" — "Conéctalo pues, dale").
 // Called by scorecard-fill for the board "operations", with that function's
-// own tools — so a rule it already has (when an order shipped, on time or
-// late, the value of a return, a product's cost) is the same code here.
+// own tools — so a rule it already has (the value of a return, a product's
+// cost) is the same code here.
+//
+// ShipStation is NOT a source (user, 2026-11-17: "Desconecta ShipStation de EOS
+// ScoreCard … de cualquier item o KPI"). Until that day its labels gave the cost
+// per label, the orders processed, the cost of a return label and when an order
+// shipped (same-day shipping, processed on time, not processed in 24 h, and the
+// marketplace tabs' on-time rows copied here): those rows are typed by their
+// people now, and nothing below reads public.shipstation_labels.
 //
 // Where each number comes from (everything is read; nothing is written but
 // the scorecard's own values):
-//   · ShipStation's labels, copied into public.shipstation_labels: cost per
-//     label, orders processed, cost of a return label;
-//   · the marketplace tabs' own rows: on-time shipping of each marketplace —
-//     copied, never measured twice;
-//   · Odoo: every order of the country (same-day shipping, orders on time, the
-//     ones not shipped by the end of the next business day, Open Box sales, wrong / missing
-//     items, returns over sales), the returns bodega received and where the
-//     goods went, the manufacturing orders, the inventory counts, costs, and
-//     its replenishment report's days of inventory for three single SKUs;
+//   · Odoo: every order of the country (Open Box sales, wrong / missing items,
+//     returns over sales), the returns bodega received and where the goods
+//     went, the manufacturing orders, the inventory counts, costs, and its
+//     replenishment report's days of inventory for three single SKUs;
 //   · WeCare, our customer-care app (its own API, GET /api/pim/scorecard, with
 //     the key it gave the PIM): tickets closed, resolution time and customer
 //     satisfaction of the week — totals only, worked out there with its
@@ -26,7 +28,7 @@
 //
 // Columns, as on every tab: a column (its Sunday) holds the numbers of the
 // week BEFORE it, Eastern days. Three kinds of row:
-//   · a week's own number (labels, orders, returns…): every column asked for;
+//   · a week's own number (orders, returns…): every column asked for;
 //   · SNAPSHOT — today's state (stock, days of inventory): this week's column
 //     only, as the team types it on the day of the meeting;
 //   · ONCE — Odoo keeps only a product's LAST count date, so a week's count
@@ -40,9 +42,8 @@ export const OPS_BOARD = "operations";
 
 type Market = "ca" | "us";
 type Odoo = (model: string, method: string, args: unknown[], kwargs?: Record<string, unknown>) => Promise<any>;
-type Shipped = Map<number, { done: string | null; any: boolean; unknown?: boolean }>;
 interface Row { id: string; market: Market | null; name: string; auto_key: string }
-interface OrderRow { id: number; date: string; state: string; pickings: number[]; mp: number | null }
+interface OrderRow { id: number; date: string; state: string; mp: number | null }
 interface LineRow { orderId: number; code: string | null; qty: number; subtotal: number; goods: boolean }
 export interface OpsOut { metricId: string; board: string; market: string; name: string; key: string; week: string; value: number | null; note?: string | null }
 export interface OpsTools {
@@ -50,38 +51,24 @@ export interface OpsTools {
   etMidnightUtc: (day: string) => string;
   isoOf: (odooTime: string) => string;
   etMs: (day: string) => number;
-  etDayOf: (iso: string) => string;
-  weekday: (day: string) => number;
   round2: (n: number) => number;
   ratio: (a: number, b: number) => number | null;
-  shippedAt: (odoo: Odoo, admin: any, orders: any[], diag: Record<string, any>) => Promise<Shipped>;
-  shipDeadline: (orderIso: string, days?: number) => number;
-  shipTally: (ids: Iterable<number>, shipped: Shipped, orderDate: Map<number, string>, now: number, diag: Record<string, any>, deadlineOf?: (orderIso: string) => number) => { onTime: number; late: number };
   receivedReturns: (odoo: Odoo, pickDomain: unknown[], sinceDay: string) => Promise<{ at: string; orderId: number; value: number }[]>;
   costsBySku: (odoo: Odoo, company: number, skus: string[]) => Promise<Map<string, number>>;
   usdPerUnit: (odoo: Odoo, company: number) => Promise<number | null>;
 }
-interface Ctx { admin: any; odoo: Odoo; rows: Row[]; loop: string[]; thisColumn: string; runColumn: string; now: number; diag: Record<string, any>; tools: OpsTools }
+interface Ctx { admin: any; odoo: Odoo; rows: Row[]; loop: string[]; thisColumn: string; runColumn: string; diag: Record<string, any>; tools: OpsTools }
 
 // Odoo: the companies, each country's warehouse, and the "marketplaces" that
 // are not sales (marketplace.master).
 const COMPANY: Record<Market, number> = { ca: 2, us: 1 };
 const WAREHOUSE: Record<Market, string> = { ca: "CBG", us: "ATL" };
 const MARKETS: Market[] = ["ca", "us"];
-const MP = { wayfair: 4, amazonFba: 13, warranty: 18, missing: 19, correct: 20, wrong: 21, reviewCa: 22, reviewUs: 23 };
+const MP = { warranty: 18, missing: 19, correct: 20, wrong: 21, reviewCa: 22, reviewUs: 23 };
 const NOT_A_SALE = new Set([MP.warranty, MP.missing, MP.correct, MP.wrong, MP.reviewCa, MP.reviewUs]);
 const DOI_DAYS = 70;      // "below 70 days of inventory"
 const EXCESS_DAYS = 180;  // "inventory excess over 180 days"
 
-// A row copied from a marketplace tab's own row of the same country and week.
-const COPIES: Record<string, { board: string; key: string }> = {
-  ops_ontime_homedepot: { board: "homedepot_ca", key: "on_time_ship" },
-  ops_ontime_rona: { board: "rona", key: "on_time_ship" },
-  ops_ontime_amazon: { board: "amazon", key: "on_time_ship" },
-  ops_ontime_walmart: { board: "walmart", key: "on_time_ship" },
-  ops_ontime_bestbuy: { board: "bestbuy", key: "on_time_ship" },
-  ops_ontime_lowes: { board: "lowes", key: "on_time_ship" },
-};
 // Days of inventory of one SKU, read from Odoo's replenishment report.
 const SINGLE_SKU: Record<string, string> = { ops_doi_st05: "ST-05", ops_doi_a918kit: "A-918KIT", ops_doi_a919kit: "A-919KIT" };
 // Products under 70 days of inventory, by group.
@@ -97,16 +84,14 @@ const DOI_GROUP: Record<string, (p: { sku: string; category: string }) => boolea
 };
 // Customer care, asked from WeCare (both countries together: the rows have no country).
 const CARE_KEYS = ["ops_care_tickets_closed", "ops_care_resolution_hours", "ops_care_csat"];
-const LABEL_KEYS = ["ops_label_cost", "ops_return_label_cost", "ops_orders_processed"];
-const ORDER_KEYS = ["ops_sameday_wayfair", "ops_on_time", "ops_late_24h", "ops_open_box_sales", "ops_shipment_errors", "ops_returns_over_sales", "ops_oos_assembly_loss"];
-const SHIP_KEYS = ["ops_sameday_wayfair", "ops_on_time", "ops_late_24h"];
+const ORDER_KEYS = ["ops_open_box_sales", "ops_shipment_errors", "ops_returns_over_sales", "ops_oos_assembly_loss"];
 const RETURN_KEYS = ["ops_returns_processed", "ops_returns_to_stock", "ops_returns_to_openbox"];
 const ASSEMBLY_KEYS = ["ops_assembly_sinks", "ops_assembly_versa"];
 const COUNT_KEYS = ["ops_cycle_count", "ops_inventory_accuracy"];
 const STOCK_KEYS = ["ops_in_stock", ...Object.keys(DOI_GROUP), "ops_inventory_excess", "ops_obsolete_value"];
 const SNAPSHOT = new Set([...STOCK_KEYS, ...Object.keys(SINGLE_SKU), "ops_oos_assembly_loss"]);
 const ONCE = new Set(COUNT_KEYS);
-export const OPS_KEYS = [...CARE_KEYS, ...LABEL_KEYS, ...Object.keys(COPIES), ...ORDER_KEYS, ...RETURN_KEYS, ...ASSEMBLY_KEYS, ...COUNT_KEYS, ...STOCK_KEYS, ...Object.keys(SINGLE_SKU)];
+export const OPS_KEYS = [...CARE_KEYS, ...ORDER_KEYS, ...RETURN_KEYS, ...ASSEMBLY_KEYS, ...COUNT_KEYS, ...STOCK_KEYS, ...Object.keys(SINGLE_SKU)];
 
 /** Every row of a table read (the API returns at most 1,000 per request). */
 async function allRows(build: () => any): Promise<any[]> {
@@ -126,7 +111,7 @@ const marketOf = (pickingType: [number, string] | false): Market | null => {
 };
 
 /** The numbers of the Operations rows for the columns asked for. */
-export async function operationsValues({ admin, odoo, rows, loop, thisColumn, runColumn, now, diag, tools: t }: Ctx): Promise<OpsOut[]> {
+export async function operationsValues({ admin, odoo, rows, loop, thisColumn, runColumn, diag, tools: t }: Ctx): Promise<OpsOut[]> {
   const keys = new Set(rows.map((r) => r.auto_key));
   const has = (list: string[]) => list.some((k) => keys.has(k));
   const marketsOf = (list: string[]): Market[] => MARKETS.filter((m) => rows.some((r) => list.includes(r.auto_key) && (r.market === m || r.market == null)));
@@ -165,47 +150,6 @@ export async function operationsValues({ admin, odoo, rows, loop, thisColumn, ru
       } catch (err) {
         diag.wecare = "WeCare could not be reached: " + (err as Error).message;
       }
-    }
-  }
-
-  // ---- ShipStation's labels ---------------------------------------------------
-  if (has(LABEL_KEYS)) {
-    const labels = await allRows(() => admin.from("shipstation_labels").select("account, created_at, cost, is_return")
-      .eq("voided", false).gte("created_at", t.isoOf(sinceOdoo)).lt("created_at", t.isoOf(t.etMidnightUtc(newest))).order("created_at").order("label_id")) as { account: string; created_at: string; cost: number | null; is_return: boolean }[];
-    diag.labels = labels.length;
-    for (const column of loop) {
-      for (const market of MARKETS) {
-        const week = labels.filter((l) => l.account === market && inDays(l.created_at, dataFrom(column), column));
-        const sent = week.filter((l) => !l.is_return);
-        const paid = sent.filter((l) => Number(l.cost) > 0);
-        const total = paid.reduce((s, l) => s + Number(l.cost), 0);
-        // Canada: the week's cost ÷ every label, the marketplaces' prepaid ones
-        // ($0) included — what ShipStation's dashboard shows and the team typed
-        // (24.75 / 25.23 / 27.90 in October, to the cent). USA: almost every
-        // label is a marketplace's, so the team reads the average of the labels
-        // we paid for.
-        if (sent.length) put("ops_label_cost", market, column, market === "ca" ? t.round2(total / sent.length) : paid.length ? t.round2(total / paid.length) : null);
-        put("ops_orders_processed", market, column, sent.length);
-        const back = week.filter((l) => l.is_return && Number(l.cost) > 0);
-        if (back.length) put("ops_return_label_cost", market, column, t.round2(back.reduce((s, l) => s + Number(l.cost), 0) / back.length));
-      }
-    }
-  }
-
-  // ---- copied from the marketplace tabs ----------------------------------------
-  const copied = rows.filter((r) => COPIES[r.auto_key] && r.market);
-  if (copied.length) {
-    const { data: sources, error } = await admin.from("scorecard_metrics").select("id, board, market, auto_key")
-      .in("board", [...new Set(copied.map((r) => COPIES[r.auto_key].board))]).in("auto_key", [...new Set(copied.map((r) => COPIES[r.auto_key].key))]).eq("archived", false);
-    if (error) throw error;
-    const idOf = new Map<string, string>((sources ?? []).map((s: any) => [`${s.board}|${s.market}|${s.auto_key}`, s.id]));
-    const ids = [...new Set(copied.map((r) => idOf.get(`${COPIES[r.auto_key].board}|${r.market}|${COPIES[r.auto_key].key}`)).filter(Boolean))] as string[];
-    const stored = ids.length ? await allRows(() => admin.from("scorecard_values").select("metric_id, week_start, value").in("metric_id", ids).in("week_start", loop).order("week_start").order("metric_id")) : [];
-    const at = new Map<string, number | null>(stored.map((v: any) => [`${v.metric_id}|${v.week_start}`, v.value]));
-    for (const r of copied) {
-      const id = idOf.get(`${COPIES[r.auto_key].board}|${r.market}|${COPIES[r.auto_key].key}`);
-      if (!id) { diag.noSource = [...(diag.noSource ?? []), `${r.auto_key}:${r.market}`]; continue; }
-      for (const column of loop) put(r.auto_key, r.market as Market, column, at.get(`${id}|${column}`));
     }
   }
 
@@ -277,9 +221,9 @@ export async function operationsValues({ admin, odoo, rows, loop, thisColumn, ru
     for (const market of marketsOf(ORDER_KEYS)) {
       const company = COMPANY[market];
       const when = [["date_order", ">=", t.etMidnightUtc(windowFrom)], ["date_order", "<", t.etMidnightUtc(newest)]];
-      const raw = await odoo("sale.order", "search_read", [[["company_id", "=", company], ["state", "in", ["sale", "done", "cancel"]], ...when]], { fields: ["date_order", "state", "currency_rate", "picking_ids", "marketplace_name"] }) as { id: number; date_order: string; state: string; currency_rate: number; picking_ids: number[]; marketplace_name: [number, string] | false }[];
+      const raw = await odoo("sale.order", "search_read", [[["company_id", "=", company], ["state", "in", ["sale", "done", "cancel"]], ...when]], { fields: ["date_order", "state", "currency_rate", "marketplace_name"] }) as { id: number; date_order: string; state: string; currency_rate: number; marketplace_name: [number, string] | false }[];
       const rate = new Map(raw.map((o) => [o.id, Number(o.currency_rate) || 1]));
-      const orders: OrderRow[] = raw.map((o) => ({ id: o.id, date: t.isoOf(o.date_order), state: o.state, pickings: o.picking_ids ?? [], mp: o.marketplace_name ? o.marketplace_name[0] : null }));
+      const orders: OrderRow[] = raw.map((o) => ({ id: o.id, date: t.isoOf(o.date_order), state: o.state, mp: o.marketplace_name ? o.marketplace_name[0] : null }));
       const rawLines = await odoo("sale.order.line", "search_read", [[["order_id.company_id", "=", company], ["order_id.state", "in", ["sale", "done"]], ...when.map((leaf) => [`order_id.${leaf[0]}`, leaf[1], leaf[2]]), ["display_type", "=", false], ["is_delivery", "=", false]]], { fields: ["order_id", "product_id", "product_uom_qty", "price_subtotal"] }) as { order_id: [number, string]; product_id: [number, string] | false; product_uom_qty: number; price_subtotal: number }[];
       const productIds = [...new Set(rawLines.map((l) => (l.product_id ? l.product_id[0] : 0)).filter(Boolean))];
       const code = new Map<number, string | null>();
@@ -303,18 +247,6 @@ export async function operationsValues({ admin, odoo, rows, loop, thisColumn, ru
       const real = (o: OrderRow) => o.state !== "cancel" && !(o.mp != null && NOT_A_SALE.has(o.mp));
       const sale = (l: LineRow) => l.goods && l.qty > 0 && l.subtotal > 0 && real(orderOf.get(l.orderId)!);
       const sales = lines.filter((l) => orderOf.has(l.orderId) && sale(l));
-      const paid = new Set(sales.map((l) => l.orderId));
-
-      // When each order was fully shipped (its ShipStation labels): what we ship ourselves, so not Amazon FBA.
-      let shipped: Shipped | null = null;
-      if (SHIP_KEYS.some((k) => rows.some((r) => r.auto_key === k && r.market === market))) {
-        const since = t.isoOf(sinceOdoo);
-        shipped = await t.shippedAt(odoo, admin, orders.filter((o) => o.date >= since && paid.has(o.id) && o.mp !== MP.amazonFba), diag);
-      }
-      // By the end of the order's own Eastern day.
-      const sameDay = (orderIso: string) => t.etMs(t.addDays(t.etDayOf(orderIso), 1));
-      // "Not processed in 24 h": not fully shipped by the end of the next business day.
-      const nextDay = (orderIso: string) => t.shipDeadline(orderIso, 1);
 
       const returns = keys.has("ops_returns_over_sales") ? await t.receivedReturns(odoo, [["sale_id.company_id", "=", company]], t.addDays(oldest, -35)) : null;
       if (returns) diag[`returns_${market}`] = returns.length;
@@ -323,16 +255,6 @@ export async function operationsValues({ admin, odoo, rows, loop, thisColumn, ru
       for (const column of loop) {
         const from = dataFrom(column);
         const week = orders.filter((o) => inDays(o.date, from, column));
-        if (shipped) {
-          const ours = week.filter((o) => paid.has(o.id) && o.mp !== MP.amazonFba);
-          const tally = (list: OrderRow[], deadlineOf?: (orderIso: string) => number) => t.shipTally(list.map((o) => o.id), shipped!, orderDate, now, diag, deadlineOf);
-          // On time: fully shipped by the end of the 2nd business day (the scorecard's own rule).
-          const all = tally(ours);
-          put("ops_on_time", market, column, t.ratio(all.onTime, all.onTime + all.late));
-          put("ops_late_24h", market, column, tally(ours, nextDay).late);
-          const wayfair = tally(ours.filter((o) => o.mp === MP.wayfair), sameDay);
-          put("ops_sameday_wayfair", market, column, t.ratio(wayfair.onTime, wayfair.onTime + wayfair.late));
-        }
         const weekIds = new Set(week.map((o) => o.id));
         // Open Box: what the -OB products sold for, before tax.
         put("ops_open_box_sales", market, column, t.round2(sales.filter((l) => weekIds.has(l.orderId) && /-OB/i.test(l.code ?? "")).reduce((s, l) => s + l.subtotal, 0)));

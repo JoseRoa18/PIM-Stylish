@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
-import { COMPANY_AUTO_KEYS } from '../lib/company';
+import { BOARDS } from '../lib/boards';
+import { COMPANY_AUTO_KEYS, ON_TIME_ROW } from '../lib/company';
 import { targetText } from '../lib/format';
 import { listValues } from './scorecard';
 
@@ -23,18 +24,26 @@ export async function getCompanyViewers() {
  * snapshot) and the targets of the rows it works out.
  */
 export async function loadCompany(weeks) {
-  const { data: metrics, error } = await supabase
-    .from('scorecard_metrics')
-    .select('id, board, market, name, unit, auto_key, goal, goal_op')
-    .in('auto_key', COMPANY_AUTO_KEYS)
-    .eq('archived', false);
-  if (error) throw error;
+  const columns = 'id, board, market, name, unit, auto_key, goal, goal_op';
+  const [keyed, onTime] = await Promise.all([
+    supabase.from('scorecard_metrics').select(columns).in('auto_key', COMPANY_AUTO_KEYS).eq('archived', false),
+    // Each marketplace tab's own on-time row: typed, so known by its name (ON_TIME_ROW).
+    supabase.from('scorecard_metrics').select(columns).ilike('name', ON_TIME_ROW.like).eq('archived', false),
+  ]);
+  if (keyed.error) throw keyed.error;
+  if (onTime.error) throw onTime.error;
+  const marketplace = new Set(BOARDS.map((b) => b.key));
+  const seen = new Set((keyed.data ?? []).map((m) => m.id));
+  const metrics = [
+    ...(keyed.data ?? []),
+    ...(onTime.data ?? []).filter((m) => marketplace.has(m.board) && !seen.has(m.id)).map((m) => ({ ...m, role: ON_TIME_ROW.role })),
+  ];
   const [values, own, targets] = await Promise.all([
-    listValues((metrics ?? []).map((m) => m.id), weeks[0], weeks.at(-1)),
+    listValues(metrics.map((m) => m.id), weeks[0], weeks.at(-1)),
     listCompanyValues(weeks[0], weeks.at(-1)),
     listCompanyTargets(),
   ]);
-  return { metrics: metrics ?? [], values, own, targets };
+  return { metrics, values, own, targets };
 }
 
 async function listCompanyTargets() {

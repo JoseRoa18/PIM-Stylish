@@ -8,7 +8,9 @@ import { BOARDS, MARKET_LABEL } from './boards';
 //   Sales      each marketplace's weekly sales, the country's total, its
 //              target and the total against it. Canada in CAD, the USA in
 //              USD — never added together;
-//   Shipping   the average of every marketplace's on-time shipping %;
+//   Shipping   the average of every marketplace's on-time shipping % — rows
+//              their people type since ShipStation left the ScoreCard (user,
+//              2026-11-17), so a tab's row is known by its name (ON_TIME_ROW);
 //   Inventory  units available and the share of products with stock per
 //              country, from the database's hourly snapshot.
 // A new company row is one more entry in buildCompanyView.
@@ -26,8 +28,16 @@ import { BOARDS, MARKET_LABEL } from './boards';
 
 export const COMPANY_KEY = 'company';
 export const COMPANY_BOARD = { key: COMPANY_KEY, label: 'Company' };
-/** The marketplace rows the tab reads (scorecard_metrics.auto_key). */
-export const COMPANY_AUTO_KEYS = ['map_pct', 'sales', 'on_time_ship'];
+/** The marketplace rows the tab reads by their key (scorecard_metrics.auto_key)… */
+export const COMPANY_AUTO_KEYS = ['map_pct', 'sales'];
+/**
+ * …and the one it reads by its name: each marketplace tab's "On-Time Shipping %".
+ * It was the PIM's (auto_key on_time_ship, from ShipStation's labels) until
+ * 2026-11-17; typed rows have no key, and every tab shares one set of names
+ * (2026-11-09), so the name is what tells it. A tab whose row is renamed
+ * leaves the average. `role` is what loadCompany marks such a row with.
+ */
+export const ON_TIME_ROW = { role: 'on_time_ship', name: 'On-Time Shipping %', like: 'on-time shipping%' };
 
 const MARKETS = ['ca', 'us'];
 const CURRENCY = { ca: 'CAD', us: 'USD' };
@@ -37,7 +47,7 @@ const latest = (rows) => rows.reduce((at, r) => (r?.updated_at > (at ?? '') ? r.
 /**
  * The tab's rows and their weekly numbers, in the shape ScorecardTable takes.
  *
- * @param {object[]} metrics  the marketplace rows with a COMPANY_AUTO_KEYS key ({ id, board, market, name, unit, auto_key, goal, goal_op })
+ * @param {object[]} metrics  the marketplace rows with a COMPANY_AUTO_KEYS key, and the on-time rows marked `role` ({ id, board, market, name, unit, auto_key, role?, goal, goal_op })
  * @param {Map}      values   their values, keyed `${metric_id}|${week}` (listValues)
  * @param {object[]} own      scorecard_company_values rows ({ key, week_start, value, origin, updated_at }), every week up to the last shown
  * @param {object[]} targets  scorecard_company_targets rows ({ key, goal, goal_op, updated_at })
@@ -57,7 +67,7 @@ export function buildCompanyView({ metrics, values, own, targets = [], weeks }) 
     if (value == null) return;
     out.set(`${id}|${week}`, { value, note: null, origin: 'auto', updated_at: latest(sources) ?? new Date().toISOString() });
   };
-  const rowsOf = (key, market = null) => metrics.filter((m) => m.auto_key === key && (!market || m.market === market));
+  const rowsOf = (key, market = null) => metrics.filter((m) => (m.role ?? m.auto_key) === key && (!market || m.market === market));
   const cellsOf = (list, week) => list.map((m) => values.get(`${m.id}|${week}`)).filter((r) => r?.value != null);
   const boardOrder = new Map(BOARDS.map((b, i) => [b.key, i]));
   const boardLabel = (key) => BOARDS.find((b) => b.key === key)?.label ?? key;
@@ -121,7 +131,7 @@ export function buildCompanyView({ metrics, values, own, targets = [], weeks }) 
   const groups = [
     { key: 'map', label: 'MAP alignment — average of every marketplace', rows: averaged('map_pct', 'map', 'MAP %', 'The average of the MAP % of every marketplace tab') },
     ...MARKETS.map((mk) => ({ key: `sales_${mk}`, label: `Sales — ${MARKET_LABEL[mk]} (${CURRENCY[mk]})`, rows: salesGroup(mk) })),
-    { key: 'shipping', label: 'On-time shipping — average of every marketplace', rows: averaged('on_time_ship', 'on_time', 'On-time shipping', 'The average of the on-time shipping % of every marketplace tab') },
+    { key: 'shipping', label: 'On-time shipping — average of every marketplace', rows: averaged(ON_TIME_ROW.role, 'on_time', 'On-time shipping', 'The average of the on-time shipping % typed on every marketplace tab') },
     { key: 'stock', label: 'Inventory available', rows: stockRows },
   ].filter((g) => g.rows.length);
   return { groups, values: out };

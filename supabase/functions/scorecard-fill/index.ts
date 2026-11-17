@@ -6,11 +6,14 @@
 //     company (Stylish International = CAD, Stylish USA = USD);
 //   - Wix (read only): the store's own orders (cancellations, refunds) and
 //     its product reviews;
-//   - ShipStation's labels, copied into public.shipstation_labels by
-//     shipstation-labels-sync: when a delivery really shipped (its label) and
-//     what it really cost — matched to Odoo's deliveries by tracking number;
 //   - the PIM's tables: stock, the obsolete mark, the Activity Log, prices and
 //     promotions.
+// ShipStation is NOT a source of the ScoreCard (user, 2026-11-17: "Desconecta
+// ShipStation de EOS ScoreCard … de cualquier item o KPI"): nothing here reads
+// public.shipstation_labels. The numbers that came from its labels — on-time
+// and late shipping, the Operations tab's label costs, orders processed and
+// shipping times — are typed by their people, and "# SKUs with No
+// Profitability" compares the price with Odoo's cost alone.
 // It writes scorecard_values with origin 'auto' for the rows whose auto_key
 // is one of SERVER_KEYS; the browser works out the others (Price Alignment,
 // promotions — src/features/scorecard/lib/autoMetrics.js).
@@ -21,9 +24,8 @@
 //
 // The Operations tab (board "operations", a department's, 2026-11-16) is filled
 // here too, when it is asked for by name: its rows' numbers are worked out by
-// _shared/scorecardOperations.ts with this function's own tools (ShipStation's
-// labels, Odoo's orders, returns, manufacturing orders and counts, the
-// marketplace tabs' on-time numbers, the PIM's stock).
+// _shared/scorecardOperations.ts with this function's own tools (Odoo's
+// orders, returns, manufacturing orders and counts, WeCare, the PIM's stock).
 //
 // Body: { mode: "fill" | "preview", boards?: string[], backfill?: number, refresh?: number, running?: true | "only" }
 //   running  — also the column of the week now running (its numbers so far,
@@ -84,7 +86,7 @@ const US = 1;
 const sold = (ids: number[], company: number) => [["marketplace_name", "in", ids], ["company_id", "=", company]];
 // Boards the server fills, per market (user, 2026-11-05: every marketplace
 // tab, from Odoo's orders — every marketplace's orders are imported there —
-// ShipStation's labels and the PIM). Keep in step with `serverFill` in
+// and the PIM). Keep in step with `serverFill` in
 // src/features/scorecard/lib/boards.js.
 const BOARDS: Record<string, Partial<Record<Market, MarketSource>>> = {
   sinksdirect: {
@@ -129,7 +131,8 @@ const SERVER_KEYS = [
   ...LIVE_KEYS,
   "sales", "orders", "units", "skus_not_sold_90d", "oos_loss", "obsolete_skus", "listings_updated",
   // 2026-11-05: Odoo records almost no cancellation, the store's own orders do.
-  "cancel_rate", "on_time_ship", "late_ship_rate", "odr", "returns_not_received", "reviews_5plus", "no_profit_skus",
+  // (On-time and late shipping left on 2026-11-17 with ShipStation: typed rows now.)
+  "cancel_rate", "odr", "returns_not_received", "reviews_5plus", "no_profit_skus",
   // 2026-11-05, the marketplace tabs: returns over 4 weeks, sales in thousands of USD, Azuni SKUs sold.
   "return_rate", "returns_value", "sales_usd_k", "azuni_skus_sold",
   // 2026-11-09: the sales of a tab's own list of SKUs (app_settings.scorecard_top_losers, by board).
@@ -144,10 +147,6 @@ const SERVER_KEYS = [
 // Read from today's state (stock, marks, reviews, prices): only this week's column gets them.
 const SNAPSHOT_KEYS = new Set(["oos_loss", "obsolete_skus", "reviews_5plus", "no_profit_skus", "losers_note", "reviews_new", "reviews_15plus"]);
 const WIX_KEYS = ["cancel_rate", "odr", "returns_not_received"];
-const SHIP_KEYS = ["on_time_ship", "late_ship_rate"];
-// On time = fully shipped by the end of the 2nd business day after the order
-// (user, 2026-11-05; Monday–Friday, Eastern).
-const SHIP_BUSINESS_DAYS = 2;
 const SETTINGS_KEY = "scorecard_fill";
 const FIRST_COLUMN = "2026-11-01"; // W44: the scorecard starts there
 // "# Listings Optimized per Week" on the marketplaces (user, 2026-11-16: "lo que el PIM envía o exporta"): the
@@ -160,7 +159,6 @@ const DAY = 86400000;
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 const etDayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" });
 const etToday = () => etDayFmt.format(new Date());
-const etDayOf = (iso: string) => etDayFmt.format(new Date(iso));
 const weekday = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay(); // 0 Sunday
 const sundayOf = (d: string) => addDays(d, -weekday(d));
 /**
@@ -190,41 +188,8 @@ const inWeek = (iso: string | null | undefined, fromDay: string, toDay: string) 
   const t = Date.parse(iso);
   return t >= etMs(fromDay) && t < etMs(toDay);
 };
-/** End (exclusive, ms) of the Nth business day after the order's Eastern day (N = 2 unless another is asked for). */
-function shipDeadline(orderIso: string, days = SHIP_BUSINESS_DAYS): number {
-  let d = etDayOf(orderIso);
-  for (let n = 0; n < days;) {
-    d = addDays(d, 1);
-    const w = weekday(d);
-    if (w !== 0 && w !== 6) n += 1;
-  }
-  return etMs(addDays(d, 1));
-}
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const ratio = (a: number, b: number) => (b ? Math.round((a / b) * 10000) / 10000 : null);
-/**
- * Of these orders: how many were fully shipped by their deadline, and how many
- * after it — or not yet, with the deadline gone. An order with nothing to ship
- * from our warehouses, or with no label to date it, is left out; the others
- * are still in time. One still open in Odoo 14 days after it was placed is
- * left out too: the marketplace cancelled it and Odoo was not told (it would
- * read as late for ever) — a backorder that ships later counts as late then.
- * `deadlineOf`: the rule (the end of the 2nd business day unless another is given).
- */
-function shipTally(ids: Iterable<number>, shipped: Map<number, { done: string | null; any: boolean; unknown?: boolean }>, orderDate: Map<number, string>, now: number, diag: Record<string, any>, deadlineOf: (orderIso: string) => number = shipDeadline) {
-  let onTime = 0;
-  let late = 0;
-  for (const id of ids) {
-    const s = shipped.get(id);
-    if (!s?.any || s.unknown) continue; // nothing to ship from our warehouses, or no label to date it
-    const placedAt = Date.parse(orderDate.get(id)!);
-    const deadline = deadlineOf(orderDate.get(id)!);
-    if (s.done) { if (Date.parse(s.done) < deadline) onTime += 1; else late += 1; } else if (now >= deadline) {
-      if (now - placedAt <= 14 * DAY) late += 1; else diag.openPast14Days = (diag.openPast14Days ?? 0) + 1;
-    }
-  }
-  return { onTime, late };
-}
 
 // ---- Odoo (JSON-RPC, read only) ----------------------------------------------
 type Odoo = (model: string, method: string, args: unknown[], kwargs?: Record<string, unknown>) => Promise<any>;
@@ -263,7 +228,7 @@ async function odooClient(): Promise<Odoo> {
 
 // `untaxed`: in the company's currency (an order's own currency can differ —
 // Wayfair Canada pays in USD); `usd`: the same in USD.
-interface Order { id: number; date: string; state: string; untaxed: number; usd: number; pickings: number[]; mp: number | null }
+interface Order { id: number; date: string; state: string; untaxed: number; usd: number; mp: number | null }
 // `goods`: a product line, not a service (Odoo's "Shipping Charges").
 interface Line { orderId: number; sku: string | null; qty: number; subtotal: number; goods: boolean }
 /** A product sold with a price: not shipping, not a part or a unit sent free. */
@@ -271,13 +236,13 @@ const isSale = (l: Line) => l.goods && l.qty > 0 && l.subtotal > 0;
 
 async function loadOrders(odoo: Odoo, domain: unknown[], fromDay: string, toDay: string, skuOf: (code: string | null) => string | null, usdPerCompanyUnit: number) {
   const when = [["date_order", ">=", etMidnightUtc(fromDay)], ["date_order", "<", etMidnightUtc(toDay)], ["state", "in", ["sale", "done", "cancel"]]];
-  const rows = await odoo("sale.order", "search_read", [[...domain, ...when]], { fields: ["id", "date_order", "state", "amount_untaxed", "currency_rate", "currency_id", "picking_ids", "marketplace_name"] }) as { id: number; date_order: string; state: string; amount_untaxed: number; currency_rate: number; currency_id: [number, string]; picking_ids: number[]; marketplace_name: [number, string] | false }[];
+  const rows = await odoo("sale.order", "search_read", [[...domain, ...when]], { fields: ["id", "date_order", "state", "amount_untaxed", "currency_rate", "currency_id", "marketplace_name"] }) as { id: number; date_order: string; state: string; amount_untaxed: number; currency_rate: number; currency_id: [number, string]; marketplace_name: [number, string] | false }[];
   // Odoo's currency_rate = the order's currency per unit of the company's.
   const rate = new Map(rows.map((o) => [o.id, Number(o.currency_rate) || 1]));
   const orders: Order[] = rows.map((o) => {
     const amount = Number(o.amount_untaxed) || 0;
     const untaxed = amount / (rate.get(o.id) ?? 1);
-    return { id: o.id, date: isoOf(o.date_order), state: o.state, untaxed, usd: o.currency_id?.[1] === "USD" ? amount : untaxed * usdPerCompanyUnit, pickings: o.picking_ids ?? [], mp: o.marketplace_name ? o.marketplace_name[0] : null };
+    return { id: o.id, date: isoOf(o.date_order), state: o.state, untaxed, usd: o.currency_id?.[1] === "USD" ? amount : untaxed * usdPerCompanyUnit, mp: o.marketplace_name ? o.marketplace_name[0] : null };
   });
   const lines: Line[] = [];
   const productIds = new Set<number>();
@@ -302,151 +267,7 @@ async function loadOrders(odoo: Odoo, domain: unknown[], fromDay: string, toDay:
   return { orders, lines };
 }
 
-/** Outgoing deliveries of the orders: when each order was FULLY shipped (null = something still to ship). */
-// ---- ShipStation labels (copied into the PIM by shipstation-labels-sync) ------
 type Admin = ReturnType<typeof createClient>;
-interface LabelRow { tracking_number: string; created_at: string; cost: number | null; currency: string | null }
-const trackingRefs = (ref: string | false | null | undefined) => String(ref || "").split(/[,;\s]+/).map((t) => t.trim()).filter(Boolean);
-/** The labels of these tracking numbers (not voided, not return labels): the earliest per number. */
-async function labelsFor(admin: Admin, trackings: string[]): Promise<Map<string, LabelRow>> {
-  const out = new Map<string, LabelRow>();
-  const unique = [...new Set(trackings)];
-  for (let i = 0; i < unique.length; i += 200) {
-    const { data, error } = await admin.from("shipstation_labels").select("tracking_number, created_at, cost, currency")
-      .in("tracking_number", unique.slice(i, i + 200)).eq("voided", false).eq("is_return", false);
-    if (error) throw error;
-    for (const l of (data ?? []) as LabelRow[]) {
-      const prev = out.get(l.tracking_number);
-      if (!prev || l.created_at < prev.created_at) out.set(l.tracking_number, l);
-    }
-  }
-  return out;
-}
-
-/**
- * When each order was FULLY shipped, from its deliveries' ShipStation labels
- * (user, 2026-11-05: the real data — Odoo dated a batch of June–August
- * deliveries Oct 16, the day someone validated them). A delivery is shipped
- * when its label was made; done in Odoo without a label we know (a pickup, a
- * label made outside ShipStation) = unknown, and the order is left out
- * rather than guessed; not done and no label = not shipped yet.
- */
-async function shippedAt(odoo: Odoo, admin: Admin, orders: Order[], diag: Record<string, any>): Promise<Map<number, { done: string | null; any: boolean; unknown: boolean }>> {
-  const ids = orders.flatMap((o) => o.pickings);
-  const picks: { id: number; picking_type_code: string; state: string; return_id: [number, string] | false; carrier_tracking_ref: string | false }[] = [];
-  for (let i = 0; i < ids.length; i += 400) {
-    picks.push(...await odoo("stock.picking", "read", [ids.slice(i, i + 400)], { fields: ["picking_type_code", "state", "return_id", "carrier_tracking_ref"] }));
-  }
-  const byId = new Map(picks.map((p) => [p.id, p]));
-  const labels = await labelsFor(admin, picks.flatMap((p) => trackingRefs(p.carrier_tracking_ref)));
-  const out = new Map<number, { done: string | null; any: boolean; unknown: boolean }>();
-  for (const o of orders) {
-    const outgoing = o.pickings.map((id) => byId.get(id)).filter((p) => p && p.picking_type_code === "outgoing" && !p.return_id && p.state !== "cancel");
-    if (!outgoing.length) { out.set(o.id, { done: null, any: false, unknown: false }); continue; }
-    let unknown = false;
-    let pending = false;
-    let last = "";
-    for (const p of outgoing) {
-      const times = trackingRefs(p!.carrier_tracking_ref).map((t) => labels.get(t)?.created_at).filter(Boolean) as string[];
-      if (times.length) { const t = times.sort()[0]; if (t > last) last = t; } else if (p!.state === "done") unknown = true; else pending = true;
-    }
-    if (unknown) diag.shipNoLabel = (diag.shipNoLabel ?? 0) + 1;
-    out.set(o.id, { done: !unknown && !pending ? last : null, any: true, unknown });
-  }
-  return out;
-}
-
-/**
- * What shipping really costs the company per unit of each SKU on the store
- * (user, 2026-11-05: "lo más real y pura posible"): for every order of the
- * last `days` whose deliveries all have a ShipStation label with a cost in the
- * market's currency: each delivery's label cost shared among the products it
- * carried by their value (an accessory sent in a box of its own carries that
- * box alone; a kit is its own line), MINUS the shipping the customer paid
- * (Odoo's "Shipping Charges" service line — charged per order, so shared among
- * the order's products by value). An order with a delivery we cannot price
- * (no label we know, a $0 label, another currency) is left out — never
- * guessed. Per SKU: the shares summed ÷ the units sold (it can be negative
- * when customers paid more than the labels).
- */
-async function shipCostPerUnit(odoo: Odoo, admin: Admin, pickDomain: unknown[], sinceDay: string, currency: string, skuOf: (code: string | null) => string | null, diag: Record<string, any>): Promise<Map<string, number>> {
-  // Odoo's done date can be late (a batch validated weeks after), so a month more; the label date decides.
-  const picks = await odoo("stock.picking", "search_read", [[...pickDomain, ["picking_type_code", "=", "outgoing"], ["return_id", "=", false], ["state", "=", "done"], ["date_done", ">=", etMidnightUtc(addDays(sinceDay, -30))]]], { fields: ["carrier_tracking_ref", "sale_id", "move_ids"] }) as { carrier_tracking_ref: string | false; sale_id: [number, string] | false; move_ids: number[] }[];
-  const labels = await labelsFor(admin, picks.flatMap((p) => trackingRefs(p.carrier_tracking_ref)));
-  const sinceMs = etMs(sinceDay);
-  // Per order: its deliveries with their label cost, or null when one cannot be priced.
-  const deliveries = new Map<number, { cost: number; moves: number[] }[] | null>();
-  const recent = new Set<number>();
-  for (const p of picks) {
-    if (!p.sale_id) continue;
-    const orderId = p.sale_id[0];
-    const ls = trackingRefs(p.carrier_tracking_ref).map((t) => labels.get(t));
-    const ok = ls.length > 0 && ls.every((l) => l && Number(l.cost) > 0 && (l.currency ?? "").toUpperCase() === currency);
-    if (!ok) { deliveries.set(orderId, null); continue; }
-    if (ls.some((l) => Date.parse(l!.created_at) >= sinceMs)) recent.add(orderId);
-    const prev = deliveries.get(orderId);
-    if (prev === null) continue;
-    deliveries.set(orderId, [...(prev ?? []), { cost: ls.reduce((s, l) => s + Number(l!.cost), 0), moves: p.move_ids ?? [] }]);
-  }
-  const orderIds = [...recent].filter((id) => deliveries.get(id) != null);
-  diag.ordersPriced = orderIds.length;
-  diag.ordersWithoutKnownShipCost = [...deliveries.values()].filter((v) => v === null).length;
-  const moveIds = orderIds.flatMap((id) => deliveries.get(id)!.flatMap((d) => d.moves));
-  const lineOfMove = new Map<number, number>();
-  for (let i = 0; i < moveIds.length; i += 400) {
-    for (const m of await odoo("stock.move", "read", [moveIds.slice(i, i + 400)], { fields: ["sale_line_id"] }) as { id: number; sale_line_id: [number, string] | false }[]) {
-      if (m.sale_line_id) lineOfMove.set(m.id, m.sale_line_id[0]);
-    }
-  }
-  const lines: { id: number; order_id: [number, string]; product_id: [number, string] | false; product_uom_qty: number; price_subtotal: number; is_delivery: boolean }[] = [];
-  for (let i = 0; i < orderIds.length; i += 400) {
-    lines.push(...await odoo("sale.order.line", "search_read", [[["order_id", "in", orderIds.slice(i, i + 400)], ["display_type", "=", false]]], { fields: ["id", "order_id", "product_id", "product_uom_qty", "price_subtotal", "is_delivery"] }));
-  }
-  const prodIds = [...new Set(lines.filter((l) => l.product_id).map((l) => (l.product_id as [number, string])[0]))];
-  const code = new Map<number, string | null>();
-  const service = new Set<number>();
-  for (let i = 0; i < prodIds.length; i += 400) {
-    for (const pr of await odoo("product.product", "read", [prodIds.slice(i, i + 400)], { fields: ["default_code", "type"] }) as { id: number; default_code: string | false; type: string }[]) {
-      code.set(pr.id, pr.default_code || null);
-      if (pr.type === "service") service.add(pr.id);
-    }
-  }
-  const byOrder = new Map<number, typeof lines>();
-  for (const l of lines) { const k = l.order_id[0]; if (!byOrder.has(k)) byOrder.set(k, []); byOrder.get(k)!.push(l); }
-  const ship = new Map<string, { cost: number; units: number }>();
-  let charged = 0;
-  let labelled = 0;
-  for (const orderId of orderIds) {
-    const ls = byOrder.get(orderId) ?? [];
-    const isShipping = (l: typeof lines[number]) => l.is_delivery || (l.product_id && service.has(l.product_id[0]));
-    const paidShipping = ls.filter(isShipping).reduce((s, l) => s + (Number(l.price_subtotal) || 0), 0);
-    const goods = ls.filter((l) => !isShipping(l) && l.product_id && l.product_uom_qty > 0 && l.price_subtotal > 0);
-    const total = goods.reduce((s, l) => s + l.price_subtotal, 0);
-    if (!goods.length || total <= 0) continue;
-    // Each line's share: of every box it travelled in, and of the shipping charged.
-    const share = new Map<number, number>(goods.map((l) => [l.id, -paidShipping * (l.price_subtotal / total)]));
-    for (const d of deliveries.get(orderId)!) {
-      const inBox = goods.filter((l) => d.moves.some((m) => lineOfMove.get(m) === l.id));
-      const carriers = inBox.length ? inBox : goods; // a box whose moves name no sale line: the order's products
-      const boxValue = carriers.reduce((s, l) => s + l.price_subtotal, 0);
-      for (const l of carriers) share.set(l.id, share.get(l.id)! + d.cost * (l.price_subtotal / boxValue));
-      labelled += d.cost;
-    }
-    charged += paidShipping;
-    for (const l of goods) {
-      const sku = skuOf(code.get((l.product_id as [number, string])[0]) ?? null);
-      if (!sku) continue;
-      const cur = ship.get(sku) ?? { cost: 0, units: 0 };
-      cur.cost += share.get(l.id)!;
-      cur.units += l.product_uom_qty;
-      ship.set(sku, cur);
-    }
-  }
-  diag.labelCostOfPricedOrders = round2(labelled);
-  diag.shippingChargedOnThem = round2(charged);
-  diag.skusWithShipCost = ship.size;
-  return new Map([...ship].map(([sku, v]) => [sku, v.cost / v.units]));
-}
 
 /**
  * The returns Odoo RECEIVED for the channel's orders since `sinceDay`: when,
@@ -792,7 +613,6 @@ Deno.serve(async (req) => {
     const odoo = await odooClient();
     const oldest = loop.at(-1)!;
     const newest = loop[0];
-    const now = Date.now();
     const out: { metricId: string; board: string; market: string; name: string; key: string; week: string; value: number | null; note?: string | null }[] = [];
     const diagnostics: Record<string, Record<string, any>> = {};
 
@@ -984,13 +804,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Shipping: the paid orders of the columns' weeks and when they were fully shipped.
-        let shipped: Map<number, { done: string | null; any: boolean }> | null = null;
-        if (SHIP_KEYS.some((k) => keys.has(k))) {
-          const since = isoOf(etMidnightUtc(addDays(oldest, -7)));
-          // Only what we ship ourselves (Amazon FBA ships from Amazon's stock).
-          shipped = await shippedAt(odoo, admin, orders.filter((o) => o.date >= since && paidOrderIds.has(o.id) && (!src.ships || (o.mp != null && src.ships.includes(o.mp)))), diag);
-        }
         // The store's own orders (cancelled, refunded) and the returns Odoo received.
         let wixList: WixOrder[] = [];
         let refunds: { orderId: string; at: string; amount: number }[] = [];
@@ -1071,13 +884,6 @@ Deno.serve(async (req) => {
           if (keys.has("listings_updated") && (src.wixSites || ((src.exports || src.wayfair) && column > LISTING_LOG_FROM))) {
             value.listings_updated = new Set(pushes.filter((p) => p.occurred_at >= isoOf(etMidnightUtc(from)) && p.occurred_at < isoOf(etMidnightUtc(column))).map((p) => p.entity_id)).size;
           }
-          if (shipped) {
-            // The week's paid orders: shipped by their deadline, after it, or
-            // not yet with the deadline gone (shipTally).
-            const { onTime, late } = shipTally(paidOrders, shipped, orderDate, now, diag);
-            value.on_time_ship = ratio(onTime, onTime + late);
-            value.late_ship_rate = ratio(late, onTime + late);
-          }
           if (src.wix && WIX_KEYS.some((k) => keys.has(k))) {
             // The store's paid orders of the week (Wix): cancelled; defective =
             // cancelled, refunded or returned (user, 2026-11-05).
@@ -1139,9 +945,10 @@ Deno.serve(async (req) => {
             if (keys.has("no_profit_skus") && src.wix) {
               // Not profitable (user, 2026-11-05): this week's price on the store
               // (the running monthly promotion, else the regular price) under
-              // Odoo's average cost plus the SKU's real shipping cost per unit of
-              // the last 180 days (ShipStation labels). A SKU we never shipped
-              // in that time has no shipping cost to add: only its cost counts.
+              // Odoo's average cost. Until 2026-11-17 the SKU's real shipping cost
+              // per unit (ShipStation's labels) was added to the cost; ShipStation
+              // is no source of the ScoreCard any more, and Odoo keeps no shipping
+              // cost, so only the cost counts — as it did for a SKU never shipped.
               const site = WIX_SITES[src.wix];
               const promo = new Map<string, number>();
               if (site.promoAware) {
@@ -1159,14 +966,12 @@ Deno.serve(async (req) => {
                 }
               }
               const costs = await costsBySku(odoo, src.company, live.map((p) => p.sku));
-              const shipping = await shipCostPerUnit(odoo, admin, via(src.odoo, "sale_id."), addDays(today, -180), site.market === "us" ? "USD" : "CAD", skuOf, diag);
               const below: string[] = [];
               for (const p of live) {
                 const price = promo.get(p.sku) ?? (p as Record<string, unknown>)[site.priceField] as number | null;
                 const cost = costs.get(p.sku);
                 if (price == null || cost == null) continue;
-                const ship = shipping.get(p.sku) ?? 0;
-                if (Number(price) < cost + ship) below.push(`${p.sku} ${price} < ${round2(cost)}${ship ? ` ${ship > 0 ? "+" : "-"} ${round2(Math.abs(ship))} net shipping` : ""}`);
+                if (Number(price) < cost) below.push(`${p.sku} ${price} < ${round2(cost)}`);
               }
               diag.costsKnown = costs.size;
               diag.promoPrices = promo.size;
@@ -1291,8 +1096,8 @@ Deno.serve(async (req) => {
       diagnostics[OPS_BOARD] = diag;
       if (rows.length) {
         out.push(...await operationsValues({
-          admin, odoo, rows, loop, thisColumn, runColumn, now, diag,
-          tools: { addDays, etMidnightUtc, isoOf, etMs, etDayOf, weekday, round2, ratio, shipDeadline, shippedAt, shipTally, receivedReturns, costsBySku, usdPerUnit },
+          admin, odoo, rows, loop, thisColumn, runColumn, diag,
+          tools: { addDays, etMidnightUtc, isoOf, etMs, round2, ratio, receivedReturns, costsBySku, usdPerUnit },
         }));
       }
     }

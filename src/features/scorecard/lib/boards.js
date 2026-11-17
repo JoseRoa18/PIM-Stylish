@@ -5,8 +5,8 @@
 // (priceAlignment.js ALIGN_TARGETS) its MAP % reads. Lowe's is the USA
 // channel (its sheet said Canada, but its sales are in USD); BB&B and
 // Overstock share one sheet and one exclusion switch. `serverFill` boards
-// also get the server-side numbers (Odoo orders, ShipStation labels, stock,
-// Activity Log) — every tab since 2026-11-05 (BOARDS in scorecard-fill says
+// also get the server-side numbers (Odoo orders, stock, Activity Log; never
+// ShipStation — user, 2026-11-17) — every tab since 2026-11-05 (BOARDS in scorecard-fill says
 // how to find each one's orders in Odoo).
 export const BOARDS = [
   {

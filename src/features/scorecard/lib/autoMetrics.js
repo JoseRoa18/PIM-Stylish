@@ -36,12 +36,12 @@ export const AUTO_KEYS = {
   units: { label: 'Units sold — products sold with a price in paid Odoo orders (not shipping)', unit: 'number', server: true },
   // From the store itself (Wix) and Odoo's deliveries / returns (user, 2026-11-05).
   cancel_rate: { label: 'Order cancelation rate — the store\'s paid orders of the week cancelled (Wix)', unit: 'percent', server: true, store: true },
-  on_time_ship: { label: 'On-time shipping — paid orders whose ShipStation labels were all made by the 2nd business day', unit: 'percent', server: true },
-  late_ship_rate: { label: 'Late shipping rate — paid orders labelled after the 2nd business day, or still waiting past it (ShipStation)', unit: 'percent', server: true },
+  // ShipStation is no source of the ScoreCard (user, 2026-11-17: "Desconecta ShipStation de EOS ScoreCard … de
+  // cualquier item o KPI"): on-time and late shipping are typed rows — the keys on_time_ship / late_ship_rate are gone.
   odr: { label: 'Order defect rate — paid orders of the week cancelled, refunded or returned (Wix + Odoo)', unit: 'percent', server: true, store: true },
   returns_not_received: { label: '$ refunded in the week on orders whose goods never came back (Wix refunds, Odoo returns)', unit: 'money', server: true, store: true },
   reviews_5plus: { label: '# products with more than 5 approved reviews on the store (Wix Reviews)', unit: 'number', server: true, store: true },
-  no_profit_skus: { label: '# SKUs priced on the store this week below Odoo\'s average cost + their real shipping cost per unit (ShipStation labels, 180 days)', unit: 'number', server: true, store: true, alsoOn: ['bbb_overstock'] },
+  no_profit_skus: { label: '# SKUs whose price this week is below Odoo\'s average cost (the store\'s price; on BB&B / Overstock, what the marketplace pays us)', unit: 'number', server: true, store: true, alsoOn: ['bbb_overstock'] },
   skus_not_sold_90d: { label: '# SKUs without a sale in 90 days — the products the marketplace lists (its ids or its Where to Buy link in the PIM) vs Odoo orders', unit: 'number', server: true },
   // Amazon sells from two stocks (2026-11-16): what it holds itself (FBA — Odoo's AMZ-CAN / AMZ-USA warehouses) and our
   // warehouse. Every product Amazon holds none of counts, whatever we have (user: "tiene que ser todo").
@@ -72,18 +72,9 @@ export const AUTO_KEYS = {
   ops_care_tickets_closed: { label: 'Tickets closed — WeCare: the customers\' tickets closed in the week, automated notifications left out', unit: 'number', server: true, ops: true },
   ops_care_resolution_hours: { label: 'Resolution time — WeCare: hours from a ticket\'s creation to its closing, for the tickets closed in the week (the clock runs nights and weekends, as on WeCare\'s dashboard)', unit: 'hours', server: true, ops: true },
   ops_care_csat: { label: 'Customer satisfaction — WeCare\'s survey: share of the week\'s answers rating 4 or 5 of 5', unit: 'percent', server: true, ops: true },
-  ops_label_cost: { label: 'Shipping cost per label — ShipStation: Canada, the week\'s cost ÷ every label (the marketplaces\' prepaid ones count as $0, as on its dashboard); USA, the average of the labels we paid for', unit: 'money', server: true, ops: true },
-  ops_orders_processed: { label: 'Orders processed — the labels made in the week (ShipStation)', unit: 'number', server: true, ops: true },
-  ops_return_label_cost: { label: 'Cost per return label — the average of the week\'s return labels (ShipStation)', unit: 'money', server: true, ops: true },
-  ops_ontime_homedepot: { label: 'On-time shipping, Home Depot — the number of its own tab: paid orders labelled by the 2nd business day', unit: 'percent', server: true, ops: true },
-  ops_ontime_rona: { label: 'On-time shipping, Rona — the number of its own tab: paid orders labelled by the 2nd business day', unit: 'percent', server: true, ops: true },
-  ops_ontime_amazon: { label: 'On-time shipping, Amazon (the orders we ship, not FBA) — the number of its own tab: paid orders labelled by the 2nd business day', unit: 'percent', server: true, ops: true },
-  ops_ontime_walmart: { label: 'On-time shipping, Walmart — the number of its own tab: paid orders labelled by the 2nd business day', unit: 'percent', server: true, ops: true },
-  ops_ontime_bestbuy: { label: 'On-time shipping, Best Buy — the number of its own tab: paid orders labelled by the 2nd business day', unit: 'percent', server: true, ops: true },
-  ops_ontime_lowes: { label: 'On-time shipping, Lowe\'s — the number of its own tab: paid orders labelled by the 2nd business day', unit: 'percent', server: true, ops: true },
-  ops_sameday_wayfair: { label: 'Same-day shipping, Wayfair — paid orders whose labels were all made the day of the order', unit: 'percent', server: true, ops: true },
-  ops_on_time: { label: 'Orders processed on time — every paid order we ship (not Amazon FBA) labelled by the 2nd business day', unit: 'percent', server: true, ops: true },
-  ops_late_24h: { label: 'Orders not processed in 24 h — paid orders we ship not labelled by the end of the next business day', unit: 'number', server: true, ops: true },
+  // Typed since 2026-11-17, when ShipStation left the ScoreCard (their keys are gone): cost per label, orders
+  // processed, return label cost, same-day shipping, processed on time, not processed in 24 h, and each
+  // marketplace's on-time shipping.
   ops_returns_processed: { label: 'Returns processed — the returns Odoo received at the country\'s warehouse in the week', unit: 'number', server: true, ops: true },
   ops_returns_to_stock: { label: 'Returns back to stock — share of the units Odoo received back that went to stock', unit: 'percent', server: true, ops: true },
   ops_returns_to_openbox: { label: 'Returns to Open Box — share of the units Odoo received back that went to Open Box', unit: 'percent', server: true, ops: true },
