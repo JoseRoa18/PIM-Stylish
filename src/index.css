@@ -76,6 +76,27 @@
   --color-brand-walmart: #0071ce;
   --color-brand-walmart-ink: #005bb5; /* small text on its 10% tint (axe 2026-11-10) */
 
+  /* The kinds of promotion on Pricing's calendar (2026-11-16): the colour
+     itself for what is no text (a chip's spine, a dot, a day's strip — 3:1 or
+     more on every surface), its container for the chip and the text on it
+     (7.8:1 or more). Monthly is amber and peak season purple, like the Orange
+     and Purple price levels they run at. */
+  --color-promo-monthly: #b8690a;
+  --color-promo-monthly-container: #fbe9d0;
+  --color-on-promo-monthly-container: #6b3a00;
+  --color-promo-flash: #2a6ab5;
+  --color-promo-flash-container: #dce9f8;
+  --color-on-promo-flash-container: #123f73;
+  --color-promo-mk: #1c7d6e;
+  --color-promo-mk-container: #d6eeea;
+  --color-on-promo-mk-container: #0b4a40;
+  --color-promo-special: #6f42b5;
+  --color-promo-special-container: #e9e0f7;
+  --color-on-promo-special-container: #40216f;
+  --color-promo-coupon: #b03a72;
+  --color-promo-coupon-container: #f8e0eb;
+  --color-on-promo-coupon-container: #6b1840;
+
   /* ============================================
      STYLISH BRAND FONTS
      Real fonts if installed, Jost as web fallback
@@ -231,6 +252,23 @@
   --color-brand-bestbuy: #9dc2ff;
   --color-brand-walmart: #7fb6ff;
   --color-brand-walmart-ink: #7fb6ff;
+
+  /* The calendar's kinds: lighter colours, deep containers */
+  --color-promo-monthly: #f0a858;
+  --color-promo-monthly-container: #5a3a12;
+  --color-on-promo-monthly-container: #ffdcb0;
+  --color-promo-flash: #86b6f2;
+  --color-promo-flash-container: #1e3c63;
+  --color-on-promo-flash-container: #cfe2ff;
+  --color-promo-mk: #62cbb9;
+  --color-promo-mk-container: #15463f;
+  --color-on-promo-mk-container: #b4efe3;
+  --color-promo-special: #b998ee;
+  --color-promo-special-container: #442a70;
+  --color-on-promo-special-container: #e6d6ff;
+  --color-promo-coupon: #ee8cb9;
+  --color-promo-coupon-container: #5e2142;
+  --color-on-promo-coupon-container: #ffd3e6;
 }
 
 /* ============================================

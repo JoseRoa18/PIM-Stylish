@@ -35,13 +35,14 @@ function leftOutNote(reviewed) {
 }
 
 /** Coupons on Sinks Direct, Wayfair and Amazon: several can run at once. A record only: nothing is sent anywhere. */
-export default function CouponsTab({ canEdit, confirm }) {
+// `initialOpenId`: the coupon to open once the list is in (a click on Pricing's calendar).
+export default function CouponsTab({ canEdit, confirm, initialOpenId = null }) {
   const [coupons, setCoupons] = useState(null);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
-  const [openId, setOpenId] = useState(null);
+  const [openId, setOpenId] = useState(initialOpenId);
 
   async function reload() {
     try {
@@ -71,6 +72,15 @@ export default function CouponsTab({ canEdit, confirm }) {
       document.getElementById(`coupon-card-${id}`)?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
     }));
   }
+  // The coupon asked for from the calendar: its card is open from the start, and comes into view once it is drawn.
+  const loaded = coupons !== null;
+  useEffect(() => {
+    if (!loaded || !initialOpenId) return;
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById(`coupon-card-${initialOpenId}`)?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+    }));
+  }, [loaded, initialOpenId]);
 
   return (
     <>

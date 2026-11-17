@@ -70,6 +70,8 @@ import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor } from '@/features/pricing/lib/promoChannels';
 import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promoCalendar';
+import PromoCalendar from '@/features/pricing/components/PromoCalendar';
+import { initialCalendar } from '@/features/pricing/lib/promoCalendarItems';
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { useTemplates } from '@/features/templates/hooks/useTemplates';
 import DealsOverview from '@/features/pricing/components/DealsOverview';
@@ -223,12 +225,16 @@ export default function PricingPage() {
   const confirm = useConfirm();
   const location = useLocation();
   const navigate = useNavigate();
-  // 'monthly' | 'flash' | 'mk_event' | 'special' — one section per promotion kind — and 'coupons', 'alignment'.
+  // 'calendar' — every kind by its dates, the tab the page opens on (user, 2026-11-16) —, then
+  // 'monthly' | 'flash' | 'mk_event' | 'special', one section per promotion kind, and 'coupons', 'alignment'.
   // The Dashboard's Price Alignment card lands on the alignment tab, on the
   // channel picked there (router state { pricingTab, alignSite }).
-  const [tab, setTab] = useState(() => (location.state?.pricingTab === 'alignment' ? 'alignment' : 'monthly'));
+  const [tab, setTab] = useState(() => (location.state?.pricingTab === 'alignment' ? 'alignment' : 'calendar'));
   const [alignSite] = useState(() => location.state?.alignSite ?? null);
-  const kindTab = tab !== 'alignment' && tab !== 'coupons';
+  const kindTab = tab !== 'alignment' && tab !== 'coupons' && tab !== 'calendar';
+  // The calendar's month, view and filters, kept here so they are as they were left when the person comes back to it.
+  const [calendar, setCalendar] = useState(initialCalendar);
+  const [couponToOpen, setCouponToOpen] = useState(null); // the coupon a click on the calendar opens
   const [promotions, setPromotions] = useState(null);
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
@@ -266,6 +272,17 @@ export default function PricingPage() {
     }));
   }
 
+  // A click on the calendar: the promotion's card on its own tab, or the coupon's on Coupons.
+  function openFromCalendar(item) {
+    if (item.source === 'coupon') {
+      setCouponToOpen(item.id);
+      setTab('coupons');
+      return;
+    }
+    setTab(item.kind);
+    openDeal(item.id);
+  }
+
   async function reload() {
     try {
       const list = await listPromotions();
@@ -279,10 +296,12 @@ export default function PricingPage() {
   useEffect(() => { reload(); }, []);
 
   return (
-    <div className="max-w-5xl space-y-6">
+    // The calendar takes the page's whole width (a month needs it); every other tab keeps the narrow column, on the same left edge.
+    <div className={`${tab === 'calendar' ? 'max-w-none' : 'max-w-5xl'} space-y-6`}>
       <div>
         <h1 className="text-display-lg text-on-surface">Pricing</h1>
         <p className="text-body-md text-on-surface-variant mt-1">
+          {tab === 'calendar' && 'Every promotion, deal, event and coupon by its dates: what starts, what ends and what is running each day, on every marketplace.'}
           {tab === 'monthly' && 'Monthly promotions for all marketplaces: the market calendar drives them and the boundaries run on their own.'}
           {tab === 'flash' && 'Flash deals: short promotions on their own dates, exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
           {tab === 'mk_event' && 'MK events: promotions on their own dates at the Orange level (Bed Bath & Beyond and Overstock at Purple), exported by hand from here. One made for Sinks Direct goes on the store by itself on its dates.'}
@@ -297,7 +316,7 @@ export default function PricingPage() {
           an inset shadow: this row scrolls sideways on a phone, and a border
           pulled over it with a negative margin would be clipped. */}
       <div className="flex max-w-full overflow-x-auto scrollbar-hide shadow-[inset_0_-1px_0_0_var(--color-outline-variant)]" role="tablist" aria-label="Pricing sections">
-        {[['monthly', 'Monthly Promotions'], ['flash', 'Flash Deals'], ['mk_event', 'MK Events'], ['special', 'Peak Season Events'], ['coupons', 'Coupons'], ['alignment', 'Price Alignment']].map(([key, label]) => (
+        {[['calendar', 'Calendar'], ['monthly', 'Monthly Promotions'], ['flash', 'Flash Deals'], ['mk_event', 'MK Events'], ['special', 'Peak Season Events'], ['coupons', 'Coupons'], ['alignment', 'Price Alignment']].map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -330,7 +349,9 @@ export default function PricingPage() {
 
       {tab === 'alignment' && <PriceAlignmentCard canEdit={canEdit} confirm={confirm} initialSite={alignSite} />}
 
-      {tab === 'coupons' && <CouponsTab canEdit={canEdit} confirm={confirm} />}
+      {tab === 'calendar' && <PromoCalendar promotions={promotions} state={calendar} onState={setCalendar} onOpen={openFromCalendar} />}
+
+      {tab === 'coupons' && <CouponsTab canEdit={canEdit} confirm={confirm} initialOpenId={couponToOpen} />}
 
       {kindTab && canEdit && (
         <div>
