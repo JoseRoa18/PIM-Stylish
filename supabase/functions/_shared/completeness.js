@@ -76,6 +76,14 @@ const filled = (v) => {
   return text(String(v));
 };
 const has = (k) => (p) => filled(attr(p, k));
+// An on / off switch of the product page (AttrField type="boolean") is never
+// missing (user, 2026-11-19: "el producto lo tiene apagado, significa que no
+// tiene, pero lo marca como faltante"). The page draws a value that was never
+// stored as OFF, exactly like a stored No, and a save with the switch off
+// stores nothing — nobody could answer "No" there, so off IS the answer. Read
+// as the page draws it: nothing stored = No. A Yes / No dropdown is another
+// thing: its empty choice shows empty, and stays missing (2026-10-05).
+const onOff = (k) => (p) => filled(attr(p, k) || false);
 const hasNum = (k) => (p) => num(Number(attr(p, k)));
 const yes = (v) => v === true || /^(yes|true)$/i.test(String(v ?? '').trim());
 const doubleBowl = (p) => Number(field(p, 'number_of_bowls')) >= 2;
@@ -159,14 +167,14 @@ export const CHECKS = [
   { key: 'bowls', label: 'Number of Bowls', group: 'Specifications', section: 'Bowl Configuration', cats: SINKS, check: (p) => num(Number(field(p, 'number_of_bowls'))) },
   { key: 'bowl_configuration', label: 'Bowl Configuration', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: has('bowl_configuration') },
   { key: 'basin_split', label: 'Basin Split (double bowl)', group: 'Specifications', section: 'Bowl Configuration', cats: SINKS, applies: doubleBowl, check: has('basin_split') },
-  { key: 'low_divider', label: 'Low Divider', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: has('low_divider') },
+  { key: 'low_divider', label: 'Low Divider', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: onOff('low_divider') },
   { key: 'strainer_model', label: 'Strainer Model', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: has('strainer_model') },
   { key: 'sink_radius', label: 'Sink Radius (mm)', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: hasNum('sink_radius_mm') },
   { key: 'drain', label: 'Drain Diameter', group: 'Specifications', section: 'Bowl Configuration', cats: SINKS, check: (p) => num(Number(field(p, 'drain_diameter_in'))) },
   // Bathroom sinks show it in their own "Bathroom Sink" section.
   { key: 'drain_location', label: 'Drain Location', group: 'Specifications', section: 'Bowl Configuration', cats: SINKS, check: (p) => text(String(attr(p, 'drain_hole_location') ?? '')) },
-  { key: 'has_grooves', label: 'Has Grooves', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: has('has_grooves') },
-  { key: 'includes_grids', label: 'Includes Grids', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: has('includes_grids') },
+  { key: 'has_grooves', label: 'Has Grooves', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: onOff('has_grooves') },
+  { key: 'includes_grids', label: 'Includes Grids', group: 'Specifications', section: 'Bowl Configuration', cats: KITCHEN_SINKS, check: onOff('includes_grids') },
 
   // ---- Specifications: Faucet Configuration ----
   { key: 'spout_type', label: 'Spout Type', group: 'Specifications', section: 'Faucet Configuration', cats: KITCHEN_FAUCETS, check: has('spout_type') },
@@ -178,14 +186,14 @@ export const CHECKS = [
   { key: 'mounting_type', label: 'Mounting / Installation Type', group: 'Specifications', section: 'Faucet Configuration', cats: FAUCETS, check: has('mounting_type') },
   { key: 'connection_size', label: 'Connection Size', group: 'Specifications', section: 'Faucet Configuration', cats: FAUCETS, check: has('connection_size') },
   { key: 'lock_type', label: 'Lock Type', group: 'Specifications', section: 'Faucet Configuration', cats: KITCHEN_FAUCETS, check: has('lock_type') },
-  { key: 'hot_cold_dispenser', label: 'Hot & Cold Dispenser', group: 'Specifications', section: 'Faucet Configuration', cats: KITCHEN_FAUCETS, check: has('hot_cold_dispenser') },
+  { key: 'hot_cold_dispenser', label: 'Hot & Cold Dispenser', group: 'Specifications', section: 'Faucet Configuration', cats: KITCHEN_FAUCETS, check: onOff('hot_cold_dispenser') },
 
   // ---- Specifications: Handles, Spray & Cartridge ----
   { key: 'handles', label: 'Number of Handles', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: FAUCETS, check: (p) => Number.isFinite(Number(attr(p, 'number_of_handles'))) && attr(p, 'number_of_handles') !== null },
-  { key: 'handles_included', label: 'Handle(s) Included', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: FAUCETS, check: has('handles_included') },
+  { key: 'handles_included', label: 'Handle(s) Included', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: FAUCETS, check: onOff('handles_included') },
   { key: 'handle_style', label: 'Handle Style', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: FAUCETS, check: has('handle_style') },
-  { key: 'cold_start_handle', label: 'Cold Start Handle', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: KITCHEN_FAUCETS, check: has('cold_start_handle') },
-  { key: 'spray_included', label: 'Spray Included', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: KITCHEN_FAUCETS, check: has('spray_included') },
+  { key: 'cold_start_handle', label: 'Cold Start Handle', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: KITCHEN_FAUCETS, check: onOff('cold_start_handle') },
+  { key: 'spray_included', label: 'Spray Included', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: KITCHEN_FAUCETS, check: onOff('spray_included') },
   { key: 'spray_type', label: 'Spray Type (with spray)', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: KITCHEN_FAUCETS, applies: (p) => yes(attr(p, 'spray_included')), check: has('spray_type') },
   { key: 'spray_activation', label: 'Spray Activation (with spray)', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: KITCHEN_FAUCETS, applies: (p) => yes(attr(p, 'spray_included')), check: has('spray_function_activation') },
   { key: 'spray_head_functions', label: 'Spray Head Functions (with spray)', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: KITCHEN_FAUCETS, applies: (p) => yes(attr(p, 'spray_included')), check: has('spray_head_functions') },
