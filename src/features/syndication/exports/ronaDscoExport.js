@@ -1,3 +1,4 @@
+import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
 import { countryFromList } from '@/features/products/lib/countries';
 import { WAREHOUSE, boxCount, boxSize, competitorPrices } from './ronaExport';
@@ -29,6 +30,7 @@ const MAX_BOXES = 10;
 // that belong in it. A category not listed here takes what Templates gave it.
 const CATEGORY_FITS = [
   [/bathroom sink faucets?$/i, (p) => p.category === 'bathroom_faucet', 'bathroom faucets'],
+  [/bathroom sinks?$/i, (p) => p.category === 'bathroom_sink', 'bathroom sinks'],
 ];
 
 const attr = (p) => p.attributes ?? {};
@@ -53,6 +55,17 @@ const titleOf = (p) => attr(p).general_title_en || p.model_name || '';
 const tagsOf = (p) => list(attr(p).durability_tags).join(' | ');
 const describes = (p) => `${p.product_type ?? ''} ${titleOf(p)} ${list(attr(p).accessories_included).join(' ')}`;
 const materials = (p) => `${p.material ?? ''} ${attr(p).handle_material ?? ''} ${titleOf(p)}`;
+const isSink = (p) => /sink/i.test(p.category ?? '');
+// What comes in the box: the product page's Includes list. On a sink it is kept
+// (P-200D is P-200 with its pop-up drain), so a sink without one includes none;
+// the PIM keeps no such list for a faucet, and nothing is said for it.
+const included = (p) => list(attr(p).accessories_included).map(String);
+const includedSkus = (p, re) => included(p).filter((a) => re.test(a)).map((a) => a.match(/\(([A-Za-z0-9-]+)\)/)?.[1]).filter(Boolean);
+const withFaucet = (p) => !isSink(p) || /faucet/i.test(`${included(p).join(' ')} ${titleOf(p).replace(/faucet holes?/gi, '')}`);
+// A sink's faucet holes: its own count, else the count the faucet fields carry (0 on a sink without a deck).
+const faucetHoles = (p) => { const own = num(attr(p).number_of_faucet_holes); return own === '' ? num(attr(p).number_of_installation_holes) : own; };
+const outside = (p) => attr(p).external_dimensions_in ?? {};
+const mountOf = (p) => words(attr(p).mounting_type || list(attr(p).installation_type)[0] || '');
 const isJpg = (url) => /\.jpe?g(?:[?#]|$)/i.test(String(url ?? ''));
 const isMp4 = (url) => /\.mp4(?:[?#]|$)/i.test(String(url ?? ''));
 
@@ -171,7 +184,8 @@ const RULES = {
   handletype: (p) => attr(p).handle_style ?? '',
   handlesincluded: (p) => yesNo(switchOn(attr(p).handles_included)),
   manufacturercolorfinish: (p) => p.finish ?? '',
-  maxflowrate: (p, x) => { const n = num(attr(p).max_flow_rate); return n === '' ? '' : x.options.find((o) => parseFloat(o) === n) ?? `${n} GPM`; },
+  // A sink sold without a faucet has no flow: the list's own "N/A" where it has one.
+  maxflowrate: (p, x) => { const n = num(attr(p).max_flow_rate); return n === '' ? (withFaucet(p) ? '' : 'N/A') : x.options.find((o) => parseFloat(o) === n) ?? `${n} GPM`; },
   maximumfaucetheightin: (p) => num(attr(p).faucet_height_in),
   mountinglocation: (p) => { const m = `${attr(p).mounting_type ?? ''} ${list(attr(p).installation_type).join(' ')}`; return /wall/i.test(m) ? 'Wall-mount' : /deck|single|hole|centerset|widespread|vessel/i.test(m) ? 'Deck-mount' : ''; },
   mountingtype: (p) => { const m = words(attr(p).mounting_type); return [m, m.replace(/-/g, ' '), /single/i.test(m) ? 'Single hole' : '']; },
@@ -188,6 +202,50 @@ const RULES = {
   valveincluded: (p) => yesNo(switchOn(attr(p).valve_included)),
   warranty: (p) => warrantyChoices(p),
   collectionname: (p) => p.series || 'N/A',
+
+  // ---- sinks ----
+  // What a sink is, from its own type and name.
+  corner: (p) => yesNo(/\bcorner\b/i.test(describes(p))),
+  trough: (p) => yesNo(/\btrough\b/i.test(describes(p))),
+  cutoutlengthin: (p) => num(attr(p).cut_out_dimensions_in?.length),
+  cutoutwidthin: (p) => num(attr(p).cut_out_dimensions_in?.width),
+  depthofbowlin: (p) => num(attr(p).internal_dimensions_in?.depth),
+  // Rona's length, width and height are the PIM's length, width and depth.
+  overalllengthin: (p) => num(outside(p).length),
+  overallwidthin: (p) => num(outside(p).width),
+  overallheightin: (p) => num(outside(p).depth),
+  // A vessel stands on the counter with its whole height; an undermount sink is all below it.
+  heightabovecounterin: (p) => (/vessel/i.test(mountOf(p)) ? num(outside(p).depth) : /under/i.test(mountOf(p)) ? 0 : ''),
+  weightlbs: (p) => num(attr(p).product_weight_lb),
+  drainconnectiondiameterin: (p) => num(attr(p).drain_diameter_in),
+  drainincluded: (p) => (included(p).some((a) => /drain/i.test(a)) ? 'Yes' : isSink(p) ? 'No' : ''),
+  // The finish of the drain that comes with it, as the PIM has that drain.
+  drainfinish: (p, x) => {
+    if (!isSink(p)) return '';
+    const drain = includedSkus(p, /drain/i).map((sku) => x.parts[sku]).find(Boolean);
+    if (!included(p).some((a) => /drain/i.test(a))) return 'No drain included';
+    return drain ? [drain.finish, drain.color, drain.color && drain.color === p.color ? 'Matches sink' : ''] : '';
+  },
+  faucetincluded: (p) => (isSink(p) ? yesNo(withFaucet(p)) : ''),
+  manufacturerfaucetfinish: (p) => (isSink(p) && !withFaucet(p) ? 'N/A' : ''),
+  numberoffaucetholes: (p) => { const n = faucetHoles(p); return n === '' ? '' : String(n); },
+  faucetholespacing: (p) => {
+    const n = faucetHoles(p);
+    if (n === '') return '';
+    if (n <= 2) return ['None', 'Single hole', 'Double hole'][n];
+    const gap = `${attr(p).faucet_hole_center_spacing ?? ''} ${attr(p).faucet_centers ?? ''}`;
+    return /\b4\b/.test(gap) ? '4-in centerset' : /\b8\b/.test(gap) ? '8-in widespread' : '';
+  },
+  forcommercialuse: (p) => { const a = attr(p).application ?? ''; return a ? yesNo(/commercial|non.?residential/i.test(a)) : ''; },
+  material: (p) => [p.material, /vitreous/i.test(p.material ?? '') ? 'Vitreous china' : ''],
+  mounttype: (p) => { const m = mountOf(p); return [m, /top.?mount/i.test(m) ? 'Drop-in' : '', /dual/i.test(m) ? 'Drop-in or undermount' : '']; },
+  overflowdrain: (p) => { const o = attr(p).overflow; return o === undefined || o === null || o === '' ? '' : yesNo(isYes(o)); },
+  sinkshape: (p) => attr(p).sink_shape ?? '',
+  stainresistant: (p) => (/stain/i.test(tagsOf(p)) ? 'Yes' : ''),
+  faderesistant: (p) => (/fade/i.test(tagsOf(p)) ? 'Yes' : ''),
+  rustresistant: (p) => (/rust/i.test(tagsOf(p)) ? 'Yes' : ''),
+  // "If item's Material is anything other than Wood, populate with N/A."
+  woodspecies: (p, x) => (/wood|bamboo|acacia|teak/i.test(p.material ?? '') ? x.options.filter((o) => new RegExp(`\\b${o}\\b`, 'i').test(materials(p))).sort((a, b) => b.length - a.length)[0] ?? '' : 'N/A'),
 };
 function holes(p, n) {
   const count = num(attr(p).number_of_installation_holes);
@@ -212,6 +270,18 @@ const PATTERNS = [
 // gallery in the PIM's own order: the PIM does not say which photo is a silo,
 // a lifestyle or a close-up.
 const GALLERY_SLOT = /^images(silo|roomlifestyle|detailfeature|vignettelifestyle)/;
+
+/** The PIM's own record of what comes with the products ("Pop-up Drain (D-701H)" → D-701H): sku → { sku, color, finish }. */
+async function includedParts(products) {
+  const skus = [...new Set(products.flatMap((p) => includedSkus(p, /./)))];
+  const out = {};
+  for (let i = 0; i < skus.length; i += 100) {
+    const { data, error } = await supabase.from('products').select('sku, color, finish').in('sku', skus.slice(i, i + 100));
+    if (error) throw error;
+    for (const part of data ?? []) out[part.sku] = part;
+  }
+  return out;
+}
 
 /** The help sheet as columns: [{ requirement, type, options }] by column index. */
 function readGlossary(grid) {
@@ -258,7 +328,7 @@ export async function fillRonaDsco({ zip, shared }, templateStoragePath, product
 
   const skus = kept.map((p) => p.sku);
   task?.progress(0.1, 'Reading images, documents and store prices…');
-  const [images, docs, videos, prices] = await Promise.all([fetchImagesBySku(skus), fetchDocsBySku(skus), fetchVideosBySku(skus), competitorPrices(skus)]);
+  const [images, docs, videos, prices, parts] = await Promise.all([fetchImagesBySku(skus), fetchDocsBySku(skus), fetchVideosBySku(skus), competitorPrices(skus), includedParts(kept)]);
   task?.progress(0.45, 'Filling the sheet…');
 
   // Each column once: its rule, its list and whether Rona requires it.
@@ -291,7 +361,7 @@ export async function fillRonaDsco({ zip, shared }, templateStoragePath, product
     const all = images[p.sku] ?? [];
     const pictures = canadaGallery(all).filter(isJpg);
     const main = all[0] && isJpg(all[0].storage_path) ? getMediaUrl(all[0].storage_path) : '';
-    const x = { notes, prices, docs: docs[p.sku] ?? [], videos: videos[p.sku] ?? [], main, gallery: pictures.filter((u) => u !== main), box: boxSize(p), boxes: boxCount(p, MAX_BOXES), none: '' };
+    const x = { notes, prices, parts, docs: docs[p.sku] ?? [], videos: videos[p.sku] ?? [], main, gallery: pictures.filter((u) => u !== main), box: boxSize(p), boxes: boxCount(p, MAX_BOXES), none: '' };
     const cells = new Map();
     for (const c of columns) {
       if (!c) continue;
@@ -343,7 +413,8 @@ export async function fillRonaDsco({ zip, shared }, templateStoragePath, product
   const some = [...empty].filter(([, without]) => without.length < kept.length);
   const few = (names) => `${names.slice(0, 6).join(', ')}${names.length > 6 ? ` and ${names.length - 6} more` : ''}`;
   const missingData = [
-    everywhere.length ? `required by Rona and empty on ${kept.length === 1 ? 'it' : 'every product'} (${everywhere.length} columns): ${everywhere.join(', ')}` : '',
+    // Named by the file's category: a selection of several categories downloads a file of each.
+    everywhere.length ? `${categoryName} — required by Rona and empty on ${kept.length === 1 ? 'it' : 'every product'} (${everywhere.length} columns): ${everywhere.join(', ')}` : '',
     ...some.map(([name, without]) => `${name}: ${few(without)}`),
     ...[...offList].flatMap(([name, values]) => [...values].map(([value, with_]) => `${name} "${value}" is not on Rona's list: ${few(with_)}`)),
     ...notes,
