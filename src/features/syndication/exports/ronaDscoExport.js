@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
+import { isKitchenFaucetCategory } from '@/features/products/lib/categories';
 import { countryFromList } from '@/features/products/lib/countries';
 import { WAREHOUSE, boxCount, boxSize, competitorPrices } from './ronaExport';
 import {
@@ -31,6 +32,10 @@ const MAX_BOXES = 10;
 const CATEGORY_FITS = [
   [/bathroom sink faucets?$/i, (p) => p.category === 'bathroom_faucet', 'bathroom faucets'],
   [/bathroom sinks?$/i, (p) => p.category === 'bathroom_sink', 'bathroom sinks'],
+  // Combos, cold water taps and pot fillers are kitchen faucets for Rona (its Faucet Type has "Pot filler").
+  [/kitchen faucets?$/i, (p) => isKitchenFaucetCategory(p.category) || p.category === 'pot_filler', 'kitchen faucets'],
+  // Bar / prep, laundry and outdoor sinks have Rona categories of their own (as on the Vendor Quote Sheet).
+  [/kitchen sinks?$/i, (p) => p.category === 'kitchen_sink', 'kitchen sinks'],
 ];
 
 const attr = (p) => p.attributes ?? {};
@@ -66,6 +71,16 @@ const withFaucet = (p) => !isSink(p) || /faucet/i.test(`${included(p).join(' ')}
 const faucetHoles = (p) => { const own = num(attr(p).number_of_faucet_holes); return own === '' ? num(attr(p).number_of_installation_holes) : own; };
 const outside = (p) => attr(p).external_dimensions_in ?? {};
 const mountOf = (p) => words(attr(p).mounting_type || list(attr(p).installation_type)[0] || '');
+const escaped = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// The longest of a list's names that a text holds as a word ("Graphite Black" → "Black").
+const namedIn = (options, text) => options.filter((o) => new RegExp(`\\b${escaped(o)}\\b`, 'i').test(text ?? '')).sort((a, b) => b.length - a.length)[0] ?? '';
+const notApplicable = (text) => /does not apply|not applicable|^none$|^no$|^n\/a$/i.test(words(text));
+// A faucet's sensor, from its own field, its type and its name.
+const sensorOf = (p) => `${attr(p).sensor_activation ?? ''} ${p.product_type ?? ''} ${titleOf(p)}`;
+// The spray head's modes ("Shower, Stream, Blade" → 3).
+const sprayModes = (p) => String(attr(p).spray_head_functions ?? '').split(/[,;]/).map(words).filter((m) => m && !notApplicable(m));
+const bowlCount = (p) => { const b = attr(p).bowl_configuration ?? ''; return /triple/i.test(b) ? 3 : /double/i.test(b) ? 2 : /single/i.test(b) ? 1 : num(attr(p).number_of_bowls); };
+const basinSplit = (p) => words(attr(p).basin_split || attr(p).bowl_split).replace(/\s/g, '');
 const isJpg = (url) => /\.jpe?g(?:[?#]|$)/i.test(String(url ?? ''));
 const isMp4 = (url) => /\.mp4(?:[?#]|$)/i.test(String(url ?? ''));
 
@@ -185,12 +200,17 @@ const RULES = {
   handlesincluded: (p) => yesNo(switchOn(attr(p).handles_included)),
   manufacturercolorfinish: (p) => p.finish ?? '',
   // A sink sold without a faucet has no flow: the list's own "N/A" where it has one.
-  maxflowrate: (p, x) => { const n = num(attr(p).max_flow_rate); return n === '' ? (withFaucet(p) ? '' : 'N/A') : x.options.find((o) => parseFloat(o) === n) ?? `${n} GPM`; },
+  maxflowrate: (p, x) => {
+    const n = num(attr(p).max_flow_rate);
+    if (n !== '') return x.options.find((o) => parseFloat(o) === n) ?? `${n} GPM`;
+    return !withFaucet(p) && x.options.some((o) => norm(o) === 'na') ? 'N/A' : '';
+  },
   maximumfaucetheightin: (p) => num(attr(p).faucet_height_in),
   mountinglocation: (p) => { const m = `${attr(p).mounting_type ?? ''} ${list(attr(p).installation_type).join(' ')}`; return /wall/i.test(m) ? 'Wall-mount' : /deck|single|hole|centerset|widespread|vessel/i.test(m) ? 'Deck-mount' : ''; },
   mountingtype: (p) => { const m = words(attr(p).mounting_type); return [m, m.replace(/-/g, ' '), /single/i.test(m) ? 'Single hole' : '']; },
   numberoffaucethandles: (p) => { const n = num(attr(p).number_of_handles); return n === '' ? '' : `${n}-handle`; },
-  packagequantity: (p) => boxCount(p, 99),
+  // A faucet sold with its tap or dispenser is more than one item, and the PIM does not count them: left for a person.
+  packagequantity: (p) => (p.category === 'kitchen_faucet_combo' ? '' : boxCount(p, 99)),
   // The PIM records a pull-down spray where there is one.
   pulldownsprayer: (p) => yesNo(/pull.?down|pull.?out/i.test(`${attr(p).spray_type ?? ''}`)),
   scratchresistant: (p) => (/scratch/i.test(tagsOf(p)) ? 'Yes' : ''),
@@ -198,7 +218,7 @@ const RULES = {
   spoutheightin: (p) => num(attr(p).spout_height_in),
   spoutreachin: (p) => num(attr(p).spout_reach_in),
   spouttype: (p) => attr(p).spout_type ?? '',
-  supplylinesincluded: (p) => yesNo(switchOn(attr(p).supply_line_included)),
+  supplylinesincluded: (p) => (isSink(p) ? '' : yesNo(switchOn(attr(p).supply_line_included))),
   valveincluded: (p) => yesNo(switchOn(attr(p).valve_included)),
   warranty: (p) => warrantyChoices(p),
   collectionname: (p) => p.series || 'N/A',
@@ -218,7 +238,8 @@ const RULES = {
   heightabovecounterin: (p) => (/vessel/i.test(mountOf(p)) ? num(outside(p).depth) : /under/i.test(mountOf(p)) ? 0 : ''),
   weightlbs: (p) => num(attr(p).product_weight_lb),
   drainconnectiondiameterin: (p) => num(attr(p).drain_diameter_in),
-  drainincluded: (p) => (included(p).some((a) => /drain/i.test(a)) ? 'Yes' : isSink(p) ? 'No' : ''),
+  // A kitchen sink's drain is its strainer.
+  drainincluded: (p) => (included(p).some((a) => /drain|strainer/i.test(a)) ? 'Yes' : isSink(p) ? 'No' : ''),
   // The finish of the drain that comes with it, as the PIM has that drain.
   drainfinish: (p, x) => {
     if (!isSink(p)) return '';
@@ -245,7 +266,71 @@ const RULES = {
   faderesistant: (p) => (/fade/i.test(tagsOf(p)) ? 'Yes' : ''),
   rustresistant: (p) => (/rust/i.test(tagsOf(p)) ? 'Yes' : ''),
   // "If item's Material is anything other than Wood, populate with N/A."
-  woodspecies: (p, x) => (/wood|bamboo|acacia|teak/i.test(p.material ?? '') ? x.options.filter((o) => new RegExp(`\\b${o}\\b`, 'i').test(materials(p))).sort((a, b) => b.length - a.length)[0] ?? '' : 'N/A'),
+  woodspecies: (p, x) => (/wood|bamboo|acacia|teak/i.test(p.material ?? '') ? namedIn(x.options, materials(p)) : 'N/A'),
+
+  // ---- kitchen faucets ----
+  '4holesinkcompatible': (p) => holes(p, 4),
+  // What the faucet is, from its category, its type and its name. A drinking water tap is none of Rona's types.
+  faucettype: (p) => {
+    const t = `${p.product_type ?? ''} ${titleOf(p)}`;
+    if (p.category === 'pot_filler' || /pot filler/i.test(t)) return 'Pot filler';
+    if (p.category === 'cold_water_tap') return '';
+    return /pre.?rinse/i.test(t) ? 'Pre-rinse' : /\bbridge\b/i.test(t) ? 'Bridge' : /\bbar\b|\bprep\b/i.test(t) ? 'Bar and prep' : 'Standard';
+  },
+  maximumdeckthicknessin: (p) => num(attr(p).max_deck_thickness_in),
+  // The spray head's holder ("Magnetic Holder", "Self Retracting"); "Does Not Apply" = a faucet with no head to dock.
+  securedocking: (p) => { const l = words(attr(p).lock_type); return l ? yesNo(!notApplicable(l)) : ''; },
+  dockingtechnology: (p) => { const l = words(attr(p).lock_type); return notApplicable(l) ? '' : l; },
+  // The PIM's Spray Type names the spray a faucet has; a side spray is none of ours unless it says so.
+  sidesprayincluded: (p) => { const s = words(attr(p).spray_type); return s ? yesNo(/side/i.test(s)) : ''; },
+  sprayheadstyle: (p) => { const s = words(attr(p).spray_type); return /pull.?down/i.test(s) ? 'Pull-down' : /pull.?out/i.test(s) ? 'Pull-out' : s ? 'Fixed' : ''; },
+  sprayandstream: (p) => { const m = sprayModes(p); return m.length ? yesNo(m.length >= 2 && m.some((w) => /spray|shower|blade|sweep/i.test(w))) : ''; },
+  numberofspraysettings: (p) => sprayModes(p).length || '',
+  swivel: (p) => { const s = attr(p).swivel_spout; return s === undefined || s === null || s === '' ? '' : yesNo(isYes(s)); },
+  valvetype: (p) => { const c = words(attr(p).cartridge_type); return /ceramic/i.test(c) ? 'Ceramic disc valve' : /\bball\b/i.test(c) ? 'Ball valve' : /compression/i.test(c) ? 'Compression valve' : /cartridge/i.test(c) ? 'Cartridge valve' : ''; },
+  activationtechnology: (p) => words(attr(p).sensor_activation),
+  higharcspout: (p) => { const s = words(attr(p).spout_type); return /high.?arc|gooseneck/i.test(s) ? 'Yes' : /low.?arc|mid.?arc/i.test(s) ? 'No' : ''; },
+  leadfree: (p) => { const l = attr(p).lead_free; return l === undefined || l === null || l === '' ? '' : yesNo(l === true || isYes(l)); },
+  touchless: (p) => (isSink(p) ? '' : yesNo(/touchless|sensor|motion/i.test(sensorOf(p)))),
+  touchsensor: (p) => (isSink(p) ? '' : yesNo(/\btouch\b/i.test(sensorOf(p)))),
+
+  // ---- kitchen sinks ----
+  bowlconfiguration: (p) => {
+    const n = bowlCount(p);
+    if (n === 1) return 'Single bowl';
+    if (n === 3) return 'Triple bowl';
+    if (n !== 2 || !basinSplit(p)) return '';
+    return basinSplit(p) === '50/50' ? 'Double equal bowl' : 'Double offset bowl';
+  },
+  basinsplit: (p) => (bowlCount(p) > 1 ? basinSplit(p) : ''),
+  // Brushed stainless steel is its own family on Rona's list; a colour with two words takes the one the list has.
+  colorfinishfamily: (p, x) => [/stainless/i.test(p.material ?? '') && /silver|stainless/i.test(p.color ?? '') ? 'Stainless steel' : '', p.color, namedIn(x.options, p.color)],
+  cornerinstallation: (p) => yesNo(/\bcorner\b/i.test(describes(p))),
+  // Bowl 1 is the left one of a double sink.
+  depthofbowl1in: (p) => { const left = num(attr(p).left_bowl_depth_in); return bowlCount(p) > 1 && left !== '' ? left : num(attr(p).internal_dimensions_in?.depth); },
+  depthofbowl2in: (p) => (bowlCount(p) > 1 ? num(attr(p).right_bowl_depth_in) : ''),
+  drainboardincluded: (p) => (isSink(p) ? yesNo(included(p).some((a) => /drain ?board/i.test(a))) : ''),
+  drainlocation: (p) => { const d = words(attr(p).drain_hole_location || attr(p).drain_position); return /corner/i.test(d) ? 'Corner' : /rear/i.test(d) ? 'Rear' : /cent(er|re)/i.test(d) ? 'Center' : /side|offset/i.test(d) ? 'Offset' : ''; },
+  reversible: (p) => (/reversible/i.test(attr(p).drain_hole_location ?? '') ? 'Yes' : ''),
+  finish: (p) => [attr(p).finish_type, { Glossy: 'Gloss' }[attr(p).finish_type]],
+  lengthin: (p) => num(outside(p).length),
+  widthin: (p) => num(outside(p).width),
+  sinkgridincluded: (p) => yesNo(switchOn(attr(p).includes_grids) || switchOn(attr(p).has_grid) || included(p).some((a) => /\bgrids?\b/i.test(a))),
+  sinkmounttype: (p) => { const m = mountOf(p); return [/dual/i.test(m) ? 'Drop-in or undermount' : '', /top.?mount/i.test(m) ? 'Drop-in' : '', m]; },
+  sinktype: (p) => { const t = `${p.product_type ?? ''} ${titleOf(p)}`; return /farmhouse|apron/i.test(t) ? 'Apron-front' : p.category === 'bar_prep_sink' ? 'Bar & Prep' : 'Standard'; },
+  strainerincluded: (p) => (isSink(p) ? yesNo(included(p).some((a) => /strainer/i.test(a))) : ''),
+  workstation: (p) => yesNo(attr(p).has_workstation === true || /workstation/i.test(`${p.product_type ?? ''} ${titleOf(p)} ${p.model_name ?? ''}`)),
+  // The cabinet the sink needs, on Rona's list of cabinet sizes: the next size up.
+  minimumcabinetsize: (p, x) => {
+    const n = num(attr(p).min_external_cabinet_size_in);
+    if (n === '') return '';
+    const sizes = x.options.map((o) => ({ o, size: /^\d/.test(o) ? parseFloat(o) + (/1\/2/.test(o) ? 0.5 : 0) : null })).filter((s) => s.size !== null).sort((a, b) => a.size - b.size);
+    if (!sizes.length) return '';
+    if (n < sizes[0].size) return x.options.find((o) => /^less than/i.test(o)) ?? '';
+    return sizes.find((s) => s.size >= n)?.o ?? x.options.find((o) => /^greater than/i.test(o)) ?? '';
+  },
+  seriesname: (p) => p.series ?? '',
+  sinkgauge: (p) => { const g = num(attr(p).gauge ?? attr(p).material_gauge); return g !== '' ? String(g) : /stainless/i.test(p.material ?? '') ? '' : 'N/A'; },
 };
 function holes(p, n) {
   const count = num(attr(p).number_of_installation_holes);
@@ -361,6 +446,7 @@ export async function fillRonaDsco({ zip, shared }, templateStoragePath, product
     const all = images[p.sku] ?? [];
     const pictures = canadaGallery(all).filter(isJpg);
     const main = all[0] && isJpg(all[0].storage_path) ? getMediaUrl(all[0].storage_path) : '';
+    if (all[0] && !main) notes.push(`${p.sku}: its main image is not a JPG, and Rona takes JPG only`);
     const x = { notes, prices, parts, docs: docs[p.sku] ?? [], videos: videos[p.sku] ?? [], main, gallery: pictures.filter((u) => u !== main), box: boxSize(p), boxes: boxCount(p, MAX_BOXES), none: '' };
     const cells = new Map();
     for (const c of columns) {
