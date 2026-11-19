@@ -8,8 +8,11 @@ import { promoWindow, shiftDay, monthEnd, etToday, periodOfDay } from './promoCa
 // the rows of the other tabs, read through the one rule for a promotion's
 // days (promoWindow). Days are Eastern 'YYYY-MM-DD' strings.
 
-/** The calendar as it opens — this month, by month, everything shown. The page keeps it while the person visits another tab. */
-export const initialCalendar = () => ({ period: periodOfDay(etToday()), view: 'month', hidden: [], market: null, channel: null });
+/**
+ * The calendar as it opens — this month, by month, everything shown. The page keeps it while the person visits
+ * another tab. `sku` is the product looked for ({ sku, name }): only the promotions that hold it are shown.
+ */
+export const initialCalendar = () => ({ period: periodOfDay(etToday()), view: 'month', hidden: [], market: null, channel: null, sku: null });
 
 /** The kinds, in the order the legend and every list name them. */
 export const CALENDAR_KINDS = [
@@ -105,6 +108,52 @@ export function filterItems(items, { kinds = null, market = null, channel = null
   }
   return out;
 }
+
+/**
+ * The items whose list holds one product (user, 2026-11-19: "un filtro para
+ * buscar en qué promociones un SKU fue ingresado"):
+ *   found  { promotions: Map(promotion id → { ca, us }), coupons: Set(coupon id) }
+ * A promotion is cut to the countries whose list the product is on — a
+ * monthly promotion's Canada and USA lists are two lists. One that holds it
+ * only on the list of a country it does not reach stays whole: the product is
+ * still on its list.
+ */
+export function itemsOfSku(items, found) {
+  const out = [];
+  for (const it of items) {
+    if (it.source === 'coupon') {
+      if (found.coupons.has(it.id)) out.push(it);
+      continue;
+    }
+    const on = found.promotions.get(it.id);
+    if (!on) continue;
+    const spans = it.spans.filter((s) => on[s.market]);
+    const cut = spans.length > 0 && spans.length < it.spans.length;
+    out.push(cut ? item({ ...it, spans, channels: it.channels.filter((c) => spans.some((s) => s.market === c.market)) }) : it);
+  }
+  return out;
+}
+
+/**
+ * Items as rows (entriesOf), by what each is doing today:
+ *   { running, coming, over } — what ends soonest first, what starts soonest first, what ended last first.
+ */
+export function entriesByState(items, today) {
+  const rows = { running: [], coming: [], over: [] };
+  const group = { running: 'running', scheduled: 'coming', ended: 'over' };
+  for (const e of entriesOf(items)) rows[group[stateOf(e, today)]].push(e);
+  rows.running.sort((a, b) => a.end.localeCompare(b.end) || byKindThenName(a.item, b.item));
+  rows.coming.sort((a, b) => a.start.localeCompare(b.start) || byKindThenName(a.item, b.item));
+  rows.over.sort((a, b) => b.end.localeCompare(a.end) || byKindThenName(a.item, b.item));
+  return rows;
+}
+
+/**
+ * The marketplaces of a row that a product is switched off for (`off`: the
+ * keys of its Excluded marketplaces switches) — no send and no file takes it
+ * there, though it is on the promotion's list.
+ */
+export const switchedOffFor = (entry, off) => entry.item.channels.filter((c) => entry.markets.includes(c.market) && off.has(c.exclusionKey ?? c.key));
 
 /**
  * An item as the month shows it: one entry per run of days. A deal whose two
@@ -220,8 +269,9 @@ export function timelineOf(items, period) {
   return groups;
 }
 
-/** The marketplaces any of the items goes to, in the app's own order. */
-export const channelsIn = (items) => {
+/** The marketplaces any of the items goes to, in the app's own order — and `keep`, the one a filter is on, whatever the items. */
+export const channelsIn = (items, keep = null) => {
   const seen = new Set(items.flatMap((it) => it.channels.map((c) => c.key)));
+  if (keep) seen.add(keep);
   return PROMO_CHANNELS.filter((c) => seen.has(c.key));
 };

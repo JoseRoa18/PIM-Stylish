@@ -3,9 +3,12 @@ import { CalendarDays, ChartGantt, ChevronLeft, ChevronRight, Flag, Loader2 } fr
 import Dialog from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
 import { listCoupons } from '@/features/pricing/api/coupons';
+import { loadSkuPromotions } from '@/features/pricing/api/promoSku';
+import PromoSkuFinder from '@/features/pricing/components/PromoSkuFinder';
 import { etToday, nextPeriod, prevPeriod, periodOfDay } from '@/features/pricing/lib/promoCalendar';
 import {
-  CALENDAR_KINDS, MARKETS, calendarItems, channelsIn, daysIndex, entriesOf, filterItems, kindOf, monthRange, monthWeeks, stateOf, timelineOf,
+  CALENDAR_KINDS, MARKETS, calendarItems, channelsIn, daysIndex, entriesByState, entriesOf, filterItems, itemsOfSku, kindOf, monthRange, monthWeeks, stateOf,
+  switchedOffFor, timelineOf,
 } from '@/features/pricing/lib/promoCalendarItems';
 
 // Pricing's Calendar tab (user, 2026-11-16: "son muchísimas, y sería más
@@ -15,6 +18,12 @@ import {
 // it ends, with a strip per day for what is running — and the timeline, a row
 // per marketplace with a bar from the first day to the last. Nothing is typed
 // here: a click opens the promotion's own card on its tab.
+//
+// A SKU can be looked for (user, 2026-11-19: "un filtro para buscar en qué
+// promociones un SKU fue ingresado … no sé cómo identificarlos entre tantas"):
+// the calendar then shows only the promotions and coupons whose list holds
+// that product — in every month, under every other filter — and names them
+// all in a list under the filters, since a month shows only its own.
 
 // Each kind's colours (index.css, --color-promo-*): the colour itself for
 // what is no text, its container and the text on it. Written out in full —
@@ -39,6 +48,8 @@ const monthTitle = (period) => fmt(period, { month: 'long', year: 'numeric' });
 const longDay = (day) => fmt(day, { weekday: 'long', month: 'long', day: 'numeric' });
 const shortDay = (day) => fmt(day, { month: 'short', day: 'numeric' });
 const rangeText = (a, b) => (a === b ? shortDay(a) : `${shortDay(a)} – ${shortDay(b)}${a.slice(0, 4) === b.slice(0, 4) ? '' : `, ${b.slice(0, 4)}`}`);
+// The same, with its year once it is not this one: a product's list goes back over every month.
+const rangeTextOfYear = (a, b, today) => `${rangeText(a, b)}${a.slice(0, 4) === b.slice(0, 4) && b.slice(0, 4) !== today.slice(0, 4) ? `, ${b.slice(0, 4)}` : ''}`;
 const dayNumber = (day) => Number(day.slice(8, 10));
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const marketTag = (markets) => (markets.length === 1 ? MARKETS.find((m) => m.key === markets[0])?.tag ?? '' : '');
@@ -50,7 +61,7 @@ const roundButton = 'inline-flex items-center justify-center w-9 h-9 rounded-ful
 
 /**
  * @param promotions  listPromotions rows (every kind), or null while they load
- * @param state       { period, view, hidden, market, channel } — kept by the page
+ * @param state       { period, view, hidden, market, channel, sku } — kept by the page
  * @param onState     (next) => void
  * @param onOpen      (item) => void — opens the promotion's or the coupon's card on its tab
  */
@@ -58,6 +69,7 @@ export default function PromoCalendar({ promotions, state, onState, onOpen }) {
   const titleId = useId();
   const today = etToday();
   const { period, view, hidden, market, channel } = state;
+  const sku = state.sku ?? null;
   const set = (patch) => onState({ ...state, ...patch });
 
   const [coupons, setCoupons] = useState(null);
@@ -68,21 +80,41 @@ export default function PromoCalendar({ promotions, state, onState, onOpen }) {
     return () => { alive = false; };
   }, []);
 
+  // The product looked for: the promotions and coupons whose list holds it, read when it is picked.
+  const skuKey = sku?.sku ?? null;
+  const [found, setFound] = useState(null); // { sku, try, promotions, coupons, off } | { sku, try, error }
+  const [attempt, setAttempt] = useState(0); // "Try again" after a failed read
+  useEffect(() => {
+    if (!skuKey) return undefined;
+    let alive = true;
+    loadSkuPromotions(skuKey)
+      .then((lists) => { if (alive) setFound({ sku: skuKey, try: attempt, ...lists }); })
+      .catch((err) => { if (alive) setFound({ sku: skuKey, try: attempt, error: err.message }); });
+    return () => { alive = false; };
+  }, [skuKey, attempt]);
+  const answer = skuKey && found?.sku === skuKey && found.try === attempt ? found : null;
+  const member = answer && !answer.error ? answer : null;
+  const skuError = answer?.error ?? null;
+
   const [openDay, setOpenDay] = useState(null); // the day whose list is open
 
   const all = useMemo(() => calendarItems(promotions ?? [], coupons ?? []), [promotions, coupons]);
+  // With a product looked for, the calendar is made of the promotions that hold it — of none while they cannot be read.
+  const base = useMemo(() => (member ? itemsOfSku(all, member) : skuKey ? [] : all), [all, member, skuKey]);
   const month = monthRange(period);
   const inMonth = (it) => it.spans.some((s) => s.start <= month.end && s.end >= month.start);
   // The country and marketplace filters first: the legend counts what they leave of each kind.
-  const placed = useMemo(() => filterItems(all, { market, channel }), [all, market, channel]);
+  const placed = useMemo(() => filterItems(base, { market, channel }), [base, market, channel]);
   const shown = useMemo(() => placed.filter((it) => !hidden.includes(it.kind)), [placed, hidden]);
   const monthItems = shown.filter(inMonth);
   const countOf = (kind) => placed.filter((it) => it.kind === kind && inMonth(it)).length;
   const runningToday = shown.filter((it) => !it.ended && it.spans.some((s) => s.start <= today && today <= s.end)).length;
-  const channels = useMemo(() => channelsIn(filterItems(all, { market })), [all, market]);
-  const filtered = hidden.length > 0 || market || channel;
+  const channels = useMemo(() => channelsIn(filterItems(base, { market }), channel), [base, market, channel]);
+  const otherFilters = hidden.length > 0 || Boolean(market) || Boolean(channel);
+  const filtered = otherFilters || Boolean(skuKey);
 
-  const loading = promotions === null || coupons === null;
+  // Reading a product's promotions is part of loading: the calendar never shows every promotion under a SKU's name.
+  const loading = promotions === null || coupons === null || (Boolean(skuKey) && !answer);
   const toggleKind = (key) => set({ hidden: hidden.includes(key) ? hidden.filter((k) => k !== key) : [...hidden, key] });
   const open = (item) => { setOpenDay(null); onOpen(item); };
 
@@ -113,6 +145,13 @@ export default function PromoCalendar({ promotions, state, onState, onOpen }) {
                 {period === periodOfDay(today) && <> · <span className="text-on-surface font-medium">{runningToday}</span> running today</>}
               </p>
             )}
+            {/* On the title's row: the row of filters under it is full at a laptop's width. */}
+            <PromoSkuFinder
+              value={sku}
+              busy={Boolean(skuKey) && !answer}
+              onPick={(product) => { setOpenDay(null); set({ sku: product }); }}
+              onClear={() => set({ sku: null })}
+            />
             <div role="group" aria-label="View" className="flex rounded-full border border-outline-variant p-0.5">
               <button type="button" aria-pressed={view === 'month'} onClick={() => set({ view: 'month' })} className={segment(view === 'month')}>
                 <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" /> Month
@@ -178,6 +217,21 @@ export default function PromoCalendar({ promotions, state, onState, onOpen }) {
         </div>
       </div>
 
+      {sku && promotions !== null && coupons !== null && (
+        <SkuPromotions
+          key={sku.sku}
+          sku={sku}
+          items={answer ? shown : null}
+          off={member?.off ?? null}
+          error={skuError}
+          otherFilters={otherFilters}
+          today={today}
+          onOpen={open}
+          onClear={() => set({ sku: null })}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      )}
+
       {error && <p role="alert" className="mx-4 sm:mx-5 mt-3 rounded-xl bg-error-container/60 text-on-error-container px-4 py-2.5 text-body-sm">The coupons could not be read: {error}</p>}
 
       {loading ? (
@@ -191,11 +245,11 @@ export default function PromoCalendar({ promotions, state, onState, onOpen }) {
         <TimelineView period={period} items={shown} today={today} onOpen={open} />
       )}
 
-      {!loading && monthItems.length === 0 && (
+      {!loading && !skuError && monthItems.length === 0 && (
         <div className="px-6 py-8 text-center border-t border-outline-variant" role="status">
           <p className="text-body-md text-on-surface font-medium">Nothing in {monthTitle(period)}{filtered ? ' with these filters' : ''}</p>
           {filtered && (
-            <button type="button" onClick={() => set({ hidden: [], market: null, channel: null })} className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
+            <button type="button" onClick={() => set({ hidden: [], market: null, channel: null, sku: null })} className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors">
               Show everything
             </button>
           )}
@@ -408,6 +462,113 @@ function DayDialog({ day, items, today, onOpen, onClose }) {
         ))}
       </div>
     </Dialog>
+  );
+}
+
+// ================================ A product's list ================================
+
+/**
+ * The promotions that hold the product looked for, in every month — the calendar under it shows the same ones, a
+ * month at a time. A chip each, in the calendar's own colours, with its days: what is running, what is coming, and
+ * what is over behind a button. Kept short on purpose: it sits over the calendar.
+ *   items  the calendar's items under every filter, or null while the product's lists are read
+ *   off    the marketplaces the product is switched off for (Set of keys)
+ */
+function SkuPromotions({ sku, items, off, error, otherFilters, today, onOpen, onClear, onRetry }) {
+  const [showOver, setShowOver] = useState(false);
+  const rows = useMemo(() => entriesByState(items ?? [], today), [items, today]);
+  const total = items?.length ?? 0;
+  const live = rows.running.length + rows.coming.length;
+  const groups = [
+    { title: 'Running', rows: rows.running },
+    { title: 'Coming', rows: rows.coming },
+    showOver && { title: 'Over', rows: rows.over },
+  ].filter((g) => g && g.rows.length);
+  // Where the promotions that run or are coming do not reach this product: its own Excluded marketplaces switches.
+  const offFor = useMemo(() => {
+    const labels = new Map();
+    if (off) for (const e of [...rows.running, ...rows.coming]) for (const c of switchedOffFor(e, off)) labels.set(c.key, c.label);
+    return [...labels.values()];
+  }, [rows, off]);
+
+  return (
+    <section aria-label={`Promotions of ${sku.sku}`} className="px-4 sm:px-5 py-3 space-y-2.5 border-b border-outline-variant bg-surface-container-low/60">
+      <div className="flex items-baseline justify-between gap-x-4 gap-y-1 flex-wrap">
+        <p className="min-w-0 text-body-md text-on-surface" role="status">
+          <span className="font-semibold">{sku.sku}</span>
+          {sku.name && <span className="text-on-surface-variant"> · {sku.name}</span>}
+          {error ? null : items === null ? (
+            <span className="text-on-surface-variant"> — looking for its promotions…</span>
+          ) : (
+            <> — {total === 0 ? 'in no promotion' : <>in <span className="font-semibold tabular-nums">{total}</span> {total === 1 ? 'promotion' : 'promotions'}</>}{otherFilters ? ' with these filters' : ''}</>
+          )}
+        </p>
+        <button type="button" onClick={onClear} className="text-label-md font-medium text-on-surface underline underline-offset-2 hover:text-primary py-1 -my-1">
+          Show every promotion
+        </button>
+      </div>
+
+      {error && (
+        <p role="alert" className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-2.5 text-body-sm">
+          The promotions of {sku.sku} could not be read: {error}{' '}
+          <button type="button" onClick={onRetry} className="font-semibold underline underline-offset-2">Try again</button>
+        </p>
+      )}
+
+      {items !== null && !error && total > 0 && live === 0 && (
+        <p className="text-body-sm text-on-surface-variant">None of them is running or coming.</p>
+      )}
+
+      {groups.map((g) => (
+        <div key={g.title} className="grid @2xl:grid-cols-[5.75rem_minmax(0,1fr)] gap-x-3 gap-y-1 items-start">
+          <h3 className="@2xl:pt-[0.4rem] text-label-md uppercase tracking-wider text-on-surface-variant whitespace-nowrap">{g.title} <span className="tabular-nums">· {g.rows.length}</span></h3>
+          <ul className="flex flex-wrap gap-1.5 min-w-0">
+            {g.rows.map((e) => (
+              <li key={`${e.item.id}:${e.start}:${e.markets.join('')}`} className="max-w-full">
+                <ListChip entry={e} today={today} onOpen={onOpen} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+
+      {offFor.length > 0 && (
+        <p className="text-body-sm text-on-surface-variant">
+          {sku.sku} is switched off for {offFor.join(', ')}: no promotion reaches it there.
+        </p>
+      )}
+
+      {rows.over.length > 0 && (
+        <button type="button" aria-expanded={showOver} onClick={() => setShowOver((v) => !v)} className="text-label-md font-medium text-on-surface underline underline-offset-2 hover:text-primary py-1 -my-1">
+          {showOver ? 'Hide' : 'Show'} the {rows.over.length} that {rows.over.length === 1 ? 'is' : 'are'} over
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** A promotion's run of days as a chip that opens it: its name whole, its country when it is one, its days. */
+function ListChip({ entry, today, onOpen }) {
+  const { item } = entry;
+  const look = LOOK[item.kind];
+  const over = stateOf(entry, today) === 'ended';
+  const tag = marketTag(entry.markets);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(item)}
+      title={`${kindOf(item.kind).one} · ${whereText(item)}${item.skus ? ` · ${plural(item.skus, 'SKU')}` : ''}`}
+      data-list-chip={over ? 'over' : 'live'}
+      className={cn(
+        'max-w-full min-h-7 inline-flex items-baseline gap-x-2 flex-wrap rounded-md pl-2 pr-2.5 py-1 text-left text-label-md border-l-[3px] transition-[filter] hover:brightness-95 [.dark_&]:hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+        over ? cn(look.spineOver, OVER) : cn(look.spine, look.chip),
+      )}
+    >
+      <span className="min-w-0 [overflow-wrap:anywhere]">{item.name}</span>
+      {tag && <span className="text-[0.625rem] leading-none font-semibold tracking-wider">{tag}</span>}
+      <span className="font-normal tabular-nums whitespace-nowrap">{rangeTextOfYear(entry.start, entry.end, today)}</span>
+      <span className="sr-only">, {kindOf(item.kind).one}{entry.markets.length === 1 ? `, ${marketWords(entry.markets)}` : ''}{over ? ', over' : ''}</span>
+    </button>
   );
 }
 
