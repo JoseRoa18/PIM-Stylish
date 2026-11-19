@@ -21,6 +21,8 @@ import { generateKeywords } from '../api/keywords';
 import { listTemplates, templateAppliesTo, templateForProduct, accessoryKind, purposesIn, templatePurpose } from '@/features/templates/api/templates';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import LowesMerchantDialog from '@/features/templates/components/LowesMerchantDialog';
+import RonaListingDialog from '@/features/templates/components/RonaListingDialog';
+import { ronaListingChoices } from '@/features/syndication/lib/ronaTemplates';
 import { listMediaFor } from '@/features/media/api/media';
 import { startTask } from '@/lib/taskProgress';
 import { useDockClearance } from '@/components/ui/useDockClearance';
@@ -76,6 +78,7 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
   // A marketplace with several kinds of template asks which one to fill.
   const [asking, setAsking] = useState(null); // { marketplace, purposes, templates }
   const [askingMerchant, setAskingMerchant] = useState(null); // { marketplace, templates }
+  const [askingRona, setAskingRona] = useState(null); // { marketplace, choices } — Rona's two new listing files
 
   const count = selectedSkus.size;
   // The progress cards sit above the bar instead of covering its buttons.
@@ -398,6 +401,16 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     task ??= startTask(`${marketplace} export`, { detail: 'Loading products…' });
     if (purpose) templates = templates.filter((t) => templatePurpose(t) === purpose);
     if (/bb&b|bbb|overstock/i.test(marketplace)) return handleExportBBB(templates, marketplace, task);
+    if (/rona/i.test(marketplace) && templates.length && templates.every((t) => templatePurpose(t) === 'new_listing')) {
+      // Rona's new listing is two files (user, 2026-11-19): which one, before anything downloads.
+      const choices = ronaListingChoices(templates);
+      if (choices.length > 1) {
+        task.cancel();
+        setBusy(null);
+        setAskingRona({ marketplace, choices });
+        return undefined;
+      }
+    }
     if (/wayfair|amazon|walmart|home ?depot|rona/i.test(marketplace)) return handleExportGrouped(marketplace, templates, task);
     if (/lowe/i.test(marketplace)) {
       if (!templates.some((t) => templatePurpose(t) === 'new_listing')) return handleExportLowes(templates, marketplace, task);
@@ -866,6 +879,18 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
           handleExportLowes(templates, marketplace, startTask(`${marketplace} export`, { detail: 'Loading products…' }), email);
         }}
         onClose={() => setAskingMerchant(null)}
+      />
+    )}
+
+    {askingRona && (
+      <RonaListingDialog
+        choices={askingRona.choices}
+        onPick={(kind) => {
+          const { marketplace, choices } = askingRona;
+          setAskingRona(null);
+          handleExportGrouped(marketplace, choices.find((c) => c.value === kind).files, startTask(`${marketplace} export`, { detail: 'Loading products…' }));
+        }}
+        onClose={() => setAskingRona(null)}
       />
     )}
     </>

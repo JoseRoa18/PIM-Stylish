@@ -64,6 +64,8 @@ import { templateMatchesProduct, purposesIn, templatePurpose, templatePurposeLab
 import { logListingExport } from '@/features/syndication/lib/listingExportLog';
 import ExportPurposeDialog from '@/features/templates/components/ExportPurposeDialog';
 import LowesMerchantDialog from '@/features/templates/components/LowesMerchantDialog';
+import RonaListingDialog from '@/features/templates/components/RonaListingDialog';
+import { ronaListingChoices, ronaTemplateKind } from '@/features/syndication/lib/ronaTemplates';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useLengthUnit, toDisplayLength, withUnit, toFractionLength, weightUnitFor, toDisplayWeight } from '@/features/products/lib/units';
 import UnitToggle from '@/components/ui/UnitToggle';
@@ -2067,6 +2069,7 @@ function ExportTemplatesCard({ product, media }) {
   const [error, setError] = useState(null);
   const [asking, setAsking] = useState(null); // { marketplace, purposes }
   const [askingMerchant, setAskingMerchant] = useState(null); // { marketplace, files, purpose }
+  const [askingRona, setAskingRona] = useState(null); // { marketplace, files, purpose, choices } — Rona's two new listing files
 
   // One action per marketplace. A marketplace can carry files for several
   // purposes (new listing, update, prices, promotions): with one purpose the
@@ -2118,19 +2121,27 @@ function ExportTemplatesCard({ product, media }) {
     runExport(entry.marketplace, entry.files, entry.purposes[0]?.value ?? 'new_listing');
   }
 
-  async function runExport(marketplace, files, purpose, merchantEmail = '') {
+  async function runExport(marketplace, files, purpose, merchantEmail = '', ronaKind = null) {
     setAsking(null);
     // The Lowe's merchant changes often: a new listing asks who it is, every time.
     if (/lowe/i.test(marketplace) && purpose === 'new_listing' && !merchantEmail) {
       setAskingMerchant({ marketplace, files, purpose });
       return;
     }
+    // Rona's new listing is two files (user, 2026-11-19): which one, before anything downloads.
+    if (/rona/i.test(marketplace) && purpose === 'new_listing' && !ronaKind) {
+      const choices = ronaListingChoices(filesFor(marketplace, files, purpose));
+      if (choices.length > 1) {
+        setAskingRona({ marketplace, files, purpose, choices });
+        return;
+      }
+    }
     setExporting(marketplace);
     setError(null);
     const task = startTask(`${marketplace} export`, { detail: product.sku });
     let done = 'Downloaded';
     try {
-      const set = filesFor(marketplace, files, purpose);
+      const set = filesFor(marketplace, files, purpose).filter((t) => !ronaKind || ronaTemplateKind(t) === ronaKind);
       if (!set.length) throw new Error(`No ${templatePurposeLabel(purpose)} file for ${marketplace} fits this product.`);
       const tag = purpose === 'new_listing' ? '' : `_${templatePurposeLabel(purpose).replace(/[^\w]+/g, '')}`;
       const base = `${(product.model_name || product.sku).replace(/[^\w-]+/g, '_')}${tag}`;
@@ -2255,6 +2266,17 @@ function ExportTemplatesCard({ product, media }) {
             runExport(marketplace, files, purpose, email);
           }}
           onClose={() => setAskingMerchant(null)}
+        />
+      )}
+      {askingRona && (
+        <RonaListingDialog
+          choices={askingRona.choices}
+          onPick={(kind) => {
+            const { marketplace, files, purpose } = askingRona;
+            setAskingRona(null);
+            runExport(marketplace, files, purpose, '', kind);
+          }}
+          onClose={() => setAskingRona(null)}
         />
       )}
     </section>

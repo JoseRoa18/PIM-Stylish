@@ -7,11 +7,17 @@ import {
   buildCell, colToIndex, downloadZip, excelSerial, fetchImagesBySku, mergeRows, norm, openTemplate, sheetPathByName, sheetToGrid, templateExt,
 } from './templateFiller';
 
-// Rona's new listing: the "Vendor Quote Sheet" (user, 2026-11-09). One sheet,
-// labels on row 3, one row per product from row 4. Columns repeat their labels
-// (five boxes, five warehouses), so they are addressed by letter and the labels
-// that anchor them are checked first.
+// Rona's new listing has two files (user, 2026-11-19), and the export asks
+// which one: the "Vendor Quote Sheet" (2026-11-09), filled here, and the catalog
+// file of Rona's DSCO portal ("RONA Catalog Items - <category>", one per
+// category), filled by ronaDscoExport.js. generateRonaFromTemplate opens the
+// file it is given and fills it the way its own sheets say, whichever was picked.
+//
+// The Vendor Quote Sheet: one sheet, labels on row 3, one row per product from
+// row 4. Columns repeat their labels (five boxes, five warehouses), so they are
+// addressed by letter and the labels that anchor them are checked first.
 const SHEET = 'Vendor Quote Sheet';
+const DSCO_SHEET = 'Catalog Data';
 const HEADER_ROW = 3;
 const FIRST_ROW = 4;
 const ANCHORS = { C: 'manufacturerpartnumber', D: 'upc', L: 'invoicecostshippingpaidbyrona', W: 'lengthin', Z: 'boxedweightlbs', AQ: 'shiponskidyn', BK: 'hscode' };
@@ -22,7 +28,7 @@ const BOX_COLUMNS = [['W', 'X', 'Y', 'Z'], ['AA', 'AB', 'AC', 'AD'], ['AE', 'AF'
 // (HomeHardware.ca and CanadianTire.ca are not read).
 const COMPETITORS = { P: 'homedepot_ca', R: 'amazon_ca', S: 'walmart_ca', U: 'wayfair_ca', V: 'bestbuy_ca' };
 // The one warehouse everything ships from (user, 2026-11-09).
-const WAREHOUSE = { address: '85 Thompson Dr, Cambridge, ON, Canada', postalCode: 'N1T 2E4', loadingDock: 'Y' };
+export const WAREHOUSE = { address: '85 Thompson Dr, Cambridge, ON, Canada', postalCode: 'N1T 2E4', loadingDock: 'Y' };
 
 // Everything ships from Canada (user, 2026-11-09), so HS Code stays empty: the
 // template asks for it only when shipping from the USA.
@@ -64,13 +70,13 @@ function ronaCategory(p) {
 }
 
 // A set of N ("-2" SKU, "Set of 2" in the title) ships in N boxes; the sheet has room for five.
-function boxCount(p) {
+export function boxCount(p, max = BOX_COLUMNS.length) {
   const n = Number(String(attr(p).general_title_en ?? '').match(/\bset of (\d+)\b/i)?.[1] ?? String(p.sku ?? '').match(/-(\d)$/)?.[1] ?? 1);
-  return Math.min(Math.max(n, 1), BOX_COLUMNS.length);
+  return Math.min(Math.max(n, 1), max);
 }
 
 // Rona measures a box by its long side, its short side and its height.
-function boxSize(p) {
+export function boxSize(p) {
   const d = attr(p).shipping_dimensions_in ?? {};
   const a = num(d.length);
   const b = num(d.width);
@@ -81,7 +87,7 @@ function boxSize(p) {
 
 // The last price read on each store's page, only where Price Alignment would
 // trust it: this product, in stock, in CAD. retailer → sku → price.
-async function competitorPrices(skus) {
+export async function competitorPrices(skus) {
   const out = {};
   for (let i = 0; i < skus.length; i += 100) {
     const { data, error } = await supabase
@@ -100,9 +106,15 @@ async function competitorPrices(skus) {
 
 export async function generateRonaFromTemplate(templateStoragePath, products, fileName = 'Rona_Export', { task = null } = {}) {
   if (!products?.length) throw new Error('No products to export.');
-  const { zip, shared } = await openTemplate(templateStoragePath, { task: task?.part(0, 0.15) });
+  const opened = await openTemplate(templateStoragePath, { task: task?.part(0, 0.15) });
+  const { zip, shared } = opened;
+  // The DSCO catalog file is told by its own sheet, whatever the file is called.
+  if (await sheetPathByName(zip, DSCO_SHEET)) {
+    const { fillRonaDsco } = await import('./ronaDscoExport');
+    return fillRonaDsco(opened, templateStoragePath, products, fileName, { task: task?.part(0.15, 1) });
+  }
   const path = await sheetPathByName(zip, SHEET);
-  if (!path) throw new Error(`This Rona file has no "${SHEET}" sheet. Only the new listing Vendor Quote Sheet can be filled from the catalog.`);
+  if (!path) throw new Error(`This Rona file has neither a "${SHEET}" sheet nor a "${DSCO_SHEET}" sheet. The new listing files the PIM fills are the Vendor Quote Sheet and the DSCO catalog file.`);
   let xml = await zip.file(path).async('string');
   const header = sheetToGrid(xml, shared)[HEADER_ROW - 1] ?? [];
   for (const [col, label] of Object.entries(ANCHORS)) {
