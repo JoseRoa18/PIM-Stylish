@@ -8,7 +8,8 @@
 //   All prices   every product compared, the aligned ones too
 //   Left out     the products the comparison leaves out, each with its reason
 //   Notes        what each status and column means
-// A row carries the store's price and the expected one, their difference,
+// A row carries the product's own code on that marketplace where the PIM has
+// one (MARKETPLACE_CODES), the store's price and the expected one, their difference,
 // where the expected price comes from (the regular price, or the promotion
 // running on that store with its name and days), the product's price levels,
 // our own stock and sales in the store's country and, for a store read from
@@ -19,6 +20,64 @@ import { alignTiles, priceSide, PRICE_SIDE_LABEL, regularPriceName } from './ali
 import { TOLERANCE_FROM, TOLERANCE_HIGH, TOLERANCE_LOW } from './priceTolerance.js';
 
 export const NOT_TRACKED = 'Not tracked';
+
+// The product's own code on the channel (user, 2026-11-19: "que cuando se
+// descargue traiga el SKU del marketplace"): one column right after our SKU,
+// named for what that marketplace calls it. Where it comes from:
+//   alias    the product's Aliases in the PIM (product_aliases.marketplace);
+//   amazon   the Seller SKU of amazon_links for that market;
+//   bestbuy  the product ID of our offer (the latest Best Buy snapshot);
+//   page     the code the store's own page showed when it was read
+//            (where_to_buy_links.page_item_id) — the only source where the
+//            PIM keeps no alias, a fallback where the page shows the very
+//            number the alias is (Home Depot, Rona). Lowe's and BB&B /
+//            Overstock have no fallback: their pages show another number.
+// A channel that is not here has no code of its own in the PIM and gets no
+// column: our own stores (the SKU there is ours), Menards and the dealers
+// (their pages give only an internal id).
+export const MARKETPLACE_CODES = {
+  homedepot_ca: { header: 'Home Depot Item #', alias: 'Home Depot CA', page: true, meaning: 'Home Depot Canada\'s item number for the product: the one in its Aliases in the PIM, else the one its page shows.' },
+  homedepot_us: { header: 'Home Depot Item #', alias: 'Home Depot US', page: true, meaning: 'Home Depot USA\'s item number for the product: the one in its Aliases in the PIM, else the one its page shows.' },
+  rona: { header: 'Rona Article #', alias: 'Rona', page: true, meaning: 'Rona\'s article number for the product: the one in its Aliases in the PIM, else the one its page shows.' },
+  lowes_us: { header: "Lowe's Item #", alias: "Lowe's US", meaning: 'Lowe\'s item number for the product, from its Aliases in the PIM.' },
+  bbb_us: { header: 'BB&B SKU', alias: 'BB&B / Overstock', meaning: 'The SKU the product has on Bed Bath & Beyond / Overstock, from its Aliases in the PIM.' },
+  overstock_us: { header: 'Overstock SKU', alias: 'BB&B / Overstock', meaning: 'The SKU the product has on Bed Bath & Beyond / Overstock, from its Aliases in the PIM.' },
+  walmart_ca: { header: 'Walmart SKU', alias: 'Walmart CA', meaning: 'The SKU the product is listed under on Walmart Canada, from its Aliases in the PIM. On some products it is not our own (A-801B is A-801B-1 there).' },
+  walmart_us: { header: 'Walmart Item ID', page: true, retailer: 'walmart_us', meaning: 'Walmart\'s item ID, the number in the product\'s walmart.com address. On Walmart USA the product is listed under our own SKU.' },
+  bestbuy: { header: 'Best Buy Product ID', bestbuy: true, meaning: 'Best Buy\'s product ID of our offer, the number in its bestbuy.ca address. The offer is listed under our own SKU.' },
+  amazon_ca: { header: 'Amazon Seller SKU', amazon: 'ca', meaning: 'The Seller SKU the product is listed under on Amazon Canada, from its Aliases in the PIM.' },
+  amazon_us: { header: 'ASIN', page: true, meaning: 'The ASIN the product\'s Amazon.com page shows. The PIM keeps no Seller SKU for Amazon USA.' },
+  wayfair_ca: { header: 'Wayfair SKU', page: true, linkPart: true, meaning: 'The Wayfair SKU the product\'s page shows (a listing\'s finishes and sizes share it).' },
+  wayfair_us: { header: 'Wayfair SKU', page: true, linkPart: true, meaning: 'The Wayfair SKU the product\'s page shows (a listing\'s finishes and sizes share it).' },
+};
+// The Wayfair SKU at the end of a Wayfair address ("…-tkjs1111.html").
+const WAYFAIR_PART = /-([a-z]{2,6}\d{3,7})\.html/i;
+
+/**
+ * Map(sku → the product's code on the channel), from the rows the channel's
+ * entry in MARKETPLACE_CODES asks for. A page's code counts only when the page
+ * read is this product's own: not a broken link, not another product or
+ * another option of it — the newest reading first.
+ * @param raw { aliases: [{ sku, alias }], amazon: [{ sku, seller_sku, asin }], bestBuy: [{ sku, bb_product_id }],
+ *              pages: [{ sku, page_item_id, url, verdict, sku_check, read_at }] }
+ */
+export function marketplaceCodes(cfg, { aliases = [], amazon = [], bestBuy = [], pages = [] } = {}) {
+  const spec = MARKETPLACE_CODES[cfg?.key];
+  const codes = new Map();
+  if (!spec) return codes;
+  const put = (sku, code) => {
+    const text = String(code ?? '').trim();
+    if (sku && text && !codes.has(sku)) codes.set(sku, text);
+  };
+  for (const a of aliases) put(a.sku, a.alias);
+  for (const a of amazon) put(a.sku, a.seller_sku || a.asin);
+  for (const o of bestBuy) put(o.sku, o.bb_product_id);
+  const own = pages
+    .filter((p) => p.verdict !== 'broken' && p.sku_check !== 'other' && p.sku_check !== 'variant')
+    .sort((a, b) => String(b.read_at ?? '').localeCompare(String(a.read_at ?? '')));
+  for (const p of own) put(p.sku, p.page_item_id || (spec.linkPart ? String(p.url ?? '').match(WAYFAIR_PART)?.[1]?.toUpperCase() : null));
+  return codes;
+}
 
 const STATUS_FILL = { promo_ok: 'E6F4EA', map_ok: 'E6F4EA', promo_missing: 'FEF3C7', misaligned: 'FCE8E6', no_map: 'F1F3F4' };
 const BELOW_FILL = 'FCE8E6';
@@ -58,7 +117,6 @@ const monthName = (period) => {
 /** "Stylish_Price_Alignment_Sinks_Direct_Canada_2026-11-13.xlsx" */
 export const alignmentFileName = (cfg, date) => `Stylish_Price_Alignment_${String(cfg.label).replace(/['’]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')}_${date}.xlsx`;
 
-const PRODUCT = { title: 'Product', color: '1F3864', headers: ['SKU', 'Model Name', 'Brand', 'Category', 'UPC', 'Obsolete'] };
 const PAGE_HEADERS = ['Page', 'SKU Confirmed', 'In Stock on the Store', 'Page Note'];
 const WIDTHS = {
   SKU: 14, 'Model Name': 30, Brand: 10, Category: 20, UPC: 15, Obsolete: 10,
@@ -78,7 +136,8 @@ const WIDTHS = {
  *                  promoBySku: Map(sku → { kind, name?, period, windowStart, windowEnd }) — loadExpectedPrices,
  *                  monthlyNames: Map(period → the monthly promotion's name),
  *                  stock: Map(sku → units available in the store's country; no entry = not tracked),
- *                  sales: Map(sku → { units_30, units_90 }) }
+ *                  sales: Map(sku → { units_30, units_90 }),
+ *                  codes: Map(sku → the product's code on the channel) — marketplaceCodes }
  * @param labels  { category: (key) → label, kind: { monthly: 'Monthly promotion', flash: … } }
  * @param date    'YYYY-MM-DD', the day of the export
  */
@@ -92,10 +151,14 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
   const statusKey = new Map(Object.entries(statusLabel).map(([key, label]) => [label, key]));
   const product = new Map((data.products ?? []).map((p) => [p.sku, p]));
   const liveHeader = `On ${cfg.short}`;
+  // The product's own code on this channel, right after our SKU — where the PIM has one (MARKETPLACE_CODES).
+  const code = MARKETPLACE_CODES[cfg.key] ?? null;
+  const PRODUCT = { title: 'Product', color: '1F3864', headers: ['SKU', ...(code ? [code.header] : []), 'Model Name', 'Brand', 'Category', 'UPC', 'Obsolete'] };
+  const widthOf = (h) => WIDTHS[h] ?? (code && h === code.header ? 20 : null);
 
   const productCells = (sku) => {
     const p = product.get(sku) ?? {};
-    return [sku, p.model_name ?? '', p.brand ?? '', p.category ? labels.category(p.category) : '', p.upc ?? '', p.is_obsolete ? 'Yes' : ''];
+    return [sku, ...(code ? [data.codes?.get(sku) ?? ''] : []), p.model_name ?? '', p.brand ?? '', p.category ? labels.category(p.category) : '', p.upc ?? '', p.is_obsolete ? 'Yes' : ''];
   };
   const pageCells = (e) => [e.url ?? '', e.url ? (e.unconfirmed ? 'No' : 'Yes') : '', yesNo(e.in_stock), e.page_note ?? ''];
 
@@ -112,7 +175,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
   const col = (h) => headers.indexOf(h);
   const MONEY = new Set([liveHeader, 'Expected', 'Difference', 'MAP Blue', 'MAP Orange', 'MAP Purple', 'MSRP']);
   const formats = headers.map((h) => (MONEY.has(h) ? 'money' : h === 'Difference %' ? 'percent' : h === 'Page' ? 'link' : null));
-  const widths = headers.map((h) => (h === liveHeader ? 14 : WIDTHS[h] ?? null));
+  const widths = headers.map((h) => (h === liveHeader ? 14 : widthOf(h)));
 
   // One row: a problem (its own status, and its side) or an aligned product.
   const priceRow = (e, key, problem) => {
@@ -174,7 +237,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
   const leftSheet = {
     name: 'Left out', sections: leftSections, rows: leftRows,
     formats: leftHeaders.map((h) => (h === 'Page' ? 'link' : h === 'Price Read' ? 'money' : null)),
-    widths: leftHeaders.map((h) => WIDTHS[h] ?? null),
+    widths: leftHeaders.map(widthOf),
   };
 
   // ---- summary ----
@@ -264,6 +327,7 @@ export function alignmentSheets({ cfg, report, data, labels, date }) {
         headers: ['Column', 'What it holds'],
         formats: ['topic', 'wrap'],
         rows: [
+          ...(code ? [[code.header, `${code.meaning} Empty where the PIM has none for the product.`]] : []),
           [liveHeader, cfg.promoAware === false
             ? `The store's base price, in ${currency}: this store runs its own sales, so only the base price is compared.`
             : `The price the store sells at, in ${currency} (the discounted one while a discount runs).`],

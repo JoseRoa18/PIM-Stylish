@@ -2,15 +2,17 @@
 // an Excel, with every detail the PIM has on each row. Loaded on click from
 // the Pricing page; the sheets are in lib/alignmentExcel.js. The report itself
 // is the one on screen — nothing is pulled from the store again: only the
-// products' own data, the promotions' names, and our stock and sales are read.
+// products' own data, their code on that marketplace, the promotions' names,
+// and our stock and sales are read.
 
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
+import { latestSnapshot } from '@/features/syndication/lib/channels';
 import { PROMOTION_KINDS } from './promotions';
 import { loadExpectedPrices } from './expectedPrices';
-import { alignmentSheets, alignmentFileName } from '../lib/alignmentExcel';
+import { alignmentSheets, alignmentFileName, MARKETPLACE_CODES, marketplaceCodes } from '../lib/alignmentExcel';
 
 const PAGE = 1000;
 const CATEGORY = new Map(CATEGORY_OPTIONS.map((c) => [c.value, c.label]));
@@ -42,12 +44,30 @@ function settleAll(reads, task, detail) {
   })));
 }
 
+// The product's own code on the channel (user, 2026-11-19: "el SKU del
+// marketplace"): only what that channel's entry in MARKETPLACE_CODES asks for —
+// its Aliases, its Amazon Seller SKUs, Best Buy's product ids, or the codes its
+// pages showed. A channel without an entry reads nothing.
+async function loadCodes(cfg) {
+  const spec = MARKETPLACE_CODES[cfg.key];
+  if (!spec) return new Map();
+  const [aliases, amazon, bestBuy, pages] = await Promise.all([
+    spec.alias ? readAll('product_aliases', 'id, sku, alias', { filter: (q) => q.eq('marketplace', spec.alias), order: ['id'] }) : [],
+    spec.amazon ? readAll('amazon_links', 'sku, seller_sku, asin', { filter: (q) => q.eq('marketplace', spec.amazon), order: ['sku'] }) : [],
+    spec.bestbuy ? latestSnapshot('bestbuy').then((s) => s?.results ?? []) : [],
+    spec.page
+      ? readAll('where_to_buy_links', 'id, sku, page_item_id, url, verdict, sku_check, read_at', { filter: (q) => q.eq('retailer', spec.retailer ?? cfg.retailer ?? cfg.key), order: ['id'] })
+      : [],
+  ]);
+  return marketplaceCodes(cfg, { aliases, amazon, bestBuy, pages });
+}
+
 async function loadDetails(cfg, task = null) {
   // The channel's own currency: the price levels shown are the ones it is compared with.
   const cur = cfg.priceField.endsWith('usd') ? 'usd' : 'cad';
   const market = cfg.market === 'us' ? 'us' : 'ca';
   const followsPromos = cfg.promoAware !== false;
-  const [products, expected, monthly, stock, sales] = await settleAll([
+  const [products, expected, monthly, stock, sales, codes] = await settleAll([
     readAll('products', `sku, model_name, brand, category, is_obsolete, upc:attributes->>upc, map:map_${cur}, map_orange:map_orange_${cur}, map_purple:map_purple_${cur}, msrp:msrp_${cur}`, { order: ['sku'] }),
     // The promotion behind each expected price (its kind, name and days in this market).
     followsPromos ? loadExpectedPrices(cfg) : Promise.resolve({ promoBySku: new Map() }),
@@ -56,8 +76,10 @@ async function loadDetails(cfg, task = null) {
       : Promise.resolve([]),
     readAll('product_inventory', 'sku, available', { filter: (q) => q.eq('market', market), order: ['sku'] }),
     readAll('product_sales', 'sku, units_30, units_90', { filter: (q) => q.eq('market', market), order: ['sku'] }),
+    loadCodes(cfg),
   ], task, 'Reading the products, the promotions, our stock and sales…');
   return {
+    codes,
     products,
     promoBySku: expected.promoBySku,
     monthlyNames: new Map(monthly.map((p) => [p.period, p.name])),
