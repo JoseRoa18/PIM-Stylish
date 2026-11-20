@@ -83,6 +83,7 @@ An axe-core scan of every route, in both themes, went from 1,107 violations to 0
 - The top search remembers the products opened from it (user idea 2026-10-05, [recentSearches.js](src/features/search/lib/recentSearches.js)). It keeps the last 4 per user in localStorage and shows them as "Recent" when the empty bar is clicked.
   - The panel is the same combobox / listbox as the results; Clear empties the list.
   - The Delete key removes the highlighted product. The × on each row is its mouse twin and is `aria-hidden`, because a listbox holds only options.
+  - **Its rows are real links** (user, 2026-11-20: "no puedo darles click derecho y abrir en otra pestaña"): each result and each Recent row is a `<Link role="option">` to the product's page, and "View all results" a link to the catalog's search, so the browser's own menu, Ctrl / Cmd + click and the middle button open them in another tab ([Topbar](src/components/layout/Topbar.jsx): `clickRow` leaves such a click to the browser — `forElsewhere` — and this tab's panel stays open with what was typed). **Ctrl / Cmd + Enter** is the keyboard twin: the highlighted row in a new tab, or the catalog's search when no row is highlighted. A plain click, the arrows and Enter are as before. A product opened in another tab from the results is remembered in Recent like any other. A row that opens a page is a link, never a `<button>` with `navigate()`.
 
 **Shell and verification**
 - AppShell has a "Skip to main content" link to `main#main-content`.

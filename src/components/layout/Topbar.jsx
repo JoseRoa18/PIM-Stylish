@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Search,
   Menu,
@@ -25,6 +25,15 @@ import { obsoleteAmong } from '@/features/products/api/products';
 
 const IS_MAC =
   typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
+
+// Every row of the search is a real link (user, 2026-11-20: "no puedo darles
+// click derecho y abrir en otra pestaña"), so the browser's own ways of opening
+// one elsewhere work: its right-click menu, Ctrl / Cmd / Shift + click and the
+// middle button. A plain click still opens the product in this tab.
+const productPath = (sku) => `/catalog/${encodeURIComponent(sku)}`;
+const catalogSearchPath = (text) => `/catalog?search=${encodeURIComponent(text.trim())}`;
+/** A click the browser should handle itself: another tab, another window, a download. */
+const forElsewhere = (e) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0;
 
 export default function Topbar({ onMenuClick, menuOpen = false }) {
   const { signOut, user } = useAuth();
@@ -127,8 +136,21 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
 
   function goToProduct(product) {
     setRecent(rememberRecent(userId, product, recent));
-    navigate(`/catalog/${encodeURIComponent(product.sku)}`);
+    navigate(productPath(product.sku));
     closeAndReset();
+  }
+
+  // A click on a row. One meant for another tab is left to the browser, and the
+  // panel stays open so several can be opened in a row; a product opened that
+  // way from the results is remembered like any other (one opened from Recent
+  // is there already — moving it up would shift the list under the pointer).
+  function clickRow(e, product, { remember = true } = {}) {
+    if (forElsewhere(e)) {
+      if (remember) setRecent(rememberRecent(userId, product, recent));
+      return;
+    }
+    e.preventDefault();
+    goToProduct(product);
   }
 
   // A recent entry stores its thumbnail path flat; the rows read primary_image.
@@ -141,7 +163,7 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
   }
 
   function goToCatalog(searchQuery) {
-    navigate(`/catalog?search=${encodeURIComponent(searchQuery.trim())}`);
+    navigate(catalogSearchPath(searchQuery));
     closeAndReset();
   }
 
@@ -185,8 +207,18 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
       setActiveIndex((i) => (i <= -1 ? max : i - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (activeIndex >= 0 && options[activeIndex]) {
-        goToProduct(showRecent ? asProduct(options[activeIndex]) : options[activeIndex]);
+      const picked = activeIndex >= 0 && options[activeIndex]
+        ? (showRecent ? asProduct(options[activeIndex]) : options[activeIndex])
+        : null;
+      // Ctrl / Cmd + Enter: the keyboard twin of "open in a new tab".
+      const elsewhere = e.ctrlKey || e.metaKey;
+      if (picked && elsewhere) {
+        window.open(productPath(picked.sku), '_blank', 'noopener');
+        if (!showRecent) setRecent(rememberRecent(userId, picked, recent));
+      } else if (picked) {
+        goToProduct(picked);
+      } else if (trimmed && elsewhere) {
+        window.open(catalogSearchPath(trimmed), '_blank', 'noopener');
       } else if (trimmed) {
         goToCatalog(trimmed);
       }
@@ -327,14 +359,17 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
                     return (
                       <li key={p.sku} role="presentation">
                         {/* The option itself; the input keeps focus and moves
-                            through the options with the arrow keys. */}
-                        <button
+                            through the options with the arrow keys. A link, so
+                            the browser can open it in another tab. */}
+                        <Link
                           id={`global-search-option-${i}`}
-                          type="button"
+                          to={productPath(p.sku)}
                           role="option"
                           aria-selected={i === activeIndex}
                           tabIndex={-1}
-                          onClick={() => goToProduct(p)}
+                          draggable={false}
+                          onClick={(e) => clickRow(e, p)}
+                          onAuxClick={(e) => { if (e.button === 1) setRecent(rememberRecent(userId, p, recent)); }}
                           onMouseEnter={() => {
                             setActiveIndex(i);
                             prefetchRoute('productDetail');
@@ -388,19 +423,24 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
                               </div>
                             )}
                           </div>
-                        </button>
+                        </Link>
                       </li>
                     );
                   })}
                 </ul>
-                <button
-                  type="button"
-                  onClick={() => goToCatalog(trimmed)}
+                <Link
+                  to={catalogSearchPath(trimmed)}
+                  draggable={false}
+                  onClick={(e) => {
+                    if (forElsewhere(e)) return;
+                    e.preventDefault();
+                    goToCatalog(trimmed);
+                  }}
                   className="w-full flex items-center justify-between gap-2 px-4 py-2.5 border-t border-outline-variant bg-surface-container-low/40 hover:bg-surface-container-low text-body-sm text-on-surface-variant hover:text-on-surface transition-colors"
                 >
                   <span>View all results for <span className="font-semibold text-on-surface">"{trimmed}"</span></span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                </Link>
               </>
             )}
           </div>
@@ -433,13 +473,14 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
                     role="presentation"
                     className={`flex items-center pr-2 transition-colors ${i === activeIndex ? 'bg-secondary-container/60' : 'hover:bg-surface-container'}`}
                   >
-                    <button
+                    <Link
                       id={`global-search-recent-${i}`}
-                      type="button"
+                      to={productPath(p.sku)}
                       role="option"
                       aria-selected={i === activeIndex}
                       tabIndex={-1}
-                      onClick={() => goToProduct(p)}
+                      draggable={false}
+                      onClick={(e) => clickRow(e, p, { remember: false })}
                       onMouseEnter={() => {
                         setActiveIndex(i);
                         prefetchRoute('productDetail');
@@ -459,7 +500,7 @@ export default function Topbar({ onMenuClick, menuOpen = false }) {
                           </span>
                         )}
                       </div>
-                    </button>
+                    </Link>
                     {/* Mouse twin of the Delete key: a listbox holds only
                         options, so this stays out of the accessibility tree. */}
                     <button
