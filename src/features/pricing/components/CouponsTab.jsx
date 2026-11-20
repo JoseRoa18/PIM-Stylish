@@ -221,6 +221,7 @@ function NewCouponForm({ onClose, onCreated }) {
   // with the same amounts creates it). `warned` = what was already said.
   const [warned, setWarned] = useState(null);
   const [overNote, setOverNote] = useState(null);
+  const today = etToday(); // the first day the two pickers offer (user, 2026-11-20)
   // A percentage is the whole coupon's; money is per product (user, 2026-11-09).
   const money = type === 'amount';
   const currency = [...new Set(marketplaces.map((k) => (k.endsWith('_ca') ? 'CAD' : 'USD')))].sort().join(' / ') || 'money';
@@ -280,11 +281,11 @@ function NewCouponForm({ onClose, onCreated }) {
         <div className="grid grid-cols-2 gap-2 min-w-0">
           <label className="block min-w-0">
             <span className="text-label-lg text-on-surface-variant">Start day</span>
-            <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} className={input} />
+            <input type="date" value={startsOn} min={today} onChange={(e) => setStartsOn(e.target.value)} className={input} />
           </label>
           <label className="block min-w-0">
             <span className="text-label-lg text-on-surface-variant">End day</span>
-            <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className={input} />
+            <input type="date" value={endsOn} min={startsOn > today ? startsOn : today} onChange={(e) => setEndsOn(e.target.value)} className={input} />
           </label>
         </div>
       </div>

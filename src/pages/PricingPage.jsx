@@ -70,6 +70,7 @@ import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
 import { expirePromoFiles, savedFileExpiry } from '@/features/pricing/api/promoTasks';
 import { PROMO_CHANNELS, promoTemplateFor, promoTemplatesFor, channelLevelFor, goesByFile } from '@/features/pricing/lib/promoChannels';
 import { promoWindow, marketWindow, etToday } from '@/features/pricing/lib/promoCalendar';
+import { pastDaysProblem, pastMonthProblem, firstMonth } from '@/features/pricing/lib/promoDays';
 import PromoCalendar from '@/features/pricing/components/PromoCalendar';
 import { initialCalendar } from '@/features/pricing/lib/promoCalendarItems';
 import { getAppSetting } from '@/features/settings/api/appSettings';
@@ -1320,6 +1321,9 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
     try {
       if (customDates && (!startsOn || !endsOn)) throw new Error('Pick both the first and the last day, or switch back to the month calendar.');
       if (customDates && endsOn < startsOn) throw new Error('The end date is before the start date.');
+      // Never before today (user, 2026-11-20): the days picked, or the month of a monthly promotion on its calendar.
+      const past = customDates ? pastDaysProblem(startsOn, endsOn) : monthly ? pastMonthProblem(`${month}-01`) : null;
+      if (past) throw new Error(past);
       // Flash deals and special events belong to the month they start in.
       const period = monthly ? `${month}-01` : `${startsOn.slice(0, 7)}-01`;
       const payload = {
@@ -1533,14 +1537,16 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
   const takenNow = monthly && monthTaken?.month === month ? monthTaken.promotion : null;
   const canCreate = hasList && !takenNow;
 
-  // Days that are already over: a heads-up, never a block (a deal can be
-  // written down after the fact).
+  // A day before today is never chosen (user, 2026-11-20: "si hoy es 20, no
+  // podemos escoger 19, ni 10 ni nada, solo del 20 en adelante"). Until that
+  // day it was a heads-up ("Those days are already over"); now the pickers
+  // start today, the form says it as the day is typed, and Create stays off.
+  // A monthly promotion on its calendar picks a month: one that is over in
+  // both countries is refused the same way.
   const today = etToday();
-  const overNote = customDates && startsOn && endsOn && endsOn >= startsOn && endsOn < today
-    ? 'Those days are already over.'
-    : monthly && !customDates && /^\d{4}-\d{2}$/.test(month) && ['us', 'ca'].every((m) => marketWindow(`${month}-01`, m).end < today)
-      ? `${monthLabel(month)} is already over in both countries.`
-      : null;
+  const datesProblem = customDates
+    ? pastDaysProblem(startsOn, endsOn, { today })
+    : monthly && /^\d{4}-\d{2}$/.test(month) ? pastMonthProblem(`${month}-01`, { today }) : null;
 
   // What is worth a look in the list itself, before creating (user,
   // 2026-11-11) — warnings, never a block. A flash deal / MK event / peak
@@ -1607,7 +1613,6 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
       const empty = perMarket && mode === 'file' ? files[m]?.emptySkus ?? [] : [];
       return empty.length ? [{ title: `${empty.length} row${empty.length === 1 ? '' : 's'} of the ${m === 'ca' ? 'Canada' : 'USA'} file left out:`, text: `${listOf(empty)} — no price or cost on ${empty.length === 1 ? 'its' : 'their'} row` }] : [];
     }),
-    ...(overNote ? [{ title: overNote }] : []),
   ];
 
   return (
@@ -1638,6 +1643,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             <input
               type="month"
               value={month}
+              min={firstMonth(today)}
               onChange={(e) => setMonth(e.target.value)}
               aria-label="Month"
               className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
@@ -1653,23 +1659,24 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
             // Flash deals and special events: the two dates sit on the same
             // line as Name and Source, no sub-labels.
             <div className="mt-1 flex items-center gap-2">
-              <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} aria-label="First day" title="First day" className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              <input type="date" value={startsOn} min={today} onChange={(e) => setStartsOn(e.target.value)} aria-label="First day" title="First day" className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
               <span className="text-body-sm text-on-surface-variant">to</span>
-              <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} aria-label="Last day" title="Last day" className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              <input type="date" value={endsOn} min={startsOn > today ? startsOn : today} onChange={(e) => setEndsOn(e.target.value)} aria-label="Last day" title="Last day" className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
             </div>
           )}
           {monthly && customDates && (
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="text-label-md text-on-surface-variant">First day</span>
-                <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+                <input type="date" value={startsOn} min={today} onChange={(e) => setStartsOn(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
               </label>
               <label className="block">
                 <span className="text-label-md text-on-surface-variant">Last day</span>
-                <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
+                <input type="date" value={endsOn} min={startsOn > today ? startsOn : today} onChange={(e) => setEndsOn(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" />
               </label>
             </div>
           )}
+          {datesProblem && <p role="alert" className="mt-1.5 text-body-sm text-error">{datesProblem}</p>}
         </div>
         {/* Where the products come from: a price file per country or a pasted
             list. A monthly promotion and a peak season event (2026-11-13). */}
@@ -1820,7 +1827,7 @@ function NewPromotionForm({ onClose, onCreated, kind = 'monthly' }) {
         </p>
         <button
           type="button"
-          disabled={busy || !canCreate}
+          disabled={busy || !canCreate || Boolean(datesProblem)}
           aria-busy={busy}
           onClick={handleCreate}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
@@ -2963,6 +2970,7 @@ function PromoMarketDates({ promo, canEdit, onChanged }) {
   const anyCustom = differs('us') || differs('ca');
   const fmt = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
   const MARKETS = [['us', 'USA'], ['ca', 'Canada']];
+  const today = etToday(); // the pickers start today; a day the market already had can stay (user, 2026-11-20)
 
   function startEditing() {
     setDraft({ us: { start: win.us.start, end: win.us.end }, ca: { start: win.ca.start, end: win.ca.end } });
@@ -3013,9 +3021,9 @@ function PromoMarketDates({ promo, canEdit, onChanged }) {
           {MARKETS.map(([m, label]) => (
             <div key={m} className="flex items-center gap-3 flex-wrap rounded-xl bg-surface-container-low px-3 py-2">
               <span className="w-16 text-label-lg font-semibold text-on-surface">{label}</span>
-              <input type="date" value={draft[m].start} onChange={(e) => setDay(m, 'start', e.target.value)} className={input} aria-label={`${label} first day`} />
+              <input type="date" value={draft[m].start} min={today} onChange={(e) => setDay(m, 'start', e.target.value)} className={input} aria-label={`${label} first day`} />
               <span className="text-on-surface-variant">to</span>
-              <input type="date" value={draft[m].end} min={draft[m].start || undefined} onChange={(e) => setDay(m, 'end', e.target.value)} className={input} aria-label={`${label} last day`} />
+              <input type="date" value={draft[m].end} min={draft[m].start > today ? draft[m].start : today} onChange={(e) => setDay(m, 'end', e.target.value)} className={input} aria-label={`${label} last day`} />
               <span className="text-label-md text-on-surface-variant">Calendar: {fmt(cal[m].start)} to {fmt(cal[m].end)}</span>
             </div>
           ))}
@@ -3041,6 +3049,7 @@ function PromoWideDates({ promo, canEdit, onChanged }) {
   const custom = Boolean(promo.starts_on && promo.ends_on);
   const us = promoWindow(promo, 'us');
   const ca = promoWindow(promo, 'ca');
+  const today = etToday(); // the pickers start today; a day the deal already had can stay (user, 2026-11-20)
   const fmt = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 
   async function save(clear = false) {
@@ -3076,9 +3085,9 @@ function PromoWideDates({ promo, canEdit, onChanged }) {
       )}
       {editing && (
         <span className="inline-flex items-center gap-2 flex-wrap">
-          <input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} className={input} aria-label="First day" />
+          <input type="date" value={startsOn} min={today} onChange={(e) => setStartsOn(e.target.value)} className={input} aria-label="First day" />
           <span className="text-on-surface-variant">to</span>
-          <input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className={input} aria-label="Last day" />
+          <input type="date" value={endsOn} min={startsOn > today ? startsOn : today} onChange={(e) => setEndsOn(e.target.value)} className={input} aria-label="Last day" />
           <button type="button" onClick={() => save(false)} disabled={busy || !startsOn || !endsOn} className="px-3 py-1.5 rounded-full bg-primary text-on-primary text-label-md font-semibold disabled:opacity-50">Save</button>
           {custom && (promo.kind ?? 'monthly') === 'monthly' && <button type="button" onClick={() => save(true)} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Back to calendar</button>}
           <button type="button" onClick={() => { setEditing(false); setError(null); }} disabled={busy} className="text-label-md font-medium text-on-surface-variant hover:underline">Cancel</button>

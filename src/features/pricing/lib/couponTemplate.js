@@ -3,6 +3,7 @@
 // with the PIM's sectioned workbook, its dropdowns on the closed columns.
 import { parseSpreadsheetFile } from '@/features/import/lib/parseSpreadsheet';
 import { PROMO_CHANNELS } from './promoChannels';
+import { pastDayProblem } from './promoDays';
 
 // The marketplaces a coupon can be recorded for, in the portals' own order: the
 // Sinks Direct stores (user, 2026-11-13), Wayfair and Amazon, Canada and USA.
@@ -46,6 +47,9 @@ function valueOf(raw, type) {
   return percent < 100 ? Math.round(percent * 10000) / 10000 : null;
 }
 
+/** A coupon's days are never before today (user, 2026-11-20), in the form and in the template alike. */
+const pastOf = (start, end) => pastDayProblem(start, { what: 'start day' }) ?? pastDayProblem(end, { what: 'end day' });
+
 /** What is wrong with one coupon, in words, or null. */
 export function couponProblem(c) {
   if (!c.name) return 'It needs a name.';
@@ -53,6 +57,7 @@ export function couponProblem(c) {
   if (c.discount_type === 'percent' && !c.discount_value) return 'The percentage must be between 0 and 100.';
   if (!c.starts_on || !c.ends_on) return 'It needs a start day and an end day.';
   if (c.ends_on < c.starts_on) return 'The end day is before the start day.';
+  if (pastOf(c.starts_on, c.ends_on)) return pastOf(c.starts_on, c.ends_on);
   if (!c.skus.length) return c.discount_type === 'percent' ? 'It needs at least one product.' : 'Add each product with its amount.';
   return null;
 }
@@ -87,7 +92,7 @@ export async function parseCouponFile(file) {
     const sku = String(r[field.sku] ?? '').trim().toUpperCase();
     const problem = !name ? 'no coupon name' : !marketplace ? `"${r[field.marketplace]}" is not ${COUPON_STORES_TEXT}, Canada or USA` : !type ? `"${r[field.type]}" is not Percentage or Money`
       : !value ? `"${r[field.value]}" is not a valid discount` : !start ? `"${r[field.start]}" is not a date (YYYY-MM-DD)` : !end ? `"${r[field.end]}" is not a date (YYYY-MM-DD)`
-        : end < start ? 'the end day is before the start day' : !sku ? 'no SKU' : null;
+        : end < start ? 'the end day is before the start day' : pastOf(start, end) ? pastOf(start, end).replace(/^The /, 'the ') : !sku ? 'no SKU' : null;
     if (problem) { errors.push(`${row}: ${problem}`); continue; }
     const key = `${name.toLowerCase()}|${marketplace}`;
     const coupon = groups.get(key);

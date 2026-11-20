@@ -5,6 +5,7 @@ import { pushProductToWix } from '@/features/syndication/api/wixSync';
 import { pushBestBuyPrices } from '@/features/syndication/api/bestbuySync';
 import { getAppSetting } from '@/features/settings/api/appSettings';
 import { batchTicker } from '../lib/fileProgress';
+import { pastDaysProblem, pastMonthProblem } from '../lib/promoDays';
 import { discountFor, STYLISH_CHANNELS } from '../lib/stylishDiscount';
 
 /**
@@ -296,7 +297,7 @@ function assertStylishAlone(portals) {
 // `task` (optional taskProgress reporter): the level prices in batches of
 // 200, the promotion, its rows in batches of 200.
 export async function createPromotionFromLevels({ name, period, kind = 'flash', starts_on = null, ends_on = null, skus, tier = null, marketplaces = [], stylish_discount = null, task = null }) {
-  assertKindDates(kind, starts_on, ends_on);
+  assertKindDates(kind, starts_on, ends_on, period);
   await assertMonthFree(kind, period);
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
   if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${KIND_NOUN[kind] ?? kind} is for.`);
@@ -409,8 +410,12 @@ export async function updatePromotionStylishDiscount(promotion, discount) {
 export const PROMOTION_KINDS = { monthly: 'Monthly promotion', flash: 'Flash deal', mk_event: 'MK event', special: 'Peak season event' };
 /** The word inside a sentence (MK keeps its capitals). `coupon`: the Coupons tab's overview. */
 export const KIND_NOUN = { monthly: 'monthly promotion', flash: 'flash deal', mk_event: 'MK event', special: 'peak season event', coupon: 'coupon' };
-function assertKindDates(kind, starts_on, ends_on) {
+function assertKindDates(kind, starts_on, ends_on, period = null) {
   if (kind !== 'monthly' && !(starts_on && ends_on)) throw new Error(`This ${KIND_NOUN[kind] ?? kind} needs a first and a last day.`);
+  // Never before today (user, 2026-11-20): the days chosen, or — a monthly
+  // promotion on its market calendar — a month that is already over.
+  const past = starts_on && ends_on ? pastDaysProblem(starts_on, ends_on) : kind === 'monthly' ? pastMonthProblem(period) : null;
+  if (past) throw new Error(past);
 }
 
 /**
@@ -446,7 +451,7 @@ function dateColumns(kind, starts_on, ends_on) {
 }
 
 export async function createPromotion({ name, period, currency, rows, kind = 'monthly', starts_on = null, ends_on = null }) {
-  assertKindDates(kind, starts_on, ends_on);
+  assertKindDates(kind, starts_on, ends_on, period);
   await assertMonthFree(kind, period);
   const { data: prods, error: prodErr } = await supabase.from('products').select('sku');
   if (prodErr) throw prodErr;
@@ -496,7 +501,7 @@ export async function createPromotion({ name, period, currency, rows, kind = 'mo
  * for every kind but monthly, and the level only for what a row leaves empty.
  */
 export async function createPromotionFromFile({ name, period, rows, kind = 'monthly', starts_on = null, ends_on = null, marketplaces = [], source = 'file', task = null }) {
-  assertKindDates(kind, starts_on, ends_on);
+  assertKindDates(kind, starts_on, ends_on, period);
   await assertMonthFree(kind, period);
   const portals = [...new Set((marketplaces ?? []).filter(Boolean))];
   if (kind !== 'monthly' && !portals.length) throw new Error(`Pick at least one portal this ${KIND_NOUN[kind] ?? kind} is for.`);
@@ -722,6 +727,10 @@ export async function updatePromotionMarketDates(promotion, dates) {
     const both = Boolean(d?.starts_on) && Boolean(d?.ends_on);
     if ((d?.starts_on || d?.ends_on) && !both) throw new Error(`${label}: set both dates, or leave it on the calendar.`);
     if (both && d.ends_on < d.starts_on) throw new Error(`${label}: the end date is before the start date.`);
+    // A day that is changed is never before today; the days the market already had stay (user, 2026-11-20).
+    const had = promoWindow(promotion, m);
+    const past = both ? pastDaysProblem(d.starts_on, d.ends_on, { was: { start: had.start, end: had.end }, label }) : null;
+    if (past) throw new Error(past);
     patch[`${m}_starts_on`] = both ? d.starts_on : null;
     patch[`${m}_ends_on`] = both ? d.ends_on : null;
     parts.push(`${label} ${both ? `${d.starts_on} to ${d.ends_on}` : 'on its calendar'}`);
@@ -772,6 +781,9 @@ export async function updatePromotionDates(promotion, { starts_on, ends_on }) {
   const both = Boolean(starts_on) && Boolean(ends_on);
   if ((starts_on || ends_on) && !both) throw new Error('Set both dates, or clear both to use the market calendar.');
   if (both && ends_on < starts_on) throw new Error('The end date is before the start date.');
+  // A day that is changed is never before today; the days it already had stay (user, 2026-11-20).
+  const past = both ? pastDaysProblem(starts_on, ends_on, { was: { start: promotion.starts_on, end: promotion.ends_on } }) : null;
+  if (past) throw new Error(past);
   const { error } = await supabase
     .from('promotions')
     .update({ starts_on: both ? starts_on : null, ends_on: both ? ends_on : null })
