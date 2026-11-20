@@ -61,6 +61,7 @@ const tagsOf = (p) => list(attr(p).durability_tags).join(' | ');
 const describes = (p) => `${p.product_type ?? ''} ${titleOf(p)} ${list(attr(p).accessories_included).join(' ')}`;
 const materials = (p) => `${p.material ?? ''} ${attr(p).handle_material ?? ''} ${titleOf(p)}`;
 const isSink = (p) => /sink/i.test(p.category ?? '');
+const kitchenSink = (p) => p.category === 'kitchen_sink';
 // What comes in the box: the product page's Includes list. On a sink it is kept
 // (P-200D is P-200 with its pop-up drain), so a sink without one includes none;
 // the PIM keeps no such list for a faucet, and nothing is said for it.
@@ -155,6 +156,11 @@ const RULES = {
   bilingualpackaginganddocumentation: () => 'Bilingual',
   consumerunitsellinguom: () => 'EA - Each',
   unitcostwithoutshippingfees: (p) => num(p.cost_cad_rona_hd),
+  // The answers of the file Vladimir filled by hand (user, 2026-11-20: "para
+  // tomarlo de ejemplo para llenar dichos campos faltantes"), the same for every
+  // product of every category: no shipping cost on top, ships in 1 business day,
+  // returns accepted — and the Hazmat code left empty, as he left it.
+  unitcostwithshippingfees: () => 0,
   currencycode: () => 'CAD',
   msrp: (p) => num(p.map_cad), // Rona's MSRP is the MAP (user, 2026-11-09)
   map: (p) => num(p.map_cad),
@@ -165,11 +171,11 @@ const RULES = {
   hscode: (p) => { const d = String(attr(p).hs_code_ca || attr(p).hs_code || '').replace(/\D/g, ''); return d ? d.padEnd(10, '0').slice(0, 10) : ''; },
   isitemonaskid: () => 'No',
   isltlshippingrequired: () => 'No',
-  leadtimebusinessdays: () => 2,
+  leadtimebusinessdays: () => 1,
+  isreturnable: () => 'Yes',
   warehouseaddress1: () => `${WAREHOUSE.address}, ${WAREHOUSE.postalCode}`,
   doesproductcontainswood: (p) => yesNo(/wood|bamboo|acacia|teak|walnut|maple|\boak\b|paper/i.test(materials(p))),
   doesproductcontainscompositewood: (p) => yesNo(/composite wood|wood fib|\bmdf\b|particle ?board|plywood/i.test(materials(p))),
-  hazmatcode: (p, x) => x.options.find((o) => /^no msds/i.test(o)) ?? '',
   imagesfrontfacingimageenglish: (p, x) => x.main,
   imagesfrontfacingimagefrench: (p, x) => x.main, // "if only one image is available, use the same for both"
   // Made here only when it is made in Canada, and then a person confirms Rona's three conditions.
@@ -188,7 +194,14 @@ const RULES = {
     return num(attr(p).number_of_handles) > 0 || attr(p).handle_style ? 'Handle' : '';
   },
   antimicrobial: (p) => (/antimicrob|antibacter/i.test(tagsOf(p)) ? 'Yes' : ''),
-  commercialresidential: (p) => { const a = attr(p).application ?? ''; const com = /non.?residential|commercial/i.test(a); const res = /(^|;|\s)residential/i.test(a.replace(/non.?residential/gi, '')); return com && res ? 'Commercial/Residential' : com ? 'Commercial' : res ? 'Residential' : ''; },
+  // From the PIM's Application; a kitchen sink has none and takes the example's answer.
+  commercialresidential: (p) => {
+    const a = attr(p).application ?? '';
+    const com = /non.?residential|commercial/i.test(a);
+    const res = /(^|;|\s)residential/i.test(a.replace(/non.?residential/gi, ''));
+    if (com || res) return com && res ? 'Commercial/Residential' : com ? 'Commercial' : 'Residential';
+    return kitchenSink(p) ? 'Commercial/Residential' : '';
+  },
   // Lead free by the PIM's own marks: Lead Free, California's AB 100, the Safe Drinking Water Act.
   complieswithfederalleadguidelines: (p) => (attr(p).lead_free === true || isYes(attr(p).lead_free) || isYes(attr(p).ab_100_compliant) || isYes(attr(p).sdwa_compliant) ? 'Yes' : ''),
   corrosionresistant: (p) => (/rust|corrosion/i.test(tagsOf(p)) ? 'Yes' : ''),
@@ -311,7 +324,20 @@ const RULES = {
   depthofbowl2in: (p) => (bowlCount(p) > 1 ? num(attr(p).right_bowl_depth_in) : ''),
   drainboardincluded: (p) => (isSink(p) ? yesNo(included(p).some((a) => /drain ?board/i.test(a))) : ''),
   drainlocation: (p) => { const d = words(attr(p).drain_hole_location || attr(p).drain_position); return /corner/i.test(d) ? 'Corner' : /rear/i.test(d) ? 'Rear' : /cent(er|re)/i.test(d) ? 'Center' : /side|offset/i.test(d) ? 'Offset' : ''; },
-  reversible: (p) => (/reversible/i.test(attr(p).drain_hole_location ?? '') ? 'Yes' : ''),
+  // The PIM's drain location says it ("Side Drain / Reversible"); one that does not ("Rear Center") is a No.
+  reversible: (p) => { const d = words(attr(p).drain_hole_location); return d ? yesNo(/reversible/i.test(d)) : ''; },
+  // What a kitchen sink answers to the questions the PIM has no field for: the
+  // answers of the file Vladimir filled by hand for the Azuni sinks (user,
+  // 2026-11-20), taken for every kitchen sink. The heat a sink stands is the
+  // stainless steel's: a granite sink's own number is not in the PIM.
+  compatiblewithgarbagedisposals: (p) => (kitchenSink(p) ? 'Yes' : ''),
+  heatresistanceindegreesf: (p) => (kitchenSink(p) && /stainless/i.test(p.material ?? '') ? '600+' : ''),
+  itemsrequiredforassembly: (p) => (kitchenSink(p) ? 'No' : ''),
+  knockoutholesincluded: (p) => (kitchenSink(p) ? 'No' : ''),
+  mountinghardwareincluded: (p) => (kitchenSink(p) ? 'Yes' : ''),
+  noiseinsulation: (p) => (kitchenSink(p) ? 'Yes' : ''),
+  safetylisting: (p) => (kitchenSink(p) ? 'Not third party lab tested' : ''),
+  style: (p) => (kitchenSink(p) ? 'Modern/Contemporary' : ''),
   finish: (p) => [attr(p).finish_type, { Glossy: 'Gloss' }[attr(p).finish_type]],
   lengthin: (p) => num(outside(p).length),
   widthin: (p) => num(outside(p).width),
@@ -434,7 +460,9 @@ export async function fillRonaDsco({ zip, shared }, templateStoragePath, product
     }
     // The DSCO platform's own optional columns repeat Rona's under other names ("msrp", "warranty"): left alone.
     if (/^optional$/i.test(spec.requirement)) rule = null;
-    return { ci, name, rule, match, required: /^required$/i.test(spec.requirement), number: /^number/i.test(spec.type), whole: /no decimal/i.test(spec.type), options: spec.options, byNorm: new Map(spec.options.map((o) => [norm(o), o])) };
+    // A list's entry is looked up as it is written first: without their signs "600+" and "600" are the same word.
+    const byText = new Map(spec.options.map((o) => [words(o).toLowerCase(), o]));
+    return { ci, name, rule, match, required: /^required$/i.test(spec.requirement), number: /^number/i.test(spec.type), whole: /no decimal/i.test(spec.type), options: spec.options, byText, byNorm: new Map(spec.options.map((o) => [norm(o), o])) };
   });
 
   const styles = columnStyles(xml);
@@ -459,7 +487,7 @@ export async function fillRonaDsco({ zip, shared }, templateStoragePath, product
         if (c.options.length) {
           // A pick list: the file's own spelling of one of the candidates, or nothing.
           const tries = [raw].flat().map((v) => words(v)).filter(Boolean);
-          value = tries.map((t) => c.byNorm.get(norm(t))).find(Boolean) ?? '';
+          value = tries.map((t) => c.byText.get(t.toLowerCase()) ?? c.byNorm.get(norm(t))).find(Boolean) ?? '';
           if (!value && tries.length) {
             const seen = offList.get(c.name) ?? new Map();
             seen.set(tries[0], [...(seen.get(tries[0]) ?? []), p.sku]);
