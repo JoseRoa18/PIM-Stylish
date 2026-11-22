@@ -26,6 +26,7 @@ const ODOO_REASON = {
   several: 'Twice in Odoo',
   taken: 'UPC on another Odoo product',
   country_unknown: 'Country not in Odoo',
+  volume_unit: 'Odoo’s volume is not in m³',
   refused: 'Odoo gave an error',
 };
 const PROMOS_SHOWN = 5;

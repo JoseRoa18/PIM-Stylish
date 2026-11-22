@@ -51,6 +51,7 @@ const WAITING = {
   archived: 'archived in Odoo',
   several: 'twice in Odoo',
   taken: 'their UPC is on another Odoo product',
+  volume_unit: 'Odoo keeps its volume in another unit than m³',
   hs_not_listed: 'their HS code is not on Odoo’s list',
   country_unknown: 'their country is not in Odoo',
   brand_unknown: 'their brand is not in Odoo',
@@ -90,7 +91,12 @@ const boxOf = (product) => {
  * was, the product as it is now (both with `attributes` and the columns named
  * in ODOO_COLUMNS: a column left out of one of them reads as changed):
  *   upc             the UPC → Odoo's Barcode
- *   box             Shipping Dimensions → Shipping Length / Width / Height
+ *   box             Shipping Dimensions → Shipping Length / Width / Height,
+ *                   and with them the box's volume → Volume (m³): the PIM keeps
+ *                   no volume of its own, so the function works it out from the
+ *                   box and sends it whenever `box` is asked for (user,
+ *                   2026-11-22: "el volumen que es el m3 … solo lo debe llenar
+ *                   PIM"). Nothing to add here for it.
  *   weight          Shipping Weight → Shipping Weight (Lbs)
  *   product_weight  Product Weight → Overall Product Weight
  *   model           Model Name → Model Name

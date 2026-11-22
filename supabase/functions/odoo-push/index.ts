@@ -7,6 +7,11 @@
 //   upc             attributes.upc                 → Barcode ("Master UPC")
 //   box             attributes.shipping_dimensions_in { length, width, height }
 //                                                  → Shipping Length / Width / Height (Inches)
+//   volume          that same box, length × width × height, in cubic metres
+//                                                  → Volume (m³), which only the PIM fills
+//                   (user, 2026-11-22: "el volumen que es el m3 … solo lo debe llenar
+//                   PIM"). The PIM keeps no volume of its own: it is the box's, so it
+//                   travels WITH the box — asking for `box` asks for `volume` too.
 //   weight          products.shipping_weight_lb    → Shipping Weight (Lbs)
 //   product_weight  attributes.product_weight_lb   → Overall Product Weight
 //   model           products.model_name            → Model Name
@@ -72,7 +77,7 @@
 //   state   "updated" / "created" (on a dry run "would_update" / "would_create") | "same" | "held"
 //   changes [{ field, before, after }]      held [{ field, reason, note }]
 //   reasons no_<field> (nothing to send: said, not a failure) · bad_upc | incomplete_box |
-//           hs_not_listed | country_unknown | brand_unknown | category_unknown | not_in_pim |
+//           volume_unit | hs_not_listed | country_unknown | brand_unknown | category_unknown | not_in_pim |
 //           not_in_odoo | archived | several | taken | look_alike | no_category | refused
 //   also    added: { color, material, finish } — the words this run added to Odoo's
 //           lists (on a dry run: the ones it would add)
@@ -94,9 +99,9 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 const MAX_SKUS = 100;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-const FIELD_KEYS = ["upc", "box", "weight", "product_weight", "model", "hs", "country", "image", "ids", "title", "brand", "category", "color", "material", "finish"] as const;
+const FIELD_KEYS = ["upc", "box", "volume", "weight", "product_weight", "model", "hs", "country", "image", "ids", "title", "brand", "category", "color", "material", "finish"] as const;
 type FieldKey = typeof FIELD_KEYS[number];
-const LABEL: Record<FieldKey, string> = { upc: "UPC", box: "box", weight: "shipping weight", product_weight: "product weight", model: "model name", hs: "HS code", country: "country of origin", image: "picture", ids: "marketplace id", title: "general title", brand: "brand", category: "category", color: "color", material: "material", finish: "finish" };
+const LABEL: Record<FieldKey, string> = { upc: "UPC", box: "box", volume: "volume", weight: "shipping weight", product_weight: "product weight", model: "model name", hs: "HS code", country: "country of origin", image: "picture", ids: "marketplace id", title: "general title", brand: "brand", category: "category", color: "color", material: "material", finish: "finish" };
 // Color, Material and Finish are lists of their own in Odoo (name + code), and a
 // product holds several of them: the PIM's one word replaces whatever is there.
 const TAGS = {
@@ -126,7 +131,7 @@ const ID_FIELDS = [...Object.values(ALIAS_FIELDS).map((a) => a.field), ...Object
 // Nothing to send for that field (the PIM has no value): said on the card, not a failure.
 const isSoft = (reason: string) => reason.startsWith("no_") && reason !== "no_category";
 // What Odoo's side can fix: noted in odoo_pending and tried again every hour.
-const RETRY = new Set(["not_in_odoo", "archived", "several", "taken", "hs_not_listed", "country_unknown", "brand_unknown", "category_unknown", "refused"]);
+const RETRY = new Set(["not_in_odoo", "archived", "several", "taken", "volume_unit", "hs_not_listed", "country_unknown", "brand_unknown", "category_unknown", "refused"]);
 
 type Change = { field: FieldKey; before: string; after: string; what?: string };
 type Hold = { field: FieldKey | "product"; reason: string; note: string };
@@ -139,6 +144,7 @@ type PimProduct = {
 type OdooProduct = {
   id: number; default_code: string; barcode: string | false; active: boolean; name: string; product_tmpl_id: [number, string];
   shipping_length_in: number; shipping_width_in: number; shipping_height_in: number; shipping_weight: number;
+  volume: number; volume_uom_name?: string | false;
   overall_product_weight: number; model_name: string | false; hs_code: string | false; country_of_origin: [number, string] | false;
   general_title: string | false; product_brand_id: [number, string] | false; categ_id: [number, string] | false;
   color_ids: number[]; material_ids: number[]; finish_ids: number[];
@@ -149,6 +155,7 @@ type Planned = Change & { on: "product" | "template"; values: Record<string, unk
 type Known = {
   takenBy: (upc: string, self?: number) => string[]; hsKeys: Set<string>; countries: Map<string, number>; pimMade: Set<string>; images: Map<string, string>; ids: Map<string, { field: string; name: string; value: string }[]>;
   brands: Map<string, { id: number; name: string }>; categories: Map<string, number>; tags: Record<TagKey, TagList>;
+  volume: { unit: string; digits: number };
 };
 // The PIM's word for one of Odoo's lists.
 const pimTag = (p: PimProduct, key: TagKey) => text(key === "color" ? p.color : key === "material" ? p.material : p.finish_type);
@@ -186,6 +193,10 @@ const num = (v: unknown): number | null => {
 const sameNum = (a: number | null, b: number | null) => a != null && b != null && Math.abs(a - b) < 0.005;
 const show = (n: number | null) => (n == null ? "—" : String(Math.round(n * 100) / 100));
 const boxText = (d: (number | null)[]) => `${d.map(show).join(" × ")} in`;
+// The volume of a box given in inches, in cubic metres, with the decimals Odoo keeps.
+const M3_PER_IN3 = 0.0254 ** 3;
+const roundTo = (n: number, digits: number) => Math.round(n * 10 ** digits) / 10 ** digits;
+const volumeText = (n: number | null) => (n == null ? "" : `${n} m³`);
 const text = (v: unknown) => String(v ?? "").trim();
 
 // The Odoo category of a PIM product. Checked against the 367 products Odoo
@@ -260,7 +271,7 @@ async function odooClient(): Promise<Odoo> {
   return (model, method, args, kwargs = {}) => rpc("object", "execute_kw", [db, uid, key, model, method, args, kwargs], method === "create");
 }
 
-const FIELDS = ["default_code", "barcode", "active", "name", "product_tmpl_id", "shipping_length_in", "shipping_width_in", "shipping_height_in", "shipping_weight", "overall_product_weight", "model_name", "hs_code", "country_of_origin", "general_title", "product_brand_id", "categ_id", "color_ids", "material_ids", "finish_ids", ...ID_FIELDS];
+const FIELDS = ["default_code", "barcode", "active", "name", "product_tmpl_id", "shipping_length_in", "shipping_width_in", "shipping_height_in", "shipping_weight", "volume", "overall_product_weight", "model_name", "hs_code", "country_of_origin", "general_title", "product_brand_id", "categ_id", "color_ids", "material_ids", "finish_ids", ...ID_FIELDS];
 const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 const barcodeOf = (p: { barcode: string | false }) => text(p.barcode || "");
 
@@ -306,6 +317,18 @@ function valueOf(field: FieldKey, p: PimProduct, known: Known): { values?: Recor
     if (have === 0) return none("shipping box");
     if (have < 3) return { hold: { field, reason: "incomplete_box", note: `The PIM has ${have} of the 3 sides of the shipping box: not sent to Odoo.` } };
     return { values: { shipping_length_in: sides[0], shipping_width_in: sides[1], shipping_height_in: sides[2] }, show: boxText(sides) };
+  }
+  if (field === "volume") {
+    // The box's own volume: nothing is typed for it in the PIM.
+    const sides = [num(p.box?.length), num(p.box?.width), num(p.box?.height)];
+    const have = sides.filter((x) => x != null).length;
+    if (have === 0) return { hold: { field, reason: "no_volume", note: "No shipping box in the PIM to work the volume out from: Odoo's Volume was left as it is." } };
+    if (have < 3) return { hold: { field, reason: "no_volume", note: `The PIM has ${have} of the 3 sides of the shipping box, so no volume can be worked out: Odoo's Volume was left as it is.` } };
+    if (known.volume.unit !== "m³") return { hold: { field, reason: "volume_unit", note: `Odoo keeps its Volume in ${known.volume.unit || "another unit"}, not in m³: not sent.` } };
+    const m3 = roundTo(sides[0]! * sides[1]! * sides[2]! * M3_PER_IN3, known.volume.digits);
+    // A box too small for the decimals Odoo keeps would read as no volume at all.
+    if (m3 <= 0) return { hold: { field, reason: "no_volume", note: `The shipping box is too small for the ${known.volume.digits} decimals Odoo keeps of a volume: Odoo's Volume was left as it is.` } };
+    return { values: { volume: m3 }, show: volumeText(m3) };
   }
   if (field === "weight") {
     const weight = num(p.shipping_weight_lb);
@@ -376,6 +399,10 @@ function plan(p: PimProduct, rec: OdooProduct, want: Set<FieldKey>, known: Known
       same: (v) => [v.shipping_length_in, v.shipping_width_in, v.shipping_height_in].every((x, i) => sameNum(x as number, odooSides[i])),
       kept: (v) => (now) => [v.shipping_length_in, v.shipping_width_in, v.shipping_height_in].every((x, i) => sameNum(x as number, [num(now.shipping_length_in), num(now.shipping_width_in), num(now.shipping_height_in)][i])),
     },
+    volume: (() => {
+      const of = (r: OdooProduct) => (num(r.volume) == null ? null : roundTo(num(r.volume)!, known.volume.digits));
+      return { before: volumeText(of(rec)), same: (v) => of(rec) === v.volume, kept: (v) => (now: OdooProduct) => of(now) === v.volume };
+    })(),
     weight: { before: num(rec.shipping_weight) == null ? "" : `${show(num(rec.shipping_weight))} lb`, same: (v) => sameNum(v.shipping_weight as number, num(rec.shipping_weight)), kept: (v) => (now) => sameNum(v.shipping_weight as number, num(now.shipping_weight)) },
     product_weight: { before: num(rec.overall_product_weight) == null ? "" : `${show(num(rec.overall_product_weight))} lb`, same: (v) => sameNum(v.overall_product_weight as number, num(rec.overall_product_weight)), kept: (v) => (now) => sameNum(v.overall_product_weight as number, num(now.overall_product_weight)) },
     model: { before: text(rec.model_name || "") ? `“${text(rec.model_name || "")}”` : "", same: (v) => text(rec.model_name || "") === v.model_name, kept: (v) => (now) => text(now.model_name || "") === v.model_name },
@@ -409,13 +436,15 @@ function plan(p: PimProduct, rec: OdooProduct, want: Set<FieldKey>, known: Known
   for (const field of FIELD_KEYS) {
     if (!want.has(field) || field === "image" || field === "ids") continue;
     const v = valueOf(field, p, known);
+    // No box, no volume: when the box was asked for too, its own note already says it.
+    if (field === "volume" && v.hold?.reason === "no_volume" && want.has("box")) continue;
     if (v.hold) { held.push(v.hold); continue; }
     if (!v.values || there[field].same(v.values)) continue;
     if (field === "upc") {
       const taken = known.takenBy(String(v.values.barcode), rec.id);
       if (taken.length) { held.push({ field, reason: "taken", note: `In Odoo the UPC ${v.values.barcode} is on ${taken.join(", ")}: Odoo takes a Barcode on one product only.` }); continue; }
     }
-    planned.push({ field, before: there[field].before, after: v.show ?? "", on: field === "upc" ? "product" : "template", values: v.values, kept: there[field].kept(v.values) });
+    planned.push({ field, before: there[field].before, after: v.show ?? "", on: field === "upc" || field === "volume" ? "product" : "template", values: v.values, kept: there[field].kept(v.values) });
   }
   // The General Title is also the product's name in Odoo, which its form calls
   // "Odoo Description" (user, 2026-11-12: "en General Title va en Odoo Description").
@@ -509,6 +538,9 @@ Deno.serve(async (req) => {
       if (!asked.length && !create) return json({ error: "No fields given." }, 400);
       for (const sku of skus) wantOf.set(sku, new Set(asked as FieldKey[]));
     }
+    // The volume is the box's: whoever sends the box sends its volume (pages
+    // opened before the volume existed ask only for `box`).
+    for (const want of wantOf.values()) if (want.has("box")) want.add("volume");
     const skus = [...wantOf.keys()];
     const anyWant = (f: FieldKey) => [...wantOf.values()].some((w) => w.has(f));
 
@@ -576,6 +608,15 @@ Deno.serve(async (req) => {
         const rows = await odoo("res.country", "search_read", [[["name", "in", names]]], { fields: ["name"], context: { lang: "en_US" } }) as { id: number; name: string }[];
         for (const r of rows) countries.set(r.name.toLowerCase(), r.id);
       }
+      // The unit Odoo keeps a volume in (m³ unless its setting says cubic feet)
+      // and how many decimals of it.
+      const volume = { unit: "m³", digits: 4 };
+      if (anyWant("volume") || create) {
+        const f = await odoo("product.product", "fields_get", [["volume"]], { attributes: ["digits"] }) as { volume?: { digits?: [number, number] | false } };
+        if (Array.isArray(f.volume?.digits) && Number.isInteger(f.volume!.digits[1])) volume.digits = f.volume!.digits[1];
+        const [any] = await odoo("product.product", "search_read", [[]], { fields: ["volume_uom_name"], limit: 1, context }) as { volume_uom_name?: string | false }[];
+        if (any) volume.unit = text(any.volume_uom_name || "");
+      }
       // Odoo's brands and product categories, by name.
       const brands = new Map<string, { id: number; name: string }>();
       if (anyWant("brand") || create) {
@@ -628,7 +669,7 @@ Deno.serve(async (req) => {
       }
       const known: Known = {
         takenBy: (upc, self) => holders.filter((h) => h.id !== self && barcodeOf(h) === upc).map((h) => text(h.default_code)),
-        hsKeys, countries, pimMade: new Set((made ?? []).map((m: { sku: string }) => m.sku)), images, ids, brands, categories, tags,
+        hsKeys, countries, pimMade: new Set((made ?? []).map((m: { sku: string }) => m.sku)), images, ids, brands, categories, tags, volume,
       };
 
       // ---- products Odoo has: compare and write ------------------------------
