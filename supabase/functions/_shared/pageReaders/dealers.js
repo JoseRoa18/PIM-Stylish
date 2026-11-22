@@ -1,5 +1,5 @@
 // Page readers for the dealer stores of the Where to Buy audit: Kitchen & Bath Authority, Warehouse-USA,
-// Cabinet Depot and Build with Rise (Shopify), our own Sinks Direct Canada / USA (Wix) and eBay.
+// Build with Rise (Shopify), our own Sinks Direct Canada / USA (Wix) and eBay.
 // Each reader takes the page HTML and the URL that was opened and returns a PageRead (see common.js) for
 // the page's MAIN product, or null when the page carries no product (404, bot page, "Too many requests"…).
 // One optional field beyond the contract: `note`, when the page says something that changes what the price
@@ -86,7 +86,7 @@ function warehouseUsa(html) {
   };
 }
 
-// ── Shopify (Cabinet Depot, Build with Rise) ─────────────────────────────────────────────────────────
+// ── Shopify (Build with Rise, Plumbing Market, Vatero) ─────────────────────────────────────────────────────────
 // Every Shopify page has the analytics `var meta = {"product":{"variants":[{id, price (cents), sku}]}}`.
 // The selected option is the URL's ?variant= (when it is one of this product's), else what the theme
 // selected (Dawn's data-selected-variant JSON, the product form's <select name="id"> option "selected"
@@ -204,7 +204,6 @@ function ebay(html, url) {
 export const readers = {
   kbauthority,
   warehouse_usa: warehouseUsa,
-  cabinet_depot: shopify,
   build_with_rise: shopify,
   // Dealers watched for price only (pageStores.js DEALER_STORES). Aquarina is
   // WooCommerce: the generic JSON-LD reader reads it (model as `sku`, price).

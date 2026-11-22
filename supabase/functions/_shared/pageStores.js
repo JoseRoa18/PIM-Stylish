@@ -25,7 +25,8 @@ export const PAGE_STORES = [
   // under its 5% minimum (homeDepotCaNlp.js): that sink stays at MAP there.
   { key: 'homedepot_ca', label: 'Home Depot Canada', short: 'Home Depot CA', market: 'ca', promoChannel: 'homedepot_ca', nlpMinimum: true },
   { key: 'rona', label: 'Rona', short: 'Rona', market: 'ca', promoChannel: 'rona' },
-  { key: 'cabinet_depot', label: 'Cabinet Depot', short: 'Cabinet Depot', market: 'ca', promoChannel: null, promosFrom: SOD_PROMOS_FROM },
+  // Cabinet Depot was here until 2026-11-22: its online shop is closed (user:
+  // "si cerró vamos a quitar todo eso y no lo contamos").
   // Build with Rise sits under Canada on the Stylish pages, but its store
   // sells in USD only (every price = the USD MAP, 2026-10-20): compared in USD.
   { key: 'build_with_rise', label: 'Build with Rise', short: 'Build with Rise', market: 'us', promoChannel: null, promosFrom: SOD_PROMOS_FROM },

@@ -9,13 +9,16 @@
  *
  * One label per retailer (they used to vary page by page: "SinksDirect.com" /
  * "SinksDirect USA", "KBAuthority.com" / "Kitchen&Bath Authority"…) and each
- * retailer under its own country (Cabinet Depot and Build with Rise are
- * Canadian stores; they sat under "Online in USA"). The order of the list is
+ * retailer under its own country (Build with Rise is a Canadian store; it
+ * sat under "Online in USA"). The order of the list is
  * the order on the page. BedBathandBeyond.ca, Overstock.ca and Lowes.ca no
  * longer exist (user, 2026-10-20): they are not stores of the list, so their links are
  * neither kept, checked nor published. Nor is Faucetline.com (2026-10-29): the
  * store is gone and its domain is parked — every address, even a made-up one,
- * sends the visitor on to unrelated sites (an adult one among them).
+ * sends the visitor on to unrelated sites (an adult one among them). Nor is
+ * Cabinet Depot (user, 2026-11-22: "si cerró vamos a quitar todo eso y no lo
+ * contamos"): its online shop, shop.cabinetdepotnewmarket.com, answers "This
+ * store is unavailable" since 2026-11-16.
  */
 
 import { orderWixSections } from './wixSectionOrder.js';
@@ -29,7 +32,6 @@ export const WTB_RETAILERS = [
   { key: 'walmart_ca', label: 'Walmart.ca', market: 'ca', host: /(^|\.)walmart\.ca$/ },
   { key: 'amazon_ca', label: 'Amazon.ca', market: 'ca', host: /(^|\.)amazon\.ca$/ },
   { key: 'rona', label: 'Rona', market: 'ca', host: /(^|\.)rona\.ca$/ },
-  { key: 'cabinet_depot', label: 'Cabinet Depot', market: 'ca', host: /(^|\.)cabinetdepotnewmarket\.com$/ },
   { key: 'build_with_rise', label: 'Build with Rise', market: 'ca', host: /(^|\.)buildwithrise\.com$/ },
   { key: 'ebay', label: 'eBay.ca', market: 'ca', host: /(^|\.)ebay\.(ca|com)$/ },
   // Online in USA
