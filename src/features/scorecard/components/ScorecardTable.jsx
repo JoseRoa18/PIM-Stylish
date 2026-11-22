@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Copy, Pencil, X, Loader2, MessageSquareText } from 'lucide-react';
+import { Check, Copy, Pencil, Loader2, MessageSquareText } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import Dialog from '@/components/ui/Dialog';
 import { formatValue, meetsTarget, parseInput, targetLabel, toInput } from '../lib/format';
@@ -11,10 +11,12 @@ import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } fro
 // One market of a board as the EOS grid (user's layout choice, 2026-11-04):
 // rows grouped by theme, one line each — the owner's initials, the
 // measurable, its target — then the 13 weeks. A week's number is green when
-// it meets the target and red when it misses it — the number and its check /
-// cross, never a filled cell (user, 2026-11-12: with a target on most rows
-// the filled cells were "muy chillones e invasivos") and never color alone;
-// its owner or an admin edits it in place. The 13 weeks fit
+// it meets the target and red when it misses it, over a faint fill of the
+// same color on its cell and with no check or cross (user, 2026-11-22: "verde
+// y roja la celda, algo tenue pero que se note" — the team found the marks
+// worse than none; the full container fills of before 2026-11-12 were "muy
+// chillones e invasivos"). The cell's tooltip and its screen-reader text say
+// on / off target in words. Its owner or an admin edits it in place. The 13 weeks fit
 // the page from 1440 px; narrower, the table scrolls inside itself and
 // opens on the latest week.
 //
@@ -242,8 +244,8 @@ function ValueCell({ metric, week, row, current, running, editable, onSave }) {
   const shown = formatValue(metric.unit, row);
   // A week in progress is never judged against the target: sales at mid-week would always miss it.
   const ok = running ? null : meetsTarget(metric, row?.value);
-  // The cell keeps only the tint of the week under review; on / off target is the number's own color.
-  const column = current ? 'bg-primary-container/25' : '';
+  // On / off target is the number's own color over a faint fill of its cell; any other cell keeps only the tint of the week under review.
+  const column = ok === true ? 'bg-success-tint' : ok === false ? 'bg-error-tint' : current ? 'bg-primary-container/25' : '';
   const ink = ok === true ? 'text-success' : ok === false ? 'text-error' : '';
   const isText = metric.unit === 'text' || (row?.value == null && row?.note);
   const longNote = isText && shown.length > 7;
@@ -267,8 +269,6 @@ function ValueCell({ metric, week, row, current, running, editable, onSave }) {
         <span className={cn('flex items-center justify-end gap-1', isText && 'justify-start')}>
           {/* a number the PIM filled carries a dot; the row says PIM */}
           {row?.origin === 'auto' && <span className="w-1.5 h-1.5 rounded-full bg-secondary flex-shrink-0" aria-hidden />}
-          {ok === true && <Check className="w-3 h-3 flex-shrink-0" aria-hidden />}
-          {ok === false && <X className="w-3 h-3 flex-shrink-0" aria-hidden />}
           {/* a long note shows as an icon so the 13 weeks keep fitting; its text is the tooltip and the sr-only line */}
           {longNote ? (
             <>
@@ -286,7 +286,7 @@ function ValueCell({ metric, week, row, current, running, editable, onSave }) {
     </>
   );
   const soFar = running && row ? `So far: ${weekSoFar(addWeeks(week, -1))} · updated ${new Date(row.updated_at).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : null;
-  const title = [soFar, row?.note && row?.value != null ? row.note : isText ? shown : null, row?.origin === 'auto' ? 'Filled by the PIM' : null].filter(Boolean).join(' · ') || undefined;
+  const title = [soFar, ok === true ? 'On target' : ok === false ? 'Off target' : null, row?.note && row?.value != null ? row.note : isText ? shown : null, row?.origin === 'auto' ? 'Filled by the PIM' : null].filter(Boolean).join(' · ') || undefined;
 
   if (draft != null) {
     return (

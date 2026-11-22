@@ -79,7 +79,7 @@ export default function TargetDialog({ metric, context, born = null, onSave, onC
           <span className="text-body-md text-on-surface-variant">{{ percent: '%', hours: 'hours', days: 'days' }[metric.unit] ?? ''}</span>
         </div>
         <p id={ids.hint} className="text-body-sm text-on-surface-variant mt-2">
-          A closed week is green with a check when it meets the target and red with a cross when it misses it.{' '}
+          A closed week is green when it meets the target and red when it misses it.{' '}
           {born
             ? `Leave the number empty to go back to ${targetLabel({ ...metric, ...born })}.`
             : 'Leave the number empty to track it without a target: its weeks take no color.'}
