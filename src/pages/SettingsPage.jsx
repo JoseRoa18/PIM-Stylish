@@ -62,7 +62,7 @@ function SettingRow({ title, description, checked, disabled, onChange }) {
 
 // Stock source (user, 2026-11-10): both markets from Odoo's Calculated
 // Inventory, column "Available for Use", one warehouse each, on their own
-// every hour. The last pull's report per market comes from app_settings.
+// every 5 minutes. The last pull's report per market comes from app_settings.
 const STOCK_SOURCES = [
   { key: 'us', title: 'USA — Odoo, warehouse ATL' },
   { key: 'ca', title: 'Canada — Odoo, warehouse CBG' },
@@ -286,7 +286,7 @@ function InventorySection() {
         <div>
           <h2 className="text-title-md text-on-surface font-semibold">Stock</h2>
           <p className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-            Read from Odoo's Calculated Inventory, column "Available for Use" (free stock plus what can be built from components), every hour and right after a product is created. Shown in the catalog, on each product and in the promotion tables. A product Odoo does not have is "not tracked", never 0.
+            Read from Odoo's Calculated Inventory, column "Available for Use" (free stock plus what can be built from components), every 5 minutes and right after a product is created. Shown in the catalog, on each product and in the promotion tables. A product Odoo does not have is "not tracked", never 0.
           </p>
         </div>
       </div>
@@ -366,7 +366,7 @@ function OdooSection() {
   async function toggle(next) {
     if (next && !(await confirm({
       title: 'Send product data to Odoo?',
-      message: 'From now on, what the PIM owns of a product — UPC, shipping box (with its volume in m³) and weight, product weight, general title, model name, brand, category, color, material, finish type, HS code, country of origin, main image and marketplace ids — is written to that product in Odoo right away when it is saved in the PIM, and a new product can be created there with it. A product nobody edits is not touched.',
+      message: 'From now on, what the PIM owns of a product — UPC, shipping box (with its volume in m³) and weight, product weight, general title, model name, brand, category, color, material, finish type, HS code, country of origin, main image and marketplace ids — is written to that product in Odoo right away when it is saved in the PIM, and a new product can be created there with it. Every hour the PIM also compares every product with Odoo and writes what differs, and a product both have is ticked “Managed by PIM” there.',
       confirmLabel: 'Turn on',
     }))) return;
     const prev = on;
@@ -390,7 +390,7 @@ function OdooSection() {
           <div>
             <h2 className="text-title-md text-on-surface font-semibold">Odoo</h2>
             <p id={descriptionId} className="text-body-sm text-on-surface-variant mt-0.5 max-w-md">
-              One way, PIM to Odoo. When a product’s UPC, shipping box, shipping weight, product weight, general title, model name, brand, category, color, material, finish type, HS code, country of origin, main image or a marketplace id (Aliases) is saved in the PIM — on its page or through a spreadsheet import — it is written to that product in Odoo right away. The General Title is the product’s Odoo Description. The Volume (m³) is the shipping box’s, worked out by the PIM and sent with the box. A color, material or finish that Odoo’s list does not have yet is added to it. A new product is created in Odoo when its “Create it in Odoo too” box is ticked. The PIM never empties a field in Odoo, never sends half a box, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
+              One way, PIM to Odoo. When a product’s UPC, shipping box, shipping weight, product weight, general title, model name, brand, category, color, material, finish type, HS code, country of origin, main image or a marketplace id (Aliases) is saved in the PIM — on its page or through a spreadsheet import — it is written to that product in Odoo right away. Every hour the PIM also compares every product with Odoo, writes what differs and ticks “Managed by PIM” on the products both have. The General Title is the product’s Odoo Description. The Volume (m³) is the shipping box’s, worked out by the PIM and sent with the box. A color, material or finish that Odoo’s list does not have yet is added to it. A new product is created in Odoo when its “Create it in Odoo too” box is ticked. The PIM never empties a field in Odoo, never sends half a box, and holds back a UPC that another Odoo product already has. What was sent or held is in the{' '}
               <Link to="/activity" className="text-primary underline underline-offset-2">Activity Log</Link>.
             </p>
           </div>

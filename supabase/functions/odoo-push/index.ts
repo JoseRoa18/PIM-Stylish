@@ -39,8 +39,23 @@
 //                   Color / Material / Finish are lists in Odoo. The product takes
 //                   the PIM's word and only that one; a word Odoo's list lacks is
 //                   ADDED to it (user, 2026-11-12: "tal cual el PIM").
+//   mark            every product the PIM is connected to — one active Odoo product
+//                   with the PIM's SKU — gets Odoo's "Managed by PIM" box ticked
+//                   (`x_managed_by_pim`, which locks the PIM's fields on Odoo's
+//                   screen), whatever was asked for (user, 2026-11-22: "los productos
+//                   que estén conectados deben activar el botón de Managed by PIM y
+//                   llenar los campos"). It is never unticked. If Odoo no longer has
+//                   that field, nothing is done about it.
 // The PIM's page and its spreadsheet import call this right after a save,
 // with the SKUs and the fields that save changed.
+//
+// `sync: true` — every hour, on top of the saves (the same user, the same day:
+// "lo de PIM a Odoo debería ser cada hora también"): the PIM's products, 100
+// from `offset` (by SKU), each compared with Odoo on EVERYTHING above but the
+// picture, and what differs written — a product made in Odoo by hand after the
+// PIM had it, a value changed there, a mark missing. The cron (odoo-push-sync-
+// hourly) asks for one page a minute, so two pages never add the same word to
+// one of Odoo's lists. It never creates a product.
 //
 // `create: true` (the "Create it in Odoo too" box of a new PIM product): a SKU
 // Odoo does not have is created there with what every PIM product in Odoo has
@@ -72,6 +87,7 @@
 //
 // Body: { skus: string[] (≤ 100), fields?: string[], create?: boolean, dryRun?: boolean }
 //       { retry: true, dryRun?: boolean }   — the pending ones (cron)
+//       { sync: true, offset?: number, dryRun?: boolean }   — a page of every product (cron)
 //   `fields` left out = ["upc"] (pages opened before the other fields existed).
 // Answer: { ok, off?, dryRun, results: [{ sku, state, note, reason?, changes, held }] }
 //   state   "updated" / "created" (on a dry run "would_update" / "would_create") | "same" | "held"
@@ -85,7 +101,7 @@
 // entry (target "odoo") with Odoo's values before the change.
 //
 // Auth: a signed-in admin or editor, a service-role bearer (proven through
-// GoTrue's admin API), or — for `retry` only — the cron's x-cron-secret.
+// GoTrue's admin API), or — for `retry` and `sync` only — the cron's x-cron-secret.
 // Deployed with verify_jwt off so pg_net can call it.
 // Secrets: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY, CRON_SECRET.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -99,9 +115,13 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 const MAX_SKUS = 100;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-const FIELD_KEYS = ["upc", "box", "volume", "weight", "product_weight", "model", "hs", "country", "image", "ids", "title", "brand", "category", "color", "material", "finish"] as const;
+const FIELD_KEYS = ["upc", "box", "volume", "weight", "product_weight", "model", "hs", "country", "image", "ids", "title", "brand", "category", "color", "material", "finish", "mark"] as const;
 type FieldKey = typeof FIELD_KEYS[number];
-const LABEL: Record<FieldKey, string> = { upc: "UPC", box: "box", volume: "volume", weight: "shipping weight", product_weight: "product weight", model: "model name", hs: "HS code", country: "country of origin", image: "picture", ids: "marketplace id", title: "general title", brand: "brand", category: "category", color: "color", material: "material", finish: "finish" };
+const LABEL: Record<FieldKey, string> = { upc: "UPC", box: "box", volume: "volume", weight: "shipping weight", product_weight: "product weight", model: "model name", hs: "HS code", country: "country of origin", image: "picture", ids: "marketplace id", title: "general title", brand: "brand", category: "category", color: "color", material: "material", finish: "finish", mark: "Managed by PIM" };
+// The "Managed by PIM" box of an Odoo product (a Studio field).
+const MARK_FIELD = "x_managed_by_pim";
+// What the hourly sync compares: everything but the picture (two pictures cannot be compared cheaply).
+const SYNC_FIELDS = FIELD_KEYS.filter((f) => f !== "image");
 // Color, Material and Finish are lists of their own in Odoo (name + code), and a
 // product holds several of them: the PIM's one word replaces whatever is there.
 const TAGS = {
@@ -148,6 +168,7 @@ type OdooProduct = {
   overall_product_weight: number; model_name: string | false; hs_code: string | false; country_of_origin: [number, string] | false;
   general_title: string | false; product_brand_id: [number, string] | false; categ_id: [number, string] | false;
   color_ids: number[]; material_ids: number[]; finish_ids: number[];
+  x_managed_by_pim?: boolean;
 };
 // A planned write: the Odoo values, which record takes them, and how to tell it was kept.
 type Planned = Change & { on: "product" | "template"; values: Record<string, unknown>; kept: (now: OdooProduct) => boolean };
@@ -155,7 +176,7 @@ type Planned = Change & { on: "product" | "template"; values: Record<string, unk
 type Known = {
   takenBy: (upc: string, self?: number) => string[]; hsKeys: Set<string>; countries: Map<string, number>; pimMade: Set<string>; images: Map<string, string>; ids: Map<string, { field: string; name: string; value: string }[]>;
   brands: Map<string, { id: number; name: string }>; categories: Map<string, number>; tags: Record<TagKey, TagList>;
-  volume: { unit: string; digits: number };
+  volume: { unit: string; digits: number }; mark: boolean;
 };
 // The PIM's word for one of Odoo's lists.
 const pimTag = (p: PimProduct, key: TagKey) => text(key === "color" ? p.color : key === "material" ? p.material : p.finish_type);
@@ -276,12 +297,12 @@ const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 const barcodeOf = (p: { barcode: string | false }) => text(p.barcode || "");
 
 // Odoo's products for these SKUs, archived ones included: SKU → its records.
-async function findProducts(odoo: Odoo, skus: string[], context: Record<string, unknown>): Promise<Map<string, OdooProduct[]>> {
+async function findProducts(odoo: Odoo, skus: string[], context: Record<string, unknown>, fields: string[]): Promise<Map<string, OdooProduct[]>> {
   const found = new Map<string, OdooProduct[]>();
   const add = (sku: string, p: OdooProduct) => found.set(sku, [...(found.get(sku) ?? []), p]);
   const exact = new Set(skus);
   const all = { ...context, active_test: false };
-  const rows = await odoo("product.product", "search_read", [[["default_code", "in", skus]]], { fields: FIELDS, context: all }) as OdooProduct[];
+  const rows = await odoo("product.product", "search_read", [[["default_code", "in", skus]]], { fields, context: all }) as OdooProduct[];
   for (const r of rows) if (exact.has(text(r.default_code))) add(text(r.default_code), r);
   // What the exact spelling did not find, once more ignoring case.
   const missing = skus.filter((s) => !found.has(s));
@@ -289,7 +310,7 @@ async function findProducts(odoo: Odoo, skus: string[], context: Record<string, 
   for (let i = 0; i < missing.length; i += 40) {
     const part = missing.slice(i, i + 40);
     const domain: unknown[] = [...Array(part.length - 1).fill("|"), ...part.map((s) => ["default_code", "=ilike", likeEscape(s)])];
-    const more = await odoo("product.product", "search_read", [domain], { fields: FIELDS, context: all }) as OdooProduct[];
+    const more = await odoo("product.product", "search_read", [domain], { fields, context: all }) as OdooProduct[];
     for (const r of more) {
       const sku = byUpper.get(text(r.default_code).toUpperCase());
       if (sku) add(sku, r);
@@ -434,7 +455,7 @@ function plan(p: PimProduct, rec: OdooProduct, want: Set<FieldKey>, known: Known
   }
 
   for (const field of FIELD_KEYS) {
-    if (!want.has(field) || field === "image" || field === "ids") continue;
+    if (!want.has(field) || field === "image" || field === "ids" || field === "mark") continue;
     const v = valueOf(field, p, known);
     // No box, no volume: when the box was asked for too, its own note already says it.
     if (field === "volume" && v.hold?.reason === "no_volume" && want.has("box")) continue;
@@ -451,6 +472,10 @@ function plan(p: PimProduct, rec: OdooProduct, want: Set<FieldKey>, known: Known
   const title = text(p.title);
   if (want.has("title") && title && text(rec.name) !== title) {
     planned.push({ field: "title", what: "Odoo Description", before: text(rec.name) ? `“${text(rec.name)}”` : "", after: `“${title}”`, on: "template", values: { name: title }, kept: (now) => text(now.name) === title });
+  }
+  // A product the PIM is connected to is "Managed by PIM" in Odoo.
+  if (want.has("mark") && known.mark && rec[MARK_FIELD] !== true) {
+    planned.push({ field: "mark", before: "off", after: "on", on: "template", values: { [MARK_FIELD]: true }, kept: (now) => now[MARK_FIELD] === true });
   }
   return { planned, held };
 }
@@ -489,12 +514,14 @@ Deno.serve(async (req) => {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const dryRun = body.dryRun === true;
     const retry = body.retry === true;
-    const create = body.create === true && !retry;
+    const sync = body.sync === true && !retry;
+    const offset = sync ? Math.max(0, Math.floor(Number(body.offset) || 0)) : 0;
+    const create = body.create === true && !retry && !sync;
 
     // --- caller: a signed-in admin / editor, the service role, or the cron ----
     const cronSecret = Deno.env.get("CRON_SECRET");
     const viaCron = Boolean(cronSecret && req.headers.get("x-cron-secret") === cronSecret);
-    if (viaCron && !retry) return json({ error: "The cron only retries what is pending." }, 403);
+    if (viaCron && !retry && !sync) return json({ error: "The cron only retries what is pending and runs the hourly sync." }, 403);
     let caller: { id: string | null; email: string | null } = { id: null, email: viaCron ? "cron" : "service role" };
     if (!viaCron) {
       const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -528,6 +555,12 @@ Deno.serve(async (req) => {
       if (error) return json({ error: error.message }, 500);
       for (const row of pending ?? []) wantOf.set(String(row.sku), new Set(((row.fields ?? []) as string[]).filter(isField)));
       if (!wantOf.size) return json({ ok: true, dryRun, retry: true, results: [] });
+    } else if (sync) {
+      // A page of the PIM's products, by SKU: everything the PIM sends but the picture.
+      const { data: page, error } = await admin.from("products").select("sku").order("sku").range(offset, offset + MAX_SKUS - 1);
+      if (error) return json({ error: error.message }, 500);
+      for (const row of page ?? []) wantOf.set(String(row.sku), new Set(SYNC_FIELDS));
+      if (!wantOf.size) return json({ ok: true, dryRun, sync: true, offset, results: [] });
     } else {
       const skus = [...new Set((Array.isArray(body.skus) ? body.skus : []).map((s) => text(s)).filter(Boolean))];
       if (!skus.length) return json({ error: "No SKUs given." }, 400);
@@ -540,7 +573,13 @@ Deno.serve(async (req) => {
     }
     // The volume is the box's: whoever sends the box sends its volume (pages
     // opened before the volume existed ask only for `box`).
-    for (const want of wantOf.values()) if (want.has("box")) want.add("volume");
+    // Asked only to create (no field): a product Odoo already has is left as it
+    // is — unless it still lacks the mark.
+    const createOnly = new Set([...wantOf].filter(([, want]) => !want.size).map(([sku]) => sku));
+    for (const want of wantOf.values()) {
+      if (want.has("box")) want.add("volume");
+      want.add("mark");
+    }
     const skus = [...wantOf.keys()];
     const anyWant = (f: FieldKey) => [...wantOf.values()].some((w) => w.has(f));
 
@@ -589,7 +628,10 @@ Deno.serve(async (req) => {
       // only is invisible from the other.
       const companies = (await odoo("res.company", "search_read", [[]], { fields: ["id"] }) as { id: number }[]).map((c) => c.id);
       const context = { allowed_company_ids: companies };
-      const found = await findProducts(odoo, here, context);
+      // Odoo's "Managed by PIM" box: read and ticked only while Odoo has that field.
+      const markThere = MARK_FIELD in (await odoo("product.product", "fields_get", [[MARK_FIELD]], { attributes: ["type"] }) as Record<string, unknown>);
+      const fields = markThere ? [...FIELDS, MARK_FIELD] : FIELDS;
+      const found = await findProducts(odoo, here, context, fields);
 
       // Who holds each UPC in Odoo today (active products).
       const upcs = [...new Set(here.map((s) => text(pim.get(s)!.upc)).filter((u) => u && !upcIssue(u)))];
@@ -669,7 +711,7 @@ Deno.serve(async (req) => {
       }
       const known: Known = {
         takenBy: (upc, self) => holders.filter((h) => h.id !== self && barcodeOf(h) === upc).map((h) => text(h.default_code)),
-        hsKeys, countries, pimMade: new Set((made ?? []).map((m: { sku: string }) => m.sku)), images, ids, brands, categories, tags, volume,
+        hsKeys, countries, pimMade: new Set((made ?? []).map((m: { sku: string }) => m.sku)), images, ids, brands, categories, tags, volume, mark: markThere,
       };
 
       // ---- products Odoo has: compare and write ------------------------------
@@ -684,7 +726,7 @@ Deno.serve(async (req) => {
         if (active.length > 1) { holdAll(sku, "several", `Odoo has ${active.length} active products with the SKU ${sku}: not written.`); continue; }
         const rec = active[0];
         // Asked only to create: the product is there already.
-        if (!want.size) { results.set(sku, { sku, state: "same", note: `${sku} is already in Odoo: nothing was created.`, changes: [], held: [], odooId: rec.id }); continue; }
+        if (createOnly.has(sku) && (!markThere || rec[MARK_FIELD] === true)) { results.set(sku, { sku, state: "same", note: `${sku} is already in Odoo: nothing was created.`, changes: [], held: [], odooId: rec.id }); continue; }
         const { planned, held } = plan(p, rec, want, known);
         // The picture: always sent when asked (two pictures cannot be compared cheaply).
         if (want.has("image")) {
@@ -711,7 +753,7 @@ Deno.serve(async (req) => {
           }
         }
         // Read back: only what Odoo really kept counts as sent.
-        const [now] = done.length ? await odoo("product.product", "read", [[rec.id], FIELDS], { context }) as OdooProduct[] : [null];
+        const [now] = done.length ? await odoo("product.product", "read", [[rec.id], fields], { context }) as OdooProduct[] : [null];
         const keptChanges = done.filter((c) => {
           if (now && c.kept(now)) return true;
           held.push({ field: c.field, reason: "refused", note: `Odoo did not keep the ${LABEL[c.field]} ${c.after}.` });
@@ -749,6 +791,7 @@ Deno.serve(async (req) => {
           const brand = brands.get(text(p.brand).toLowerCase());
           if (brand) values.product_brand_id = brand.id;
           if (title) values.general_title = title;
+          if (markThere) values[MARK_FIELD] = true;
           // Everything the PIM sends, as it has it today (what it lacks is simply left out).
           const held: Hold[] = [];
           for (const field of FIELD_KEYS) {
@@ -818,32 +861,33 @@ Deno.serve(async (req) => {
     const created = ordered.filter((r) => r.state === "created");
     const heldHard = ordered.filter((r) => r.held.some((h) => !isSoft(h.reason)));
     const anyAdded = TAG_KEYS.some((key) => added[key].length > 0);
-    // An hourly retry that still cannot send says nothing: it is already noted.
-    const worthLogging = retry ? updated.length > 0 : (updated.length || created.length || heldHard.length) > 0;
+    // An hourly retry or sync that still cannot send says nothing: it is already noted.
+    const quiet = retry || sync;
+    const worthLogging = quiet ? updated.length > 0 : (updated.length || created.length || heldHard.length) > 0;
     if (!dryRun && worthLogging) {
-      const touched = [...new Set([...updated, ...created, ...(retry ? [] : heldHard)].map((r) => r.sku))];
+      const touched = [...new Set([...updated, ...created, ...(quiet ? [] : heldHard)].map((r) => r.sku))];
       const one = touched.length === 1 ? ordered.find((r) => r.sku === touched[0])! : null;
       const perField = FIELD_KEYS.map((f) => [LABEL[f], updated.filter((r) => r.changes.some((c) => c.field === f)).length] as const).filter(([, n]) => n);
       const hardNotes = (r: Result) => r.held.filter((h) => !isSoft(h.reason)).map((h) => h.note).join(" ");
       const summary = one
         ? (one.state === "created" ? `Created ${one.sku} in Odoo: ${one.note}`
-          : one.state === "updated" ? `Sent to Odoo for ${one.sku}: ${one.changes.map((c) => changeText(c, "Odoo had")).join("; ")}${!retry && hardNotes(one) ? `. Not sent: ${hardNotes(one)}` : ""}`
+          : one.state === "updated" ? `Sent to Odoo for ${one.sku}: ${one.changes.map((c) => changeText(c, "Odoo had")).join("; ")}${!quiet && hardNotes(one) ? `. Not sent: ${hardNotes(one)}` : ""}`
           : `Not sent to Odoo for ${one.sku}: ${one.note}`)
-        : `Sent to Odoo: ${updated.length} updated${perField.length ? ` (${perField.map(([l, n]) => `${l} ${n}`).join(", ")})` : ""}${created.length ? `, ${created.length} created` : ""}${!retry && heldHard.length ? `, ${heldHard.length} with something not sent` : ""}`;
+        : `Sent to Odoo: ${updated.length} updated${perField.length ? ` (${perField.map(([l, n]) => `${l} ${n}`).join(", ")})` : ""}${created.length ? `, ${created.length} created` : ""}${!quiet && heldHard.length ? `, ${heldHard.length} with something not sent` : ""}`;
       await admin.from("audit_log").insert({
         actor_id: caller.id, actor_email: caller.email, actor_name: caller.id ? null : "PIM automation",
         action: created.length && !updated.length ? "create" : "push", entity_type: "product", entity_id: one ? one.sku : `${touched.length} products`, target: "odoo",
-        summary: `${retry ? "(Hourly retry) " : ""}${summary}${anyAdded ? `. Added to Odoo's lists: ${TAG_KEYS.filter((key) => added[key].length).map((key) => `${TAGS[key].list} ${added[key].join(", ")}`).join("; ")}` : ""}`.slice(0, 900),
+        summary: `${retry ? "(Hourly retry) " : sync ? "(Hourly sync) " : ""}${summary}${anyAdded ? `. Added to Odoo's lists: ${TAG_KEYS.filter((key) => added[key].length).map((key) => `${TAGS[key].list} ${added[key].join(", ")}`).join("; ")}` : ""}`.slice(0, 900),
         metadata: {
-          retry, created: created.map((r) => ({ sku: r.sku, values: r.values })),
+          retry, ...(sync ? { sync: true, offset } : {}), created: created.map((r) => ({ sku: r.sku, values: r.values })),
           updated: updated.map((r) => ({ sku: r.sku, changes: r.changes })),
-          held: (retry ? [] : heldHard).map((r) => ({ sku: r.sku, held: r.held.filter((h) => !isSoft(h.reason)) })),
+          held: (quiet ? [] : heldHard).map((r) => ({ sku: r.sku, held: r.held.filter((h) => !isSoft(h.reason)) })),
           ...(anyAdded ? { added_to_odoo_lists: added } : {}),
         },
       });
     }
 
-    return json({ ok: true, dryRun, ...(retry ? { retry: true } : {}), ...(anyAdded ? { added } : {}), results: ordered });
+    return json({ ok: true, dryRun, ...(retry ? { retry: true } : {}), ...(sync ? { sync: true, offset } : {}), ...(anyAdded ? { added } : {}), results: ordered });
   } catch (err) {
     return json({ error: (err as Error).message }, 500);
   }

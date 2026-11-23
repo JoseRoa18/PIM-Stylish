@@ -2027,7 +2027,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
     });
   }, [rows, stylishEvent]);
 
-  // Pull both markets' stock from Odoo now (the cron does it hourly).
+  // Pull both markets' stock from Odoo now (the cron does it every 5 minutes).
   async function refreshStock() {
     setBusy('stock');
     setMsg(null);
@@ -2569,7 +2569,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                       onClick={refreshStock}
                       disabled={busy === 'stock'}
                       aria-busy={busy === 'stock'}
-                      title="Pull both markets' stock from Odoo now (it also refreshes every hour)"
+                      title="Pull both markets' stock from Odoo now (it also refreshes every 5 minutes)"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md font-medium text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50 whitespace-nowrap"
                     >
                       {busy === 'stock' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}

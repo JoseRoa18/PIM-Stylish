@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 
 /**
  * Units sold per product and market over the last 30 and 90 days, CACHED in
- * product_sales by the `odoo-sales-pull` edge function (every 3 hours) from
+ * product_sales by the `odoo-sales-pull` edge function (every hour) from
  * Odoo's confirmed sales orders (user, 2026-11-11). One row per market and
  * SKU that sold: `units_30`, `units_90` and `channels` =
  * { "<marketplace>": { u30, u90 } }. A SKU without a row sold nothing in 90

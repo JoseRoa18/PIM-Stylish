@@ -181,7 +181,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
         <div aria-hidden className="fixed z-50 -translate-x-1/2 pointer-events-none rounded-lg bg-inverse-surface text-on-inverse-surface px-3 py-2 shadow-lg whitespace-nowrap text-center" style={{ left: tip.x, top: tip.y }}>
           <div className="text-label-md font-semibold">{weekTag(tip.week)} · numbers of</div>
           <div className="text-body-sm">{weekDays(addWeeks(tip.week, -1))}</div>
-          {tip.week > thisWeek && <div className="text-label-sm opacity-80">{tip.week === runningWeek ? 'In progress — numbers so far, updated every 3 hours' : 'Upcoming'}</div>}
+          {tip.week > thisWeek && <div className="text-label-sm opacity-80">{tip.week === runningWeek ? 'In progress — numbers so far, updated every hour' : 'Upcoming'}</div>}
         </div>,
         document.body,
       )}

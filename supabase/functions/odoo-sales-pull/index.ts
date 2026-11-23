@@ -22,7 +22,7 @@
 // the DASH is kept. A kit sells as the kit: its components are not counted.
 //
 // Body: { dryRun?: boolean }. The last run's report is app_settings
-// 'odoo_sales'. Cron: odoo-sales-pull (every 3 hours).
+// 'odoo_sales'. Cron: odoo-sales-pull (every hour).
 // Auth: `x-cron-secret`, a service-role bearer (proven through GoTrue's admin
 // API) or a signed-in session. Deployed with verify_jwt off.
 // Secrets: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY, CRON_SECRET.

@@ -9,7 +9,7 @@ import { startTask } from '@/lib/taskProgress';
 
 // A channel's stock sync, on its channel page (user 2026-10-30): our stock
 // minus 2 units of safety margin, 0 when we do not track it, while the switch
-// is on. The stock is Odoo's (product_inventory, read every hour): Walmart
+// is on. The stock is Odoo's (product_inventory, read every 5 minutes): Walmart
 // USA (walmart-us-inventory) takes the USA's, Best Buy Canada
 // (bestbuy-inventory) Canada's, after each new reading.
 // Shows the channel's answer to the last send.

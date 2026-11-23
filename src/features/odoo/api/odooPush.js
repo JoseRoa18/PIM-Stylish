@@ -12,7 +12,10 @@ import { startTask } from '@/lib/taskProgress';
 // another Odoo product has, half a box…). A new product can be created in
 // Odoo with it (`create`). What waits for Odoo's side (the product is not
 // there yet, an HS code its list lacks…) is tried again every hour by the
-// function's own cron. The switch is app_settings 'odoo_push'
+// function's own cron. Every hour the function also goes over EVERY product by
+// itself (its `sync` mode, cron odoo-push-sync-hourly): what differs in Odoo is
+// written again and a product both have is ticked "Managed by PIM" there (user,
+// 2026-11-22). The switch is app_settings 'odoo_push'
 // (Settings → Odoo); the function checks it too.
 
 const SETTING = 'odoo_push';

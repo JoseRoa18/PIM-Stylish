@@ -3,7 +3,7 @@ import { logActivity } from '@/features/activity/api/activityLog';
 
 /**
  * Stock per product and market, CACHED in product_inventory by the
- * `inventory-pull` edge function (hourly via pg_cron, after every product
+ * `inventory-pull` edge function (every 5 minutes via pg_cron, after every product
  * insert, or by hand). Both markets come from Odoo's Calculated Inventory,
  * column "Available for Use" (free finished stock + what can be built from
  * components), with one warehouse selected (user, 2026-11-10):
