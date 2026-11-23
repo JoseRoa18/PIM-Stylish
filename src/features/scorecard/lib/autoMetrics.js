@@ -78,6 +78,9 @@ export const AUTO_KEYS = {
   ops_returns_processed: { label: 'Returns processed — the returns Odoo received at the country\'s warehouse in the week', unit: 'number', server: true, ops: true },
   ops_returns_to_stock: { label: 'Returns back to stock — share of the units Odoo received back that went to stock', unit: 'percent', server: true, ops: true },
   ops_returns_to_openbox: { label: 'Returns to Open Box — share of the units Odoo received back that went to Open Box', unit: 'percent', server: true, ops: true },
+  // Credit memos (user, 2026-11-23: "en Canadá en retornos meter mejor el total de las credit memo … en dinero y en SKU").
+  ops_credit_memos_value: { label: 'Credit memos ($) — Odoo\'s posted customer credit notes of the week for the country\'s company, before tax, in its own currency', unit: 'money', server: true, ops: true },
+  ops_credit_memos_skus: { label: 'Credit memos (SKUs) — how many different SKUs the week\'s credit notes name (Odoo)', unit: 'number', server: true, ops: true },
   ops_returns_over_sales: { label: 'Returns over sales — value of the goods Odoo received back ÷ what was sold, over the last 4 weeks (both countries: in USD)', unit: 'percent', server: true, ops: true },
   ops_open_box_sales: { label: 'Open Box sales — what the -OB products sold for in the week, before tax (Odoo)', unit: 'money', server: true, ops: true },
   ops_assembly_sinks: { label: 'Assembly, sinks — units of sinks assembled in the week (Odoo\'s manufacturing orders)', unit: 'number', server: true, ops: true },

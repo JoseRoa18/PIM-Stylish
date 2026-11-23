@@ -16,7 +16,7 @@
 // the scorecard's own values):
 //   · Odoo: every order of the country (Open Box sales, wrong / missing items,
 //     returns over sales), the returns bodega received and where the goods
-//     went, the manufacturing orders, the inventory counts, costs, and its
+//     went, the customer credit notes (credit memos), the manufacturing orders, the inventory counts, costs, and its
 //     replenishment report's days of inventory for three single SKUs;
 //   · WeCare, our customer-care app (its own API, GET /api/pim/scorecard, with
 //     the key it gave the PIM): tickets closed, resolution time and customer
@@ -86,12 +86,14 @@ const DOI_GROUP: Record<string, (p: { sku: string; category: string }) => boolea
 const CARE_KEYS = ["ops_care_tickets_closed", "ops_care_resolution_hours", "ops_care_csat"];
 const ORDER_KEYS = ["ops_open_box_sales", "ops_shipment_errors", "ops_returns_over_sales", "ops_oos_assembly_loss"];
 const RETURN_KEYS = ["ops_returns_processed", "ops_returns_to_stock", "ops_returns_to_openbox"];
+// The week's credit memos (user, 2026-11-23): what they add up to, and how many different SKUs they name.
+const CREDIT_KEYS = ["ops_credit_memos_value", "ops_credit_memos_skus"];
 const ASSEMBLY_KEYS = ["ops_assembly_sinks", "ops_assembly_versa"];
 const COUNT_KEYS = ["ops_cycle_count", "ops_inventory_accuracy"];
 const STOCK_KEYS = ["ops_in_stock", ...Object.keys(DOI_GROUP), "ops_inventory_excess", "ops_obsolete_value"];
 const SNAPSHOT = new Set([...STOCK_KEYS, ...Object.keys(SINGLE_SKU), "ops_oos_assembly_loss"]);
 const ONCE = new Set(COUNT_KEYS);
-export const OPS_KEYS = [...CARE_KEYS, ...ORDER_KEYS, ...RETURN_KEYS, ...ASSEMBLY_KEYS, ...COUNT_KEYS, ...STOCK_KEYS, ...Object.keys(SINGLE_SKU)];
+export const OPS_KEYS = [...CARE_KEYS, ...ORDER_KEYS, ...RETURN_KEYS, ...CREDIT_KEYS, ...ASSEMBLY_KEYS, ...COUNT_KEYS, ...STOCK_KEYS, ...Object.keys(SINGLE_SKU)];
 
 /** Every row of a table read (the API returns at most 1,000 per request). */
 async function allRows(build: () => any): Promise<any[]> {
@@ -323,6 +325,44 @@ export async function operationsValues({ admin, odoo, rows, loop, thisColumn, ru
         const openBox = week.reduce((s, p) => s + (units.get(p.id)?.openBox ?? 0), 0);
         put("ops_returns_to_stock", market, column, t.ratio(stockUnits, stockUnits + openBox));
         put("ops_returns_to_openbox", market, column, t.ratio(openBox, stockUnits + openBox));
+      }
+    }
+  }
+
+  // ---- the week's credit memos (Odoo's customer credit notes) -------------------------
+  // user, 2026-11-23: "en Canadá en retornos meter mejor el total de las credit memo, eso se saca de
+  // Odoo, ahí sacaremos el total en dinero y en SKU o números de parte". The posted customer credit
+  // notes of the country's company, by their own date: what they add up to before tax, in the
+  // company's currency (a note in another currency — Wayfair Canada's are in USD — at Odoo's rate of
+  // its day: amount_untaxed_signed), and how many DIFFERENT SKUs their product lines name (his
+  // choice over the units). A line that is no product — a discount, a shipping charge — names none.
+  if (has(CREDIT_KEYS)) {
+    const notes = await odoo("account.move", "search_read", [[["move_type", "=", "out_refund"], ["state", "=", "posted"], ["invoice_date", ">=", t.addDays(oldest, -7)], ["company_id", "in", Object.values(COMPANY)]]], { fields: ["invoice_date", "company_id", "amount_untaxed_signed"] }) as { id: number; invoice_date: string | false; company_id: [number, string]; amount_untaxed_signed: number }[];
+    const noteIds = notes.map((n) => n.id);
+    const lines: { move_id: [number, string]; product_id: [number, string] | false }[] = [];
+    for (let i = 0; i < noteIds.length; i += 400) lines.push(...await odoo("account.move.line", "search_read", [[["move_id", "in", noteIds.slice(i, i + 400)], ["display_type", "=", "product"], ["product_id", "!=", false]]], { fields: ["move_id", "product_id"] }));
+    const productIds = [...new Set(lines.map((l) => (l.product_id ? l.product_id[0] : 0)).filter(Boolean))];
+    const skuOf = new Map<number, string>();
+    for (let i = 0; i < productIds.length; i += 400) {
+      for (const p of await odoo("product.product", "read", [productIds.slice(i, i + 400)], { fields: ["default_code", "type"] }) as { id: number; default_code: string | false; type: string }[]) {
+        if (p.default_code && p.type !== "service") skuOf.set(p.id, p.default_code);
+      }
+    }
+    const skusOfNote = new Map<number, Set<string>>();
+    for (const l of lines) {
+      const sku = l.product_id ? skuOf.get(l.product_id[0]) : undefined;
+      if (!sku) continue;
+      if (!skusOfNote.has(l.move_id[0])) skusOfNote.set(l.move_id[0], new Set());
+      skusOfNote.get(l.move_id[0])!.add(sku);
+    }
+    diag.creditNotes = notes.length;
+    for (const column of loop) {
+      for (const market of MARKETS) {
+        const week = notes.filter((n) => n.company_id?.[0] === COMPANY[market] && n.invoice_date && n.invoice_date >= dataFrom(column) && n.invoice_date < column);
+        put("ops_credit_memos_value", market, column, t.round2(week.reduce((s, n) => s + Math.abs(Number(n.amount_untaxed_signed) || 0), 0)));
+        const skus = new Set<string>();
+        for (const n of week) for (const sku of skusOfNote.get(n.id) ?? []) skus.add(sku);
+        put("ops_credit_memos_skus", market, column, skus.size);
       }
     }
   }
