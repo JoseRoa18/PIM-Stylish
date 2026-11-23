@@ -8,7 +8,7 @@ import {
   IMAGE_LINK_RE,
 } from './importSchema';
 import { BRANDS, canonicalBrand } from '@/features/products/lib/brands';
-import { isFaucetCategory } from '@/features/products/lib/categories';
+import { hasCraftsmanship } from '@/features/products/lib/categories';
 import { readMoney } from '@/lib/money';
 
 // "Ask Technical Team" is the PTD's placeholder for an unknown answer, not a
@@ -190,10 +190,11 @@ export function buildImportRows(parsed) {
       }
     }
 
-    // A faucet has no craftsmanship (user, 2026-11-22). A file that still has
-    // the column — the vendor's sheet, a PIM Excel downloaded before that day —
-    // does not write it onto one, nor count it as missing.
-    const noCraftsmanship = isFaucetCategory(columns.category);
+    // Only a sink has a craftsmanship (user, 2026-11-22). A file that still has
+    // the column on another product's row — the vendor's sheet, a PIM Excel
+    // downloaded before that day, a Full Report — does not write it there, nor
+    // count it as missing.
+    const noCraftsmanship = !hasCraftsmanship(columns.category);
     if (noCraftsmanship) {
       delete attributes.craftsmanship;
       filledLabels.delete(CRAFTSMANSHIP_LABEL);

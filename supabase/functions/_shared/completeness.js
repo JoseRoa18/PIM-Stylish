@@ -12,7 +12,7 @@
 // stays pure JS importing only from _shared. Category labels mirror
 // src/features/products/lib/categories.js; keep both in step.
 import { COUNTRY_NAMES } from './countries.js';
-import { FAUCET_CATEGORIES, KITCHEN_FAUCET_CATEGORIES } from './categories.js';
+import { FAUCET_CATEGORIES, KITCHEN_FAUCET_CATEGORIES, SINK_CATEGORIES } from './categories.js';
 
 export const CATEGORY_LABEL = {
   kitchen_sink: 'Kitchen Sink',
@@ -29,7 +29,7 @@ export const CATEGORY_LABEL = {
   accessory: 'Accessory',
 };
 
-const SINKS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink', 'bathroom_sink'];
+const SINKS = SINK_CATEGORIES;
 const KITCHEN_SINKS = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink'];
 // Kitchen Faucet Combo and Cold Water Tap are kitchen faucets (categories.js).
 const FAUCETS = FAUCET_CATEGORIES;
@@ -157,8 +157,10 @@ export const CHECKS = [
   // ---- Specifications: Physical Properties ----
   { key: 'material', label: 'Material', group: 'Specifications', section: 'Physical Properties', cats: ALL, check: (p) => text(p.material) },
   { key: 'finish', label: 'Finish', group: 'Specifications', section: 'Physical Properties', cats: ALL, check: (p) => text(p.finish) },
-  // Not a faucet's field (user, 2026-11-22: "los faucets no tienen craftsmanship").
-  { key: 'craftsmanship', label: 'Craftsmanship', group: 'Specifications', section: 'Physical Properties', cats: NOT_FAUCETS, check: has('craftsmanship') },
+  // Only a sink has one (user, 2026-11-22: "solo los sinks de cocina y los
+  // porcelain sinks traen el craftsmanship"): never asked of a faucet or an
+  // accessory — hasCraftsmanship in categories.js is the same list.
+  { key: 'craftsmanship', label: 'Craftsmanship', group: 'Specifications', section: 'Physical Properties', cats: SINKS, check: has('craftsmanship') },
   { key: 'shape', label: 'Sink Shape', group: 'Specifications', section: 'Physical Properties', cats: SINKS, check: (p) => text(String(field(p, 'sink_shape') ?? p.shape ?? '')) },
   { key: 'installation', label: 'Installation Type', group: 'Specifications', section: 'Physical Properties', cats: SINKS, check: (p) => text(String(field(p, 'installation_type') ?? '')) || list(field(p, 'installation_type')) },
   { key: 'gauge', label: 'Gauge (stainless steel)', group: 'Specifications', section: 'Physical Properties', cats: SINKS, applies: (p) => stainless(p), check: (p) => num(Number(field(p, 'gauge'))) },

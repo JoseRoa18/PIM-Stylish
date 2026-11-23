@@ -16,6 +16,18 @@ export const isFaucetCategory = (category) => FAUCET_CATEGORIES.includes(String(
 /** The category the channels and the marketplace templates know a category by. */
 export const baseCategory = (category) => (isKitchenFaucetCategory(category) ? 'kitchen_faucet' : category);
 
+// The sinks: the kitchen-type ones (kitchen, bar / prep, laundry, outdoor) and
+// the bathroom ones (porcelain).
+export const SINK_CATEGORIES = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink', 'outdoor_sink', 'bathroom_sink'];
+
+/**
+ * Only a sink has a Craftsmanship (user, 2026-11-22: "solo los sinks de cocina
+ * y los porcelain sinks traen el craftsmanship, lo demás no lo trae"). A
+ * faucet or an accessory has none: the PIM neither shows, asks for nor imports
+ * it there, and a marketplace that asks is given its own word for "none".
+ */
+export const hasCraftsmanship = (category) => SINK_CATEGORIES.includes(String(category ?? ''));
+
 // Colanders, drying racks and mats, dish racks and organizers and the
 // workstation kits are Accessories since 2026-10-08 (user's file), but every
 // channel still knows them as "Colanders & Drying Racks", so their templates,

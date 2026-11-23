@@ -158,7 +158,7 @@ const WORKFLOW_OPTIONS = [
   { value: 'archived', label: 'Archived' },
 ];
 
-import { CATEGORY_OPTIONS, isFaucetCategory } from '@/features/products/lib/categories';
+import { CATEGORY_OPTIONS, isFaucetCategory, hasCraftsmanship } from '@/features/products/lib/categories';
 import { BRAND_OPTIONS } from '@/features/products/lib/brands';
 import { COUNTRY_NAMES } from '@/features/products/lib/countries';
 import {
@@ -1263,8 +1263,9 @@ function SpecsTab({ product, edit }) {
           <EditableField label="Finish" fieldKey="finish" suggest product={product} edit={edit} />
           <EditableField label="Color" fieldKey="color" type="select" options={COLOR_SELECT} product={product} edit={edit} />
           <AttrField label="Finish Type" attrKey="finish_type" type="select" options={FINISH_TYPE_OPTIONS} product={product} edit={edit} />
-          {/* A faucet has no craftsmanship (user, 2026-11-22): not shown, not asked. */}
-          {!isFaucet && <AttrField label="Craftsmanship" attrKey="craftsmanship" type="select" options={CRAFTSMANSHIP_OPTIONS} product={product} edit={edit} />}
+          {/* Only a sink has a craftsmanship (user, 2026-11-22): a faucet or an
+              accessory is not shown the field, nor asked for it. */}
+          {hasCraftsmanship(cat) && <AttrField label="Craftsmanship" attrKey="craftsmanship" type="select" options={CRAFTSMANSHIP_OPTIONS} product={product} edit={edit} />}
           {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" type="select" options={SINK_SHAPE_OPTIONS} product={product} edit={edit} />}
           {isSink && <AttrField label="Installation Type" attrKey="installation_type" type="select" options={INSTALLATION_TYPE_OPTIONS} product={product} edit={edit} />}
           {!isFaucet && !isSink && <AttrField label="Installation Type" attrKey="installation_type" suggest product={product} edit={edit} />}
