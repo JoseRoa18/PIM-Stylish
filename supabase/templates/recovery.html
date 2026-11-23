@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>Reset your Stylish PIM password</title>
+<style>
+  body { margin: 0; padding: 0; width: 100%; background-color: #f2f2f2; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+  table { border-collapse: collapse; }
+  a { color: #8b0000; }
+  @media only screen and (max-width: 620px) {
+    .pim-pad { padding-left: 24px !important; padding-right: 24px !important; }
+    .pim-title { font-size: 22px !important; }
+  }
+  @media (prefers-color-scheme: dark) {
+    body, .pim-page { background-color: #141211 !important; }
+    .pim-card { background-color: #1a1716 !important; border-color: #4f4642 !important; }
+    .pim-ink { color: #eae1dc !important; }
+    .pim-soft { color: #d4c4bd !important; }
+    .pim-rule { border-top-color: #4f4642 !important; }
+    .pim-link { color: #ffb4a8 !important; }
+    .pim-brand { color: #ffb4a8 !important; }
+  }
+</style>
+</head>
+<body class="pim-page" style="margin:0; padding:0; background-color:#f2f2f2;">
+<div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent; mso-hide:all;">Choose a new password for your Stylish PIM account. The link works for 1 hour.</div>
+<table role="presentation" class="pim-page" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f2f2;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px; border-collapse:separate;">
+        <tr>
+          <td class="pim-card" style="background-color:#ffffff; border:1px solid #d8d8d8; border-radius:16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td class="pim-pad" style="padding:32px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td width="40" height="40" align="center" valign="middle" bgcolor="#8b0000" style="width:40px; height:40px; background-color:#8b0000; border-radius:10px;">
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
+                          <tr>
+                            <td width="7" height="7" bgcolor="#ffffff" style="width:7px; height:7px; line-height:7px; font-size:7px; background-color:#ffffff; border-radius:7px;">&nbsp;</td>
+                            <td width="6" style="width:6px; line-height:7px; font-size:7px;">&nbsp;</td>
+                            <td width="7" height="7" bgcolor="#ffffff" style="width:7px; height:7px; line-height:7px; font-size:7px; background-color:#ffffff; border-radius:7px;">&nbsp;</td>
+                          </tr>
+                          <tr><td colspan="3" height="6" style="height:6px; line-height:6px; font-size:6px;">&nbsp;</td></tr>
+                          <tr>
+                            <td width="7" height="7" bgcolor="#ffffff" style="width:7px; height:7px; line-height:7px; font-size:7px; background-color:#ffffff; border-radius:7px;">&nbsp;</td>
+                            <td width="6" style="width:6px; line-height:7px; font-size:7px;">&nbsp;</td>
+                            <td width="7" height="7" bgcolor="#ffffff" style="width:7px; height:7px; line-height:7px; font-size:7px; background-color:#ffffff; border-radius:7px;">&nbsp;</td>
+                          </tr>
+                        </table>
+                      </td>
+                      <td style="padding-left:12px;">
+                        <div class="pim-brand" style="font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:18px; line-height:22px; font-weight:bold; color:#8b0000;">Stylish PIM</div>
+                        <div class="pim-soft" style="font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:12px; line-height:16px; color:#474747;">Centralized Product Management</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td class="pim-pad" style="padding:28px 40px 0 40px;">
+                  <h1 class="pim-ink pim-title" style="margin:0; font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:26px; line-height:32px; font-weight:normal; color:#0c0c0c;">Choose a new password</h1>
+                </td>
+              </tr>
+              <tr>
+                <td class="pim-pad pim-ink" style="padding:14px 40px 0 40px; font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:15px; line-height:24px; color:#0c0c0c;">
+                  We received a request to reset the password of the Stylish PIM account of <strong>{{ .Email }}</strong>. Press the button to choose a new one.
+                </td>
+              </tr>
+              <tr>
+                <td class="pim-pad" style="padding:26px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td align="center" bgcolor="#8b0000" style="background-color:#8b0000; border-radius:999px;">
+                        <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=recovery" target="_blank" style="display:inline-block; padding:13px 30px; font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:15px; line-height:20px; font-weight:bold; color:#ffffff; text-decoration:none; border-radius:999px;">Choose a new password</a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td class="pim-pad pim-soft" style="padding:16px 40px 0 40px; font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:13px; line-height:20px; color:#474747;">
+                  The link works for 1 hour, and only once.
+                </td>
+              </tr>
+              <tr>
+                <td class="pim-pad" style="padding:26px 40px 0 40px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr><td class="pim-rule" style="border-top:1px solid #d8d8d8; font-size:1px; line-height:1px;">&nbsp;</td></tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td class="pim-pad pim-soft" style="padding:20px 40px 0 40px; font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:13px; line-height:20px; color:#474747;">
+                  <strong class="pim-ink" style="color:#0c0c0c;">Didn't ask for this?</strong> You can ignore this email. Your password stays as it is, and nobody can change it without this link.
+                </td>
+              </tr>
+              <tr>
+                <td class="pim-pad pim-soft" style="padding:14px 40px 32px 40px; font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:13px; line-height:20px; color:#474747;">
+                  If the button does not open, copy this address into your browser:<br>
+                  <a class="pim-link" href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=recovery" target="_blank" style="color:#8b0000; text-decoration:underline; word-break:break-all;">{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=recovery</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td class="pim-soft" align="center" style="padding:20px 16px 0 16px; font-family:'Century Gothic','Jost',Futura,'Trebuchet MS',Arial,sans-serif; font-size:12px; line-height:18px; color:#474747;">
+            Stylish International Inc. · Internal product management system<br>
+            This message is sent automatically. Replies are not read.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

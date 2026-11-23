@@ -37,7 +37,7 @@ function markShown(userId) {
  * floating loose over the page. Never blocks: it auto-hides and sits below
  * dialogs.
  */
-export default function AvatarNudge() {
+export default function AvatarNudge({ blocked = false }) {
   const { user, profile, refreshProfile } = useAuth();
   const [visible, setVisible] = useState(false);
   const [status, setStatus] = useState('idle'); // idle | uploading | done
@@ -63,13 +63,15 @@ export default function AvatarNudge() {
   }, [userId]);
 
   // Arm the reminder when the profile has no photo and enough time has passed
-  // since the last one.
+  // since the last one. `blocked`: the "choose your own password" reminder is
+  // up in this same place — this one waits for it to be answered, then takes
+  // its usual delay.
   useEffect(() => {
-    if (!userId || !needsPhoto) return;
+    if (!userId || !needsPhoto || blocked) return;
     if (Date.now() - lastShownAt(userId) < REMINDER_INTERVAL_MS) return;
     const timer = setTimeout(show, APPEAR_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [userId, needsPhoto, show]);
+  }, [userId, needsPhoto, blocked, show]);
 
   // Auto-dismiss. Held open while the pointer/keyboard is on the toast, while
   // an upload is in flight, and after an error so the message can be read.

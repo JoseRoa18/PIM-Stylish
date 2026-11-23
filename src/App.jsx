@@ -29,6 +29,8 @@ const ComingSoon = lazy(ROUTE_IMPORTS.comingSoon);
 const Analytics = lazy(ROUTE_IMPORTS.analytics);
 const Scorecard = lazy(ROUTE_IMPORTS.scorecard);
 const Assistant = lazy(ROUTE_IMPORTS.assistant);
+// Where a "Forgot your password?" email lands: only someone with such a link opens it.
+const ResetPassword = lazy(() => import('./features/auth/pages/ResetPassword'));
 
 function PageFallback() {
   return (
@@ -85,11 +87,30 @@ function ProtectedLayout() {
 }
 
 export default function App() {
+  // A reset link that reached another address of the app (the mail service
+  // falls back to the site's front page when it is not given the page) still
+  // opens the page that takes it.
+  const { pathname, search } = useLocation();
+  if (pathname !== '/reset-password') {
+    const params = new URLSearchParams(search);
+    if (params.get('type') === 'recovery' && params.get('token_hash')) {
+      return <Navigate to={`/reset-password${search}`} replace />;
+    }
+  }
+
   return (
     <ConfirmProvider>
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={<Login />} />
+        <Route
+          path="/reset-password"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <ResetPassword />
+            </Suspense>
+          }
+        />
 
         {/* Protected routes — wrapped in AppShell (sidebar + topbar) */}
         <Route element={<ProtectedLayout />}>
@@ -126,14 +147,9 @@ export default function App() {
             }
           />
 
-          <Route
-            path="/settings"
-            element={
-              <RequireRole allowed={['admin']}>
-                <SettingsPage />
-              </RequireRole>
-            }
-          />
+          {/* Everyone: a person's own password is in Settings → Security. The
+              page shows the PIM's rules only to admins. */}
+          <Route path="/settings" element={<SettingsPage />} />
 
           {/* Not built yet — show a friendly "Coming soon" instead of a dead redirect */}
           <Route path="/assets" element={<ComingSoon />} />

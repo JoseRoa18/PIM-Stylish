@@ -11,6 +11,13 @@
 //
 // Why an Edge Function: creating/deleting auth users needs the service_role
 // key (auth.admin API), which must never reach the browser.
+//
+// A person's OWN password is not changed here: they do that themselves in
+// Settings → Security, or from a "Forgot your password?" email (browser →
+// Supabase Auth). When they do, the browser notes it in their user_metadata
+// (`password_set_at`), which retires the "choose your own password" reminder.
+// An account made here has no such note, and `resetPassword` clears it: the
+// person is on a generated password again, so the reminder comes back.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -176,7 +183,11 @@ Deno.serve(async (req) => {
         // Matches the project-level password policy (min 10, set 2026-08-01).
         if (password.length < 10) return json({ error: "Password must be at least 10 characters." }, 400);
 
-        const { error } = await admin.auth.admin.updateUserById(id, { password });
+        // A null value takes the key out of the metadata; the other keys stay.
+        const { error } = await admin.auth.admin.updateUserById(id, {
+          password,
+          user_metadata: { password_set_at: null },
+        });
         if (error) return json({ error: error.message }, 400);
         return json({ ok: true });
       }

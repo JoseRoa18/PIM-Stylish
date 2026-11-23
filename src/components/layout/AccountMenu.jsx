@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, lazy, Suspense } from 'react';
-import { Camera, Loader2, Trash2, AlertCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Camera, Loader2, Trash2, AlertCircle, KeyRound } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import Avatar from '@/components/ui/Avatar';
 
 // Only shown to people without a photo, after a delay — loaded on demand.
 const AvatarNudge = lazy(() => import('@/components/layout/AvatarNudge'));
+// Only shown to people still on the password an admin generated for them.
+const PasswordNudge = lazy(() => import('@/components/layout/PasswordNudge'));
 import { uploadAvatar, removeAvatar } from '@/features/users/api/avatar';
 import { nameFromEmail } from '@/lib/format';
 
@@ -25,6 +28,9 @@ export default function AccountMenu() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // The two reminders hang off the chip in the same place: while the password
+  // one is up, the photo one waits.
+  const [passwordNudgeUp, setPasswordNudgeUp] = useState(false);
   const fileRef = useRef(null);
   const triggerRef = useRef(null);
   const rootRef = useRef(null);
@@ -101,13 +107,13 @@ export default function AccountMenu() {
         </span>
       </button>
 
-      {/* The "add a photo" reminder hangs off this same chip. Opening the menu
-          retires it — they're already where the photo is managed. */}
-      {!open && (
-        <Suspense fallback={null}>
-          <AvatarNudge />
-        </Suspense>
-      )}
+      {/* The reminders hang off this same chip: "choose your own password"
+          first (a new person sees it at once), then "add a photo". Opening the
+          menu retires them — it is where both are managed. */}
+      <Suspense fallback={null}>
+        <PasswordNudge suspended={open} onVisibleChange={setPasswordNudgeUp} />
+        {!open && <AvatarNudge blocked={passwordNudgeUp} />}
+      </Suspense>
 
       {open && (
         <>
@@ -158,6 +164,15 @@ export default function AccountMenu() {
                   Remove photo
                 </button>
               )}
+              {/* A row that opens a page is a link. */}
+              <Link
+                to="/settings?section=security"
+                onClick={() => setOpen(false)}
+                className="w-full flex items-center gap-2.5 px-5 py-2.5 text-body-sm text-on-surface hover:bg-surface-container-low transition-colors"
+              >
+                <KeyRound className="w-4 h-4 text-on-surface-variant" />
+                Change password
+              </Link>
             </div>
 
             <input

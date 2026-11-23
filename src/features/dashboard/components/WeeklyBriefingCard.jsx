@@ -266,7 +266,7 @@ function OdooPanel({ odoo, isAdmin }) {
           </li>
         ))}
       </ul>
-      <PanelFoot to={isAdmin ? '/settings' : null} linkLabel="Open Settings">
+      <PanelFoot to={isAdmin ? '/settings?section=odoo' : null} linkLabel="Open Settings">
         Saved in the PIM and not taken by Odoo yet. They are sent again every hour.
       </PanelFoot>
     </>

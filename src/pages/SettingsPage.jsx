@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, UserCheck, ShieldCheck, Send } from 'lucide-react';
+import { CalendarClock, Loader2, AlertTriangle, CheckCircle2, Play, Zap, Package, RefreshCw, UserCheck, ShieldCheck, Send, KeyRound, MessageCircle } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getAppSetting, saveAppSetting, runPromoApplyNow } from '@/features/settings/api/appSettings';
 import { getInventoryReport, refreshInventory, describeInventoryPull, stockAge } from '@/features/pricing/api/inventory';
@@ -9,7 +9,9 @@ import { TASK_CHANNELS } from '@/features/pricing/lib/promoTasks';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { WARRANTY_BRANDS, getBrandWarranties, setBrandWarranty, countBrandProducts } from '@/features/settings/api/brandWarranty';
 import { DocumentRow } from '@/features/media/components/DocumentsSection';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '@/features/auth/AuthContext';
+import SecuritySettings from '@/features/auth/components/SecuritySettings';
 import { startTask } from '@/lib/taskProgress';
 import { setOdooPush, listOdooPending } from '@/features/odoo/api/odooPush';
 import AssistantSettings from '@/features/assistant/components/AssistantSettings';
@@ -423,7 +425,9 @@ function OdooSection() {
   );
 }
 
-export default function SettingsPage() {
+// The monthly promotion's automation: its switches, what is loaded for this
+// month and the next, and "Run now".
+function PromoAutomationSection() {
   const confirm = useConfirm();
   const [settings, setSettings] = useState(null);
   const [promotions, setPromotions] = useState(null);
@@ -524,14 +528,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-display-lg text-on-surface">Settings</h1>
-        <p className="text-body-md text-on-surface-variant mt-1">
-          Rules for what the PIM does on its own.
-        </p>
-      </div>
-
+    <>
       {error && (
         <div role="alert" className="rounded-xl bg-error-container/60 text-on-error-container px-4 py-3 text-body-sm">
           {error}
@@ -643,16 +640,89 @@ export default function SettingsPage() {
           </p>
         )}
       </section>
+    </>
+  );
+}
 
-      <PromoOwnersSection />
+// The page's menu (user, 2026-11-23: "un menú dentro de Settings que seccione
+// todo, y en una parte diga como Security"). One section at a time, named in
+// the address (?section=), so a link can open the right one. "Your account" is
+// for everyone; the PIM's own rules are shown to admins only — the database
+// refuses them to anyone else whatever the page shows.
+const SECTIONS = [
+  { key: 'security', label: 'Security', icon: KeyRound, group: 'Your account' },
+  { key: 'promotions', label: 'Promotions', icon: CalendarClock, group: 'PIM rules', admin: true },
+  { key: 'warranty', label: 'Warranty documents', icon: ShieldCheck, group: 'PIM rules', admin: true },
+  { key: 'stock', label: 'Stock', icon: Package, group: 'PIM rules', admin: true },
+  { key: 'odoo', label: 'Odoo', icon: Send, group: 'PIM rules', admin: true },
+  { key: 'assistant', label: 'Assistant', icon: MessageCircle, group: 'PIM rules', admin: true },
+];
 
-      <WarrantySection />
+export default function SettingsPage() {
+  const { isAdmin } = useAuth();
+  const [params] = useSearchParams();
+  const sections = SECTIONS.filter((s) => !s.admin || isAdmin);
+  // An unknown section, or one this person may not see, opens the first.
+  const active = sections.find((s) => s.key === params.get('section')) ?? sections[0];
+  const groups = [...new Set(sections.map((s) => s.group))];
 
-      <InventorySection />
+  return (
+    <div className="max-w-5xl">
+      <div className="mb-6">
+        <h1 className="text-display-lg text-on-surface">Settings</h1>
+        <p className="text-body-md text-on-surface-variant mt-1">
+          {isAdmin ? 'Your account, and the rules for what the PIM does on its own.' : 'Your account in the PIM.'}
+        </p>
+      </div>
 
-      <OdooSection />
+      <div className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-10">
+        {/* A column that stays in view from lg; under it, a strip that scrolls inside itself. */}
+        <nav
+          aria-label="Settings sections"
+          className="mb-6 lg:mb-0 lg:sticky lg:top-8 lg:self-start flex gap-1 max-w-full overflow-x-auto scrollbar-hide lg:block lg:overflow-visible lg:space-y-5"
+        >
+          {groups.map((group) => (
+            <div key={group} role="group" aria-label={group} className="contents lg:block">
+              <p aria-hidden className="hidden lg:block px-3 mb-1.5 text-label-md font-medium text-on-surface-variant">{group}</p>
+              <ul className="contents lg:block lg:space-y-0.5">
+                {sections.filter((s) => s.group === group).map((s) => {
+                  const current = s.key === active.key;
+                  return (
+                    <li key={s.key} className="flex-shrink-0">
+                      <Link
+                        to={`/settings?section=${s.key}`}
+                        aria-current={current ? 'page' : undefined}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-label-md whitespace-nowrap transition-colors ${
+                          current
+                            ? 'bg-secondary-container text-on-secondary-container font-semibold'
+                            : 'text-secondary hover:bg-surface-container-high'
+                        }`}
+                      >
+                        <s.icon className="w-4 h-4 flex-shrink-0" aria-hidden />
+                        {s.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
 
-      <AssistantSettings />
+        <div className="min-w-0 max-w-3xl space-y-6">
+          {active.key === 'security' && <SecuritySettings />}
+          {active.key === 'promotions' && (
+            <>
+              <PromoAutomationSection />
+              <PromoOwnersSection />
+            </>
+          )}
+          {active.key === 'warranty' && <WarrantySection />}
+          {active.key === 'stock' && <InventorySection />}
+          {active.key === 'odoo' && <OdooSection />}
+          {active.key === 'assistant' && <AssistantSettings />}
+        </div>
+      </div>
     </div>
   );
 }

@@ -36,7 +36,8 @@ const NAV_ITEMS = [
   { to: '/assistant', icon: MessageCircle, label: 'Assistant', assistantOnly: true, prefetch: 'assistant' },
   { to: '/users', icon: Users, label: 'Users', adminOnly: true, prefetch: 'users' },
   { to: '/activity', icon: History, label: 'Activity Log', adminOnly: true, prefetch: 'activity' },
-  { to: '/settings', icon: Settings, label: 'Settings', adminOnly: true, prefetch: 'settings' },
+  // Everyone: their own password is there (Security). The PIM's rules inside it are for admins.
+  { to: '/settings', icon: Settings, label: 'Settings', prefetch: 'settings' },
 ];
 
 export default function Sidebar({ open = false, onClose }) {
