@@ -157,7 +157,8 @@ export const CHECKS = [
   // ---- Specifications: Physical Properties ----
   { key: 'material', label: 'Material', group: 'Specifications', section: 'Physical Properties', cats: ALL, check: (p) => text(p.material) },
   { key: 'finish', label: 'Finish', group: 'Specifications', section: 'Physical Properties', cats: ALL, check: (p) => text(p.finish) },
-  { key: 'craftsmanship', label: 'Craftsmanship', group: 'Specifications', section: 'Physical Properties', cats: ALL, check: has('craftsmanship') },
+  // Not a faucet's field (user, 2026-11-22: "los faucets no tienen craftsmanship").
+  { key: 'craftsmanship', label: 'Craftsmanship', group: 'Specifications', section: 'Physical Properties', cats: NOT_FAUCETS, check: has('craftsmanship') },
   { key: 'shape', label: 'Sink Shape', group: 'Specifications', section: 'Physical Properties', cats: SINKS, check: (p) => text(String(field(p, 'sink_shape') ?? p.shape ?? '')) },
   { key: 'installation', label: 'Installation Type', group: 'Specifications', section: 'Physical Properties', cats: SINKS, check: (p) => text(String(field(p, 'installation_type') ?? '')) || list(field(p, 'installation_type')) },
   { key: 'gauge', label: 'Gauge (stainless steel)', group: 'Specifications', section: 'Physical Properties', cats: SINKS, applies: (p) => stainless(p), check: (p) => num(Number(field(p, 'gauge'))) },

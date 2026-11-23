@@ -536,10 +536,11 @@ export const TEMPLATE_HEADERS = [
 ];
 
 // Blank template headers for KITCHEN faucets, in the source-sheet order.
-// (Family # is omitted — variant families are derived from the SKU.)
+// (Family # is omitted — variant families are derived from the SKU. The
+// sheet's "Craftsmanship Type" too: a faucet has none — user, 2026-11-22.)
 export const FAUCET_TEMPLATE_HEADERS = [
   'Model Number', 'Model Name', 'Brand', 'Category', 'Material', 'Durability',
-  'Lead Free', 'Craftsmanship Type', 'Number of Installation Holes', 'Spout Type',
+  'Lead Free', 'Number of Installation Holes', 'Spout Type',
   'Swivel Spout', 'Maximum Flow Rate', 'Instant Hot and Cold Water Dispenser',
   'Spray Included', 'Spray Type', 'Spray Function Activation', 'Spray Head Functions',
   'Pull down hose model', 'Cartridge size', 'Cold start handle?', 'Handle(s) Included',
@@ -566,10 +567,11 @@ export const FAUCET_TEMPLATE_HEADERS = [
 
 // Blank template headers for BATHROOM faucets, in the source-sheet order.
 // (Family # kept for fidelity but ignored on import; the duplicate
-// "Mounting / Installation Type" column is collapsed to one.)
+// "Mounting / Installation Type" column is collapsed to one; no
+// "Craftsmanship Type", as on the kitchen faucets' sheet.)
 export const BATH_FAUCET_TEMPLATE_HEADERS = [
   'Model Number', 'Model Name', 'Family #', 'Quickbooks Description', 'MSRP CAD$',
-  'Brand', 'Category', 'Material', 'Durability', 'Craftsmanship Type', 'Maximum Flow Rate',
+  'Brand', 'Category', 'Material', 'Durability', 'Maximum Flow Rate',
   'Laminar Flow', 'Handle(s) Included', 'Number of Handles', 'Deck Plate Included',
   'Compatible Deck Plate Part Number', 'Drain Overflow', 'Valve Included',
   'Aerator Included', 'Supply Line Included', 'Supplier Intended and Approved Use',

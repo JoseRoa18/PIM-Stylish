@@ -6,6 +6,8 @@
 // ignored. Choice values are snapped to the template's Valid Values in
 // wayfairExport (case-insensitive), so rules return the *intended* value here.
 
+import { isFaucetCategory } from '@/features/products/lib/categories';
+
 const attr = (p) => p.attributes || {};
 
 // ---- value transforms ----
@@ -228,8 +230,13 @@ export const WAYFAIR_RULES = {
   'Maximum Deck Thickness': (p) => num(attr(p).max_deck_thickness_in),
   'Overall Product Weight': (p) => num(attr(p).product_weight_lb || p.shipping_weight_lb),
   'Cartridge Type': (p) => cartridge(attr(p).cartridge_type),
-  // Wayfair uses the British spelling ("Poured / Moulded").
-  'Craftsmanship Type': (p) => (attr(p).craftsmanship || '').replace(/molded/i, 'Moulded'),
+  // Wayfair uses the British spelling ("Poured / Moulded"). A faucet has no
+  // craftsmanship and the PIM keeps none for it (user, 2026-11-22): the kitchen
+  // faucets' template (653) still asks, and its own word for that is
+  // "No Craftsmanship" — what every faucet sent while the value was stored.
+  'Craftsmanship Type': (p) => (isFaucetCategory(p.category)
+    ? 'No Craftsmanship'
+    : (attr(p).craftsmanship || '').replace(/molded/i, 'Moulded')),
   'Compatible Deck Plate Part Number': (p) => deckPlate(attr(p).compatible_deck_plate),
   'Mounting / Installation': (p) => alias(MOUNT_ALIAS, attr(p).mounting_type),
   // Warranty

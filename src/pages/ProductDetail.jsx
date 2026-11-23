@@ -1263,7 +1263,8 @@ function SpecsTab({ product, edit }) {
           <EditableField label="Finish" fieldKey="finish" suggest product={product} edit={edit} />
           <EditableField label="Color" fieldKey="color" type="select" options={COLOR_SELECT} product={product} edit={edit} />
           <AttrField label="Finish Type" attrKey="finish_type" type="select" options={FINISH_TYPE_OPTIONS} product={product} edit={edit} />
-          <AttrField label="Craftsmanship" attrKey="craftsmanship" type="select" options={CRAFTSMANSHIP_OPTIONS} product={product} edit={edit} />
+          {/* A faucet has no craftsmanship (user, 2026-11-22): not shown, not asked. */}
+          {!isFaucet && <AttrField label="Craftsmanship" attrKey="craftsmanship" type="select" options={CRAFTSMANSHIP_OPTIONS} product={product} edit={edit} />}
           {!isFaucet && <AttrField label="Sink Shape" attrKey="sink_shape" type="select" options={SINK_SHAPE_OPTIONS} product={product} edit={edit} />}
           {isSink && <AttrField label="Installation Type" attrKey="installation_type" type="select" options={INSTALLATION_TYPE_OPTIONS} product={product} edit={edit} />}
           {!isFaucet && !isSink && <AttrField label="Installation Type" attrKey="installation_type" suggest product={product} edit={edit} />}

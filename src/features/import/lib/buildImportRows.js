@@ -8,11 +8,13 @@ import {
   IMAGE_LINK_RE,
 } from './importSchema';
 import { BRANDS, canonicalBrand } from '@/features/products/lib/brands';
+import { isFaucetCategory } from '@/features/products/lib/categories';
 import { readMoney } from '@/lib/money';
 
 // "Ask Technical Team" is the PTD's placeholder for an unknown answer, not a
 // value: it lands as empty (user, 2026-10-06 — 253 of them were cleared).
 const EMPTY_VALUES = new Set(['', 'n/a', 'na', '#n/a', '#n/d', '-', '—', 'null', 'none', 'ask technical team', 'ask the technical team']);
+const CRAFTSMANSHIP_LABEL = FIELD_DEFS.find((d) => d.key === 'craftsmanship').label;
 
 function cleanText(raw) {
   const s = String(raw ?? '').trim();
@@ -188,6 +190,15 @@ export function buildImportRows(parsed) {
       }
     }
 
+    // A faucet has no craftsmanship (user, 2026-11-22). A file that still has
+    // the column — the vendor's sheet, a PIM Excel downloaded before that day —
+    // does not write it onto one, nor count it as missing.
+    const noCraftsmanship = isFaucetCategory(columns.category);
+    if (noCraftsmanship) {
+      delete attributes.craftsmanship;
+      filledLabels.delete(CRAFTSMANSHIP_LABEL);
+    }
+
     // Assemble dimension groups
     for (const [group, obj] of Object.entries(dims)) {
       attributes[group] = obj;
@@ -231,6 +242,7 @@ export function buildImportRows(parsed) {
     for (const def of FIELD_DEFS) {
       if (!ownKeys.has(def.key)) continue; // column absent from this row's sheet
       if (def.optional) continue;
+      if (noCraftsmanship && def.key === 'craftsmanship') continue;
       if (!filledLabels.has(def.label)) missingLabels.push(def.label);
     }
     if (matchedFieldKeys.has('bullets_en') && compactEn.length === 0) missingLabels.push('Bullets (EN)');
