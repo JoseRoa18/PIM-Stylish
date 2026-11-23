@@ -92,7 +92,10 @@ export const DEPARTMENT_BOARDS = [
       { key: 'returns', label: 'Returns' },
       { key: 'inventory', label: 'Inventory & purchasing' },
       { key: 'warehouse', label: 'Warehouse' },
-      { key: 'shipping', label: 'On-time shipping' },
+      // "Same-day shipping" since 2026-11-23 (user: "se cambia on time shipping
+      // a same day shipping"); its rows carry only their marketplace, since the
+      // theme already says what is measured. Only on this tab.
+      { key: 'shipping', label: 'Same-day shipping' },
     ],
   },
 ];
