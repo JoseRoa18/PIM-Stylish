@@ -88,10 +88,15 @@ export const DEPARTMENT_BOARDS = [
     serverFill: true,
     markets: { ca: {}, us: {} },
     sections: [
+      // Warehouse is the first theme (user, 2026-11-23: "este debe ir de primero").
+      { key: 'warehouse', label: 'Warehouse' },
       { key: 'care', label: 'Customer care' },
       { key: 'returns', label: 'Returns' },
+      // Sales (user, 2026-11-23, about Open Box sales: "esto es sales, no
+      // inventory purchasing, hay que moverlo").
+      { key: 'sales', label: 'Sales' },
       { key: 'inventory', label: 'Inventory & purchasing' },
-      { key: 'warehouse', label: 'Warehouse' },
+      // The last theme also takes a row whose theme the tab does not know (sectionOf).
       // "Same-day shipping" since 2026-11-23 (user: "se cambia on time shipping
       // a same day shipping"); its rows carry only their marketplace, since the
       // theme already says what is measured. Only on this tab.

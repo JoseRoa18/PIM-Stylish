@@ -98,6 +98,12 @@ export const AUTO_KEYS = {
   ops_doi_a919kit: { label: 'A-919KIT days of inventory — Odoo\'s replenishment report at the country\'s warehouse, on hand + transit', unit: 'days', server: true, ops: true },
   ops_inventory_excess: { label: 'Inventory excess over 180 days — sinks and faucets on hand beyond 180 days of sales, at Odoo\'s average cost', unit: 'money', server: true, ops: true },
   ops_obsolete_value: { label: 'Obsolete inventory — units on hand of the products marked obsolete in the PIM, at Odoo\'s average cost', unit: 'money', server: true, ops: true },
+  // A row that repeats another tab's (user, 2026-11-23, about Operations' Amazon FBA inventory rows: "se debe
+  // traer ya del tab de Amazon de cada país y colocarle el mismo nombre"): scorecard_metrics.copy_of names the
+  // row it repeats, and the database copies each number the moment it is saved there (trigger
+  // scorecard_values_copy, 20261123_scorecard_copy_of.sql) — typed once, never twice. `linked`: set in the
+  // database with its source row, so the pencil never offers it; `server`: the browser works nothing out for it.
+  copy: { label: 'The same number as on its marketplace\'s tab — typed there, and copied here the moment it is saved', unit: null, server: true, linked: true },
 };
 export const isServerKey = (key) => Boolean(AUTO_KEYS[key]?.server);
 /** Keys read from a Wix store itself (its orders, reviews, prices): the Sinks Direct tab only. */

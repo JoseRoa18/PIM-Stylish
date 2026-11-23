@@ -24,7 +24,8 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
   // are its own kind (`ops`).
   const sections = sectionsFor(board);
   const ownSections = sections !== SECTIONS;
-  const autoKeys = Object.entries(AUTO_KEYS).filter(([, a]) => (board.department
+  // A row that repeats another tab's (`linked`: it needs its source row, set in the database) is never offered here.
+  const autoKeys = Object.entries(AUTO_KEYS).filter(([, a]) => !a.linked && (board.department
     ? a.ops
     // the server's numbers (Odoo orders, stock…) exist only for boards it fills; a Wix store's own (its orders, reviews) only on Sinks Direct
     : !a.ops && (!a.server || board.serverFill) && (!a.store || board.key === 'sinksdirect' || a.alsoOn?.includes(board.key))));
