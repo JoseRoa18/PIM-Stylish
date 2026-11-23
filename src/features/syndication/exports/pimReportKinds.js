@@ -21,10 +21,10 @@ export const REPORT_KINDS = [
   {
     key: 'prices',
     label: 'Prices',
-    hint: 'MSRP, MAP and wholesale costs at Blue, Orange and Purple: Canada, USA and Wayfair Canada.',
+    hint: 'MSRP, MAP and wholesale costs at Blue, Orange and Purple: Canada, USA, Wayfair Canada and Costco Canada.',
     file: 'Prices_Report',
     sheet: 'Prices',
-    sections: ['pricing_ca', 'pricing_us', 'pricing_wfca'],
+    sections: ['pricing_ca', 'pricing_us', 'pricing_wfca', 'pricing_costco'],
     extra: [],
   },
   {

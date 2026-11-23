@@ -33,6 +33,11 @@ const GROUPS = [
     map: (s) => `map_usd_wayfair_ca${s}`, label: 'MAP Wayfair Canada USD', msrp: null,
     costs: [[(s) => `cost_usd_wayfair_ca${s}`, 'WC Wayfair Canada USD']],
   },
+  // Costco Canada has its own MAP and cost, in USD, apart from Canada's (user, 2026-11-23).
+  {
+    map: (s) => `map_usd_costco${s}`, label: 'MAP Costco Canada USD', msrp: null,
+    costs: [[(s) => `cost_usd_costco${s}`, 'WC Costco Canada USD']],
+  },
 ];
 
 const LABELS = {};

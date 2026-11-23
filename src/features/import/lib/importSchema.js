@@ -127,6 +127,9 @@ const PRICE_DEFS = [
   // Wayfair Canada, in USD (its supplier account is priced in US dollars)
   ...priceDefs('MAP Wayfair Canada USD', (s) => `map_usd_wayfair_ca${s}`),
   ...priceDefs('WC Wayfair Canada USD', (s) => `cost_usd_wayfair_ca${s}`),
+  // Costco Canada, in USD like Wayfair Canada: its own MAP and cost, apart from Canada's (user, 2026-11-23)
+  ...priceDefs('MAP Costco Canada USD', (s) => `map_usd_costco${s}`),
+  ...priceDefs('WC Costco Canada USD', (s) => `cost_usd_costco${s}`),
 ];
 
 export const FIELD_DEFS = [
@@ -849,6 +852,7 @@ export const SECTIONS = [
   { key: 'pricing_ca', title: 'Pricing — Canada (CAD)', color: '9C2A00' },
   { key: 'pricing_us', title: 'Pricing — USA (USD)', color: '1E5631' },
   { key: 'pricing_wfca', title: 'Pricing — Wayfair Canada (USD)', color: '6B4F00' },
+  { key: 'pricing_costco', title: 'Pricing — Costco Canada (USD)', color: '0F5257' },
   { key: 'physical', title: 'Physical Properties', color: '2E75B6' },
   { key: 'sink', title: 'Sink Configuration', color: '00695C' },
   { key: 'faucet', title: 'Faucet Configuration', color: '4527A0' },
@@ -870,6 +874,7 @@ const SECTION_FIELDS = {
   pricing_us: ['msrp_usd', 'map_usd', 'map_orange_usd', 'map_purple_usd', 'cost_usd_lowes_sod_bbb', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple',
     'cost_usd_wayfair', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards', 'cost_usd_menards_orange', 'cost_usd_menards_purple'],
   pricing_wfca: ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple', 'cost_usd_wayfair_ca', 'cost_usd_wayfair_ca_orange', 'cost_usd_wayfair_ca_purple'],
+  pricing_costco: ['map_usd_costco', 'map_usd_costco_orange', 'map_usd_costco_purple', 'cost_usd_costco', 'cost_usd_costco_orange', 'cost_usd_costco_purple'],
   physical: ['material', 'finish', 'color', 'finish_type', 'craftsmanship', 'durability', 'lead_free', 'installation_type', 'mounting_type', 'sink_shape', 'overall_shape',
     'pattern', 'wood_species', 'antimicrobial', 'application'],
   sink: ['number_of_bowls', 'bowl_configuration', 'basin_split', 'low_divider', 'gauge', 'sink_radius_mm', 'strainer_model', 'drain_hole_location', 'drain_diameter_in',

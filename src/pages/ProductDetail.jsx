@@ -256,6 +256,12 @@ function buildEditForm(product) {
     cost_usd_wayfair_ca: product.cost_usd_wayfair_ca ?? '',
     cost_usd_wayfair_ca_orange: product.cost_usd_wayfair_ca_orange ?? '',
     cost_usd_wayfair_ca_purple: product.cost_usd_wayfair_ca_purple ?? '',
+    map_usd_costco: product.map_usd_costco ?? '',
+    map_usd_costco_orange: product.map_usd_costco_orange ?? '',
+    map_usd_costco_purple: product.map_usd_costco_purple ?? '',
+    cost_usd_costco: product.cost_usd_costco ?? '',
+    cost_usd_costco_orange: product.cost_usd_costco_orange ?? '',
+    cost_usd_costco_purple: product.cost_usd_costco_purple ?? '',
     cost_usd_lowes_sod_bbb: product.cost_usd_lowes_sod_bbb ?? '',
     cost_usd_wayfair: product.cost_usd_wayfair ?? '',
     cost_usd_menards: product.cost_usd_menards ?? '',
@@ -329,6 +335,8 @@ function buildEditForm(product) {
 
 // Wayfair Canada's own levels, in USD (its supplier account is priced in US dollars).
 const WAYFAIR_CA_KEYS = ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple', 'cost_usd_wayfair_ca', 'cost_usd_wayfair_ca_orange', 'cost_usd_wayfair_ca_purple'];
+// Costco Canada's own levels, in USD like Wayfair Canada's: its MAP and cost go apart from Canada's (user, 2026-11-23).
+const COSTCO_CA_KEYS = ['map_usd_costco', 'map_usd_costco_orange', 'map_usd_costco_purple', 'cost_usd_costco', 'cost_usd_costco_orange', 'cost_usd_costco_purple'];
 
 const NUMBER_COLUMNS = new Set([
   'family_number', 'msrp_cad', 'map_cad', 'cost_cad_rona_hd', 'cost_cad_wayfair_sod',
@@ -336,6 +344,7 @@ const NUMBER_COLUMNS = new Set([
   'map_orange_cad', 'map_orange_usd', 'map_purple_cad', 'map_purple_usd',
   'cost_cad_rona_hd_orange', 'cost_cad_rona_hd_purple', 'cost_cad_wayfair_sod_orange', 'cost_cad_wayfair_sod_purple', 'cost_usd_lowes_sod_bbb_orange', 'cost_usd_lowes_sod_bbb_purple', 'cost_usd_wayfair_orange', 'cost_usd_wayfair_purple', 'cost_usd_menards_orange', 'cost_usd_menards_purple',
   ...WAYFAIR_CA_KEYS,
+  ...COSTCO_CA_KEYS,
   'shipping_weight_lb',
 ]);
 
@@ -1752,6 +1761,18 @@ function PricingTab({ product, edit, onAddPricing }) {
               columns={[
                 { label: 'MAP · Wayfair Canada', help: 'Wayfair Canada in US dollars. Its wholesale cost is billed in USD; Wayfair shows its MAP in CAD (the Canada MAP above) and uses this USD MAP only on the few products where it keeps one.', keys: ['map_usd_wayfair_ca', 'map_usd_wayfair_ca_orange', 'map_usd_wayfair_ca_purple'] },
                 { label: 'WC · Wayfair Canada', keys: ['cost_usd_wayfair_ca', 'cost_usd_wayfair_ca_orange', 'cost_usd_wayfair_ca_purple'] },
+              ]}
+            />
+          </Section>
+          {/* Costco Canada's prices go apart (user, 2026-11-23): its own MAP and
+              its own wholesale cost, in US dollars — never the Canada table's. */}
+          <Section title="Costco Canada (USD)">
+            <PriceTierTable
+              product={product}
+              edit={edit}
+              columns={[
+                { label: 'MAP · Costco Canada', help: "Costco Canada's own MAP, in US dollars. It goes apart from the Canada MAP above, which is for every other marketplace.", keys: ['map_usd_costco', 'map_usd_costco_orange', 'map_usd_costco_purple'] },
+                { label: 'WC · Costco Canada', help: "Costco Canada's own wholesale cost, in US dollars.", keys: ['cost_usd_costco', 'cost_usd_costco_orange', 'cost_usd_costco_purple'] },
               ]}
             />
           </Section>
