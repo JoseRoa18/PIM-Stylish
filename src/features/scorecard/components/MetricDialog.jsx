@@ -160,6 +160,10 @@ export default function MetricDialog({ board, metric = null, defaultMarket = nul
             <option value="">No — its owner types it</option>
             {autoKeys.map(([k, a]) => <option key={k} value={k}>{a.label}</option>)}
           </select>
+          {/* What the PIM fills is locked for everyone (user, 2026-11-23): once saved, the row has no pencil. */}
+          {draft.auto_key && (
+            <p className="mt-1 text-body-sm text-on-surface-variant">Once the PIM fills it, nobody can edit this measurable or its numbers from here — only its target.</p>
+          )}
         </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

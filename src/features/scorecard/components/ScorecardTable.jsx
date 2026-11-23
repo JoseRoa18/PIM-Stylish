@@ -23,6 +23,12 @@ import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } fro
 // The Target cell is a button for whoever may change it (`canEditTarget(row)`;
 // user, 2026-11-12): it opens the target's dialog (`onEditTarget(row, group)`).
 //
+// What the PIM fills is locked for everyone (user, 2026-11-23: "si PIM lo
+// llena debe quedar bloqueado"): a row with an auto_key has no pencil, and a
+// number the PIM wrote (origin 'auto') is no button on any row — also on one
+// people type today. The database refuses both (20261123_scorecard_pim_locked.sql).
+// A PIM row's Target stays the admins' to set.
+//
 // The Company tab draws the same grid with its own groups (`groups`: [{ key,
 // label, rows }]) and no owners (`plain`); a row there may be `strong` (a
 // total), carry a `hint` for its tooltip and a `targetHint` for its target's
@@ -137,7 +143,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                       </span>
                     )}
                     {!m.auto_key && m.source && <span className="sr-only">Source: {m.source}</span>}
-                    {isAdmin && (
+                    {isAdmin && !m.auto_key && (
                       <button type="button" onClick={() => onEditMetric(m)} aria-label={`Edit ${m.name}`} title="Edit measurable" className="relative flex-shrink-0 p-[5px] rounded-full text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container-high transition-colors after:absolute after:-inset-1.5">
                         <Pencil className="w-3.5 h-3.5" aria-hidden />
                       </button>
@@ -167,7 +173,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                     row={values.get(`${m.id}|${w}`)}
                     current={w === thisWeek}
                     running={w === runningWeek}
-                    editable={canWrite(m) && w <= thisWeek}
+                    editable={canWrite(m) && w <= thisWeek && values.get(`${m.id}|${w}`)?.origin !== 'auto'}
                     onSave={onSave}
                   />
                 ))}
