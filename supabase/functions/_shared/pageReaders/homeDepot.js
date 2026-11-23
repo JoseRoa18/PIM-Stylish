@@ -54,8 +54,23 @@ function choose(places) {
 // base-catalog-<itemId>: identifiers.modelNumber / itemId, pricing.value / original), the JSON-LD Product
 // (thd-helmet productStructureData: model, productID, offers.price + StrikethroughPrice) and the visible
 // buybox price (<div id="standard-price"> or, on sale, <div id="was-price"> with a sui-line-through "was").
-// Stock is loaded in the browser (buybox placeholder), so inStock is only known when the page says
-// discontinued / "not currently available". Other finishes are separate items (no options on the page).
+// Other finishes are separate items (no options on the page).
+//
+// Stock (user, 2026-11-23: S-301G read OK with the page saying "Out of Stock" in large type): the data of
+// the page never says it — the browser asks for it after loading — so it is read from the buybox as it is
+// DRAWN, which Bright Data's copy carries (checked that day on 16 pages: our S-301G and S-203T sold out,
+// twelve of our products and two Glacier Bay sinks in stock). A product that can be bought has the Add to
+// Cart button (component add-to-cart:AddToCart, with fulfillment:FulfillmentTiles); a sold-out one has
+// neither, and in their place the "Out of Stock" heading (data-automation-id fulfillment__out-of-stock,
+// component fulfillment:FulfillmentNotifyMe: "Receive an email when this item is back in stock").
+// Never the words alone: every page carries "Out of Stock" in its settings. A copy whose buybox is not
+// drawn (the server's page: ScraperAPI) cannot tell — null, and the check keeps what the last read said.
+function buyboxStockUs(html) {
+  if (/data-component="add-to-cart:AddToCart\b/.test(html)) return true;
+  if (/data-automation-id="fulfillment__out-of-stock"/.test(html) || /data-component="fulfillment:FulfillmentNotifyMe\b/.test(html)) return false;
+  return null;
+}
+
 function readHomeDepotUs(html, url) {
   html = String(html ?? '');
   const urlId = idOfUrl(url) ?? idOfUrl(canonicalOf(html));
@@ -98,7 +113,7 @@ function readHomeDepotUs(html, url) {
     price,
     wasPrice,
     currency: offer?.currency ?? 'USD',
-    inStock: unavailable ? false : offer?.inStock ?? null,
+    inStock: unavailable ? false : buyboxStockUs(html) ?? offer?.inStock ?? null,
     itemId: String(ident.itemId ?? ld?.productID ?? urlId ?? '') || null,
     source: `hd-us ${source}${inCart ? ' (price in cart)' : ''}`,
   };

@@ -1451,10 +1451,18 @@ function readingFor(o: Judged, now: string): Partial<Reading> {
   return { ...model, price: o.page.price, was_price: o.page.wasPrice, currency: o.page.currency, in_stock: o.page.inStock, read_at: now };
 }
 
+// Stores that say their stock only in the page as it is drawn (HomeDepot.com's
+// buybox — user, 2026-11-23). A copy that is not drawn (the backup route's
+// server page, a page caught before its buybox) cannot tell: it keeps what
+// the last read said, else a sold-out link would go back on the websites for
+// a pass and leave again at the next.
+const STOCK_ON_DRAWN_PAGE = new Set(["homedepot_us"]);
+
 // What an outcome writes on the row.
 function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> | null {
   const clearJob = { job_id: null, job_at: null };
   const reading = readingFor(o, now);
+  if (STOCK_ON_DRAWN_PAGE.has(row.retailer) && o.page && !o.soldOut && reading.in_stock === null) delete reading.in_stock;
   // An answered link is due again at the next pass (Monday, Wednesday or
   // Friday from 1 AM Eastern) — a sold-out one too, so it comes back on the
   // first pass that finds the product in stock.
