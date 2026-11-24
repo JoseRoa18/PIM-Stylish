@@ -86,6 +86,16 @@ function readAmazon(html, url) {
     ?? rows.find(([k]) => k === 'ASIN')?.[1] ?? html.match(/"currentAsin"\s*:\s*"([A-Z0-9]{10})"/)?.[1]
     ?? html.match(/<link rel="canonical" href="[^"]*\/dp\/([A-Z0-9]{10})/)?.[1] ?? String(url ?? '').match(/\/dp\/([A-Z0-9]{10})/i)?.[1] ?? null;
 
+  // The item the link asked for, when the page is on another one. Amazon moves a shopper who asks for an option
+  // it cannot sell now (no offer, no stock) to another option of the same listing: the page's data keeps both
+  // — "landingAsin" the one asked for, "currentAsin" the one on show — and takes the one asked for out of the
+  // choices. So the page is a sibling's, not a wrong link: K-131GR's Amazon.ca link read K-131G on two passes
+  // and was called Broken, then showed K-131GR again, in stock (user, 2026-11-24). Checked that day on three
+  // live pages (S-301G → S-300XG, C430L → C432L, S-612WN → S-610W) and on K-131GR's, where both are the same.
+  const asked = String(url ?? '').match(/\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})(?![A-Z0-9])/i)?.[1]?.toUpperCase() ?? null;
+  const landing = html.match(/"landingAsin"\s*:\s*"([A-Z0-9]{10})"/)?.[1] ?? null;
+  const movedFrom = asked && itemId && landing === asked && itemId !== asked ? asked : null;
+
   // Options: the twister's other ASINs; a label is kept in `options` only when it is a model number.
   let twister = {};
   try { twister = JSON.parse(html.match(/"dimensionValuesDisplayData"\s*:\s*(\{[^{}]*\})/)?.[1] ?? '{}'); } catch { /* none */ }
@@ -122,7 +132,7 @@ function readAmazon(html, url) {
   }) : [];
   return {
     ids, options, optionLinks, price: core?.amount ?? null, wasPrice: core?.was ?? null, currency: core ? currencyOf(core.text, cartCode, market) : null,
-    inStock, itemId, source: ['details', core && `price:${core.block}`].filter(Boolean).join('+'),
+    inStock, itemId, movedFrom, source: ['details', core && `price:${core.block}`].filter(Boolean).join('+'),
     // Extra fields (not in the PageRead contract): the other options' ASINs, coupon, buy box seller, delivery place.
     optionItemIds: others.map(([asin]) => asin), coupon, seller, deliverTo, foreignExit,
   };

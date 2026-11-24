@@ -26,8 +26,10 @@ export const WTB_RETAILERS = STORES.map((r) => ({ key: r.key, label: r.label, sh
 // 2026-10-19); a portal the page does not link is a KPI of links to add, and
 // the sites no service can open are checked by hand.
 export const WTB_VERDICTS = {
-  ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product. Checked every Monday, Wednesday and Friday from 1 AM (Cambridge time).' },
-  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address. Checked again every Monday, Wednesday and Friday.' },
+  // The hints say what a status means, never when or how the check runs (user,
+  // 2026-11-24: "son reglas internas del sistema").
+  ok: { label: 'OK', tone: 'ok', problem: false, hint: 'The link opens and shows the product.' },
+  broken: { label: 'Broken', tone: 'error', problem: true, hint: 'There is a link but it does not open the product page: not found, redirects elsewhere or invalid address.' },
   missing: { label: 'Link to add', tone: 'warning', problem: false, hint: 'The page has no link to this portal, although most products of the site link it.' },
   pending: { label: 'Not checked yet', tone: 'muted', problem: false, hint: 'Waiting for its first answer: new links are opened within the hour, and a store that did not answer is tried again a few hours later.' },
   manual: { label: 'Check by hand', tone: 'muted', problem: false, hint: 'This site turns every automatic check away: open the link to check it.' },
@@ -73,7 +75,7 @@ export const OTHER_FINISH = {
 // page shows the stock of the store's default option and never counts.
 export const OUT_OF_STOCK = {
   label: 'Out of stock', tone: 'stock', problem: false,
-  hint: 'The store shows the product as sold out. It is not shown on the Stylish websites until the store has it again; read again every Monday, Wednesday and Friday.',
+  hint: 'The store shows the product as sold out. It is not shown on the Stylish websites until the store has it again.',
 };
 export const isWrongProduct = (row) => row?.sku_check === 'other' || row?.sku_check === 'variant';
 export const isOtherFinish = (row) => row?.sku_check === 'listing';

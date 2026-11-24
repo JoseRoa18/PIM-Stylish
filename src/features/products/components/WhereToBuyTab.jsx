@@ -49,7 +49,6 @@ const PUBLISH_TEXT = {
   not_found: 'product not found on the site',
   later: 'queued — Wix asked to wait, updated within minutes',
 };
-const VIA = { direct: 'the PIM', brightdata: 'Bright Data', scraperapi: 'ScraperAPI', price2spy: 'Price2Spy' };
 const shortUrl = (u) => String(u ?? '').replace(/^https?:\/\/(www\.)?/, '');
 const SUGGESTION_WHY = {
   wrong_link: 'The current link opens another product',
@@ -242,11 +241,10 @@ export default function WhereToBuyTab({ product }) {
                       // behind the status (hover / screen reader), so every row
                       // keeps one line.
                       const detail = saved ? [
-                        check?.checked_at && (check.verdict === 'ok' || check.verdict === 'broken') ? `Checked by ${VIA[check.checked_via] ?? 'the PIM'}` : null,
                         check?.verdict !== 'ok' ? check?.note : null,
                         wrong && check.sku_check === 'variant' ? `The page shows ${check.page_model ?? 'another option'}, another option of the same product. Not shown on the Stylish websites until the link opens ${product.sku} — use the suggested link or edit it.` : null,
                         wrong && check.sku_check === 'other' ? `The page shows ${check.page_model ?? 'another product'}, not ${product.sku}. Not shown on the Stylish websites until the link is fixed.` : null,
-                        soldOut ? `${check.verdict === 'ok' && check.note ? `${check.note}. ` : ''}The store shows ${product.sku} as sold out: not shown on the Stylish websites until the store has it again (read again every Monday, Wednesday and Friday).` : null,
+                        soldOut ? `${check.verdict === 'ok' && check.note ? `${check.note}. ` : ''}The store shows ${product.sku} as sold out: not shown on the Stylish websites until the store has it again.` : null,
                         otherFinish ? `The link opens the right listing, but the store preselects ${check.page_model ?? 'another finish'} (its default option, with its own price); ${product.sku} is one click away. Shown on the websites — use the suggested link so it opens ${product.sku}'s own option.` : null,
                         check?.read_at && !isWrong(check) && check.page_model && check.sku_check === 'unknown' ? `The page shows model ${check.page_model} (not a PIM SKU) — check that it is ${product.sku}.` : null,
                         check?.page_note ? `On the page: ${check.page_note}.` : null,
@@ -378,7 +376,7 @@ export default function WhereToBuyTab({ product }) {
       )}
       {data && (
         <p className="px-6 sm:px-8 pb-5 -mt-2 text-label-md text-on-surface-variant">
-          Point at a status to see when and how the link was checked, why it is not OK and which product the page shows; the price under it is the one the page showed at that check. Only the links that work and open this product show on the websites (a link not checked yet shows too). A suggested link was found and opened by the PIM: its page shows this product.
+          Point at a status to see why it is not OK and which product the page shows; the price under it is the one the page showed. Only the links that work and open this product show on the websites (a link not checked yet shows too). A suggested link was found and opened by the PIM: its page shows this product.
         </p>
       )}
       {data?.sites.some((s) => !s.linked) && (

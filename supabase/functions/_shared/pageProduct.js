@@ -10,6 +10,8 @@
 //   price    what a shopper pays now (the sale price while on sale); wasPrice the
 //            regular / struck-through price next to it; currency CAD / USD
 //   inStock  when the page says; itemId the store's own id of the product
+//   movedFrom  Amazon: the item the link asked for, when the store cannot sell
+//            it now and shows another option of the same listing in its place
 //   note     what changes the meaning of the price or the link: a coupon or a
 //            discount taken in the cart, an open-box listing, a price shown only
 //            in the cart, a link that selects no option of the listing
@@ -154,6 +156,8 @@ function clean(read) {
     gtins, price, wasPrice, currency,
     inStock: typeof read.inStock === "boolean" ? read.inStock : null,
     itemId: read.itemId ? String(read.itemId).slice(0, 40) : null,
+    // Amazon: the item the link asked for, when the store shows another option of the listing in its place.
+    movedFrom: read.movedFrom ? String(read.movedFrom).slice(0, 40) : null,
     subSku: read.subSku ? String(read.subSku).slice(0, 40) : null,
     reviewCount: Number.isInteger(read.reviewCount) && read.reviewCount >= 0 ? read.reviewCount : null,
     // The average out of 5, only next to a count of at least one review.

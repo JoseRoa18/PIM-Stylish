@@ -915,10 +915,10 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                   result.notOnStore ? `${result.notOnStore} broken link${result.notOnStore === 1 ? '' : 's'} left out` : null,
                   result.otherProduct ? `${result.otherProduct} link${result.otherProduct === 1 ? '' : 's'} opening another product or finish left out` : null,
                   result.otherCurrency ? `${result.otherCurrency} shown in another currency left out` : null,
-                  result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again (that morning, 9:10 Eastern)` : null,
+                  result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again` : null,
                   result.soldOut ? `${result.soldOut} sold out without a price` : null,
                   result.noPrice ? `${result.noPrice} read without a price` : null,
-                  'each link is read again every Monday, Wednesday and Friday, the problems once more that morning, and a promotion\'s products the morning it starts or ends',
+                  // Never when or how the pages are read (user, 2026-11-24: "son reglas internas del sistema").
                 ].filter(Boolean).join(' · ')
               : `${result.total} products on the store · expected prices as the PIM has them now${result.notOnStore ? ` · ${result.notOnStore} not on the store, left out` : ''}`}
           </p>

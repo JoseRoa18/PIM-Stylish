@@ -9,7 +9,6 @@ import WhereToBuyExcel from './WhereToBuyExcel';
 import {
   WTB_SITES,
   WTB_RETAILERS,
-  WTB_VIA,
   WTB_STATUSES,
   groupWhereToBuy,
   linksToAdd,
@@ -28,8 +27,7 @@ import {
 // is the link's verdict (OK / Broken — user, 2026-10-19), or "Wrong product"
 // when its page shows another product (2026-10-20), or "Out of stock" when
 // the store shows it sold out (2026-10-26, a hollow ring). Expanding a row lists
-// every link with the reason, who checked it and what the page showed (its
-// model and price). The portals a page does not link are a KPI of their own
+// every link with the reason and what the page showed (its model and price). The portals a page does not link are a KPI of their own
 // ("Links to add"), not a problem. "Suggested links" lists the right
 // addresses the PIM found and opened for wrong, broken and missing links;
 // "Use" saves one into the product's list and publishes its pages.
@@ -58,7 +56,7 @@ const CHIP_TONE = {
 
 const PAGE_SIZE = 50;
 
-// `detail` (the reason, who checked it and when) shows on hover and is read
+// `detail` (the reason and what the page showed) shows on hover and is read
 // by screen readers, so each link keeps one line.
 function StatusChip({ link, detail }) {
   const v = linkStatus(link);
@@ -266,9 +264,6 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
             <p className="text-body-sm text-on-surface-variant mt-0.5">
               Every retailer link on the product pages, opened to confirm it reaches the product page.
             </p>
-            <p className="text-body-sm text-on-surface-variant mt-1">
-              Links are checked every Monday, Wednesday and Friday from 1 AM (Cambridge time), new ones right away · stores that block the PIM are opened through Bright Data or ScraperAPI
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {sites.length > 1 && (
@@ -308,7 +303,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                   disabled={busy != null}
                   aria-busy={busy === 'check'}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-label-md font-semibold hover:bg-primary/90 disabled:opacity-40"
-                  title="Check the links that are due now. The automatic checks run every Monday, Wednesday and Friday from 1 AM (Cambridge time); new links are checked right away."
+                  title="Check the links that are due now."
                 >
                   {busy === 'check' ? `Checking · ${progress?.checked ?? 0}` : 'Check links'}
                 </button>
@@ -500,9 +495,8 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                               </colgroup>
                               <tbody className="divide-y divide-outline-variant/50">
                                 {(hit && !allLinks ? g.links.filter(hit) : [...g.links]).sort(byStoreOrder).map((l) => {
-                                  const checked = l.checked_via && (l.verdict === 'ok' || l.verdict === 'broken');
-                                  // Who opened it — never when (user, 2026-11-16: no reading dates on screen).
-                                  const when = checked ? (WTB_VIA[l.checked_via] ?? l.checked_via) : '';
+                                  // Never when a link was read (user, 2026-11-16) nor which service
+                                  // opened it (2026-11-24: "son reglas internas del sistema").
                                   const read = pageReading(l);
                                   const wrong = isWrongProduct(l);
                                   const detail = [
@@ -511,7 +505,6 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                                     wrong && l.verdict !== 'broken' ? linkStatus(l).hint : null,
                                     isOtherFinish(l) && l.verdict !== 'broken' ? `The page opens on ${l.page_model ?? 'another finish'}, the listing's default option. ${linkStatus(l).hint}` : null,
                                     linkStatus(l) === OUT_OF_STOCK ? [l.verdict === 'ok' ? l.note : null, OUT_OF_STOCK.hint].filter(Boolean).join('. ') : null,
-                                    when ? `Checked by ${when}` : null,
                                   ].filter(Boolean).join('\n');
                                   return (
                                     <tr key={l.id} className="h-9 align-middle">
@@ -533,7 +526,7 @@ export default function WhereToBuyPanel({ sites = WTB_SITES }) {
                                         {read ? read.text : ''}
                                       </td>
                                       <td className="text-label-md text-on-surface-variant truncate" title={detail || undefined}>
-                                        {when || (l.verdict === 'pending' ? (l.note ? 'Trying again soon' : 'Waiting for its check') : '')}
+                                        {l.verdict === 'pending' ? (l.note ? 'Trying again soon' : 'Waiting for its check') : ''}
                                       </td>
                                     </tr>
                                   );

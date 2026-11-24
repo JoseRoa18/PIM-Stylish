@@ -903,6 +903,7 @@ interface PageRead {
   ids: string[]; options: string[]; gtins: string[]; price: number | null; wasPrice: number | null; currency: string | null;
   inStock: boolean | null; itemId: string | null; source: string | null; optionDefaulted: boolean; gone: boolean; note: string | null;
   subSku: string | null; reviewCount?: number | null; rating?: number | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
+  movedFrom?: string | null;
 }
 interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string; soldOut?: string }
 
@@ -1373,6 +1374,16 @@ function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalo
   // that option's, and the PIM keeps it as the BB&B / Overstock alias (10 of
   // 10 pages agreed, 2026-11-09). The alias settles it, whatever the model.
   if (check && check.check !== "match" && o.page.subSku && beyondAliases.get(row.sku)?.has(o.page.subSku)) check = { check: "match", model: row.sku };
+  // Amazon cannot sell the item the link asks for right now, and shows another
+  // option of the same listing in its place (the reader's `movedFrom`: the
+  // page's own data names both). The link is right and the product is not
+  // available there: sold out, not "Opens another product" — K-131GR's
+  // Amazon.ca link stood Broken with its page back in stock (user,
+  // 2026-11-24). Not when the page on show IS the link's product (an older
+  // item of it that Amazon sends to the current one).
+  if (o.page.movedFrom && check?.check !== "match") {
+    return { ...o, soldOut: `Amazon shows another option of this listing${check?.model ? ` (${check.model})` : ""} while it cannot sell this one` };
+  }
   if (check?.check === "other") return { ...o, kind: "soft", check, note: `Opens another product: ${check.model}` };
   return { ...o, check };
 }
