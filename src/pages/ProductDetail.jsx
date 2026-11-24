@@ -649,7 +649,7 @@ export default function ProductDetail() {
       <div className="flex flex-col sm:flex-row gap-6 mb-6 items-start">
         <ProductHeroImage primary={primary} name={product.model_name || `SKU ${product.sku}`} obsolete={product.is_obsolete} />
         <div className="flex-1 min-w-0 w-full">
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container text-body-sm font-mono text-on-surface-variant">
               {product.sku}
             </span>
@@ -670,6 +670,12 @@ export default function ProductDetail() {
             {/* the saved mark, while editing too */}
             <ObsoleteBadge product={product} />
             <WixLinkBadge product={product} />
+          </div>
+          {/* The stock has a line of its own (user, 2026-11-24): in one row with
+              the chips above, a long SKU sent both countries down and a short one
+              only the USA. The line keeps a chip's height while the stock loads,
+              so the name under it does not move. */}
+          <div className="flex items-center gap-2 mb-3 flex-wrap min-h-[1.8125rem]">
             <StockBadge market="ca" stock={stock?.ca} loading={stock === undefined} />
             <StockBadge market="us" stock={stock?.us} loading={stock === undefined} />
           </div>
