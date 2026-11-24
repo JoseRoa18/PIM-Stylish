@@ -3,7 +3,9 @@
 // starting with Sinks Direct). Sources:
 //   - Odoo (read only): sale orders (the Wix sites' orders are imported there,
 //     by wix_site_name), their deliveries and returns, product costs per
-//     company (Stylish International = CAD, Stylish USA = USD);
+//     company (Stylish International = CAD, Stylish USA = USD), and the
+//     customer credit notes ("Returns Value $" = each channel's credit memos
+//     of the week, user 2026-11-24);
 //   - Wix (read only): the store's own orders (cancellations, refunds) and
 //     its product reviews;
 //   - the PIM's tables: stock, the obsolete mark, the Activity Log, prices and
@@ -134,6 +136,7 @@ const SERVER_KEYS = [
   // (On-time and late shipping left on 2026-11-17 with ShipStation: typed rows now.)
   "cancel_rate", "odr", "returns_not_received", "reviews_5plus", "no_profit_skus",
   // 2026-11-05, the marketplace tabs: returns over 4 weeks, sales in thousands of USD, Azuni SKUs sold.
+  // (2026-11-24: returns_value = the week's credit memos made out to the marketplace, see creditMemos.)
   "return_rate", "returns_value", "sales_usd_k", "azuni_skus_sold",
   // 2026-11-09: the sales of a tab's own list of SKUs (app_settings.scorecard_top_losers, by board).
   "top_losers_sales",
@@ -317,6 +320,42 @@ async function receivedReturns(odoo: Odoo, pickDomain: unknown[], sinceDay: stri
       return s + (m && line ? (Number(m.quantity) || Number(m.product_uom_qty) || 0) * line.unit : 0);
     }, 0),
   }));
+}
+
+/**
+ * The channel's credit memos since `sinceDay` (user, 2026-11-24: "eso de returns
+ * value debe venir de lo de credit memos"): Odoo's posted customer credit notes
+ * of the market's company, each with its own date and its total before tax in
+ * the company's currency (a note in another currency — Wayfair Canada's are in
+ * USD — at Odoo's rate of its day: amount_untaxed_signed). The same notes as
+ * the Operations tab's "Credit memos ($)", one channel's share of them.
+ *
+ * A credit note names no order and no marketplace (they are typed by hand:
+ * invoice_origin, reversed_entry_id and marketplace_name are empty), only its
+ * customer — and in Odoo a marketplace IS one customer: every order of the
+ * channel is invoiced to it (Lowe's USA, Home Depot, Rona Inc., WAYFAIR CANADA,
+ * SINKS DIRECT CANADA…). So the channel's notes are the ones made out to the
+ * customer its orders of the last year are invoiced to; a customer with a
+ * handful of them (a warranty claim entered under the store) is not the
+ * channel's. `null`: the channel had no order in that time, so nothing says
+ * who its customer is.
+ *
+ * Why not the returns Odoo received: the marketplaces credit what their
+ * customers return and keep most of those goods, so little of it ever reaches
+ * our warehouse.
+ */
+async function creditMemos(odoo: Odoo, src: MarketSource, sinceDay: string, diag: Record<string, any>): Promise<{ date: string; amount: number }[] | null> {
+  const groups = await odoo("sale.order", "read_group", [[...src.odoo, ["state", "in", ["sale", "done"]], ["date_order", ">=", etMidnightUtc(addDays(sinceDay, -365))]], ["partner_invoice_id"], ["partner_invoice_id"]], { lazy: false }) as { partner_invoice_id: [number, string] | false; __count: number }[];
+  const total = groups.reduce((s, g) => s + (Number(g.__count) || 0), 0);
+  const invoiced = groups.filter((g) => g.partner_invoice_id && (Number(g.__count) || 0) >= total * 0.05).map((g) => (g.partner_invoice_id as [number, string])[0]);
+  if (!invoiced.length) return null;
+  // A note is made out to the company itself, whichever of its addresses the orders name.
+  const partners = await odoo("res.partner", "read", [invoiced], { fields: ["commercial_partner_id"] }) as { id: number; commercial_partner_id: [number, string] | false }[];
+  const customers = new Map(partners.map((p) => (p.commercial_partner_id ? p.commercial_partner_id : [p.id, ""]) as [number, string]));
+  diag.creditCustomers = [...customers.values()].join(", ");
+  const notes = await odoo("account.move", "search_read", [[["move_type", "=", "out_refund"], ["state", "=", "posted"], ["company_id", "=", src.company], ["commercial_partner_id", "in", [...customers.keys()]], ["invoice_date", ">=", sinceDay]]], { fields: ["invoice_date", "amount_untaxed_signed"] }) as { invoice_date: string | false; amount_untaxed_signed: number }[];
+  diag.creditMemos = notes.length;
+  return notes.filter((n) => n.invoice_date).map((n) => ({ date: n.invoice_date as string, amount: Math.abs(Number(n.amount_untaxed_signed) || 0) }));
 }
 
 /**
@@ -739,8 +778,10 @@ Deno.serve(async (req) => {
           return writeLosersNote(losers, uniq);
         };
         // Returns Odoo received for the channel (read over 4 weeks).
-        const returns = keys.has("return_rate") || keys.has("returns_value") || keys.has("returns_note") ? await receivedReturns(odoo, via(src.odoo, "sale_id."), addDays(oldest, -35)) : null;
+        const returns = keys.has("return_rate") || keys.has("returns_note") ? await receivedReturns(odoo, via(src.odoo, "sale_id."), addDays(oldest, -35)) : null;
         if (returns) diag.returnsReceived = returns.length;
+        // "Returns Value $": the channel's credit memos (user, 2026-11-24), not what came back to the warehouse.
+        const credits = keys.has("returns_value") ? await creditMemos(odoo, src, addDays(oldest, -7), diag) : null;
 
         let stock: Map<string, number> | null = null;
         let held: Map<string, number> | null = null; // Amazon: the units Amazon holds itself (FBA), by SKU
@@ -858,13 +899,12 @@ Deno.serve(async (req) => {
           }
           if (returns) {
             // Over the 4 weeks ending with the data week: orders with a return
-            // Odoo received ÷ the paid orders placed in them, and the weekly
-            // average value of the goods back (bodega validates returns in batches).
+            // Odoo received ÷ the paid orders placed in them (bodega validates
+            // returns in batches, so a week alone jumps).
             const start = addDays(column, -28);
             const inWindow = returns.filter((r) => inDays(r.at, start, column));
             const placed = orders.filter((o) => paidOrderIds.has(o.id) && inDays(o.date, start, column)).length;
             value.return_rate = ratio(new Set(inWindow.map((r) => r.orderId)).size, placed);
-            value.returns_value = round2(inWindow.reduce((s, r) => s + r.value, 0) / 4);
             if (keys.has("returns_note")) {
               // The note reads only what came back in this data week.
               const back = new Map<string, { qty: number; value: number }>();
@@ -879,6 +919,8 @@ Deno.serve(async (req) => {
               notes.returns_note = list.length ? `Received back this week: ${list.join(", ")}. Total ${money([...back.values()].reduce((t, x) => t + x.value, 0))}.` : "No returns this week.";
             }
           }
+          // The credit memos dated in the data week (a credit note's date is a plain day).
+          if (credits) value.returns_value = round2(credits.filter((n) => n.date >= from && n.date < column).reduce((s, n) => s + n.amount, 0));
           // Sinks Direct: every week (its pushes were always noted). A marketplace:
           // from the week the listing files began to be noted.
           if (keys.has("listings_updated") && (src.wixSites || ((src.exports || src.wayfair) && column > LISTING_LOG_FROM))) {

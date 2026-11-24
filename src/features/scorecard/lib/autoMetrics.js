@@ -49,7 +49,9 @@ export const AUTO_KEYS = {
   obsolete_skus: { label: '# SKUs marked obsolete in the PIM', unit: 'number', server: true },
   // The marketplace tabs (user, 2026-11-05): returns read over 4 weeks (bodega validates them in batches).
   return_rate: { label: 'Return rate — orders with a return Odoo received in the last 4 weeks ÷ the paid orders placed in them', unit: 'percent', server: true },
-  returns_value: { label: '$ returned — weekly average value of the goods Odoo received back over the last 4 weeks', unit: 'money', server: true },
+  // The credit memos (user, 2026-11-24: "eso de returns value debe venir de lo de credit memos"): a marketplace
+  // credits what its customers return and keeps most of those goods, so what came back to the warehouse said little.
+  returns_value: { label: 'Returns value — the credit memos of the week: Odoo\'s posted customer credit notes made out to this marketplace, before tax, in the country\'s currency', unit: 'money', server: true },
   sales_usd_k: { label: 'Sales in thousands of USD — Odoo orders, USD ones as they are, others at today\'s rate', unit: 'number', server: true },
   azuni_skus_sold: { label: '# Azuni SKUs sold in the week (Odoo orders)', unit: 'number', server: true },
   returns_note: { label: 'Return actions — what came back in the week, by SKU (Odoo returns)', unit: 'text', server: true },
