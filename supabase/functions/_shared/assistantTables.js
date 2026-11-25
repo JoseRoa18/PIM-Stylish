@@ -66,7 +66,10 @@ export const ASSISTANT_TABLES = {
     key: "id",
     note: "The Activity Log: who did what and when (occurred_at, actor_name, actor_email, action, entity_type, entity_id, target, summary; metadata JSON = the details, often the values before). Admins only.",
   },
-  kpi_snapshots: { key: "snapshot_date,scope,key", note: "Daily KPI snapshots behind Analytics (snapshot_date, scope, key, metrics JSON)." },
+  kpi_snapshots: {
+    key: "snapshot_date,scope,key",
+    note: "Daily KPI snapshots behind Analytics (snapshot_date, scope, key, metrics JSON). scope 'pim' / key 'all' = the PIM's completeness (total, complete = products at 100%, avg, missing = how many products miss each field; also every product's score — a large row, take one day); 'pim_category' / <category> = the same totals per category; 'channel' / <marketplace> = its Listing Health (total, linked, avg, distribution by band; since 2026-11-25 complete = listings at 100%, issues = failed checks in all, by_check); 'channel_detail' / <marketplace> = each listing's score and the listings failing each check — large rows: always filter by key and one snapshot_date; 'price' and 'sync' = price alignment per Wix site and Wayfair's spec sync.",
+  },
   channel_health: {
     key: "id",
     note: "Listing Health snapshots per channel (channel, target, run_at, total, in_sync, with_diffs, errors). Take the latest run_at per channel.",

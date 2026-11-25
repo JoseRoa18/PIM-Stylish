@@ -21,7 +21,7 @@
 // timeouts can't kill the run.
 
 // @ts-ignore — plain JS module shared with the browser app
-import { buildListingHealthData, buildSummaryRows } from "../_shared/listingHealth.js";
+import { buildListingHealthData, buildSummaryRows, channelSnapshotRows } from "../_shared/listingHealth.js";
 // @ts-ignore — plain JS module shared with the browser app
 import { completenessContext, inCompleteness, scoreCompleteness, snapshotMetrics } from "../_shared/completeness.js";
 import { etToday, promoWindow, windowContains } from "../_shared/promoCalendar.ts";
@@ -335,20 +335,10 @@ async function runRefresh() {
         result: scoreCompleteness(p, (p.product_media as unknown[]) ?? [], ctx),
       }));
       const rows = snapshotMetrics(scored, today) as Record<string, unknown>[];
-      type MktData = { stats: { avgScore: number; distribution: Record<string, number> }; linkedCount: number; products: unknown[] };
-      for (const [mkt, data] of Object.entries(perMarketplaceData as Record<string, MktData>)) {
-        rows.push({
-          snapshot_date: today,
-          scope: "channel",
-          key: mkt,
-          metrics: {
-            total: data.products.length,
-            linked: data.linkedCount,
-            avg: data.stats.avgScore,
-            distribution: data.stats.distribution,
-          },
-        });
-      }
+      // Each marketplace's totals — at 100%, issues in all and per check — and,
+      // in a row apart, each listing's score and what it fails (Analytics →
+      // Progress to 100%). One shape for the cron and the browser.
+      rows.push(...(channelSnapshotRows(perMarketplaceData, today) as Record<string, unknown>[]));
       // Price alignment per Wix site from each site's latest catalog pull
       // (rows carry expected + price_diff), and Wayfair spec sync from the
       // latest audit — the same reports the Pricing and Wayfair tabs show.

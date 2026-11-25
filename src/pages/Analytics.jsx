@@ -4,12 +4,14 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { useKpi } from '@/features/analytics/hooks/useKpi';
 import { takeSnapshot } from '@/features/analytics/api/kpi';
 import { latestSnapshot, snapshotAt, weeklySeries, formatShort, projectToTarget } from '@/features/analytics/lib/weekly';
+import { progressScopes, scopeInWeek } from '@/features/analytics/lib/progress';
 import { CATEGORY_LABEL } from '@/features/products/lib/completeness';
 import WeekSummary from '@/features/analytics/components/WeekSummary';
 import HeadlineKpis from '@/features/analytics/components/HeadlineKpis';
 import CategoryProgress from '@/features/analytics/components/CategoryProgress';
 import GapAging from '@/features/analytics/components/GapAging';
 import ChannelCoverage from '@/features/analytics/components/ChannelCoverage';
+import ListingProgress from '@/features/analytics/components/ListingProgress';
 import PromoStatus from '@/features/analytics/components/PromoStatus';
 import TeamActivity from '@/features/analytics/components/TeamActivity';
 import TeamTrend from '@/features/analytics/components/TeamTrend';
@@ -26,6 +28,7 @@ import { startTask } from '@/lib/taskProgress';
 // without scrolling back up.
 const SECTIONS = [
   { id: 'overview', label: 'Overview' },
+  { id: 'progress', label: 'Progress to 100%' },
   { id: 'quality', label: 'Data quality' },
   { id: 'channels', label: 'Channels' },
   { id: 'promotions', label: 'Promotions' },
@@ -59,6 +62,7 @@ export default function Analytics() {
   }, [index]);
   const latestTaken = snapshots.length ? snapshots.reduce((a, r) => (r.taken_at > a ? r.taken_at : a), '') : null;
   const names = useMemo(() => new Map(products.map((p) => [p.sku, p.model_name])), [products]);
+  const productInfo = useMemo(() => new Map(products.map((p) => [p.sku, p])), [products]);
   const weekRows = useMemo(() => {
     if (!auditRows) return [];
     const end = new Date(week.end.getTime() + 86399999);
@@ -128,6 +132,15 @@ export default function Analytics() {
     if (channels.length) {
       lines.push([], ['Channel', 'Linked', 'Products', 'Avg score']);
       for (const c of channels) { const m = latestSnapshot(index, 'channel', c)?.metrics; if (m) lines.push([c, m.linked, m.total, m.avg]); }
+    }
+    // Progress to 100%: how each place stood in the week (lib/progress.js).
+    const places = progressScopes(index).map((scope) => scopeInWeek(index, scope, week)).filter((r) => r.now);
+    if (places.length) {
+      lines.push([], ['Progress to 100%', 'Listings', 'At 100%', 'Left', 'Bad (under 70)', 'Open issues', `Issues, change in ${week.name}`]);
+      for (const r of places) {
+        const d = r.now.issues != null && r.before?.issues != null ? r.now.issues - r.before.issues : '';
+        lines.push([r.scope.label, r.now.total ?? '', r.now.complete ?? '', r.now.left ?? '', r.now.bad ?? '', r.now.issues ?? '', d]);
+      }
     }
     if (activity) {
       lines.push([], ['Person', 'Products touched', 'Edits', 'Media uploaded', 'Pushes', 'New products']);
@@ -238,6 +251,10 @@ export default function Analytics() {
               </div>
               <LineTrend points={trend} ariaLabel="Share of products at 100% per week" reference={targets?.global?.pct != null ? { value: targets.global.pct, label: `Target ${targets.global.pct}%${targets.global.date ? ` by ${targets.global.date}` : ''}` } : null} />
             </div>
+          </Section>
+
+          <Section id="progress" title="Progress to 100%" blurb="How many listings are at 100%, how many are left and how many are bad, in the PIM and on each marketplace — with the open issues week by week.">
+            <ListingProgress index={index} week={week} names={productInfo} />
           </Section>
 
           <Section id="quality" title="Data quality" blurb="Completeness by category against its target, and how long the gaps have been open.">

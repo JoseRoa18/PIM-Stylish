@@ -860,6 +860,70 @@ export function summarizeForDashboard(perMarketplaceData) {
 }
 
 /**
+ * A marketplace's checks by key — { label, category, severity, weight } — for
+ * a reader that holds only the keys (the KPI snapshots list the checks a
+ * listing fails by key).
+ */
+export function marketplaceChecks(marketplace) {
+  const out = {};
+  for (const c of MARKETPLACES[marketplace]?.checks ?? []) {
+    const f = FIELDS[c.field];
+    if (f) out[c.field] = { key: c.field, label: f.label, category: c.category, severity: c.severity, weight: c.weight };
+  }
+  return out;
+}
+
+/**
+ * The channels' KPI snapshot rows of one day (table kpi_snapshots), the same
+ * from the daily cron and from the browser. Two rows per marketplace:
+ *   scope 'channel'         the totals Analytics compares week by week — the
+ *                           listings scored, linked, the average, the score
+ *                           bands, how many are at 100% (`complete`), how many
+ *                           checks fail in all (`issues`) and per check
+ *                           (`by_check`);
+ *   scope 'channel_detail'  each listing's score and the listings failing each
+ *                           check, read only for the days being compared (the
+ *                           history is never loaded whole: ~10 KB a row).
+ * An issue = one check one listing fails.
+ * @param {string} date  YYYY-MM-DD
+ */
+export function channelSnapshotRows(perMarketplaceData, date) {
+  const rows = [];
+  for (const [mkt, data] of Object.entries(perMarketplaceData)) {
+    const scores = {};
+    const missingSkus = {};
+    const byCheck = {};
+    let complete = 0;
+    let issues = 0;
+    for (const p of data.products) {
+      scores[p.sku] = p.result.score;
+      if (p.result.issues.length === 0) complete += 1;
+      for (const i of p.result.issues) {
+        (missingSkus[i.key] ??= []).push(p.sku);
+        byCheck[i.key] = (byCheck[i.key] ?? 0) + 1;
+        issues += 1;
+      }
+    }
+    rows.push({
+      snapshot_date: date,
+      scope: 'channel',
+      key: mkt,
+      metrics: {
+        total: data.products.length,
+        linked: data.linkedCount,
+        avg: data.stats.avgScore,
+        distribution: data.stats.distribution,
+        complete,
+        issues,
+        by_check: byCheck,
+      },
+    });
+    rows.push({ snapshot_date: date, scope: 'channel_detail', key: mkt, metrics: { scores, missing_skus: missingSkus } });
+  }
+  return rows;
+}
+
+/**
  * The `channel_health` rows (channel = 'listing_health', target = <mkt>)
  * that persist those summaries for the Dashboard to read.
  */

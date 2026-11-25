@@ -169,8 +169,11 @@ export function Columns({ points, height = 96, ariaLabel, format = (v) => v }) {
   const bw = Math.min(24, band - 4);
   const ih = height - pad.t - pad.b;
   const y = (v) => pad.t + ih - (v / max) * ih;
-  // Screen readers get every column's value, not just the chart's title.
-  const spoken = `${ariaLabel ? `${ariaLabel}: ` : ''}${points.length ? points.map((p) => `${p.label} ${format(p.value ?? 0)}`).join(', ') : 'no data yet'}`;
+  // Screen readers get every column's value, not just the chart's title. A
+  // point without a value (`null`: no snapshot that week) is no column and is
+  // not read out as a zero.
+  const known = points.filter((p) => p.value != null);
+  const spoken = `${ariaLabel ? `${ariaLabel}: ` : ''}${known.length ? known.map((p) => `${p.label} ${format(p.value)}`).join(', ') : 'no data yet'}`;
   return (
     <div className="relative">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto text-on-surface-variant" role="img" aria-label={spoken} onPointerLeave={() => setHover(null)}>
@@ -195,7 +198,7 @@ export function Columns({ points, height = 96, ariaLabel, format = (v) => v }) {
       {hover && (
         <div className="absolute top-0 pointer-events-none rounded-lg border border-outline-variant bg-surface-container-lowest px-2.5 py-1.5 text-body-sm shadow-sm" style={{ left: `calc(${(hover.x / width) * 100}% + 8px)` }}>
           <div className="text-label-md text-on-surface-variant">Week {String(hover.label).replace(/^W/, '')}{hover.range ? ` · ${hover.range}` : ''}</div>
-          <div className="text-on-surface font-semibold">{format(hover.value ?? 0)}</div>
+          <div className="text-on-surface font-semibold">{hover.value == null ? 'no snapshot' : format(hover.value)}</div>
         </div>
       )}
     </div>

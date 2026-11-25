@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/features/activity/api/activityLog';
 import { completenessContext, inCompleteness, scoreCompleteness, snapshotMetrics } from '@/features/products/lib/completeness';
 import { computeListingHealth } from '@/features/dashboard/api/listingHealthData';
+import { channelSnapshotRows } from '@/features/dashboard/lib/listingHealth';
 import { loadLatestAlignment } from '@/features/pricing/api/priceAlignment';
 import { WIX_SITES } from '@/features/syndication/lib/wixSites';
 import { toDateKey, addDays } from '../lib/weekly';
@@ -9,12 +10,15 @@ import { toDateKey, addDays } from '../lib/weekly';
 /** Every snapshot row since `fromDate` (default: 16 weeks back). */
 // The API answers at most 1,000 rows: 16 weeks are ~3,200 (29 a day), and
 // reading only the first 1,000 left Analytics three weeks behind (2026-11-10).
+// Each marketplace's per-listing detail (scope 'channel_detail', ~10 KB a row
+// and day) is left out: loadChannelDetail reads it for the days being compared.
 export async function loadSnapshots(fromDate = addDays(new Date(), -16 * 7)) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('kpi_snapshots')
       .select('snapshot_date, scope, key, metrics, taken_at')
+      .neq('scope', 'channel_detail')
       .gte('snapshot_date', toDateKey(fromDate))
       .order('snapshot_date', { ascending: true })
       .order('scope', { ascending: true })
@@ -24,6 +28,27 @@ export async function loadSnapshots(fromDate = addDays(new Date(), -16 * 7)) {
     rows.push(...(data ?? []));
     if (!data || data.length < 1000) return rows;
   }
+}
+
+/**
+ * The marketplaces' per-listing detail — each listing's score and the listings
+ * failing each check — for the given marketplaces and days ('YYYY-MM-DD'):
+ * Map("<marketplace>|<date>" → the row). A day without one is not in the map
+ * (the detail is kept since 2026-11-25).
+ */
+export async function loadChannelDetail(keys, dates) {
+  const days = [...new Set(dates.filter(Boolean))];
+  const out = new Map();
+  if (!keys.length || !days.length) return out;
+  const { data, error } = await supabase
+    .from('kpi_snapshots')
+    .select('snapshot_date, key, metrics')
+    .eq('scope', 'channel_detail')
+    .in('key', keys)
+    .in('snapshot_date', days);
+  if (error) throw error;
+  for (const r of data ?? []) out.set(`${r.key}|${r.snapshot_date}`, r);
+  return out;
 }
 
 /**
@@ -82,14 +107,7 @@ export async function takeSnapshot({ task = null } = {}) {
   task?.progress(0.45, 'Scoring the channels…');
   try {
     const { perMarketplaceData } = await computeListingHealth({ task: task?.part(0.45, 0.9) });
-    for (const [mkt, d] of Object.entries(perMarketplaceData)) {
-      rows.push({
-        snapshot_date: today,
-        scope: 'channel',
-        key: mkt,
-        metrics: { total: d.products.length, linked: d.linkedCount, avg: d.stats.avgScore, distribution: d.stats.distribution },
-      });
-    }
+    rows.push(...channelSnapshotRows(perMarketplaceData, today));
   } catch {
     // PIM rows still count; channel rows arrive with the next cron run.
   }
@@ -206,9 +224,9 @@ export async function loadScreenTime(start, end) {
   return rows.map((r) => ({ ...r, email: people.get(r.user_id)?.email ?? r.user_id, name: people.get(r.user_id)?.name ?? null }));
 }
 
-/** Product names (sku → model_name) for the activity and completeness details. */
+/** Product names (sku → model_name), with brand and category, for the activity and completeness details. */
 export async function loadProductNames() {
-  const { data, error } = await supabase.from('products').select('sku, model_name');
+  const { data, error } = await supabase.from('products').select('sku, model_name, brand, category');
   if (error) throw error;
   return data ?? [];
 }
