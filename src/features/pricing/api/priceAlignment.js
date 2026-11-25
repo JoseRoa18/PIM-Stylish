@@ -96,7 +96,7 @@ const REREAD_CALLS = 4;
  * a paid request: only what a person asks for goes through here.
  * `task` (optional taskProgress reporter) counts the products asked.
  * → { asked, bySku: { [sku]: { state, price, note } }, read, waiting, broken, unanswered }
- *   state: 'read' (the page was opened), 'waiting' (Lowe's and Menards answer
+ *   state: 'read' (the page was opened), 'waiting' (Menards answers
  *   in a few minutes), 'broken' (the link no longer opens the product),
  *   'unanswered' (the store gave no answer: the check tries it again by itself).
  */

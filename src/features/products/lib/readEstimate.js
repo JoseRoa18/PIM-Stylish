@@ -6,14 +6,15 @@
 // reads took (`learned`, { [retailer]: { ms, n } }), so it corrects itself.
 // A store never read this way starts from SEED_S — a store the PIM opens by
 // itself answers in seconds, one that has to be opened for it takes half a
-// minute, and Lowe's and Menards answer through a job of a couple of minutes.
+// minute, and Menards answers through a job of a couple of minutes (Lowe's
+// did too until 2026-11-25; its page is opened like the other stores' now).
 
 const SEED_S = {
   sinksdirect_ca: 8, sinksdirect_us: 8, build_with_rise: 8, kbauthority: 8, warehouse_usa: 8,
   walmart_ca: 20, walmart_us: 20,
   wayfair_ca: 30, wayfair_us: 30, bestbuy_ca: 30, amazon_ca: 30, amazon_us: 30, homedepot_us: 30, overstock_us: 30, ebay: 30,
-  rona: 40, homedepot_ca: 45, bbb_us: 45,
-  lowes_us: 150, menards: 150,
+  rona: 40, homedepot_ca: 45, bbb_us: 45, lowes_us: 45,
+  menards: 150,
 };
 const DEFAULT_S = 30;
 // A count that reaches zero before the page is read is worse than one that

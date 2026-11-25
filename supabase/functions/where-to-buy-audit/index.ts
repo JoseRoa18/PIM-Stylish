@@ -209,10 +209,19 @@ const retailerFor = (host: string): { key: string; market: string; label: string
 //   premium ones do (2 of 3, 30 credits a page, a failure costs nothing),
 //   while Bright Data opened 272 BB&B pages on 10-27 — Bright Data first,
 //   ScraperAPI's ultra premium behind it (SCRAPERAPI_OPTIONS). Amazon lets the
-//   server in, but without its prices (see below). Menards and Lowe's go
-//   through Bright Data's ready-made scrapers ("scraper", see SCRAPERS):
-//   Lowe's opened 7 of 8 links on 2026-10-19 and put a captcha in front of
-//   the Web Unlocker the next day.
+//   server in, but without its prices (see below). Menards goes through
+//   Bright Data's ready-made scraper ("scraper", see SCRAPERS).
+//   Lowe's has changed sides twice. It opened 7 of 8 links through the Web
+//   Unlocker on 2026-10-19 and put a captcha in front of it the next day, so
+//   its links went to Bright Data's "Lowes.com" scraper. From 2026-11-20 that
+//   scraper stopped reading them — Lowe's turned it away ("Access Denied" on
+//   111 of 252 pages), then it timed out waiting for parts of the page, and
+//   on 11-25 it answered "no_peers" for 246 of 254 — while the Web Unlocker
+//   opened Lowe's again: 38 of 40 links that had gone a week without an
+//   answer, 34 at the first try, ~17 s a page, each with the stored model
+//   and price (user, 2026-11-25: "Sí, hazlo y despliega"). So: the Web
+//   Unlocker first, with a second try in the link's own turn
+//   (UNLOCKER_SECOND_TRY), and the scraper as the backup (toScraper).
 // Anything not listed: the server's probe, then one Bright Data try.
 type Method = "direct" | "brightdata" | "scraperapi" | "scraper";
 const ROUTES: Record<string, Method[]> = {
@@ -221,7 +230,7 @@ const ROUTES: Record<string, Method[]> = {
   homedepot_ca: ["brightdata", "scraperapi"],
   homedepot_us: ["brightdata", "scraperapi"],
   bestbuy_ca: ["brightdata", "scraperapi"],
-  lowes_us: ["scraper"],
+  lowes_us: ["brightdata", "scraper"],
   rona: ["brightdata"],
   menards: ["scraper"],
   bbb_us: ["brightdata", "scraperapi"],
@@ -1015,13 +1024,20 @@ async function lookAgain(row: DueRow, first: Outcome, deadline: number, open: ()
   }
   return first;
 }
+// Stores the unlocker turns down now and then on a page it opens at the next
+// request: the page is asked for once more in the link's own turn. Lowe's
+// (2026-11-25): 34 of 40 pages opened at the first try and 38 with a second
+// ("captcha or protection page found", a navigation timeout, "no_peer" on the
+// others). A try the unlocker turns down is not billed.
+const UNLOCKER_SECOND_TRY = new Set(["lowes_us"]);
+const SECOND_TRY_MS = 45000; // a Lowe's page took up to 38 s
 // One more copy of the row's page through Bright Data (null: no page this time).
-async function brightDataAgain(row: DueRow): Promise<Outcome | null> {
+async function brightDataAgain(row: DueRow, ms = SECOND_LOOK_MS): Promise<Outcome | null> {
   const r = await fetch("https://api.brightdata.com/request", {
     method: "POST",
     headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({ zone: BRIGHTDATA_ZONE, url: asUri(row.url), format: "json" }),
-    signal: AbortSignal.timeout(SECOND_LOOK_MS),
+    signal: AbortSignal.timeout(ms),
   });
   if (!r.ok) return null;
   const j = await r.json() as { status_code?: number; body?: string };
@@ -1049,8 +1065,23 @@ async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
     const code = j.status_code ?? null;
     if (RATE_LIMIT_RE.test(j.headers?.["x-brd-error"] ?? "")) { brightData.limited += 1; brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     // 5xx / 403 / 429 here are the store or the unlocker turning the page down.
-    if (code === null || code >= 500 || code === 403 || code === 429) return { kind: "none", via: "brightdata", status: code, note: j.headers?.["x-brd-error"] ?? `HTTP ${code}` };
+    if (code === null || code >= 500 || code === 403 || code === 429) {
+      const miss: Outcome = { kind: "none", via: "brightdata", status: code, note: j.headers?.["x-brd-error"] ?? `HTTP ${code}` };
+      if (!UNLOCKER_SECOND_TRY.has(row.retailer) || Date.now() + SECOND_TRY_MS + 3000 >= deadline) return miss;
+      return (await brightDataAgain(row, SECOND_TRY_MS).catch(() => null)) ?? miss;
+    }
     const out = await lookAgain(row, judgePage(code, j.body ?? "", row, "brightdata"), deadline, () => brightDataAgain(row));
+    // Lowe's: now and then the unlocker hands over a copy of the product's
+    // page without its data — 2 of the first ~100 reads on 2026-11-25
+    // (K-150SM, K-135S: their stored price and model were emptied, and one
+    // took a sign toward Broken), each read whole at the next request, 3 of
+    // 3. Such a copy is asked for once more, and the copy with the product
+    // is the answer; only two copies without it count as a page without the
+    // product.
+    if (UNLOCKER_SECOND_TRY.has(row.retailer) && (out.kind === "soft" || (out.kind === "ok" && !out.page)) && Date.now() + SECOND_TRY_MS + 3000 < deadline) {
+      const again = await brightDataAgain(row, SECOND_TRY_MS).catch(() => null);
+      if (again?.kind === "ok" && again.page) return again;
+    }
     // Rona's new page (2026-11) has no price in it: its own item service gives
     // the price and the stock — one more request, in this link's own turn. A
     // call with no time left for it leaves the link for the next one (5
@@ -1184,7 +1215,9 @@ async function viaScraperApi(row: DueRow): Promise<Outcome> {
 //     front of the Web Unlocker ("captcha or protection page found" on 70
 //     links, with or without a US exit) while its scraper read the same links
 //     (B-112C, P-227H, S-306TG: model_number, upc, final_price /
-//     initial_price, in_stock).
+//     initial_price, in_stock). Since 2026-11-25 it is Lowe's BACKUP: the
+//     scraper stopped reading Lowe's on 11-20 and the Web Unlocker opens it
+//     again (see ROUTES, toScraper).
 type ScrapedRecord = Record<string, unknown>;
 interface ScraperStore { dataset: string; label: string; read: (rec: ScrapedRecord, siblings: ScrapedRecord[]) => PageRead | null }
 const SCRAPERS: Record<string, ScraperStore> = {
@@ -1192,6 +1225,25 @@ const SCRAPERS: Record<string, ScraperStore> = {
   lowes_us: { dataset: "gd_lnvl79pfftqh18u2o", label: "Lowe's", read: (rec) => lowesRecordRead(rec) },
 };
 const SCRAPER_RETAILERS = Object.keys(SCRAPERS);
+// Which links go to their store's scraper. A store whose route STARTS with
+// the scraper is read only there (Menards). One that lists it after the Web
+// Unlocker (Lowe's) is read through the unlocker, and the scraper is its
+// backup: a link with a scraper job in flight, and one link's turn in three
+// once the unlocker has missed it twice in a row (fail_count 2, 5, 8…:
+// unlocker, unlocker, scraper) — so a store that turns one of the two away,
+// as Lowe's has done to each in turn, is still read by the other, and a
+// broken scraper never holds a link for good. `asked` — a person, or a
+// caller that names the products, wants these links read now — keeps such a
+// store on the unlocker, which answers in seconds where a scraper job takes
+// minutes.
+const SCRAPER_FIRST = new Set(SCRAPER_RETAILERS.filter((k) => ROUTES[k]?.[0] === "scraper"));
+const SCRAPER_TURN = 3;
+function toScraper(row: { retailer: string; job_id?: string | null; fail_count?: number | null }, asked = false): boolean {
+  if (!SCRAPERS[row.retailer]) return false;
+  if (SCRAPER_FIRST.has(row.retailer)) return true;
+  if (asked || !ROUTES[row.retailer]?.includes("scraper")) return false;
+  return Boolean(row.job_id) || (row.fail_count ?? 0) % SCRAPER_TURN === SCRAPER_TURN - 1;
+}
 const SCRAPER_BATCH = 300;      // links per job
 const SCRAPER_GIVEUP_HOURS = 3; // a job still running after 3 h: no answer
 
@@ -1327,6 +1379,9 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
   let last: Outcome = { kind: "none", note: "not tried" };
   let provisional: Outcome | null = null;
   for (const m of triesInOrder(routeFor(row.retailer, row.host ?? ""), row.fail_count ?? 0)) {
+    // A store's scraper is no step of a link's own turn: it takes its links
+    // as one batch (toScraper, checkScrapers).
+    if (m === "scraper") continue;
     if (m === "scraperapi" && !SCRAPERAPI_FIRST.has(row.retailer) && (row.fail_count ?? 0) < SCRAPERAPI_AFTER_FAILS) continue;
     if (Date.now() + METHOD_MS[m] > deadline) return provisional ?? (misses.length ? { kind: "none", note: misses.join(" · ") } : { kind: "later" });
     let o: Outcome;
@@ -1347,8 +1402,7 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
         if (PRICE_BLIND.has(row.retailer)) o.priceBlind = true;
       }
     } else if (m === "brightdata") o = await viaBrightData(row, deadline);
-    else if (m === "scraperapi") o = await viaScraperApi(row);
-    else o = { kind: "none", via: "scraper", note: "goes through its store's scraper batch" }; // never reached: checkScrapers
+    else o = await viaScraperApi(row);
     if (o.kind === "soft") { provisional ??= o; misses.push(`${METHOD_LABEL[m]}: ${o.note ?? "no product"}`); continue; }
     if (o.kind !== "none") return o;
     misses.push(`${METHOD_LABEL[m]}: ${o.note ?? "no answer"}`);
@@ -1583,7 +1637,7 @@ const dueFilter = () => `url=not.is.null&verdict=not.in.(missing,manual)&or=(nex
 // account's verification, 2026-10-20; links never verified first), and the
 // links the server opens itself (fast, free).
 const UNLOCKER_RETAILERS = Object.entries(ROUTES).filter(([, r]) => r[0] !== "direct" && r[0] !== "scraper").map(([k]) => k);
-const SCRAPER_POOL = 900; // rows (both sites); each store goes as one scraper job
+const SCRAPER_POOL = 1000; // rows (both sites) read before the turn filter; each store goes as one scraper job
 const UNLOCKER_BATCH = 72;
 // The server's own probe: 50 rows a call (2026-10-22). A call has a fixed
 // share of compute, and 250 rows of heavy pages (Sinks Direct's Wix pages,
@@ -1617,10 +1671,10 @@ function capPerHost(rows: DueRow[], perHost: number, total: number): DueRow[] {
 // Stylish site — that are not due go with them, so one answer settles every
 // copy. Otherwise the copies drifted apart: the USA row OK and the Canada row
 // still "Not checked yet" after its own tries failed (2026-10-29: seven
-// Overstock and BB&B links). The scraper stores' batches already take every
-// due row of the store.
+// Overstock and BB&B links). A scraper's batch already takes every due row
+// of its store.
 async function siblingsOf(rows: DueRow[]): Promise<DueRow[]> {
-  const own = rows.filter((r) => !SCRAPER_RETAILERS.includes(r.retailer));
+  const own = rows.filter((r) => !toScraper(r));
   const ids = new Set(rows.map((r) => r.id));
   const want = new Set(own.map((r) => `${r.retailer}|${r.url}`));
   const out: DueRow[] = [];
@@ -1644,14 +1698,23 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean;
     if (taken.length < due.length) leftDue = true;
     return taken;
   };
-  const rows = opts.skus?.length
-    ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus)}${opts.retailer ? `&retailer=eq.${encodeURIComponent(opts.retailer)}` : ""}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
+  // Named products: their links are wanted now (toScraper's `asked`).
+  const asked = Boolean(opts.skus?.length);
+  const scraperTurn = (r: DueRow) => toScraper(r, asked);
+  const pooled = asked
+    ? await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&sku=${inList(opts.skus!)}${opts.retailer ? `&retailer=eq.${encodeURIComponent(opts.retailer)}` : ""}&${opts.dueOnly ? dueFilter() : "url=not.is.null&verdict=not.in.(missing,manual)"}`, { headers: { Prefer: "count=none" } })
     : [
       ...await pool(`retailer=${inList(UNLOCKER_RETAILERS)}`, "verdict.desc,next_check_at.asc.nullsfirst", 1000, UNLOCKER_PER_HOST, UNLOCKER_BATCH),
       ...await pool(`retailer=not.${inList([...UNLOCKER_RETAILERS, ...SCRAPER_RETAILERS])}`, "next_check_at.asc.nullsfirst", 1000, DIRECT_PER_HOST, opts.limit ?? DIRECT_BATCH),
-      ...await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(SCRAPER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${SCRAPER_POOL}`, { headers: { Prefer: "count=none" } }),
+      // The scrapers' links: every due link of a store read only there, and
+      // of a store that keeps its scraper as the backup (Lowe's) only the
+      // ones whose turn it is — the others are the unlocker pool's.
+      ...(await rest<DueRow[]>(`where_to_buy_links?select=${DUE_COLUMNS}&${dueFilter()}&retailer=${inList(SCRAPER_RETAILERS)}&order=next_check_at.asc.nullsfirst&limit=${SCRAPER_POOL}`, { headers: { Prefer: "count=none" } })).filter(scraperTurn),
     ];
-  if (!opts.skus?.length) rows.push(...await siblingsOf(rows));
+  // A backup-scraper link whose turn it is can come from both pools: once.
+  const pooledIds = new Set<string>();
+  const rows = pooled.filter((r) => !pooledIds.has(r.id) && pooledIds.add(r.id));
+  if (!asked) rows.push(...await siblingsOf(rows));
   // Claim the batch so an overlapping call (cron chain + UI) skips it; every
   // outcome writes its own next_check_at, and a link this call never reaches
   // is due again when the claim runs out.
@@ -1670,17 +1733,17 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean;
   // One queue per host. Sites read through an unlocker take 3 lanes (the
   // service spreads them over its own addresses); the server's own probe
   // keeps one paced lane per host.
-  // Menards and Lowe's go as one batch per store to their scraper
-  // (checkScrapers), the rest by host.
+  // A scraper's links (Menards; Lowe's when it is the backup's turn) go as
+  // one batch per store (checkScrapers), the rest by host.
   const byHost = new Map<string, DueRow[]>();
   for (const r of leads) {
-    if (SCRAPERS[r.retailer]) continue;
+    if (scraperTurn(r)) continue;
     const h = (r.host ?? "").replace(/^www\./, "");
     if (!byHost.has(h)) byHost.set(h, []);
     byHost.get(h)!.push(r);
   }
   const answers: Array<{ row: DueRow; o: Outcome }> = [];
-  const scraped = checkScrapers(leads.filter((r) => SCRAPERS[r.retailer])).then((res) => { answers.push(...res); });
+  const scraped = checkScrapers(leads.filter(scraperTurn)).then((res) => { answers.push(...res); });
   await Promise.all([scraped, ...[...byHost.entries()].map(async ([host, list]) => {
     const unlocker = !routeFor(list[0].retailer, host).every((m) => m === "direct");
     // 3 lanes per store through an unlocker (slow stores — Home Depot Canada,
@@ -2384,11 +2447,11 @@ async function verifySuggestions(deadline: number) {
   const lane = async (queue: Suggestion[]) => {
     while (queue.length && Date.now() + 15000 < deadline) {
       const s = queue.shift()!;
-      // Menards and Lowe's open only through their scraper (minutes per
-      // batch): the scraper itself read the options it lists (Menards gives a
-      // record per finish), so such a suggestion counts as seen; any other
-      // cannot be opened here.
-      if (SCRAPERS[s.retailer]) {
+      // Menards opens only through its scraper (minutes per batch): the
+      // scraper itself read the options it lists (a record per finish), so
+      // such a suggestion counts as seen; any other cannot be opened here.
+      // (Lowe's is opened like any other store since 2026-11-25.)
+      if (SCRAPER_FIRST.has(s.retailer)) {
         if (s.source !== "page_option") { await fail(s, `${SCRAPERS[s.retailer].label} opens only through its scraper batch`); continue; }
         counts.ready += 1;
         await patch(s, { status: "ready", status_note: `Read by Bright Data's ${SCRAPERS[s.retailer].label} scraper`, checked_at: now(), next_check_at: new Date(Date.now() + 365 * 86400e3).toISOString() });
@@ -2812,7 +2875,7 @@ Deno.serve(async (req) => {
       const result = await check({ skus, retailer });
       const links = result.links ?? [];
       // One product's page, read: how long it took from the person's click
-      // (Lowe's and Menards answer over several calls) is that store's time.
+      // (Menards answers over several calls) is that store's time.
       if (skus.length === 1 && links.some((l) => l.kind === "ok" || l.kind === "broken" || l.kind === "soft")) {
         const asked = typeof body.since === "string" ? Date.parse(body.since) : NaN;
         const took = Number.isFinite(asked) && asked <= Date.now() && Date.now() - asked < READ_TIME_MAX_MS ? Date.now() - asked : result.ms;

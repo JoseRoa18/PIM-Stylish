@@ -31,7 +31,7 @@ export async function loadReadTimes() {
   return error ? {} : data?.value ?? {};
 }
 
-// Lowe's and Menards answer through a job: the page is asked for, and its
+// Menards answers through a job: the page is asked for, and its
 // answer is read a little later — the same call, repeated, reads it.
 const POLL_MS = 20_000;
 const WAIT_MAX_MS = 6 * 60_000;
