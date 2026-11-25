@@ -51,9 +51,14 @@
 //                are made due again, so each one is confirmed by a second
 //                read (user, 2026-11-16: "solo los que tienen errores"). Cron
 //                where-to-buy-problem-reread, 10 AM Eastern on the pass days.
-// mode "reread" — { retailer, skus }: "Read again" on Price Alignment — those
-//                products' pages of that store are opened now, in this call
-//                (admins and editors).
+// mode "reread" — { retailer, skus, since? }: "Read again" — those products'
+//                pages of that store are opened now, in this call (admins and
+//                editors). Price Alignment asks it for a store read from its
+//                pages; the product's Where to Buy tab for any store of the
+//                list, one product at a time (user, 2026-11-25), with `since`
+//                = when the person asked: how long the read took is kept per
+//                store (app_settings.where_to_buy_read_times), and that tab
+//                counts the time left from it.
 // mode "publish" — writes the next products of the publish queue to the
 //                Stylish pages (cron every 5 minutes; the check calls also
 //                drain it when they have time left).
@@ -987,6 +992,42 @@ const brightData = { inFlight: 0, coolUntil: 0, limited: 0 };
 const BD_MAX_IN_FLIGHT = 20;
 const RONA_SERVICE_MS = 25000; // Rona's item service answers in ~8 s through the unlocker
 const RATE_LIMIT_RE = /rate limit/i;
+// Amazon shows a product as unavailable to a visitor whose delivery place it
+// is not sold to: K-151S, a kitchen faucet, read "Currently unavailable. We
+// don't know when or if this item will be back in stock." — no price, no buy
+// button — from a Los Angeles exit, and in stock at $87 from every other place
+// of the country (user, 2026-11-25: his link stayed Out of stock "cuando en
+// realidad sí tiene stock"; 5 of ~50 reads that day, each one "Los Angeles
+// 90060" where the place was noted). The unlocker exits somewhere else at each
+// request, so a page that says unavailable — or that Amazon moved to another
+// option — is asked for again, twice at most: the link is sold out only when
+// every read says so. A read that shows the product in stock is the answer.
+const SECOND_LOOK = new Set(["amazon_us", "amazon_ca"]);
+const SECOND_LOOKS = 2;
+const SECOND_LOOK_MS = 25000;
+const looksSoldOut = (o: Outcome | null) => !!o && o.kind === "ok" && !!o.page && (o.page.inStock === false || !!o.page.movedFrom);
+const showsInStock = (o: Outcome | null) => !!o && o.kind === "ok" && !!o.page && o.page.inStock === true && !o.page.movedFrom;
+async function lookAgain(row: DueRow, first: Outcome, deadline: number, open: () => Promise<Outcome | null>): Promise<Outcome> {
+  if (!SECOND_LOOK.has(row.retailer) || !looksSoldOut(first)) return first;
+  for (let n = 0; n < SECOND_LOOKS && Date.now() + SECOND_LOOK_MS < deadline; n++) {
+    const again = await open().catch(() => null);
+    if (showsInStock(again)) return again!;
+  }
+  return first;
+}
+// One more copy of the row's page through Bright Data (null: no page this time).
+async function brightDataAgain(row: DueRow): Promise<Outcome | null> {
+  const r = await fetch("https://api.brightdata.com/request", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ zone: BRIGHTDATA_ZONE, url: asUri(row.url), format: "json" }),
+    signal: AbortSignal.timeout(SECOND_LOOK_MS),
+  });
+  if (!r.ok) return null;
+  const j = await r.json() as { status_code?: number; body?: string };
+  return j.status_code === 200 ? judgePage(200, j.body ?? "", row, "brightdata") : null;
+}
+
 async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
   const url = row.url;
   if (!BRIGHTDATA_API_TOKEN) return { kind: "none", via: "brightdata", note: "not configured" };
@@ -1009,7 +1050,7 @@ async function viaBrightData(row: DueRow, deadline: number): Promise<Outcome> {
     if (RATE_LIMIT_RE.test(j.headers?.["x-brd-error"] ?? "")) { brightData.limited += 1; brightData.coolUntil = Date.now() + 20000; return { kind: "later", via: "brightdata" }; }
     // 5xx / 403 / 429 here are the store or the unlocker turning the page down.
     if (code === null || code >= 500 || code === 403 || code === 429) return { kind: "none", via: "brightdata", status: code, note: j.headers?.["x-brd-error"] ?? `HTTP ${code}` };
-    const out = judgePage(code, j.body ?? "", row, "brightdata");
+    const out = await lookAgain(row, judgePage(code, j.body ?? "", row, "brightdata"), deadline, () => brightDataAgain(row));
     // Rona's new page (2026-11) has no price in it: its own item service gives
     // the price and the stock — one more request, in this link's own turn. A
     // call with no time left for it leaves the link for the next one (5
@@ -1720,7 +1761,8 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean;
     ...(opts.skus?.length ? {
       links: results.filter(({ row }) => opts.skus!.includes(row.sku)).filter(({ row }, i, all) => all.findIndex((x) => x.row.url === row.url && x.row.sku === row.sku) === i).map(({ row, o }) => ({
         sku: row.sku, retailer: row.retailer, url: row.url, kind: o.kind, via: o.via ?? null, note: o.soldOut ?? o.note ?? null,
-        page: o.page ? { model: o.check?.model ?? o.page.ids[0] ?? null, check: o.check?.check ?? null, price: o.page.price, wasPrice: o.page.wasPrice, currency: o.page.currency, inStock: o.page.inStock, note: o.page.note, gone: o.page.gone, source: o.page.source } : o.page,
+        // `deliverTo` / `foreignExit`: where the store thought the visitor was (Amazon's reader says it).
+        page: o.page ? { model: o.check?.model ?? o.page.ids[0] ?? null, check: o.check?.check ?? null, price: o.page.price, wasPrice: o.page.wasPrice, currency: o.page.currency, inStock: o.page.inStock, note: o.page.note, gone: o.page.gone, source: o.page.source, deliverTo: (o.page as { deliverTo?: string | null }).deliverTo ?? null, foreignExit: (o.page as { foreignExit?: boolean | null }).foreignExit ?? null } : o.page,
       })),
     } : {}),
   };
@@ -2637,6 +2679,24 @@ async function logImport(summary: string, metadata: Record<string, unknown>) {
 }
 
 // ---------------------------------------------------------------- auth
+// How long a read of one page of each store takes, as people's own "Read
+// again" on a product's link measured it: { [retailer]: { ms, n } }, each new
+// time weighing two fifths (a store's speed changes; one slow read does not
+// take the average over). The product's Where to Buy tab counts the time left
+// from it.
+const READ_TIMES_KEY = "where_to_buy_read_times";
+const READ_TIME_MAX_MS = 30 * 60e3;
+async function noteReadTime(retailer: string, took: number) {
+  const ms = Math.min(READ_TIME_MAX_MS, Math.max(1000, Math.round(took)));
+  const times = (await rest<Array<{ value: Record<string, { ms: number; n: number }> }>>(`app_settings?select=value&key=eq.${READ_TIMES_KEY}`))[0]?.value ?? {};
+  const usual = Number(times[retailer]?.ms) || 0;
+  const kept = { ms: usual > 0 ? Math.round(usual * 0.6 + ms * 0.4) : ms, n: (Number(times[retailer]?.n) || 0) + 1 };
+  await rest("app_settings?on_conflict=key", {
+    method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key: READ_TIMES_KEY, value: { ...times, [retailer]: kept }, updated_at: new Date().toISOString() }),
+  });
+}
+
 // How the caller is authorized: the cron secret, a signed-in user's JWT, or
 // the Gmail script's report key (which may only post reports — the gateway
 // adds an anon Authorization header, so the JWT check must really pass).
@@ -2740,14 +2800,25 @@ Deno.serve(async (req) => {
       return json({ ok: true, ...(await problemReread({ dryRun })) });
     }
     if (mode === "reread") {
-      // body: { retailer, skus } — "Read again" on Price Alignment.
+      // body: { retailer, skus, since? } — "Read again": on Price Alignment (a
+      // store read from its pages) and on the product's Where to Buy tab (any
+      // store of the list).
       if (!(await maySpend(kind, req))) return json({ error: "Only admins and editors can have a store page read again" }, 403);
       const retailer = String(body.retailer ?? "");
-      if (!(PAGE_STORES as Array<{ key: string }>).some((s) => s.key === retailer)) return json({ error: "retailer: a store read from its pages is required" }, 400);
+      const known = [...(PAGE_STORES as Array<{ key: string }>), ...(WTB_RETAILERS as Array<{ key: string }>)].some((s) => s.key === retailer);
+      if (!known) return json({ error: "retailer: a store of the Where to Buy list or one read from its pages is required" }, 400);
       const skus = Array.isArray(body.skus) ? [...new Set<string>(body.skus.map((s: unknown) => String(s).trim()).filter(Boolean))].slice(0, REREAD_MAX) : [];
       if (!skus.length) return json({ error: "skus[] is required" }, 400);
       const result = await check({ skus, retailer });
-      return json({ ok: true, retailer, checked: result.checked, byKind: result.byKind, ms: result.ms, links: result.links ?? [] });
+      const links = result.links ?? [];
+      // One product's page, read: how long it took from the person's click
+      // (Lowe's and Menards answer over several calls) is that store's time.
+      if (skus.length === 1 && links.some((l) => l.kind === "ok" || l.kind === "broken" || l.kind === "soft")) {
+        const asked = typeof body.since === "string" ? Date.parse(body.since) : NaN;
+        const took = Number.isFinite(asked) && asked <= Date.now() && Date.now() - asked < READ_TIME_MAX_MS ? Date.now() - asked : result.ms;
+        await noteReadTime(retailer, took).catch((e) => console.warn("[where-to-buy] read time not kept:", (e as Error).message));
+      }
+      return json({ ok: true, retailer, checked: result.checked, byKind: result.byKind, ms: result.ms, links });
     }
     if (mode === "suggest") return json({ ok: true, ...(await suggest({ build: body.build === true, dryRun: body.dryRun === true })) });
     // ScraperAPI's credits and today's allowance (reads the account; spends nothing).

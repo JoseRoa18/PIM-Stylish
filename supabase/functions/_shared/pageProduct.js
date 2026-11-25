@@ -158,6 +158,10 @@ function clean(read) {
     itemId: read.itemId ? String(read.itemId).slice(0, 40) : null,
     // Amazon: the item the link asked for, when the store shows another option of the listing in its place.
     movedFrom: read.movedFrom ? String(read.movedFrom).slice(0, 40) : null,
+    // Amazon: where the store thought the visitor was ("New York 10001", "Canada"), and whether that is
+    // outside the store's own country — such a page hides the offers that do not ship there.
+    deliverTo: read.deliverTo ? String(read.deliverTo).slice(0, 60) : null,
+    foreignExit: typeof read.foreignExit === "boolean" ? read.foreignExit : null,
     subSku: read.subSku ? String(read.subSku).slice(0, 40) : null,
     reviewCount: Number.isInteger(read.reviewCount) && read.reviewCount >= 0 ? read.reviewCount : null,
     // The average out of 5, only next to a count of at least one review.

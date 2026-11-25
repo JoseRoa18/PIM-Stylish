@@ -1,8 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ExternalLink, Lightbulb, Loader2, Star, Upload } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { AlertCircle, ExternalLink, Lightbulb, Loader2, RefreshCw, Star, Upload } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { loadProductWhereToBuy, saveProductWhereToBuy, publishWhereToBuy, dismissWhereToBuySuggestion } from '../api/whereToBuy';
+import { loadReadTimes, startLinkRead, subscribeLinkReads, linkReadsVersion, linkReadOf, linkReadsOf } from '../api/whereToBuyReads';
 import { WTB_MARKETS, WTB_RETAILERS, wtbUrlProblem, cleanWtbUrl } from '../lib/whereToBuy';
+import { LINK_STATUS as STATUS, isWrong, linkStatusKey, priceText } from '../lib/linkStatus';
+import { leftText } from '../lib/readEstimate';
 import { PAGE_STORE_KEYS, readingCounts } from '@/features/pricing/lib/pageStores';
 import { linkReviews, reviewsText } from '@/features/dashboard/lib/whereToBuy';
 import { startTask } from '@/lib/taskProgress';
@@ -18,29 +21,12 @@ import { startTask } from '@/lib/taskProgress';
 // wrong product, a broken one or a missing one, the PIM may suggest the right
 // address — found and opened by the audit, its page shows this product. "Use"
 // puts it in the field; nothing changes until "Save and publish".
+// Each saved link has "Read again" (user, 2026-11-25): the store's page is
+// opened now and the row takes what it shows, with the time left while it is
+// read — the store's own usual time (whereToBuyReads.js, readEstimate.js).
 
 const inputCls = 'w-full px-3 py-1.5 rounded-lg border bg-surface text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors';
 
-const STATUS = {
-  ok: { label: 'OK', cls: 'bg-success-container text-on-success-container' },
-  broken: { label: 'Broken', cls: 'bg-error-container text-on-error-container' },
-  wrong: { label: 'Wrong product', cls: 'bg-warning-container text-on-warning-container' },
-  // Sold out on the store (2026-10-26): off the websites until the store has it again.
-  outOfStock: { label: 'Out of stock', cls: 'bg-tertiary-container text-on-tertiary-container' },
-  // The right listing on its default option (Wayfair without ?piid=): shown on the websites.
-  otherFinish: { label: 'Other finish', cls: 'bg-surface-container-high text-on-surface-variant' },
-  pending: { label: 'Checking', cls: 'bg-surface-container-high text-on-surface-variant' },
-  manual: { label: 'Check by hand', cls: 'bg-surface-container-high text-on-surface-variant' },
-};
-const isWrong = (check) => check?.sku_check === 'other' || check?.sku_check === 'variant';
-const isOtherFinish = (check) => check?.sku_check === 'listing';
-// The stock of an "Other finish" page is the store's default option's.
-const isSoldOut = (check) => check?.in_stock === false && !isOtherFinish(check);
-const priceText = (check) => {
-  if (check?.price == null) return '';
-  const symbol = check.currency === 'USD' ? '$' : check.currency === 'CAD' ? 'C$' : '';
-  return `${symbol}${Number(check.price).toFixed(2)}`;
-};
 const PUBLISH_TEXT = {
   published: 'updated',
   up_to_date: 'already up to date',
@@ -64,6 +50,13 @@ export default function WhereToBuyTab({ product }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null); // 'save' | 'publish'
   const [result, setResult] = useState(null);
+  // "Read again": how long each store's reads take (for the time left), what
+  // the last read of each link said, and a clock while one is in flight.
+  const [readTimes, setReadTimes] = useState(null);
+  const [readNotes, setReadNotes] = useState({}); // "<sku>|<store>" → { text, failed }
+  const [now, setNow] = useState(() => Date.now());
+  const readsVersion = useSyncExternalStore(subscribeLinkReads, linkReadsVersion);
+  const shownSku = useRef(product.sku);
 
   // `keepDraft`: the fields keep what the person typed (after a dismiss).
   async function reload({ keepDraft = false } = {}) {
@@ -76,7 +69,39 @@ export default function WhereToBuyTab({ product }) {
       setError(err.message);
     }
   }
-  useEffect(() => { reload(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [product.sku]);
+  // A read that ended: its row takes what the page showed, and the next
+  // estimate the time it took. (Not when the person has moved to another product.)
+  function readEnded(sku, retailer, read) {
+    if (shownSku.current !== sku) return;
+    setReadNotes((notes) => ({ ...notes, [`${sku}|${retailer}`]: { text: read.text, failed: read.state === 'failed' } }));
+    reload({ keepDraft: true });
+    loadReadTimes().then((times) => { if (shownSku.current === sku) setReadTimes(times); });
+  }
+  useEffect(() => {
+    shownSku.current = product.sku;
+    reload();
+    // Reads asked before leaving this tab are still running: show their end.
+    for (const read of linkReadsOf(product.sku)) read.done.then((r) => readEnded(product.sku, read.retailer, r));
+    return () => { shownSku.current = null; };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [product.sku]);
+  useEffect(() => {
+    if (canEdit) loadReadTimes().then(setReadTimes);
+  }, [canEdit]);
+  // The time left counts down while a link of this product is being read.
+  useEffect(() => {
+    if (!linkReadsOf(product.sku).length) return undefined;
+    const clock = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(clock);
+  }, [product.sku, readsVersion]);
+
+  function handleReread(store, statusNow) {
+    const sku = product.sku;
+    setReadNotes((notes) => Object.fromEntries(Object.entries(notes).filter(([k]) => k !== `${sku}|${store.key}`)));
+    startLinkRead(product, store, readTimes, statusNow).then((read) => readEnded(sku, store.key, read));
+  }
+  // What the reads of this product's links said, in the stores' order.
+  const notes = WTB_RETAILERS.map((r) => ({ key: r.key, ...readNotes[`${product.sku}|${r.key}`] })).filter((n) => n.text);
 
   const problems = useMemo(() => Object.fromEntries(
     Object.entries(draft).filter(([, url]) => url?.trim()).map(([k, url]) => [k, wtbUrlProblem(k, url.trim())]).filter(([, p]) => p),
@@ -200,6 +225,12 @@ export default function WhereToBuyTab({ product }) {
           {result.some((r) => r.status === 'published') && <p className="text-on-surface-variant">New addresses are checked within a few minutes.</p>}
         </div>
       )}
+      {notes.length > 0 && (
+        <div role="status" className="mx-8 mt-4 rounded-xl bg-surface-container px-4 py-3 text-body-sm text-on-surface space-y-0.5">
+          <p className="text-on-surface-variant">Read again:</p>
+          {notes.map((n) => <p key={n.key} className={n.failed ? 'text-error' : ''}>{n.text}</p>)}
+        </div>
+      )}
 
       {!data ? (
         <div role="status" aria-label="Loading links" className="m-8 h-40 rounded-xl bg-surface-container animate-pulse" />
@@ -220,18 +251,24 @@ export default function WhereToBuyTab({ product }) {
                     <col className="w-[9.5rem]" />
                     <col />
                     <col className="w-[6.75rem]" />
-                    <col className="w-9" />
+                    {/* Open, and Read again beside it (under it on a phone). */}
+                    <col className={canEdit ? 'w-9 sm:w-[4.25rem]' : 'w-9'} />
                   </colgroup>
                   <tbody className="divide-y divide-outline-variant/60">
                     {stores.map((r) => {
                       const saved = data.links[r.key] ?? '';
                       const check = data.checks[r.key];
-                      const wrong = isWrong(check) && check.verdict !== 'broken';
-                      const otherFinish = isOtherFinish(check) && check.verdict !== 'broken';
-                      const soldOut = !wrong && isSoldOut(check) && check.verdict !== 'broken';
-                      const status = saved ? (wrong ? STATUS.wrong : soldOut ? STATUS.outOfStock : otherFinish ? STATUS.otherFinish : STATUS[check?.verdict] ?? STATUS.pending) : null;
+                      const statusKey = saved ? linkStatusKey(check) : null;
+                      const wrong = statusKey === 'wrong';
+                      const otherFinish = statusKey === 'otherFinish';
+                      const soldOut = statusKey === 'outOfStock';
+                      const status = statusKey ? STATUS[statusKey] : null;
                       const problem = problems[r.key];
                       const id = `wtb-${r.key}`;
+                      // "Read again": the read in flight of this link, and whether
+                      // the field still holds the saved address (the read is of that one).
+                      const read = saved ? linkReadOf(product.sku, r.key) : null;
+                      const edited = (draft[r.key]?.trim() ? cleanWtbUrl(draft[r.key]) : '') !== saved;
                       // The price shows only when the page is this product's
                       // (another product's price would mislead).
                       const price = saved && check?.verdict !== 'broken' && readingCounts(check) ? priceText(check) : '';
@@ -292,7 +329,19 @@ export default function WhereToBuyTab({ product }) {
                             {problem && <span id={`${id}-problem`} className="sr-only">{problem}</span>}
                           </td>
                           <td>
-                            {problem ? (
+                            {read ? (
+                              <span className="flex flex-col items-start">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-label-md font-semibold whitespace-nowrap bg-surface-container-high text-on-surface-variant">
+                                  <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                  Reading
+                                </span>
+                                {/* The time left is seen, not read out second by second:
+                                    the progress card says when the read starts and ends. */}
+                                <span className="mt-0.5 text-label-md text-on-surface-variant tabular-nums whitespace-nowrap" aria-hidden="true">
+                                  {leftText(read.estimate, Math.max(0, now - read.startedAt))}
+                                </span>
+                              </span>
+                            ) : problem ? (
                               <span className="inline-block px-1.5 py-0.5 rounded text-label-md font-semibold bg-error-container text-on-error-container" title={problem}>Wrong store</span>
                             ) : status ? (
                               <span className="flex flex-col items-start cursor-default" title={detail || undefined}>
@@ -306,9 +355,23 @@ export default function WhereToBuyTab({ product }) {
                           </td>
                           <td className="text-right">
                             {saved && (
-                              <a href={saved} target="_blank" rel="noreferrer" aria-label={`Open the ${r.label} page`} className="inline-flex p-1.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface">
-                                <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                              </a>
+                              <span className="flex flex-col sm:flex-row items-center justify-end">
+                                {canEdit && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReread(r, statusKey)}
+                                    disabled={Boolean(read) || edited || busy != null}
+                                    aria-label={`Read the ${r.label} page again`}
+                                    title={read ? 'Reading this page…' : edited ? 'Save the link first: the page read is the saved one' : 'Read this page again now'}
+                                    className="inline-flex p-1 sm:p-1.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-on-surface-variant"
+                                  >
+                                    {read ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
+                                  </button>
+                                )}
+                                <a href={saved} target="_blank" rel="noreferrer" aria-label={`Open the ${r.label} page`} className={`inline-flex ${canEdit ? 'p-1 sm:p-1.5' : 'p-1.5'} rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface`}>
+                                  <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                                </a>
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -376,7 +439,7 @@ export default function WhereToBuyTab({ product }) {
       )}
       {data && (
         <p className="px-6 sm:px-8 pb-5 -mt-2 text-label-md text-on-surface-variant">
-          Point at a status to see why it is not OK and which product the page shows; the price under it is the one the page showed. Only the links that work and open this product show on the websites (a link not checked yet shows too). A suggested link was found and opened by the PIM: its page shows this product.
+          Point at a status to see why it is not OK and which product the page shows; the price under it is the one the page showed. Only the links that work and open this product show on the websites (a link not checked yet shows too). A suggested link was found and opened by the PIM: its page shows this product.{canEdit ? ' The arrows at the end of a row read its page again now.' : ''}
         </p>
       )}
       {data?.sites.some((s) => !s.linked) && (
