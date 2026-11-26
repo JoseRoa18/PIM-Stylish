@@ -5,8 +5,10 @@
 //
 // Everything here is read with the lookups' own helpers; `ctx` is the
 // lookups' context (assistantTools.js). The `assistant` edge function runs it
-// on Monday at 7 AM Eastern (cron assistant-briefing) or when an admin asks,
-// and keeps the result in app_settings 'assistant_briefing'.
+// every 5 minutes (cron assistant-briefing — every Monday at 7 AM Eastern
+// until 2026-11-26, when the user asked for the card to be up to date all
+// day) or when an admin asks, and keeps the result in app_settings
+// 'assistant_briefing'. Its days run from today to six days ahead.
 import { promotionsOverview, restAll } from "./assistantTools.js";
 import { shiftDay } from "./promoCalendar.ts";
 import { wtbRetailer } from "./whereToBuy.js";

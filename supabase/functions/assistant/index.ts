@@ -52,7 +52,8 @@
 //   "warm"        keeps the cached beginning alive while someone asked in the
 //                 last 3 hours (cron assistant-warm; an idle day costs nothing)
 //   "briefing"    builds the Dashboard's weekly briefing (cron assistant-briefing,
-//                 Monday 7 AM Eastern; { cron: true } runs only at that hour)
+//                 every 5 minutes since 2026-11-26; { cron: true } — the Monday
+//                 job's old body — runs only at 7 AM Eastern)
 //   "user_guide"  rewrites, for people who are not admins, the pieces of the
 //                 guide that are new or changed ({ limit? } per call; the sync
 //                 script calls it until nothing remains; { again: true } also

@@ -6,11 +6,17 @@ import { getBriefing, refreshBriefing } from '@/features/assistant/api/assistant
 import { formatTimeAgo } from '@/lib/format';
 
 // The week's briefing (user, 2026-11-11: "Cada lunes: los más vendidos sin
-// stock, promociones que empiezan, links rotos"). Built on the server every
-// Monday at 7 AM Eastern straight from the data (assistantBriefing.js — no
-// model writes it) and kept in app_settings 'assistant_briefing'; this card
-// only shows it. Nothing is drawn until the first one exists. An admin can
-// build it again now.
+// stock, promociones que empiezan, links rotos"). Built on the server
+// straight from the data (assistantBriefing.js — no model writes it) and kept
+// in app_settings 'assistant_briefing'; this card only shows it. Nothing is
+// drawn until the first one exists. An admin can build it again now.
+//
+// It is kept up to date all day (user, 2026-11-26: "Todo ese panel debe
+// actualizarse al día, en vivo pues" — on a Thursday its Broken links tile
+// still showed Monday's count). The server builds it every 5 minutes, and the
+// card reads it again every minute while the page is in view and when the
+// person comes back to the tab, so an open Dashboard follows it. Its days run
+// from today to six days ahead (what starts and ends in the next 7 days).
 //
 // The look (user, the same day, about a first version of three columns of
 // sentences: "No me gusta como se ve eso"): the week's numbers as tiles, and a
@@ -30,6 +36,7 @@ const ODOO_REASON = {
   refused: 'Odoo gave an error',
 };
 const PROMOS_SHOWN = 5;
+const RELOAD_MS = 60_000;
 
 const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 // A bare day is that day where the person is (new Date() would read it as UTC).
@@ -285,8 +292,19 @@ export default function WeeklyBriefingCard() {
 
   useEffect(() => {
     let active = true;
-    getBriefing().then((value) => { if (active) setBriefing(value); }).catch(() => {});
-    return () => { active = false; };
+    // Never an older build over a newer one (a read that started before the
+    // admin's own "build it again" can land after it).
+    const newest = (current, value) => (!value || (current?.generated_at && value.generated_at && value.generated_at < current.generated_at) ? current : value);
+    const load = () => getBriefing().then((value) => { if (active) setBriefing((current) => newest(current, value)); }).catch(() => {});
+    const inView = () => { if (document.visibilityState === 'visible') load(); };
+    load();
+    const timer = setInterval(inView, RELOAD_MS);
+    document.addEventListener('visibilitychange', inView);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', inView);
+    };
   }, []);
 
   async function refresh() {
