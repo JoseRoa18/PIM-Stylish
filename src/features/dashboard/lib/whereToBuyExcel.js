@@ -24,7 +24,9 @@
 // and how urgent it is, from OUR stock in the store's country: a product we
 // have no stock of may have been taken down by the store and will not be
 // found, so it comes last (sold-out pages are Out of stock, never in the
-// list). Walmart USA is not covered yet (user, the same day: "seguimos
+// list — and since 2026-11-26 a link whose page is down while we have no stock
+// is Out of stock too, so priority 4 is left for the links to add and for the
+// broken links of another kind: a wrong page, a store that moved). Walmart USA is not covered yet (user, the same day: "seguimos
 // trabajando en ello"): its links stay off To fix and Links to add.
 
 import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
@@ -345,7 +347,7 @@ export function whereToBuySheets(rows, date) {
         headers: ['Step', 'What to do'],
         formats: ['topic', 'wrap'],
         rows: [
-          ['0. Where to start', '"To fix" and "Links to add" are sorted by Priority, and "What to Do" says what each row needs. 1 = the PIM already found the right link; 2 = we have the product in stock in that country; 3 = our stock is not tracked; 4 = we have no stock, so the store may have taken the product down — search once and move on. "Our Stock" is our own stock in the store\'s country. Out of stock links (the store shows the product sold out) are not in these lists: nothing to fix.'],
+          ['0. Where to start', '"To fix" and "Links to add" are sorted by Priority, and "What to Do" says what each row needs. 1 = the PIM already found the right link; 2 = we have the product in stock in that country; 3 = our stock is not tracked; 4 = we have no stock, so the store may have taken the product down — search once and move on. "Our Stock" is our own stock in the store\'s country. Out of stock links (the store shows the product sold out, or its page is down while we have no stock of it in that country) are not in these lists: nothing to fix.'],
           ['Store Code', 'The product\'s own code on that store, to search it with: Home Depot Canada / USA = the item number (homedepot.ca/product/<code>, homedepot.com/p/<code>), Lowe\'s = the item #, Rona = the article #, BB&B / Overstock = the product number (the part before the dashes: bedbathandbeyond.com/<number>/product.html), Amazon.ca = the ASIN or our Seller SKU, Best Buy = the product id of our offer (bestbuy.ca/en-ca/product/<code>), Wayfair = the part number (TKJS…, the same on Wayfair.ca and Wayfair.com). It comes from the product\'s Aliases tab; empty where the PIM has none.'],
           ['1. Write the address', 'On "To fix", "Links to add" or "All links", write the store page of the product in the green "New Link" column. A "Suggested Link" is an address the PIM already opened and found right.'],
           ['2. Remove a link', 'Write REMOVE in "New Link": the link leaves the product\'s list and its pages (both Stylish pages, or the Azuni store\'s).'],

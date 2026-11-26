@@ -26,7 +26,8 @@ import {
 // one cell per retailer linked from its WHERE TO BUY section; the cell colour
 // is the link's verdict (OK / Broken — user, 2026-10-19), or "Wrong product"
 // when its page shows another product (2026-10-20), or "Out of stock" when
-// the store shows it sold out (2026-10-26, a hollow ring). Expanding a row lists
+// the store shows it sold out, or its page is down while we have no stock
+// (2026-10-26 and 2026-11-26, a hollow ring). Expanding a row lists
 // every link with the reason and what the page showed (its model and price). The portals a page does not link are a KPI of their own
 // ("Links to add"), not a problem. "Suggested links" lists the right
 // addresses the PIM found and opened for wrong, broken and missing links;

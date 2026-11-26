@@ -71,11 +71,16 @@ export const OTHER_FINISH = {
 // marketplaces showed it as Broken — "Ocultar hasta que vuelva"): nothing to
 // fix. It leaves the websites until the store has the product again
 // (isHiddenLink) and is read again on every check day. Best Buy takes the page down while
-// our offer has no stock, so such a 404 counts here too. An "Other finish"
-// page shows the stock of the store's default option and never counts.
+// our offer has no stock, so such a 404 counts here too — and since 2026-11-26
+// so does any store's page that is down while we have no stock of the product
+// in that store's country (user: "esos productos que vengan de Odoo con 0, en
+// vez de broken, se coloquen como Out of Stock"; the check decides it, and the
+// link turns Broken by itself if the page is still down once we have stock).
+// An "Other finish" page shows the stock of the store's default option and
+// never counts.
 export const OUT_OF_STOCK = {
   label: 'Out of stock', tone: 'stock', problem: false,
-  hint: 'The store shows the product as sold out. It is not shown on the Stylish websites until the store has it again.',
+  hint: 'The store shows the product as sold out, or its page is down while we have no stock of it in that country. Nothing to fix: it is not shown on the Stylish websites until the store has it again, and it turns Broken if the page is still down once we have stock.',
 };
 export const isWrongProduct = (row) => row?.sku_check === 'other' || row?.sku_check === 'variant';
 export const isOtherFinish = (row) => row?.sku_check === 'listing';

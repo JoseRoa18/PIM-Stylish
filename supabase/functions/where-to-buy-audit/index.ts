@@ -91,7 +91,9 @@
 // 2026-10-26: "Ocultar hasta que vuelva" — isHiddenLink) and is read again
 // on every pass meanwhile. Best Buy takes the product page down (404) while our offer
 // has no stock: such a 404 on the offer's own page is "sold out" too, from
-// the latest Best Buy snapshot (channel_health 'bestbuy', twice a day).
+// the latest Best Buy snapshot (channel_health 'bestbuy', twice a day). And
+// since 2026-11-26 any store's page that is down while we have no stock of the
+// product in that store's country is sold out as well (downWithoutStock).
 //
 // Auth: `x-cron-secret` (cron) or a signed-in user's JWT. Deployed with
 // --no-verify-jwt so the cron call (no JWT) reaches the handler.
@@ -666,7 +668,7 @@ const DOC_HOST = /dropbox\.com|sharepoint\.com|supabase\.co/;
 const laneConfig = (host: string) =>
   /wayfair/.test(host) ? { pace: 3000, lanes: 1 } : DOC_HOST.test(host) ? { pace: 300, lanes: 3 } : { pace: 1200, lanes: 1 };
 
-interface Probe { verdict: "ok" | "broken" | "pending"; http_status: number | null; final_url: string | null; note: string | null; title?: string; body?: string }
+interface Probe { verdict: "ok" | "broken" | "pending"; http_status: number | null; final_url: string | null; note: string | null; title?: string; body?: string; down?: boolean }
 
 // Only the head of a page is downloaded: the readers find the product in its
 // first ~300 KB (Sinks Direct's Wix pages are 3 MB, the title and product at
@@ -705,12 +707,12 @@ async function probe(url: string): Promise<Probe> {
     const host = new URL(finalUrl).hostname;
     if (DOC_HOST.test(host)) { try { await r.body?.cancel(); } catch { /* ignore */ } }
     else { try { body = await readHead(r, bodyLimit(host)); } catch { body = ""; } }
-    if (status === 404 || status === 410) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `HTTP ${status}` };
+    if (status === 404 || status === 410) return { verdict: "broken", http_status: status, final_url: finalUrl, note: `HTTP ${status}`, down: true };
     // 401/403/429 and 5xx from retailers are robot blocks (Amazon answers
     // 500/503 to datacenter traffic) — the link is not verified, try later.
     if (status === 401 || status === 403 || status === 429 || status >= 500) return { verdict: "pending", http_status: status, final_url: finalUrl, note: `Blocked by the site (HTTP ${status})` };
     if (BOT_RE.test(body) || BOT_BODY_RE.test(body)) return { verdict: "pending", http_status: status, final_url: finalUrl, note: "Blocked by the site (bot check page)" };
-    if (NOT_FOUND_RE.test(body)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "The page says the product was not found" };
+    if (NOT_FOUND_RE.test(body)) return { verdict: "broken", http_status: status, final_url: finalUrl, note: "The page says the product was not found", down: true };
     try {
       const a = new URL(url); const b = new URL(finalUrl);
       const rootHost = (h: string) => h.replace(/^www\./, "");
@@ -919,7 +921,7 @@ interface PageRead {
   subSku: string | null; reviewCount?: number | null; rating?: number | null; optionLinks: OptionLink[]; canonical: string | null; optionStale?: boolean; choiceCount?: number | null;
   movedFrom?: string | null;
 }
-interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string; soldOut?: string }
+interface Outcome { kind: Kind; via?: Method; status?: number | null; note?: string | null; finalUrl?: string | null; jobId?: string; page?: PageRead | null; priceBlind?: boolean; title?: string; soldOut?: string; down?: boolean }
 
 const METHOD_LABEL: Record<Method, string> = { direct: "Direct", brightdata: "Bright Data", scraperapi: "ScraperAPI", scraper: "Bright Data scraper" };
 // Time an attempt may take, so a call never starts one it cannot finish.
@@ -965,8 +967,8 @@ function showsProduct(title: string, body: string, sku: string): boolean {
 // OK page is read for its product's model and price.
 function judgePage(status: number | null, body: string, row: DueRow, via: Method): Outcome {
   const title = pageTitle(body);
-  if (status === 404 || status === 410) return { kind: "broken", via, status, note: `HTTP ${status}` };
-  if (PAGE_NOT_FOUND_TITLE.test(title)) return { kind: "broken", via, status, note: "The page says the product was not found" };
+  if (status === 404 || status === 410) return { kind: "broken", via, status, note: `HTTP ${status}`, down: true };
+  if (PAGE_NOT_FOUND_TITLE.test(title)) return { kind: "broken", via, status, note: "The page says the product was not found", down: true };
   if (PAGE_BLOCKED_TITLE.test(title)) return { kind: "none", via, status, note: `bot check page ("${title.slice(0, 40)}")` };
   // A bot or denial page dressed as a normal one — Amazon's captcha titled
   // just "Amazon.ca", Walmart's "Robot or human?", Lowe's Akamai page titled
@@ -985,7 +987,7 @@ function judgePage(status: number | null, body: string, row: DueRow, via: Method
   if (status !== null && status >= 200 && status < 300 && title && showsProduct(title, body, row.sku)) {
     return { kind: "ok", via, status, note: null, page, title };
   }
-  if (PAGE_NOT_FOUND_BODY.test(body)) return { kind: "broken", via, status, note: "The page says the product was not found" };
+  if (PAGE_NOT_FOUND_BODY.test(body)) return { kind: "broken", via, status, note: "The page says the product was not found", down: true };
   if (status !== null && status >= 200 && status < 300 && title) return { kind: "soft", via, status, note: `Opens a page without the product: "${title.slice(0, 80)}"` };
   return { kind: "none", via, status, note: status ? `HTTP ${status}, empty page` : "no page" };
 }
@@ -1195,7 +1197,7 @@ async function viaScraperApi(row: DueRow): Promise<Outcome> {
   try {
     const r = await fetch(`https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(asUri(url))}${opt.params}`, { signal: AbortSignal.timeout(70000) });
     const body = await r.text();
-    if (r.status === 404 || r.status === 410) return { kind: "broken", via: "scraperapi", status: r.status, note: `HTTP ${r.status}` };
+    if (r.status === 404 || r.status === 410) return { kind: "broken", via: "scraperapi", status: r.status, note: `HTTP ${r.status}`, down: true };
     if (r.status >= 400) return { kind: "none", via: "scraperapi", status: r.status, note: r.status === 500 ? "could not open the page" : `HTTP ${r.status}` };
     return judgePage(r.status, body, row, "scraperapi");
   } catch (e) {
@@ -1305,9 +1307,9 @@ async function checkScraper(store: ScraperStore, leads: DueRow[]): Promise<Array
         // Menards' answered dead_page for P-203's LIVE page (Model P-203, $82
         // in the user's browser) and the link had left both Stylish pages.
         // Broken only when it repeats (SOFT_RULE: Menards 4 times 6 h apart).
-        else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "soft", via: "scraper", status: 404, note: `${store.label}: the scraper found the product page gone (404)` } });
+        else if (rec.error_code === "dead_page" || /\b404\b|not found/i.test(String(rec.error ?? ""))) out.push({ row, o: { kind: "soft", via: "scraper", status: 404, note: `${store.label}: the scraper found the product page gone (404)`, down: true } });
         else if (rec.error) out.push({ row, o: { kind: "none", via: "scraper", note: `${store.label} scraper: ${String(rec.error).slice(0, 80)}` } });
-        else if (page?.gone) out.push({ row, o: { kind: "broken", via: "scraper", status: 200, note: page.note ?? `${store.label} no longer sells it`, page } });
+        else if (page?.gone) out.push({ row, o: { kind: "broken", via: "scraper", status: 200, note: page.note ?? `${store.label} no longer sells it`, page, down: true } });
         else if (page) out.push({ row, o: { kind: "ok", via: "scraper", status: 200, page } });
         else out.push({ row, o: { kind: "none", via: "scraper", note: `the ${store.label} scraper read no product` } });
       }
@@ -1387,7 +1389,7 @@ async function checkRow(row: DueRow, deadline: number): Promise<Outcome> {
     let o: Outcome;
     if (m === "direct") {
       const p = await probe(row.url);
-      o = { kind: p.verdict === "pending" ? "none" : p.verdict, via: "direct", status: p.http_status, finalUrl: p.final_url, note: p.note, title: p.title };
+      o = { kind: p.verdict === "pending" ? "none" : p.verdict, via: "direct", status: p.http_status, finalUrl: p.final_url, note: p.note, title: p.title, down: p.down };
       // An open page counts only when it shows the product (user, 2026-10-19):
       // Walmart and Amazon sometimes answer a bot check that looks like a
       // normal page ("Robot or human?", "Verify Your Identity", Amazon's
@@ -1462,7 +1464,7 @@ function judgedFor(row: DueRow, o: Outcome, catalog: ReturnType<typeof pimCatalo
       ? { ...o, kind: "soft", note: "Opens a page without the product (a brand, category or search page)" }
       : o;
   }
-  if (o.page.gone) return { ...o, kind: "broken", note: o.page.note ?? "The store no longer sells it" };
+  if (o.page.gone) return { ...o, kind: "broken", note: o.page.note ?? "The store no longer sells it", down: true };
   let check = skuCheck(o.page, row.sku, catalog);
   // Overstock writes one model number per listing, so a page on another color
   // names none or the listing's own (B-102C's reads B-102N); its full SKU is
@@ -1504,6 +1506,55 @@ async function bestBuySoldOut(): Promise<BestBuySoldOut> {
     if (why) out.set(o.sku, { productId: String(o.bb_product_id), why });
   }
   return out;
+}
+
+// A page that is gone while we have no stock of the product in the store's
+// country is "Out of stock", not Broken (user, 2026-11-26: "esos productos que
+// vengan de Odoo con 0, en vez de broken, se coloquen como Out of Stock" — 146
+// of the panel's 222 Broken links that day were such pages; Lowe's 17 "no
+// longer sold" all of them). A store takes a product's page down while there
+// is nothing to sell, so there is nothing to fix: the link stays OK with
+// `in_stock` false, off the websites like any sold-out link, and is read again
+// on every pass. Three limits, his:
+//   - only a page that is DOWN (404 / 410, the store's "not found" page, "no
+//     longer sold", a scraper's dead page once its signs are in — the outcome's
+//     `down`): a link that opens another product or a page without the product
+//     is a wrong link whatever our stock and stays Broken, and so does one sent
+//     to another site, a login page or the store's home page (a store that
+//     closed or moved: a person looks at those);
+//   - our stock is Odoo's Available for Use of the store's own country
+//     (product_inventory: Canada = Cambridge, USA = Atlanta); a product Odoo
+//     does not track has no stock figure and is judged as before, never as 0;
+//   - nothing is remembered: the link is judged again at every read, so the
+//     first pass that finds the page still down with stock in the warehouse
+//     makes it Broken — a link that was really wrong does not stay hidden.
+// The dealers watched for their price only (site "dealers") are on no page and
+// have no country in the registry: their links are judged as before.
+type OwnStock = Map<string, number>; // "SKU|market" → units available
+const stockKey = (sku: string, market: string) => `${sku}|${market}`;
+async function ownStock(skus: string[]): Promise<OwnStock> {
+  const out: OwnStock = new Map();
+  for (const part of chunk([...new Set(skus)], 150)) {
+    const rows = await rest<Array<{ sku: string; market: string; available: number | null }>>(`product_inventory?select=sku,market,available&sku=${inList(part)}`, { headers: { Prefer: "count=none" } });
+    for (const r of rows) if (r.available !== null && Number.isFinite(Number(r.available))) out.set(stockKey(r.sku, r.market), Number(r.available));
+  }
+  return out;
+}
+const COUNTRY_NAME: Record<string, string> = { ca: "Canada", us: "the USA" };
+/** Why a link whose page is down is sold out instead of Broken, or null (it is Broken). */
+function downWithoutStock(row: DueRow, o: Outcome, stock: OwnStock): string | null {
+  if (!o.down) return null;
+  const market = wtbRetailer(row.retailer)?.market;
+  if (!market || !COUNTRY_NAME[market]) return null;
+  const units = stock.get(stockKey(row.sku, market));
+  if (units === undefined || units > 0) return null;
+  return `The page is down while we have no stock in ${COUNTRY_NAME[market]}`;
+}
+/** A down page judged with our stock: sold out when we have none, else as it was. */
+function withOwnStock(row: DueRow, o: Judged, stock: OwnStock): Judged {
+  if (o.kind !== "broken") return o;
+  const why = downWithoutStock(row, o, stock);
+  return why ? { ...o, kind: "ok", page: undefined, soldOut: why } : o;
 }
 
 // The stores whose reader cannot be trusted to call a page "not a product
@@ -1565,7 +1616,7 @@ function readingFor(o: Judged, now: string): Partial<Reading> {
 const STOCK_ON_DRAWN_PAGE = new Set(["homedepot_us"]);
 
 // What an outcome writes on the row.
-function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> | null {
+function patchFor(row: DueRow, o: Judged, now: string, stock: OwnStock = new Map()): Record<string, unknown> | null {
   const clearJob = { job_id: null, job_at: null };
   const reading = readingFor(o, now);
   if (STOCK_ON_DRAWN_PAGE.has(row.retailer) && o.page && !o.soldOut && reading.in_stock === null) delete reading.in_stock;
@@ -1590,7 +1641,12 @@ function patchFor(row: DueRow, o: Judged, now: string): Record<string, unknown> 
       // one, or a sign too soon that changes nothing.
       const counts = last === null || since > SIGN_FORGOTTEN_MS || since >= rule.everyHours * 3600e3 - 10 * 60e3;
       const signals = last === null || since > SIGN_FORGOTTEN_MS ? 1 : counts ? row.signal_count + 1 : row.signal_count;
-      if (signals >= rule.strikes) return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks ${rule.everyHours} h apart`, signals);
+      if (signals >= rule.strikes) {
+        // A dead page we have no stock for: sold out, not Broken (downWithoutStock).
+        const why = downWithoutStock(row, o, stock);
+        if (why) return patchFor(row, { ...o, kind: "ok", page: undefined, soldOut: why }, now, stock);
+        return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks ${rule.everyHours} h apart`, signals);
+      }
       // Not enough yet: keep the verdict, look again later (on a pass day).
       return {
         signal_count: signals, signal_at: counts ? now : row.signal_at, fail_count: 0, ...clearJob,
@@ -1771,13 +1827,16 @@ async function check(opts: { limit?: number; skus?: string[]; dueOnly?: boolean;
   }
   const unreadable = await unreadableStores(answers);
   const bestBuy: BestBuySoldOut = answers.some(({ row, o }) => row.retailer === "bestbuy_ca" && o.kind === "broken") ? await bestBuySoldOut() : new Map();
-  const results = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o: judgedFor(r, o, catalog, unreadable, bestBuy, beyondAliases) })));
+  const judged = answers.flatMap(({ row, o }) => sameUrl.get(row.url)!.map((r) => ({ row: r, o: judgedFor(r, o, catalog, unreadable, bestBuy, beyondAliases) })));
+  // Our own stock, for the links whose page is down (downWithoutStock).
+  const stock = await ownStock(judged.filter(({ o }) => o.down).map(({ row }) => row.sku));
+  const results = judged.map(({ row, o }) => ({ row, o: withOwnStock(row, o, stock) }));
 
   const now = new Date().toISOString();
   const groups = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
   const republish = new Set<string>();
   for (const { row, o } of results) {
-    const patch = patchFor(row, o, now);
+    const patch = patchFor(row, o, now, stock);
     if (!patch) continue;
     // A link that leaves the pages (broken, opening another product, sold
     // out) or comes back to them: its product's pages are written again. (A
