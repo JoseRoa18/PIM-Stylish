@@ -30,6 +30,7 @@ import {
   type RuleCtx,
   ruleContext,
   ruleForTitle,
+  shapeForms,
 } from "../_shared/wayfairAttributes.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -176,6 +177,9 @@ Deno.serve(async (req) => {
     // allowed answers so we never send a value outside Wayfair's list.
     // The CAN supplier answers questions only under the US market context.
     const allowed = new Map<string, string[]>(); // title → possibleAnswers
+    // Wayfair's list of every question of the class, blank on the item or not:
+    // read where the PIM's word and Wayfair's may be two forms of one answer.
+    const answers = new Map<string, string[]>();
     const classNotes: string[] = [];
     if (item.class?.classId) {
       const qr = await call(
@@ -198,6 +202,7 @@ Deno.serve(async (req) => {
       else {
         let added = 0;
         for (const q of flat) {
+          if (numeric(q) && q.possibleAnswers?.length) answers.set(q.displayName, q.possibleAnswers.map((a) => a.value));
           if (!q.answerType || !numeric(q) || byTitle.has(q.displayName)) continue;
           if (!ruleForTitle(q.displayName)) continue;
           byTitle.set(q.displayName, { attributeId: String(q.id), current: [] });
@@ -236,6 +241,20 @@ Deno.serve(async (req) => {
       try { raw = rule(product as Product, ctx); } catch { raw = ""; }
       let values = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? "").trim()).filter(Boolean);
       if (!values.length) { skipped[title] = "no PIM value"; continue; }
+      // A shape, which Wayfair's lists write two ways ("Rectangle" /
+      // "Rectangular"): the word the listing holds stands when it names the
+      // PIM's shape — nothing to change —, else the PIM's own word where the
+      // list has it, else the form the list has.
+      if ((title === "Overall Shape" || title === "Sink Shape") && values.length === 1) {
+        const forms = shapeForms(values[0]);
+        const held = wf.current.length === 1 ? wf.current[0] : null;
+        if (held != null && forms.some((f) => canon(f) === canon(held))) values = [held];
+        else if (forms.length) {
+          const options = answers.get(title);
+          const pick = options ? forms.map((f) => options.find((o) => canon(o) === canon(f))).find((o) => o != null) : null;
+          if (pick) values = [pick];
+        }
+      }
       // Blank-on-Wayfair attributes: only values from Wayfair's own list.
       const list = allowed.get(title);
       if (list) {

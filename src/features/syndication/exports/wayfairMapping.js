@@ -106,9 +106,10 @@ const deckPlate = (v) => {
   if (/does\s*not?\s*app/i.test(v)) return 'Does Not Apply';
   return String(v).replace(/[,:]/g, ';').replace(/\s*;\s*/g, '; ').trim();
 };
-// Wayfair's shape list uses noun forms ("Rectangle"), the PIM adjectives.
+// Wayfair's shape list has both forms of a shape ("Rectangle" and
+// "Rectangular"), so the PIM's own word is on it and goes as it is (2026-11-26;
+// until then "Rectangular" was turned into "Rectangle").
 const SHAPE_ALIAS = {
-  rectangular: 'Rectangle',
   circular: 'Circle',
   round: 'Round',
   square: 'Square',

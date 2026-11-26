@@ -98,8 +98,36 @@ const hasWarranty = (p: Product) => Boolean(attr(p).warranty || attr(p).warranty
 const holes = (p: Product) => Number(num(attr(p).number_of_installation_holes)) || 0;
 const handleCount = (p: Product) => Number(num(attr(p).number_of_handles)) || 0;
 
-// Sinks: "Rectangle" nouns (Wayfair's Overall Shape); faucets: from the PIM's
-// Overall Shape field, else the spout type.
+// Wayfair's "Overall Shape" list carries BOTH forms of a shape — "Rectangle"
+// and "Rectangular", "Circle", "Circular" and "Round" (the Valid Values of its
+// Product Addition templates, classes 628 and 588) — so the PIM's own word is a
+// valid answer and is the one sent, and a listing that already holds the other
+// form says the same thing: it is left as it is. Until 2026-11-26 the rule sent
+// the noun whatever the listing held, so the push offered to change a
+// "Rectangular" that was right (Vladimir: "why use rectangle when the correct
+// term is rectangular, just as it appears on the product itself?").
+const SHAPE_FORMS: { re: RegExp; forms: string[] }[] = [
+  { re: /rect/, forms: ["Rectangular", "Rectangle"] },
+  { re: /squar/, forms: ["Square"] },
+  { re: /round|circ/, forms: ["Round", "Circular", "Circle"] },
+  { re: /oval/, forms: ["Oval"] },
+  { re: /d-?shap/, forms: ["D-Shaped"] },
+];
+/**
+ * Every way Wayfair writes the shape `word` names, the word itself first when
+ * it is one of them; [] when it is no shape of a sink. The push and the new
+ * listing choose from these against Wayfair's own list.
+ */
+export const shapeForms = (word: unknown): string[] => {
+  const w = String(word ?? "").trim().toLowerCase();
+  const hit = w ? SHAPE_FORMS.find((s) => s.re.test(w)) : undefined;
+  if (!hit) return [];
+  const own = hit.forms.find((f) => f.toLowerCase() === w);
+  return own ? [own, ...hit.forms.filter((f) => f !== own)] : [...hit.forms];
+};
+
+// Sinks: the PIM's Sink Shape, in Wayfair's spelling (see shapeForms);
+// faucets: from the PIM's Overall Shape field, else the spout type.
 export const overallShape = (p: Product): string => {
   if (isFaucetCat(p)) {
     const explicit = String(attr(p).overall_shape ?? "").trim();
@@ -110,14 +138,7 @@ export const overallShape = (p: Product): string => {
     if (/low arc|curved/.test(spout)) return "Curved";
     return "";
   }
-  const sh = String(p.shape ?? attr(p).sink_shape ?? "").toLowerCase();
-  if (!sh) return "";
-  if (/rect/.test(sh)) return "Rectangle";
-  if (/squar/.test(sh)) return "Square";
-  if (/round|circ/.test(sh)) return "Round";
-  if (/oval/.test(sh)) return "Oval";
-  if (/d-?shap/.test(sh)) return "D-Shape";
-  return "";
+  return shapeForms(attr(p).sink_shape ?? p.shape)[0] ?? "";
 };
 // Wayfair's "Mounting / Installation" (multi). "Mounting / Installation
 // Required" rides along on every item Wayfair holds for us.
@@ -186,9 +207,18 @@ export const piecesIncluded = (p: Product): string[] => {
   if (!isUtilitySink(p) && (/hardware|clip/.test(acc) || /under|dual|drop|top ?mount/.test(installText(p)))) out.add("Mounting Hardware");
   return [...out];
 };
+// A workstation sink SAYS so — in its Product Type, its title or its model
+// name — or has the product page's Workstation switch on. An accessory alone
+// does not make one: until 2026-11-26 a drying rack, a colander or a cutting
+// board in the Includes list was enough, and the push wanted to turn C132 and
+// C233 (dual-mount sinks sold with a roll-up drying rack, "Standard Kitchen
+// Sink" on Wayfair) into "Kitchen Sink Workstation" (Vladimir: "eso no es
+// cierto"). The switch OFF is no answer by itself: nine sinks named
+// Workstation have it off. The same reading as Rona's file (ronaDscoExport).
+// Only a sink is one: a "Workstation Drying Rack" is an accessory for them.
 const isWorkstation = (p: Product) =>
-  /workstation/i.test(String(p.product_type ?? "")) || attr(p).has_workstation === true ||
-  /cutting board|drying rack|colander|bamboo board/i.test(accessories(p).join(" "));
+  isSinkCat(p) && (attr(p).has_workstation === true ||
+    /workstation/i.test(`${p.product_type ?? ""} ${attr(p).general_title_en ?? ""} ${p.model_name ?? ""}`));
 export const productType = (p: Product): string => {
   if (isKitchenLike(p)) {
     if (isWorkstation(p)) return "Kitchen Sink Workstation";
@@ -197,6 +227,10 @@ export const productType = (p: Product): string => {
   }
   if (cat(p) === "bathroom_faucet") return handleCount(p) <= 1 ? "Mono Basin Mixer" : "";
   if (isKitchenFaucetCategory(cat(p))) {
+    // A cold water tap is Wayfair's "Cold Water Dispensers", what its K-147
+    // listings hold: read as any kitchen faucet it came out "Single Handle
+    // Kitchen Faucet", and the push wanted to change them (2026-11-26).
+    if (String(p.category ?? "") === "cold_water_tap") return "Cold Water Dispensers";
     const t = `${p.product_type ?? ""} ${attr(p).spout_type ?? ""} ${attr(p).spray_type ?? ""} ${attr(p).general_title_en ?? ""}`;
     if (/pot ?filler/i.test(t)) return "Pot Filler";
     if (/\bbar\b|beverage|prep/i.test(t)) return "Bar Faucet";
@@ -298,9 +332,11 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Stainless Steel Gauge": (p) => num(p.gauge ?? attr(p).gauge),
   "Number of Basins": (p) => num(p.number_of_bowls ?? attr(p).number_of_bowls),
   "Basin Split": (p) => String(p.basin_split ?? attr(p).basin_split ?? ""),
-  // NOTE: the API's "Sink Shape" vocabulary is ADJECTIVAL ("Rectangular") —
-  // distinct from "Overall Shape" nouns ("Rectangle"). Push the raw PIM value.
-  "Sink Shape": (p) => String(p.shape ?? attr(p).sink_shape ?? ""),
+  // The API's "Sink Shape" takes the PIM's own words ("Rectangular"); "Overall
+  // Shape" is another attribute, whose list has both forms (see shapeForms).
+  // The product page's field first: the old `shape` column is a leftover
+  // (S-831WN held "Rectangle" there beside the page's "Rectangular").
+  "Sink Shape": (p) => String(attr(p).sink_shape ?? p.shape ?? ""),
   "Material": (p) => wayfairMaterial(p),
   "Finish": (p) => finish(p.finish),
   "Warranty Length": (p) => String(attr(p).warranty_length ?? ""),
@@ -311,8 +347,8 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
     if (bowls > 0 && bowls <= 1) return "Does Not Apply";
     return yesNo(attr(p).low_divider);
   },
-  // Workstation sinks carry over-the-sink accessories (cutting board, drying
-  // rack, colander) or say so in the product type. SKU alone isn't reliable.
+  // A workstation sink says so in its type, title or name, or has the switch
+  // on (isWorkstation): its accessories alone do not say it.
   "Kitchen Sink Workstation": (p) => (isWorkstation(p) ? "Yes" : "No"),
 
   // ---- Rules added 2026-09-16 (the "has PIM data, no push rule" group) ----

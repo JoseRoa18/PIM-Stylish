@@ -36,7 +36,7 @@
 //          WAYFAIR_CLIENT_ID/SECRET/SUPPLIER_ID for CAN, WAYFAIR_ENV.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
-import { attr, FINISH_ALIAS, num, type Product, ruleContext, ruleForTitle } from "../_shared/wayfairAttributes.ts";
+import { attr, FINISH_ALIAS, num, type Product, ruleContext, ruleForTitle, shapeForms } from "../_shared/wayfairAttributes.ts";
 import { channelCategory, isFaucetCategory } from "../_shared/categories.js";
 
 const corsHeaders: Record<string, string> = {
@@ -370,6 +370,13 @@ function snap(q: Question, raw: string): string | null {
   if (alias) {
     const hit = opts.find((o) => o.toLowerCase() === alias.toLowerCase());
     if (hit) return hit;
+  }
+  // A shape Wayfair writes two ways ("Rectangular" / "Rectangle"): the form its list has.
+  if (/shape/i.test(q.displayName)) {
+    for (const form of shapeForms(value)) {
+      const hit = opts.find((o) => o.toLowerCase() === form.toLowerCase());
+      if (hit) return hit;
+    }
   }
   // Longest option contained in the value ("Quartz Composite" → "Quartz"),
   // else the shortest option that contains the value ("ASME A112.19.3" → full label).
