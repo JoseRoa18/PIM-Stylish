@@ -1641,12 +1641,15 @@ function patchFor(row: DueRow, o: Judged, now: string, stock: OwnStock = new Map
       // one, or a sign too soon that changes nothing.
       const counts = last === null || since > SIGN_FORGOTTEN_MS || since >= rule.everyHours * 3600e3 - 10 * 60e3;
       const signals = last === null || since > SIGN_FORGOTTEN_MS ? 1 : counts ? row.signal_count + 1 : row.signal_count;
-      if (signals >= rule.strikes) {
-        // A dead page we have no stock for: sold out, not Broken (downWithoutStock).
+      // A dead page we have no stock for: sold out, not Broken (downWithoutStock)
+      // — once its signs are in, or at once on a link that is already Broken:
+      // the signs keep a live link from being called broken, and that one was
+      // (Menards' 53 such links would have waited four more signs, 6 h apart).
+      if (signals >= rule.strikes || row.verdict === "broken") {
         const why = downWithoutStock(row, o, stock);
         if (why) return patchFor(row, { ...o, kind: "ok", page: undefined, soldOut: why }, now, stock);
-        return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks ${rule.everyHours} h apart`, signals);
       }
+      if (signals >= rule.strikes) return verdictPatch("broken", `${o.note} — on ${rule.strikes} checks ${rule.everyHours} h apart`, signals);
       // Not enough yet: keep the verdict, look again later (on a pass day).
       return {
         signal_count: signals, signal_at: counts ? now : row.signal_at, fail_count: 0, ...clearJob,
