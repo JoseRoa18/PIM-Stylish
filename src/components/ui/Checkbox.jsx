@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { Check, Minus } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 /**
@@ -8,9 +8,14 @@ import { cn } from '@/lib/cn';
  * hidden, still focusable) so keyboard and screen-reader behavior come for
  * free — works standalone in table cells, toolbars, and forms.
  *
+ * `indeterminate`: a "select all" box while only some of its rows are
+ * selected — a dash in the place of the check, and the input's own
+ * `indeterminate` state, which a screen reader reads as "mixed".
+ *
  * Extra props (`aria-label`, `disabled`, `name`, ...) land on the input.
  */
-export default function Checkbox({ checked = false, onChange, className, ...rest }) {
+export default function Checkbox({ checked = false, indeterminate = false, onChange, className, ...rest }) {
+  const mixed = indeterminate && !checked;
   return (
     <label
       className={cn('relative inline-flex items-center justify-center cursor-pointer p-1 -m-1', className)}
@@ -19,16 +24,18 @@ export default function Checkbox({ checked = false, onChange, className, ...rest
         type="checkbox"
         checked={checked}
         onChange={onChange}
+        // a DOM property with no attribute of its own
+        ref={(el) => { if (el) el.indeterminate = mixed; }}
         className="peer sr-only"
         {...rest}
       />
       <span
         aria-hidden="true"
         className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40 peer-focus-visible:ring-offset-1 ${
-          checked ? 'bg-primary border-primary text-on-primary' : 'border-outline'
+          checked || mixed ? 'bg-primary border-primary text-on-primary' : 'border-outline'
         }`}
       >
-        {checked && <Check className="w-3 h-3" strokeWidth={3} />}
+        {checked ? <Check className="w-3 h-3" strokeWidth={3} /> : mixed ? <Minus className="w-3 h-3" strokeWidth={3} /> : null}
       </span>
     </label>
   );

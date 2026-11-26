@@ -40,6 +40,7 @@ import {
   checkStylishDiscount,
   stylishPricedSkus,
   setPromotionSkusFromLevel,
+  removePromotionSkus,
   addFileToPromotion,
   autoScheduleBestBuyPromo,
   scheduleWalmartPromo,
@@ -64,6 +65,7 @@ import PromoCheckNotes from '@/features/pricing/components/PromoCheckNotes';
 import SortButton from '@/features/pricing/components/SortButton';
 import { nextSort, ariaSort, sortRows } from '@/features/pricing/lib/tableSort';
 import Dialog from '@/components/ui/Dialog';
+import Checkbox from '@/components/ui/Checkbox';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { runPriceAlignment, loadLatestAlignment, pushExpectedPrice, fixAlignment, rereadStorePages, ALIGN_TARGETS, ALIGN_TARGET_KEYS } from '@/features/pricing/api/priceAlignment';
 import { DEFAULT_WIX_SITE } from '@/features/syndication/lib/wixSites';
@@ -1937,6 +1939,18 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
   // SKU A to Z), a second one turns it round, a third gives the list back.
   const [sort, setSort] = useState(null);
   const onSort = (key) => setSort((now) => nextSort(now, key, key === 'sku' ? 'asc' : 'desc'));
+  // The products ticked in the table (user, 2026-11-26: "check box para
+  // seleccionar los productos en las promociones y poder eliminarlos o lo que
+  // sea"): the SKUs of the list shown. It is kept while the list is filtered
+  // or sorted — tick the out-of-stock ones, clear the filter, tick two more —
+  // and emptied when the country's tab changes or the list is loaded again.
+  const [selected, setSelected] = useState(() => new Set());
+  const clearSelection = () => setSelected(new Set());
+  const toggleSelected = (sku) => setSelected((now) => {
+    const next = new Set(now);
+    if (!next.delete(sku)) next.add(sku);
+    return next;
+  });
   // Stock per market and SKU from product_inventory (Odoo); null
   // until loaded.
   const [stockByMarket, setStockByMarket] = useState(null);
@@ -2065,8 +2079,100 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
       if (r.noLevel.length) notes.push(`No ${levelLabel(promotionLevel(promo))} price in the PIM: ${r.noLevel.join(', ')}.`);
       setMsg({ tone: 'success', text: notes.join(' ') });
       setEditingSkus(false);
+      clearSelection();
       setRows(null); // reload the list
       onChanged();
+    } catch (err) {
+      task.fail(err);
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // What follows a change of a country's list — Import list, that country's
+  // Edit SKUs, products removed from the table. `info` = { market, leftSkus }.
+  function followMarketList(info) {
+    // A Sinks Direct deal: the stores follow the new list and prices now.
+    if (goesToSinksDirect(promo)) sendDealsNow(promo.name);
+    // An updated list re-schedules the Best Buy discounts (the
+    // OF24 import overwrites the previous ones and clears the
+    // SKUs that left) — of the monthly promotion, and of a deal
+    // made for Best Buy. A deal for other portals sends it nothing:
+    // until 2026-11-13 Import list on a Walmart-only flash deal
+    // would have scheduled its 41 products on Best Buy too (found
+    // with every call captured; it had never happened for real).
+    if ((promo.kind ?? 'monthly') === 'monthly' || (promo.marketplaces ?? []).includes('bestbuy')) scheduleBestBuyInBackground(promo, onChanged);
+    // Walmart Canada already scheduled: the SKUs that left the
+    // Canada list lose its promo there (joined ones are sent by
+    // hand from the Walmart row). Its own card, like Best Buy's.
+    if (info?.market === 'ca' && promo.wm_ca_scheduled_at && info.leftSkus?.length) {
+      const task = startTask(`Walmart Canada list — ${promo.name}`, { detail: 'Checking the SKUs that left the Canada list…' });
+      syncWalmartCaList(promo, { ...info, task })
+        .then((r) => {
+          if (r?.skipped) task.cancel();
+          else task.finish(r?.removed?.to_delete ? `Promo removed from ${r.removed.to_delete} SKU${r.removed.to_delete === 1 ? '' : 's'}` : 'Nothing to remove');
+          return onChanged();
+        })
+        .catch((err) => {
+          task.fail(err);
+          setMsg({ tone: 'error', text: `Walmart Canada: ${err.message}` });
+        });
+    }
+  }
+
+  // The products ticked in the table leave the list: `market` 'ca' / 'us' =
+  // that country's list only (a promotion with a list per country), null =
+  // the promotion whole (a deal with one list). It is what Edit SKUs does when
+  // those lines are deleted, so the same things follow it — and the products
+  // that stay are not touched.
+  async function removeSelected(skus, market) {
+    if (!skus.length || busy) return;
+    const n = skus.length;
+    const what = n === 1 ? skus[0] : `${n} products`;
+    const country = market === 'us' ? 'USA' : 'Canada';
+    const noun = KIND_NOUN[promo.kind ?? 'monthly'] ?? 'promotion';
+    const gone = new Set(skus);
+    // Said before the question, not after it: a list keeps at least one
+    // product, as when it is edited or imported.
+    const list = market ? (rows ?? []).filter((r) => onMarketList(r, market)) : rows ?? [];
+    if (list.every((r) => gone.has(r.sku))) {
+      setMsg({ tone: 'error', text: market
+        ? `That is every product on the ${country} list. Keep at least one.`
+        : `That is every product of "${promo.name}". Keep at least one — or delete the ${noun}.` });
+      return;
+    }
+    const then = [];
+    if (market) then.push(`The ${market === 'us' ? 'Canada' : 'USA'} list is not touched.`);
+    if (goesToSinksDirect(promo)) then.push(`On Sinks Direct ${n === 1 ? 'it goes' : 'they go'} back to ${n === 1 ? 'its' : 'their'} regular price now.`);
+    if (market === 'ca' && promo.wm_ca_scheduled_at) then.push(`Walmart Canada takes its promo off ${n === 1 ? 'it' : 'them'}.`);
+    if (market === 'ca' && promo.bb_scheduled_at) then.push(`Best Buy's discounts are sent again without ${n === 1 ? 'it' : 'them'}.`);
+    const ok = await confirm({
+      title: market ? `Remove ${what} from the ${country} list?` : `Remove ${what} from this ${noun}?`,
+      message: [
+        n > 1 ? `${listOf(skus, 12)}.` : null,
+        `${n === 1 ? 'It leaves' : 'They leave'} "${promo.name}"${market ? ` in ${market === 'us' ? 'the USA' : 'Canada'}` : ''}; the other products keep their prices.`,
+        ...then,
+      ].filter(Boolean).join('\n'),
+      confirmLabel: n === 1 ? 'Remove it' : `Remove ${n}`,
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy('remove');
+    setMsg(null);
+    const task = startTask(`Remove products — ${promo.name}`, { detail: "Reading the promotion's products…" });
+    // A deal with one list: the Sinks Direct stores follow it on this same card.
+    const toStores = !market && goesToSinksDirect(promo);
+    try {
+      const r = await removePromotionSkus(promo, skus, { market, task: toStores ? task.part(0, 0.4) : task });
+      const done = `${r.left} removed${market ? ` from the ${country} list` : ''}`;
+      if (toStores) sendDealsNow(promo.name, { task, from: 0.4, done });
+      else task.finish(done);
+      setMsg({ tone: 'success', text: `${r.left === 1 ? r.leftSkus[0] : `${r.left} products`} removed${market ? ` from the ${country} list` : ''}${r.left > 1 ? `: ${listOf(r.leftSkus, 12)}` : ''}.` });
+      clearSelection();
+      setRows(null); // reload the list
+      onChanged();
+      if (market) followMarketList(r);
     } catch (err) {
       task.fail(err);
       setMsg({ tone: 'error', text: err.message });
@@ -2292,35 +2398,11 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
               onImported={(text, info) => {
                 setImportModal(false);
                 setMsg({ tone: 'success', text });
+                clearSelection();
                 setRows(null);
                 setMapBySku(null);
                 onChanged();
-                // A Sinks Direct deal: the stores follow the new list and prices now.
-                if (goesToSinksDirect(promo)) sendDealsNow(promo.name);
-                // An updated list re-schedules the Best Buy discounts (the
-                // OF24 import overwrites the previous ones and clears the
-                // SKUs that left) — of the monthly promotion, and of a deal
-                // made for Best Buy. A deal for other portals sends it nothing:
-                // until 2026-11-13 Import list on a Walmart-only flash deal
-                // would have scheduled its 41 products on Best Buy too (found
-                // with every call captured; it had never happened for real).
-                if ((promo.kind ?? 'monthly') === 'monthly' || (promo.marketplaces ?? []).includes('bestbuy')) scheduleBestBuyInBackground(promo, onChanged);
-                // Walmart Canada already scheduled: the SKUs that left the
-                // Canada list lose its promo there (joined ones are sent by
-                // hand from the Walmart row). Its own card, like Best Buy's.
-                if (info?.market === 'ca' && promo.wm_ca_scheduled_at && info.leftSkus?.length) {
-                  const task = startTask(`Walmart Canada list — ${promo.name}`, { detail: 'Checking the SKUs that left the Canada list…' });
-                  syncWalmartCaList(promo, { ...info, task })
-                    .then((r) => {
-                      if (r?.skipped) task.cancel();
-                      else task.finish(r?.removed?.to_delete ? `Promo removed from ${r.removed.to_delete} SKU${r.removed.to_delete === 1 ? '' : 's'}` : 'Nothing to remove');
-                      return onChanged();
-                    })
-                    .catch((err) => {
-                      task.fail(err);
-                      setMsg({ tone: 'error', text: `Walmart Canada: ${err.message}` });
-                    });
-                }
+                followMarketList(info);
               }}
             />
           )}
@@ -2430,6 +2512,29 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
             // 2026-11-13). "Edit SKUs" then edits the list of the tab shown, so
             // the other country's list and the file's prices are not touched.
             const listPerMarket = (promo.kind ?? 'monthly') === 'monthly' || rows.some((r) => onMarketList(r, 'ca') !== onMarketList(r, 'us'));
+            // The products ticked: of this country's list, whatever the
+            // filters show now (the bar says how many they hide). The header's
+            // box ticks or unticks the rows shown.
+            const pickedRows = marketRows.filter((r) => selected.has(r.sku));
+            const pickedShown = shownRows.filter((r) => selected.has(r.sku)).length;
+            const allShownPicked = shownRows.length > 0 && pickedShown === shownRows.length;
+            const toggleShown = () => setSelected((now) => {
+              const next = new Set(now);
+              for (const r of shownRows) { if (allShownPicked) next.delete(r.sku); else next.add(r.sku); }
+              return next;
+            });
+            const canRemove = canEdit && promo.status !== 'ended';
+            const selectionBar = (sticky) => pickedRows.length > 0 && (
+              <SelectionBar
+                sticky={sticky}
+                skus={pickedRows.map((r) => r.sku)}
+                hidden={pickedRows.length - pickedShown}
+                removeLabel={listPerMarket ? `Remove from the ${market === 'us' ? 'USA' : 'Canada'} list` : 'Remove'}
+                onRemove={canRemove ? () => removeSelected(pickedRows.map((r) => r.sku), listPerMarket ? market : null) : null}
+                removing={busy === 'remove'}
+                onClear={clearSelection}
+              />
+            );
             return (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -2439,7 +2544,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         key={key}
                         type="button"
                         aria-pressed={market === key}
-                        onClick={() => setMarket(key)}
+                        onClick={() => { if (key !== market) clearSelection(); setMarket(key); }}
                         className={`px-4 py-1.5 rounded-full text-label-lg font-medium transition-colors ${
                           market === key ? 'bg-surface text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
                         }`}
@@ -2604,6 +2709,8 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                   <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
                     <p className="text-body-md text-on-surface font-medium">No product in the {market === 'ca' ? 'Canada' : 'USA'} list matches these filters</p>
                     <button type="button" onClick={clearFilters} className="mt-1 text-body-sm text-primary hover:underline">Clear filters</button>
+                    {/* products ticked before the filters hid every row */}
+                    {pickedRows.length > 0 && <div className="mt-4 text-left">{selectionBar(false)}</div>}
                   </div>
                 ) : marketRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-outline-variant px-6 py-8 text-center">
@@ -2623,6 +2730,21 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                     <table className="w-full text-body-sm">
                       <thead>
                         <tr className="text-on-surface-variant text-label-md">
+                          {/* Ticks or unticks the rows shown (a dash while only
+                              some are); as narrow as its box, so the columns
+                              keep their room. */}
+                          <th
+                            className="sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant pl-3 pr-1 py-2.5 w-px"
+                            title={allShownPicked ? 'Unselect the products shown' : filtering ? 'Select the products shown' : 'Select every product'}
+                          >
+                            <Checkbox
+                              checked={allShownPicked}
+                              indeterminate={pickedShown > 0}
+                              onChange={toggleShown}
+                              aria-label={allShownPicked ? `Unselect the ${shownRows.length} products shown` : `Select the ${shownRows.length} products shown`}
+                              className="align-middle"
+                            />
+                          </th>
                           <SortTh sortKey="sku" sort={sort} onSort={onSort} align="left">SKU</SortTh>
                           <SortTh sortKey="promo" sort={sort} onSort={onSort} title={stylishEvent ? "The price the store shows during the event: the MSRP with the event's discount" : undefined}>{stylishEvent ? 'Promo MSRP' : 'Promo MAP'}</SortTh>
                           <SortTh sortKey="regular" sort={sort} onSort={onSort}>{stylishEvent ? 'Regular MSRP' : 'Regular MAP'}</SortTh>
@@ -2643,13 +2765,24 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         {shownRows.map((r) => {
                           const p = mapBySku?.[r.sku];
                           const out = stockStateOf(r) === 'Out of stock';
+                          const picked = selected.has(r.sku);
                           return (
                             <tr
                               key={r.id}
-                              className={`border-t border-outline-variant/40 ${out ? 'bg-error-container/30' : 'odd:bg-surface-container-low/30'}`}
+                              // A ticked row is gray, not the catalog's primary
+                              // tint: here that pale red could not be told from
+                              // an out-of-stock row's. Its stock cell still says
+                              // it is out.
+                              className={`border-t border-outline-variant/40 ${picked ? 'bg-surface-container-high' : out ? 'bg-error-container/30' : 'odd:bg-surface-container-low/30'}`}
                               title={out ? `0 units in ${market === 'ca' ? 'Canada' : 'the USA'}${arrivalText(stockOf(r)) ? ` · ${arrivalText(stockOf(r))}` : ''}` : undefined}
                             >
-                              <td className="px-2 first:pl-3 last:pr-3 py-2 font-mono text-on-surface whitespace-nowrap">
+                              <td className="pl-3 pr-1 py-2 w-px">
+                                {/* align-middle: on its baseline the box sat 1 px
+                                    higher once it held its check, and the rows
+                                    under it moved up as it was ticked */}
+                                <Checkbox checked={picked} onChange={() => toggleSelected(r.sku)} aria-label={`Select ${r.sku}`} className="align-middle" />
+                              </td>
+                              <td className="px-1.5 last:pr-3 py-2 font-mono text-on-surface whitespace-nowrap">
                                 {r.sku}
                                 {/* The pill in the page's own font (the cell is
                                     mono); -my-1 keeps the row its usual height. */}
@@ -2664,21 +2797,21 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                                 const pays = d.skip === undefined ? Math.round(d.storePrice * (100 - CUSTOMER_OFF)) / 100 : null;
                                 return (
                                   <td
-                                    className="px-2 first:pl-3 last:pr-3 py-2 text-right font-semibold text-on-surface tabular-nums"
+                                    className="px-1.5 last:pr-3 py-2 text-right font-semibold text-on-surface tabular-nums"
                                     title={d.skip ? `No discount: ${d.skip}` : pays != null ? `An approved customer pays ${fmt(pays)} with the ${CUSTOMER_OFF}% coupon` : undefined}
                                   >
                                     {d.skip === undefined ? fmt(d.storePrice) : '—'}
                                   </td>
                                 );
                               })() : (
-                                <td className="px-2 first:pl-3 last:pr-3 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
+                                <td className="px-1.5 last:pr-3 py-2 text-right font-semibold text-on-surface tabular-nums">{fmt(r[priceKey])}</td>
                               )}
-                              <td className="px-2 first:pl-3 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[stylishEvent ? msrpKey : mapKey])}</td>
+                              <td className="px-1.5 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums">{fmt(p?.[stylishEvent ? msrpKey : mapKey])}</td>
                               {(() => {
                                 const s = stockOf(r);
                                 return (
                                   <td
-                                    className={`px-2 first:pl-3 last:pr-3 py-2 text-right tabular-nums ${!s ? 'text-on-surface-variant/60' : s.available > 0 ? 'text-on-surface' : 'text-error font-semibold'}`}
+                                    className={`px-1.5 last:pr-3 py-2 text-right tabular-nums ${!s ? 'text-on-surface-variant/60' : s.available > 0 ? 'text-on-surface' : 'text-error font-semibold'}`}
                                     title={describeStock(s, market)}
                                   >
                                     {s ? s.available : '—'}
@@ -2687,14 +2820,14 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                               })()}
                               {(() => {
                                 // no reading yet: an empty cell, not a 0
-                                if (!salesByMarket) return <td className="px-2 first:pl-3 last:pr-3 py-2" />;
+                                if (!salesByMarket) return <td className="px-1.5 last:pr-3 py-2" />;
                                 const sold = salesOf(r);
                                 return (
-                                  <td className="px-2 first:pl-3 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums" title={sold ? `${sold.units_30} in the last 30 days` : 'No sales in the last 90 days'}>{sold ? sold.units_90 : 0}</td>
+                                  <td className="px-1.5 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums" title={sold ? `${sold.units_30} in the last 30 days` : 'No sales in the last 90 days'}>{sold ? sold.units_90 : 0}</td>
                                 );
                               })()}
                               {costKeys.map((k) => (
-                                <td key={k} className="px-2 first:pl-3 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums">
+                                <td key={k} className="px-1.5 last:pr-3 py-2 text-right text-on-surface-variant tabular-nums">
                                   {fmt(r.promo_costs?.[k])}
                                 </td>
                               ))}
@@ -2703,6 +2836,7 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
                         })}
                       </tbody>
                     </table>
+                    {selectionBar(true)}
                   </div>
                 )}
               </div>
@@ -2710,6 +2844,45 @@ function PromotionCard({ promo, canEdit, confirm, onChanged, open = false, onTog
           })()}
         </div>
       )}
+    </div>
+  );
+}
+
+// The bar of the products ticked in a promotion's table (user, 2026-11-26):
+// how many, and what can be done with them — copy their SKUs (every role) and
+// take them off the list (editors, while the promotion is not over; `onRemove`
+// null = not offered). `sticky`: pinned to the foot of the table's own scroll
+// box, so it comes up over the rows instead of pushing them down — no row
+// moves from under the pointer while boxes are being ticked — and it stays in
+// view while the list scrolls, sideways too. `hidden` = ticked products the
+// filters do not show now: they are counted, and removed, with the rest.
+function SelectionBar({ sticky, skus, hidden, removeLabel, onRemove, removing, onClear }) {
+  return (
+    <div
+      role="group"
+      aria-label="Selected products"
+      className={`flex items-center gap-x-3 gap-y-2 flex-wrap px-3 py-2 bg-surface-container-high ${sticky ? 'sticky bottom-0 left-0 z-20 border-t border-outline-variant' : 'rounded-xl border border-outline-variant'}`}
+    >
+      {/* the count takes the room left, so the buttons sit on the right — and
+          on a phone they wrap one by one under it, not as a block */}
+      <p role="status" className="flex-1 min-w-max text-label-md text-on-surface">
+        <span className="font-semibold tabular-nums">{skus.length} selected</span>
+        {hidden > 0 && <span className="text-on-surface-variant"> · {hidden} not shown by the filters</span>}
+      </p>
+      <CopySkusButton skus={skus} title="Copy the selected SKUs, one per line" />
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={removing}
+          aria-busy={removing}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-error hover:bg-error-container hover:text-on-error-container hover:border-error-container transition-colors disabled:opacity-60"
+        >
+          {removing ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />}
+          {removeLabel}
+        </button>
+      )}
+      <button type="button" onClick={onClear} disabled={removing} className="px-1 py-1.5 text-label-md font-medium text-on-surface-variant hover:underline disabled:opacity-60">Clear</button>
     </div>
   );
 }
@@ -2722,7 +2895,7 @@ function SortTh({ sortKey, sort, onSort, align = 'right', title, children }) {
     <th
       aria-sort={ariaSort(sort, sortKey)}
       title={title}
-      className={`sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-2 first:pl-3 last:pr-3 py-2.5 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
+      className={`sticky top-0 z-10 bg-surface-container-low border-b border-outline-variant px-1.5 last:pr-3 py-2.5 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
     >
       <SortButton active={sort?.key === sortKey} dir={sort?.dir} right={right} onClick={() => onSort(sortKey)}>{children}</SortButton>
     </th>
@@ -2731,7 +2904,7 @@ function SortTh({ sortKey, sort, onSort, align = 'right', title, children }) {
 
 // One-click copy of a market's promo member SKUs (newline-separated — what
 // marketplace portals expect when pasting part numbers into a list box).
-function CopySkusButton({ skus }) {
+function CopySkusButton({ skus, title = "Copy this market's promo SKUs, one per line" }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
     try {
@@ -2749,7 +2922,7 @@ function CopySkusButton({ skus }) {
       type="button"
       onClick={copy}
       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-outline-variant text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
-      title="Copy this market's promo SKUs, one per line"
+      title={title}
     >
       <MorphIcon
         icon={copied ? Check : Copy}

@@ -705,6 +705,110 @@ export function marketListRows(existing, skus, market) {
 }
 
 /**
+ * Take products off a promotion (user, 2026-11-26: "check box para seleccionar
+ * los productos en las promociones y poder eliminarlos") — the ones ticked in
+ * its card's table. `market` 'ca' / 'us' = off that country's list only: a
+ * product still on the other country's list keeps its row, without this
+ * country's file price and costs (the very row a file that leaves it out
+ * writes); `market` null = off the promotion whole (a deal with one list for
+ * both countries). Nothing else on the list changes, so the products that stay
+ * keep the prices their file gave them.
+ *
+ * A list keeps at least one product. A Stylish event by price also
+ * forgets the prices given for the products that leave: left there, the next
+ * save of its discount would put them back on the list.
+ *
+ * Returns what `addFileToPromotion` returns of a list that shrank (`leftSkus`),
+ * so what follows a list change follows this one too. `task` (optional
+ * taskProgress reporter): the promotion's rows, the saves, the removals.
+ */
+export async function removePromotionSkus(promotion, skus, { market = null, task = null } = {}) {
+  if (market != null && market !== 'ca' && market !== 'us') throw new Error('Pick the country whose list the products leave.');
+  const wanted = new Set((skus ?? []).filter(Boolean));
+  if (!wanted.size) throw new Error('Select at least one product.');
+  task?.progress(0, "Reading the promotion's products…");
+  const existing = await getPromotionPrices(promotion.id);
+  task?.progress(0.2);
+  const other = market === 'us' ? 'ca' : 'us';
+  const leaving = existing.filter((r) => wanted.has(r.sku) && (!market || onMarketList(r, market)));
+  if (!leaving.length) throw new Error(`${wanted.size === 1 ? 'That product is' : 'Those products are'} no longer on the list — it changed since this page loaded. Nothing was removed.`);
+  // A list keeps at least one product, as when it is edited or imported: an
+  // emptied Canada list would send Best Buy nothing, and the discounts already
+  // scheduled there would stay.
+  const label = market === 'us' ? 'USA' : 'Canada';
+  const listNow = market ? existing.filter((r) => onMarketList(r, market)) : existing;
+  if (leaving.length === listNow.length) {
+    throw new Error(market
+      ? `That is every product on the ${label} list of "${promotion.name}". Keep at least one.`
+      : `That is every product of "${promotion.name}". Keep at least one — or delete the promotion.`);
+  }
+  // On the other country's list too: the row stays, off this country's list.
+  const staysOnOther = (r) => Boolean(market) && onMarketList(r, other);
+  const toKeep = leaving.filter(staysOnOther);
+  const toDelete = leaving.filter((r) => !staysOnOther(r));
+
+  const upserts = toKeep.map((prev) => ({
+    promotion_id: promotion.id,
+    sku: prev.sku,
+    in_ca: market !== 'ca',
+    in_us: market !== 'us',
+    set_price_cad: market === 'ca' ? null : prev.set_price_cad ?? null,
+    set_price_usd: market === 'us' ? null : prev.set_price_usd ?? null,
+    set_costs: withoutMarketCosts(prev.set_costs, market),
+  }));
+  const tickSave = batchTicker(task?.part(0.2, toDelete.length ? 0.6 : 1), upserts.length, 200, `Taking ${upserts.length} SKUs off the list`);
+  for (let i = 0; i < upserts.length; i += 200) {
+    tickSave(i);
+    const { error } = await supabase.from('promotion_prices').upsert(upserts.slice(i, i + 200), { onConflict: 'promotion_id,sku' });
+    if (error) throw error;
+  }
+  const tickDelete = batchTicker(task?.part(upserts.length ? 0.6 : 0.2, 1), toDelete.length, 200, `Removing ${toDelete.length} SKUs`);
+  for (let i = 0; i < toDelete.length; i += 200) {
+    tickDelete(i);
+    const { error } = await supabase.from('promotion_prices').delete().in('id', toDelete.slice(i, i + 200).map((r) => r.id));
+    if (error) throw error;
+  }
+
+  // A Stylish event by price: the prices given for the products that left go
+  // with them (read fresh — the page's copy may be older than the last save).
+  if (promotion.stylish_discount?.mode === 'price') {
+    const { data: fresh, error } = await supabase.from('promotions').select('stylish_discount').eq('id', promotion.id).maybeSingle();
+    if (error) throw error;
+    const discount = fresh?.stylish_discount;
+    if (discount?.mode === 'price') {
+      const gone = new Set(leaving.map((r) => r.sku));
+      let dropped = 0;
+      const prices = Object.fromEntries(Object.entries(discount.prices ?? {}).map(([m, list]) => {
+        if (market && m !== market) return [m, list];
+        const kept = Object.fromEntries(Object.entries(list ?? {}).filter(([sku]) => !gone.has(sku)));
+        dropped += Object.keys(list ?? {}).length - Object.keys(kept).length;
+        return [m, kept];
+      }));
+      if (dropped) {
+        const { error: saveErr } = await supabase.from('promotions').update({ stylish_discount: { ...discount, prices } }).eq('id', promotion.id);
+        if (saveErr) throw saveErr;
+      }
+    }
+  }
+  task?.progress(1);
+
+  logActivity({
+    action: 'update',
+    entityType: 'promotion',
+    entityId: String(promotion.id),
+    summary: `Removed ${leaving.length} product${leaving.length === 1 ? '' : 's'} from ${market ? `the ${label} list of ` : ''}"${promotion.name}"`,
+    // What each one held, so a product removed by mistake can be put back as it was.
+    metadata: {
+      market,
+      removed_rows: toDelete.length,
+      kept_on_the_other_list: toKeep.length,
+      products: leaving.slice(0, 200).map((r) => ({ sku: r.sku, in_ca: onMarketList(r, 'ca'), in_us: onMarketList(r, 'us'), set_price_cad: r.set_price_cad ?? null, set_price_usd: r.set_price_usd ?? null, set_costs: r.set_costs ?? {} })),
+    },
+  });
+  return { market, left: leaving.length, removed: toDelete.length, leftSkus: leaving.map((r) => r.sku), joinedSkus: [], notInPim: [] };
+}
+
+/**
  * Mark a draft promotion as active WITHOUT touching store pricing — for
  * promotions that were already uploaded to the marketplaces outside the PIM.
  */
