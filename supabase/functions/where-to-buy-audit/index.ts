@@ -51,6 +51,11 @@
 //                are made due again, so each one is confirmed by a second
 //                read (user, 2026-11-16: "solo los que tienen errores"). Cron
 //                where-to-buy-problem-reread, 10 AM Eastern on the pass days.
+// mode "daily-reread" — the links that need attention are read every day, not
+//                only on the pass days (user, 2026-11-26): Broken, Wrong
+//                product, Other finish, and Out of stock when we do have
+//                stock of the product in the store's country. Cron
+//                where-to-buy-daily-reread, 1 AM Eastern; see dailyReread.
 // mode "reread" — { retailer, skus, since? }: "Read again" — those products'
 //                pages of that store are opened now, in this call (admins and
 //                editors). Price Alignment asks it for a store read from its
@@ -2170,6 +2175,108 @@ async function problemReread(opts: { dryRun?: boolean } = {}) {
   return { dryRun: Boolean(opts.dryRun), ...report };
 }
 
+// ---------------------------------------------------------------- the daily read
+// The links that need attention are read EVERY day (user, 2026-11-26, asked
+// what a daily check would cost: "se haría todos los días solo de aquellos
+// que salgan Out of Stock y que sí tengamos stock (los que no tenemos stock en
+// dicho país, no se haría) y de los que salgan broken o other finish o wrong
+// link, de los OK solo se seguiría haciendo como hasta ahora" — "Hazlo"). A
+// link that is back in stock at the store returns to the Stylish pages the
+// same day instead of two or three days later. About 645 of ~6,300 addresses
+// that day, some 470 of them through Bright Data: ~0.70 USD a day.
+//   - Broken (verdict broken), Wrong product (sku_check variant / other) and
+//     Other finish (sku_check listing): all of them;
+//   - Out of stock (an OK link whose page said sold out, or was down while we
+//     had no stock — downWithoutStock): only where we HAVE stock of the
+//     product in the store's country (product_inventory: Canada = Cambridge,
+//     USA = Atlanta). With none there is nothing to sell there, and the link
+//     waits for its pass. A product Odoo does not track has no stock figure:
+//     it is read, never taken as 0;
+//   - an OK link in stock keeps its passes (Monday, Wednesday, Friday; BB&B
+//     and Overstock Monday and Friday).
+// Mode "daily-reread" (cron where-to-buy-daily-reread, 1 AM Eastern, when a
+// pass would start): those links are made due on every day that is NOT a pass
+// day of their store — on a pass day they are due anyway —, and the usual
+// check batches open them. Left out: a link already due, and one read in the
+// last 6 hours. A link that gets no answer that day waits for its next pass
+// or the next daily read (patchFor's retry falls outside a pass day).
+// ScraperAPI: what Overstock's and BB&B's links of the set may spend is added
+// to the day's allowance, DAILY_SCRAPERAPI_MAX at most (~640 credits a day
+// were expected, ~14,000 a month of the plan's 100,000): if BB&B turns Bright
+// Data away again, its daily links wait for their pass instead of taking the
+// passes' share of the month.
+const DAILY_REREAD_KEY = "where_to_buy_daily_reread";
+const DAILY_FRESH_MS = 6 * 3600e3; // a link read since then is not read again
+const DAILY_SCRAPERAPI_MAX = 800;  // credits a day this read may add to the allowance
+type DailyKind = "broken" | "wrong" | "other_finish" | "sold_out";
+interface DailyRow { id: string; sku: string; retailer: string; market: string | null; url: string; verdict: string; sku_check: string | null; in_stock: boolean | null; next_check_at: string | null; checked_at: string | null }
+// What a link is shown as (the app's linkStatus.js: wrong, then sold out, then other finish).
+const dailyKind = (r: DailyRow): DailyKind | null =>
+  r.verdict === "broken" ? "broken"
+    : r.verdict !== "ok" ? null
+    : r.sku_check === "variant" || r.sku_check === "other" ? "wrong"
+    : r.in_stock === false && r.sku_check !== "listing" ? "sold_out"
+    : r.sku_check === "listing" ? "other_finish"
+    : null;
+
+async function dailyReread(opts: { dryRun?: boolean; asOf?: string } = {}) {
+  const started = new Date();
+  const now = started.toISOString();
+  const recent = new Date(started.getTime() - DAILY_FRESH_MS).toISOString();
+  // `asOf` (a dry run): the set of that day of the week, whatever is due today.
+  const weekday = opts.asOf ? new Date(`${opts.asOf}T12:00:00Z`).getUTCDay() : eastern(started).weekday;
+  const rows = await restAll<DailyRow>(
+    "where_to_buy_links?select=id,sku,retailer,market,url,verdict,sku_check,in_stock,next_check_at,checked_at&url=not.is.null"
+    + "&or=(verdict.eq.broken,and(verdict.eq.ok,sku_check.in.(variant,other,listing)),and(verdict.eq.ok,in_stock.is.false))&order=id",
+  );
+  const kinds = rows.map((r) => ({ r, kind: dailyKind(r) })).filter((x): x is { r: DailyRow; kind: DailyKind } => x.kind !== null);
+  const stock = await ownStock(kinds.filter((x) => x.kind === "sold_out").map((x) => x.r.sku));
+  const stores: Record<string, { broken: number; wrong: number; other_finish: number; sold_out: number; rows: number; pages: number }> = {};
+  const leftOut = { no_stock_of_ours: 0, pass_day: 0, already_due: 0, just_read: 0 };
+  const due: DailyRow[] = [];
+  const pages = new Map<string, Set<string>>();
+  for (const { r, kind } of kinds) {
+    if (kind === "sold_out") {
+      const units = r.market ? stock.get(stockKey(r.sku, r.market)) : undefined;
+      if (units !== undefined && units <= 0) { leftOut.no_stock_of_ours += 1; continue; }
+    }
+    if (passWeekdays(r.retailer).includes(weekday)) { leftOut.pass_day += 1; continue; }
+    if (!opts.asOf && (!r.next_check_at || r.next_check_at <= now)) { leftOut.already_due += 1; continue; }
+    if (!opts.asOf && r.checked_at && r.checked_at > recent) { leftOut.just_read += 1; continue; }
+    due.push(r);
+    const s = stores[r.retailer] ??= { broken: 0, wrong: 0, other_finish: 0, sold_out: 0, rows: 0, pages: 0 };
+    s.rows += 1;
+    if (!pages.has(r.retailer)) pages.set(r.retailer, new Set());
+    if (!pages.get(r.retailer)!.has(r.url)) { pages.get(r.retailer)!.add(r.url); s.pages += 1; s[kind] += 1; }
+  }
+  // ScraperAPI's stores: what their pages of the set may spend, within the day's limit.
+  let credits = 0;
+  for (const retailer of SCRAPERAPI_FIRST) credits += (pages.get(retailer)?.size ?? 0) * (SCRAPERAPI_OPTIONS[retailer]?.credits ?? 10);
+  credits = Math.min(credits, DAILY_SCRAPERAPI_MAX);
+  if (!opts.dryRun) {
+    await addToScraperAllowance(credits);
+    for (const ids of chunk(due.map((r) => r.id), 100)) {
+      await rest(`where_to_buy_links?id=${inList(ids)}`, { method: "PATCH", body: JSON.stringify({ next_check_at: now }) });
+    }
+  }
+  const total = (k: "broken" | "wrong" | "other_finish" | "sold_out" | "rows" | "pages") => Object.values(stores).reduce((a, s) => a + s[k], 0);
+  const report = {
+    at: now, day: opts.asOf ?? eastern(started).day, weekday,
+    pages: total("pages"), rows: total("rows"),
+    broken: total("broken"), wrong: total("wrong"), other_finish: total("other_finish"), sold_out_we_have: total("sold_out"),
+    scraperCredits: credits, stores, leftOut,
+  };
+  if (!opts.dryRun) {
+    await rest("app_settings?on_conflict=key", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ key: DAILY_REREAD_KEY, value: report, updated_at: now }),
+    });
+    console.log(`[where-to-buy] daily read: ${report.pages} pages (${report.broken} broken, ${report.wrong} wrong, ${report.other_finish} other finish, ${report.sold_out_we_have} sold out with stock of ours)`);
+  }
+  return { dryRun: Boolean(opts.dryRun), ...report };
+}
+
 // ---------------------------------------------------------------- suggestions
 // The right link, suggested (user, 2026-10-20: "1 hazlo" / "2 hazlo"). For a
 // link that opens another option or product, a broken link, or a store a
@@ -2923,6 +3030,17 @@ Deno.serve(async (req) => {
       }
       if (!dryRun && !(await maySpend(kind, req))) return json({ error: "Only admins and editors can have the store pages read again" }, 403);
       return json({ ok: true, ...(await problemReread({ dryRun })) });
+    }
+    if (mode === "daily-reread") {
+      // The cron fires at 05:00 and 06:00 UTC every day; the call at 1 AM
+      // Eastern (EDT or EST) runs. A dry run only counts ({ asOf } for another
+      // day's set); { force: true } runs it at another hour.
+      const dryRun = body.dryRun === true;
+      if (kind === "cron" && !dryRun && body.force !== true && eastern(new Date()).hour !== PASS_HOUR) {
+        return json({ ok: true, skipped: "runs at 1 AM Eastern" });
+      }
+      if (!dryRun && !(await maySpend(kind, req))) return json({ error: "Only admins and editors can have the store pages read again" }, 403);
+      return json({ ok: true, ...(await dailyReread({ dryRun, asOf: dryRun && typeof body.asOf === "string" ? body.asOf : undefined })) });
     }
     if (mode === "reread") {
       // body: { retailer, skus, since? } — "Read again": on Price Alignment (a
