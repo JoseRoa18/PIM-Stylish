@@ -108,9 +108,22 @@ export const AUTO_KEYS = {
   // row it repeats, and the database copies each number the moment it is saved there (trigger
   // scorecard_values_copy, 20261123_scorecard_copy_of.sql) — typed once, never twice. `linked`: set in the
   // database with its source row, so the pencil never offers it; `server`: the browser works nothing out for it.
-  copy: { label: 'The same number as on its marketplace\'s tab — typed there, and copied here the moment it is saved', unit: null, server: true, linked: true },
+  // The row it repeats can be typed (Amazon's Inventory Age) or the PIM's own (2026-11-24: Operations' "Home Depot
+  // USA returns ($)" repeats the Home Depot tab's Returns Value $, the credit memos), so the row's Source says
+  // which row it is and how that one is filled — `autoDescription` reads it.
+  copy: { label: 'The same number as on its marketplace\'s tab, copied here the moment it is saved there', unit: null, server: true, linked: true },
 };
 export const isServerKey = (key) => Boolean(AUTO_KEYS[key]?.server);
+/**
+ * What a PIM row says about itself (its tooltip): its key's description. A row
+ * that repeats another tab's says which row that is — kept in its Source,
+ * since the key is the same for every such row.
+ */
+export const autoDescription = (metric) => {
+  const auto = AUTO_KEYS[metric?.auto_key];
+  if (!auto) return '';
+  return auto.linked && metric.source ? `${auto.label} — ${metric.source}` : auto.label;
+};
 /** Keys read from a Wix store itself (its orders, reviews, prices): the Sinks Direct tab only. */
 export const isStoreKey = (key) => Boolean(AUTO_KEYS[key]?.store);
 

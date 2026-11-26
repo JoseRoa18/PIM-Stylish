@@ -5,7 +5,7 @@ import { cn } from '@/lib/cn';
 import Dialog from '@/components/ui/Dialog';
 import { formatValue, meetsTarget, parseInput, targetLabel, toInput } from '../lib/format';
 import { sectionOf, sectionsFor } from '../lib/sections';
-import { AUTO_KEYS } from '../lib/autoMetrics';
+import { autoDescription } from '../lib/autoMetrics';
 import { addWeeks, weekDays, weekRange, weekSoFar, weekStartLabel, weekTag } from '../lib/weeks';
 
 // One market of a board as the EOS grid (user's layout choice, 2026-11-04):
@@ -134,7 +134,7 @@ export default function ScorecardTable({ board, metrics, values, weeks, thisWeek
                 <th scope="row" className={`sticky left-0 z-10 bg-surface-container-lowest group-hover:bg-surface-container-low text-left font-normal pl-3 pr-2 py-1.5 border-b border-outline-variant ${nameCol}`}>
                   <div className="flex items-center gap-2 min-w-0">
                     {!plain && <OwnerBadge label={m.owner_label} />}
-                    <span className={cn('min-w-0 flex-1 truncate text-body-md text-on-surface', m.strong && 'font-semibold')} title={[m.name, m.hint, m.owner_label && `Owner: ${m.owner_label}`, m.auto_key ? `Filled by the PIM${AUTO_KEYS[m.auto_key] ? `: ${AUTO_KEYS[m.auto_key].label}` : ''}` : m.source && `Source: ${m.source}`].filter(Boolean).join('\n')}>
+                    <span className={cn('min-w-0 flex-1 truncate text-body-md text-on-surface', m.strong && 'font-semibold')} title={[m.name, m.hint, m.owner_label && `Owner: ${m.owner_label}`, m.auto_key ? `Filled by the PIM${autoDescription(m) ? `: ${autoDescription(m)}` : ''}` : m.source && `Source: ${m.source}`].filter(Boolean).join('\n')}>
                       {m.name}
                     </span>
                     {m.auto_key && (
