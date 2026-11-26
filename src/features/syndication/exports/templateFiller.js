@@ -50,8 +50,13 @@ export function excelSerial(day) {
   return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000);
 }
 
+// A part that starts with a byte-order mark (every part of a file Syndigo
+// writes) does not parse with it in front: the browser answers with an error
+// document, which reads as a workbook with no sheets and no rows. Menards'
+// own downloads could not be filled at all until 2026-11-26 ("No data sheet
+// found").
 export function parse(xml) {
-  return new DOMParser().parseFromString(xml, 'application/xml');
+  return new DOMParser().parseFromString(String(xml ?? '').replace(/^\uFEFF/, ''), 'application/xml');
 }
 
 export function parseSharedStrings(xml) {
@@ -511,13 +516,23 @@ export async function downloadMediaZip(entries, fileName, { partBytes = 600 * 10
     bytes = 0;
     inZip = 0;
   };
+  // Storage turns part of a burst away (429 — 4 of 139 pictures in a run of
+  // 2026-11-25) and a connection can drop: such a file is asked for again, three
+  // times at most, a little later each time. A file that is not there (400 /
+  // 404) is not asked for twice.
   const fetchBlob = async (url) => {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.blob();
-    } catch {
-      return null;
+    for (let attempt = 0; ; attempt += 1) {
+      let wait = 1500 * 2 ** attempt;
+      try {
+        const res = await fetch(url);
+        if (res.ok) return await res.blob();
+        if (res.status !== 429 && res.status < 500) return null;
+        wait = Number(res.headers.get('retry-after')) * 1000 || wait;
+      } catch {
+        // a dropped connection: tried again like a refusal
+      }
+      if (attempt >= 3) return null;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 15000)));
     }
   };
   const sharedBlobs = new Map(); // url → Promise<Blob|null>, only for URLs used more than once

@@ -54,7 +54,7 @@ the workbook and destroys data validations and styling. (Reading grids for analy
 |---|---|---|
 | Wayfair | sheet named `/^\d+ -/`, header row 4 | Valid Values sheet; variant grouping by `model_name` + dashed SKU root, Finish is primary axis |
 | Amazon (CA/US) | full seller flat file, XLSM | A1 settings string declares labelRow=4 / attributeRow=5 / dataRow=7; repeated labels (Bullet Point ×5, Other Image URL ×8) filled by occurrence; Valid Values rows `"Label - [ TYPE ]"`; US labels say `(en_US, ...)` — normalize to `(en_CA, ...)` for rule lookup |
-| Menards (Syndigo) | rows 1–5 = GUIDs/source/locale/requiredness/names, data row 6 | One category = content file + 5 container files that are DISTINCT dimensions despite near-identical filenames `(n)`; dedupe by internal data-sheet name, NEVER by filename; deliver as ONE ZIP with original filenames |
+| Menards (Syndigo) | rows 1–5 = GUIDs/source/locale/requiredness/names, data row 6 | New products go in ONE general workbook, "Menards Product Content" (206 columns, every category); its `Reference` sheet lists each column's type, max length and choices — read it at every export and snap to it (a yes/no is "Y"/"N" in one column, "Yes"/"No" in the next). Rules = the file Vladimir completed (`lib/menardsFile.js`). Every XML part Syndigo writes starts with a BOM: strip it before DOMParser or the workbook reads as empty. Image cells hold file names; the ZIP carries the pictures under those names. The older per-category set (content file + 5 container files that are DISTINCT dimensions despite near-identical filenames `(n)`) is deduped by internal data-sheet name, NEVER by filename |
 | BB&B | First Cost sheet, 268 cols | inline strings (no sharedStrings) |
 | Walmart CA | multilocale spec v3.x | data sheet has "Version=…" in A1; labels R4, attribute XML names R5 (the stable key), data R7; _en/_fr pairs (leave _fr blank); repeated XML names fill by occurrence; closed lists on the Hidden_* sheet |
 | Home Depot US | Mirakl | "Data" sheet: labels R1, attribute GUIDs R2, data R3; snap against GUID-keyed ReferenceData columns; requiredness per collection in the "Columns" sheet; Product Category = full collection path string |
@@ -81,6 +81,12 @@ the workbook and destroys data validations and styling. (Reading grids for analy
   PIM; never copy marketplace data back in.
 - Keep heavy deps (JSZip) out of the initial bundle — exporters are reached from
   lazy-loaded routes; import JSZip dynamically (`loadJSZip`).
+- **A byte-order mark in front of an XML part** (Syndigo's files) makes DOMParser
+  return an error document: no sheets, no rows, and the exporter reports "no data
+  sheet". `parse()` in templateFiller strips it — use it, never a bare DOMParser.
+- **A template is only proven by an export run in a browser against the real file**:
+  Menards' export was failing outright in production when it was looked at on
+  2026-11-26, and nothing in the code said so.
 - **Sheet names with `&`** arrive XML-entity-encoded from raw regex parsing;
   `listSheetNames` decodes them (fixed) — compare decoded names only.
 - **Spec-wide accessory templates** (file name mentions no accessory kind, e.g.

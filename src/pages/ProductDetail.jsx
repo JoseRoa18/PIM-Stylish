@@ -2177,7 +2177,9 @@ function ExportTemplatesCard({ product, media }) {
       // The exporters load on click — they stay out of the page's first download.
       if (/menards/i.test(marketplace)) {
         const { generateMenardsFromTemplates } = await import('@/features/syndication/exports/menardsExport');
-        await generateMenardsFromTemplates(set, [product], { task });
+        const res = await generateMenardsFromTemplates(set, [product], { task });
+        if (res.images) done = `Downloaded + ${res.images} image${res.images === 1 ? '' : 's'}`;
+        if (res.missingData.length) setError(`Downloaded. To look at: ${res.missingData.join(' · ')}`);
       } else if (/wayfair/i.test(marketplace)) {
         // Wayfair exports the whole variant family, so name the file by collection.
         const { generateWayfairFromTemplate } = await import('@/features/syndication/exports/wayfairExport');

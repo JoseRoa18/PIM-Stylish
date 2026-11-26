@@ -463,10 +463,13 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
     }
   }
 
-  // Menards is a file SET per category (content + one container file per
-  // dimension). Like the grouped exporters, a mixed selection exports the
-  // categories that HAVE a template set and reports the ones that don't —
-  // it never refuses the whole selection over one uncovered category.
+  // Menards' new product file (the Menards Product Content workbook) takes
+  // every category: the products of a selection go in it together, one row
+  // each, and download as one ZIP with their pictures. A file kept for one
+  // category only (an older set: its content file and one Containers file per
+  // dimension) goes to that category's products. A mixed selection exports the
+  // categories that HAVE a file and reports the ones that don't — it never
+  // refuses the whole selection over one uncovered category.
   async function handleExportMenards(templates, marketplace, task) {
     begin('export');
     try {
@@ -475,13 +478,14 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
       // DIFFERENT dimensions — real duplicates are detected inside the
       // generator by their data sheet name, never by file name.
       const fillable = templates.filter((t) => !/recipient|reference\.xls/i.test(t.file_name));
+      const filesOf = (category) => fillable.filter((t) => templateAppliesTo(t, category));
 
       const cats = [...new Set(selectedProducts.map((p) => p.category))];
-      const coveredCats = cats.filter((c) => fillable.some((t) => templateAppliesTo(t, c)));
+      const coveredCats = cats.filter((c) => filesOf(c).length);
       const skippedCats = cats.filter((c) => !coveredCats.includes(c));
       if (!coveredCats.length) {
         throw new Error(
-          `No Menards template covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload the set(s) in /templates.`,
+          `No Menards file covers the selected categor${cats.length === 1 ? 'y' : 'ies'} (${cats.join(', ')}). Upload the Menards Product Content file in /templates.`,
         );
       }
 
@@ -503,36 +507,43 @@ export default function BulkActionsBar({ selectedSkus, products, filteredCount =
         throw new Error(excludedSkus.length ? `Every selected product is excluded from ${marketplace}: ${excludedSkus.join(', ')}.` : 'Could not load product data.');
       }
 
-      // One file set per covered category (today that's kitchen sinks; more
-      // sets slot in as they're uploaded).
+      // The products that take the same files go out together: with the one
+      // file for every category, the whole selection in one download.
+      const sets = new Map(); // the files' ids → { files, products }
+      for (const p of productList) {
+        const own = filesOf(p.category);
+        const key = own.map((t) => t.id).sort().join('|');
+        if (!sets.has(key)) sets.set(key, { files: own, products: [] });
+        sets.get(key).products.push(p);
+      }
       let files = 0;
       let countTotal = 0;
+      let images = 0;
       const menardsReports = [];
-      const unmapped = new Set();
+      const missingData = [];
       const { labelTask } = await loadTemplateFiller();
-      const sets = coveredCats.filter((cat) => productList.some((p) => p.category === cat));
       task.progress(0.1);
-      for (const [i, cat] of sets.entries()) {
-        const catTemplates = fillable.filter((t) => templateAppliesTo(t, cat));
-        const catProducts = productList.filter((p) => p.category === cat);
-        const slice = labelTask(task.part(0.1 + (0.9 * i) / sets.length, 0.1 + (0.9 * (i + 1)) / sets.length), sets.length > 1 ? `Set ${i + 1} of ${sets.length}: ${cat}` : '');
-        const res = await generateMenardsFromTemplates(catTemplates, catProducts, { task: slice });
-        logListingExport(marketplace, templatePurpose(catTemplates[0]), catProducts.map((p) => p.sku));
+      for (const [i, set] of [...sets.values()].entries()) {
+        const slice = labelTask(task.part(0.1 + (0.9 * i) / sets.size, 0.1 + (0.9 * (i + 1)) / sets.size), sets.size > 1 ? `Download ${i + 1} of ${sets.size}` : '');
+        const res = await generateMenardsFromTemplates(set.files, set.products, { task: slice });
+        logListingExport(marketplace, templatePurpose(set.files[0]), set.products.map((p) => p.sku));
         files += res.files;
         countTotal += res.count;
+        images += res.images;
+        missingData.push(...res.missingData);
         for (const r of res.results) {
           if (r.fillReport) menardsReports.push({ file: r.file, ...r.fillReport });
-          for (const u of r.unmapped ?? []) unmapped.add(u);
         }
       }
       if (menardsReports.length) setReadiness(menardsReports);
 
-      let message = `Exported ${files} Menards file(s) for ${countTotal} product(s).`;
-      if (unmapped.size) message += ` ${unmapped.size} column(s) left for manual/account data (vendor terms, master packs…).`;
-      if (skippedCats.length) message += ` ⚠ Skipped (no template): ${skippedCats.join(', ')}.`;
+      let message = `Exported ${files} Menards file${files === 1 ? '' : 's'} for ${noun(countTotal)}`;
+      message += images ? `, with ${images} image${images === 1 ? '' : 's'} in the ZIP's Images folder under the names the file gives them.` : '.';
+      if (missingData.length) message += ` ⚠ To look at: ${missingData.join(' · ')}.`;
+      if (skippedCats.length) message += ` ⚠ Skipped (no Menards file): ${skippedCats.join(', ')}.`;
       if (excludedSkus.length) message += ` Excluded from ${marketplace}, left out: ${excludedSkus.join(', ')}.`;
-      task.finish(`Downloaded · ${files} file${files === 1 ? '' : 's'}, ${noun(countTotal)}`);
-      setResult({ type: skippedCats.length ? 'error' : 'success', message });
+      task.finish(`Downloaded · ${files} file${files === 1 ? '' : 's'}, ${noun(countTotal)}${images ? `, ${images} image${images === 1 ? '' : 's'}` : ''}`);
+      setResult({ type: skippedCats.length || missingData.length ? 'error' : 'success', message });
     } catch (err) {
       task.fail(err);
       setResult({ type: 'error', message: err.message ?? 'Menards export failed' });

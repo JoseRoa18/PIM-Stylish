@@ -4,307 +4,178 @@ import {
   sheetPathByName,
   sheetToGrid,
   buildCell,
+  columnStyles,
   indexToCol,
   injectRows,
+  listSheetNames,
   fetchImagesBySku,
-  createFillTracker,
+  downloadMediaZip,
   labelTask,
 } from './templateFiller';
+import {
+  MENARDS_IMAGE_CELL,
+  menardsColumns,
+  menardsGallery,
+  menardsImageName,
+  menardsNotes,
+  menardsRow,
+  readMenardsReference,
+} from '../lib/menardsFile';
 
-// Menards (Syndigo "PIM Hierarchy") exporter.
+// Menards (Syndigo) exporter.
 //
-// A Menards category is a SET of files: one ProductContent workbook (sheet
-// "Attributes", ~251 columns) plus one small "Containers" workbook per
-// dimension group (Overall Width / Height / Depth / Weight / Interior
-// Dimensions Per Bowl — 6 columns each). All share the same layout on the data
-// sheet: row 1 attribute GUIDs, row 2 source, row 3 locale, row 4 requiredness,
-// row 5 display names; data rows start at row 6.
+// Menards' new product file is Syndigo's "Menards Product Content" workbook:
+//   "Attributes"  rows 1-5 the columns (their ids, source, locale, Required /
+//                 Conditional / Optional, their names), one product a row from row 6;
+//   "Reference"   every column again: what it takes and, for a list, its entries.
+// The file kept in Templates is that workbook without a product row. An older
+// download for one category (requirement set 30: the same columns, the
+// category's own after them, and a small "Containers" workbook per dimension)
+// fills by the same rules — whatever Templates holds for Menards is what goes out.
 //
-// Phase 1 fills what the PIM owns (content, compliance, dimensions, packaging
-// from shipping data) and leaves Menards-account commercial fields (vendor,
-// merchant, payment terms, master packs…) blank — or filled from
-// MENARDS_ACCOUNT once the business provides the values.
+// What goes in each column, and why, is in ../lib/menardsFile.js: the file
+// Vladimir completed for C234L (2026-11-25). Until then a row left the account's
+// columns empty (vendor, merchant, cost, terms, master pack) and answered in
+// words the lists do not have ("Yes" where the list says "Y", "inch" for
+// "inches", "year" for "month", the retail pack's "Box"), with the box's width
+// and depth the wrong way round.
 
-// Account-level constants (same for every product). Fill these once with the
-// values from the Menards vendor agreement; blank = left empty in the file.
-const MENARDS_ACCOUNT = {
-  'Vendor Number': '',
-  'Merchant': '',
-  'Associate Merchant': '',
-  'Payment Terms': '',
-  'FOB': '',
-  'Shipping Method': '',
-  'Ship Combination': '',
-  'Freight Type': '',
-  'Freight Min Description': '',
-  'Vendor Ships Via': '',
-  'Sales Unit': '',
-  'Min Order Qty - Vendor': '',
-  'Lead Time': '',
-  'Order Lead Time UOM': '',
-  'Product Port Of Origin': '',
-};
-
-const attr = (p) => p.attributes || {};
-const num = (v) => {
-  if (v == null || v === '') return '';
-  const m = String(v).match(/-?\d+(\.\d+)?/);
-  return m ? m[0] : '';
-};
-const ext = (p, axis) => num(attr(p).external_dimensions_in?.[axis]);
-const cut = (p, axis) => num(attr(p).cut_out_dimensions_in?.[axis]);
-const ship = (p, axis) => num(attr(p).shipping_dimensions_in?.[axis]);
-const colorFamily = (p) => {
-  const f = String(p.finish ?? '').toLowerCase();
-  if (/black/.test(f)) return 'Black';
-  if (/gold/.test(f)) return 'Gold';
-  if (/stainless|chrome|silver/.test(f)) return 'Silver';
-  if (/white/.test(f)) return 'White';
-  if (/grey|gray/.test(f)) return 'Gray';
-  if (/brown|bamboo/.test(f)) return 'Brown';
-  return '';
-};
-const mounting = (p) => {
-  const t = `${p.product_type ?? ''} ${[attr(p).installation_type ?? []].flat().join(' ')} ${attr(p).mounting_type ?? ''}`;
-  if (/dual/i.test(t)) return 'Dual Mount';
-  if (/under/i.test(t)) return 'Undermount';
-  if (/drop/i.test(t)) return 'Drop-In';
-  if (/farmhouse|apron/i.test(t)) return 'Apron/Farmhouse';
-  return '';
-};
-const interiorPerBowl = (p) => {
-  const d = attr(p).internal_dimensions_in ?? {};
-  return d.length && d.width && d.depth ? `${d.length} in x ${d.width} in x ${d.depth} in` : '';
-};
-
-// Rules keyed by the row-5 display name. Menards axis language: Width =
-// side-to-side (PIM length), Depth = front-to-back (PIM width), Height =
-// top-to-bottom (PIM height/depth).
-const MENARDS_RULES = {
-  ...Object.fromEntries(Object.entries(MENARDS_ACCOUNT).map(([k, v]) => [k, () => v])),
-
-  // Identity & copy
-  'Model Number': (p) => p.sku,
-  'MFG Part # (OEM)': (p) => p.sku,
-  'MFG Model # (Series)': (p) => p.model_name || p.sku,
-  'Description 1': (p) => attr(p).general_title_en || p.model_name || p.sku,
-  'Description 2': (p) => [p.brand, p.model_name, p.product_type].filter(Boolean).join(' '),
-  'UPC': (p) => attr(p).upc || '',
-  'Country Of Origin': (p) => attr(p).country_of_origin || '',
-  'Mfg Location': (p) => attr(p).country_of_origin || '',
-  'Imported Flag': (p) => (/canada|usa|united states/i.test(attr(p).country_of_origin ?? '') ? 'No' : 'Yes'),
-  'Master Image (Front View)': (p) => (p._images ?? [])[0] ?? '',
-  'Includes': (p) => [attr(p).accessories_included ?? []].flat().join(', '),
-  'Product Type': (p) => p.product_type || '',
-  'Application': (p) => attr(p).application || 'Kitchen',
-
-  // Warranty
-  'Mfr Warranty': (p) => attr(p).warranty_length || '',
-  'Warranty UOM': (p) => (/year/i.test(attr(p).warranty_length ?? '') ? 'year' : ''),
-  'Manufacturer Warranty': (p) => attr(p).warranty_length || '',
-
-  // Sink specifics
-  'Gauge': (p) => num(attr(p).gauge),
-  'Sink Material': (p) => p.material || '',
-  'Sink Shape': (p) => attr(p).sink_shape || '',
-  'Number of Bowls': (p) => num(attr(p).number_of_bowls),
-  'Bowl Configuration': (p) => attr(p).bowl_configuration || attr(p).basin_split || '',
-  'Mounting Type': mounting,
-  'Color/Finish': (p) => p.finish || '',
-  'Color/Finish Family': colorFamily,
-  'Drain Location': (p) => attr(p).drain_hole_location || '',
-  'Number of Faucet Holes': (p) => num(attr(p).number_of_faucet_holes) || '0',
-  'Faucet Type': () => '',
-  'Faucet Finish': () => '',
-  'Flow Rate': () => '',
-  'Interior Dimensions Per Bowl': interiorPerBowl,
-
-  // Dimensions (content + container files share these names)
-  'Overall Width': (p) => ext(p, 'length'),
-  'Overall Width UOM': (p) => (ext(p, 'length') ? 'inch' : ''),
-  'Width': (p) => ext(p, 'length'),
-  'Overall Depth': (p) => ext(p, 'width'),
-  'Depth': (p) => ext(p, 'width'),
-  'Overall Depth UOM': (p) => (ext(p, 'width') ? 'inch' : ''),
-  'Overall Height': (p) => ext(p, 'height') || ext(p, 'depth'),
-  'Overall Height UOM': (p) => (ext(p, 'height') || ext(p, 'depth') ? 'inch' : ''),
-  'Weight': (p) => num(attr(p).product_weight_lb),
-  'Weight UOM': (p) => (num(attr(p).product_weight_lb) ? 'pound' : ''),
-  'Cutout Left-to-Right Width': (p) => cut(p, 'length'),
-  'Cutout Front-to-Back Depth': (p) => cut(p, 'width'),
-  'Cutout Below Counter Height': (p) => cut(p, 'depth'),
-  'Minimum Cabinet Size': (p) => num(attr(p).min_external_cabinet_size_in),
-  'Minimum Cabinet Size UOM': (p) => (num(attr(p).min_external_cabinet_size_in) ? 'inch' : ''),
-  'Minimum Countertop Length': (p) => num(attr(p).min_external_cabinet_size_in),
-  'Minimum Countertop Length UOM': (p) => (num(attr(p).min_external_cabinet_size_in) ? 'inch' : ''),
-
-  // Retail pack = the shipping box the PIM already knows
-  'Retail Pack Width': (p) => ship(p, 'width'),
-  'Package Width UOM': (p) => (ship(p, 'width') ? 'inch' : ''),
-  'Retail Pack Height': (p) => ship(p, 'height'),
-  'Package Height UOM': (p) => (ship(p, 'height') ? 'inch' : ''),
-  'Retail Pack Depth': (p) => ship(p, 'length'),
-  'Package Depth UOM': (p) => (ship(p, 'length') ? 'inch' : ''),
-  'Retail Pack Weight': (p) => num(p.shipping_weight_lb),
-  'Package Weight UOM': (p) => (num(p.shipping_weight_lb) ? 'pound' : ''),
-  'Retail Pack Qty': () => '1',
-  'Retail Pack UPC': (p) => attr(p).upc || '',
-  'Retail Packaging Type': () => 'Box',
-  'Retail Nestable': () => 'No',
-  'Retail Peggable': () => 'No',
-
-  // Compliance (conservative constants; ADA from the PIM)
-  'ADA Compliant': (p) => {
-    const v = String(attr(p).ada_compliant ?? '').toLowerCase();
-    if (!v) return '';
-    return v.includes('not') || v === 'no' || v === 'false' ? 'No' : 'Yes';
-  },
-  'AGA Certified': () => 'No',
-  'Lithium Type': () => 'Does not Use or Contain Lithium Batteries/Cells',
-  // Sinks certify under ASME/ANSI A112 (the cUPC mark covers it).
-  'ANSI Compliant': (p) => {
-    const a = attr(p);
-    const anyYes = [a.asme_a112_19_3_compliant, a.asme_a112_19_2_compliant, a.cupc_certified]
-      .some((v) => /yes|true/i.test(String(v ?? '')));
-    return anyYes ? 'Yes' : '';
-  },
-  'Certified Mark Name': (p) => (/yes|true/i.test(String(attr(p).cupc_certified ?? '')) ? 'UPC' : ''),
-  'Perishable Item': () => 'No',
-  'Expiration Date Required': () => 'No',
-  'Limited Quantity': () => 'No',
-  'Hazard Code Required': () => 'No',
-  'Prop 65 Item': () => 'No',
-  'OSHA Approved': () => 'No',
-  'Energy Star': () => 'No',
-  'Refrigerated Van': () => 'No',
-  'Heated Van Required': () => 'No',
-};
-
-const BULLET_RE = /^Bullet_(\d+)$/;
-
-// Locate the data sheet: "Attributes" on content files, the dimension-named
-// sheet on container files (the one that isn't Summary/Reference/category).
-function isDataSheetName(name) {
-  return !['Summary', 'Reference'].includes(name);
-}
+const START = 6; // rows 1-5 are Syndigo's header block
+const HEADER_SHEETS = new Set(['Summary', 'Reference']);
 
 /**
- * Fill one Menards workbook (content or containers). Returns the filled file
- * as a blob (kept under its original name — the set ships as one ZIP, the way
- * Menards delivers it) plus per-file stats. `task` (optional taskProgress
- * reporter): the template 40%, the rows 10%, writing the file the rest.
+ * Fill one Menards workbook. Returns it as a blob under its own name plus what
+ * the caller reports. `task` (optional taskProgress reporter): the template
+ * 40%, the rows 10%, writing the file the rest.
  */
-async function fillOne(template, products, task = null) {
+async function fillOne(template, products, galleries, task = null) {
   const { zip, shared } = await openTemplate(template.storage_path, { task: task?.part(0, 0.4) });
-  const wbXml = await zip.file('xl/workbook.xml').async('string');
-  const sheetNames = [...wbXml.matchAll(/<sheet[^>]*name="([^"]+)"/g)].map((m) => m[1]);
+  const sheetNames = listSheetNames(await zip.file('xl/workbook.xml').async('string'));
 
+  // The data sheet is the one whose row 5 carries the columns' names:
+  // "Attributes", or a dimension's own sheet in a Containers workbook.
   let dataPath = null;
   let dataSheet = null;
   let grid = null;
-  for (const name of sheetNames.filter(isDataSheetName)) {
+  for (const name of sheetNames.filter((n) => !HEADER_SHEETS.has(n))) {
     const path = await sheetPathByName(zip, name);
     if (!path) continue;
     const g = sheetToGrid(await zip.file(path).async('string'), shared);
-    // The data sheet is the one whose row 5 carries display names.
     if ((g[4] || []).filter(Boolean).length > 0) { dataPath = path; dataSheet = name; grid = g; break; }
   }
-  if (!dataPath) throw new Error(`No data sheet found in ${template.file_name}`);
+  if (!dataPath) throw new Error(`${template.file_name} is not a Menards file: no sheet has the columns' names on row 5.`);
 
+  const referencePath = await sheetPathByName(zip, 'Reference');
+  const reference = readMenardsReference(referencePath ? sheetToGrid(await zip.file(referencePath).async('string'), shared) : []);
   const names = grid[4] || [];
+  const columns = menardsColumns(names, grid[3] || [], reference);
   const ncols = names.length;
-  const sheetXml = await zip.file(dataPath).async('string');
 
-  const START = 6; // rows 1-5 are the Syndigo header block
-  const unmapped = new Set();
-  let rowsXml = '';
-  const fill = createFillTracker();
   if (task) {
     task.progress(0.4);
-    await task.step(`Filling ${products.length} rows…`);
+    await task.step(`Filling ${products.length} row${products.length === 1 ? '' : 's'}…`);
   }
-  products.forEach((p, pi) => {
-    const rowNum = START + pi;
-    const bullets = attr(p).bullet_points || [];
-    let cells = '';
-    for (let ci = 0; ci < ncols; ci++) {
-      const nm = names[ci];
-      if (!nm) continue;
-      let v;
-      const bul = BULLET_RE.exec(nm);
-      if (bul) v = bullets[Number(bul[1]) - 1] || '';
-      else {
-        const rule = MENARDS_RULES[nm];
-        if (!rule) { unmapped.add(nm); continue; }
-        try { v = rule(p); } catch { v = ''; }
-      }
-      if (v === '' || v == null) continue;
-      fill.hit(ci, v);
-      cells += buildCell(`${indexToCol(ci + 1)}${rowNum}`, v);
+  // A file that still holds a product's row (a download with one filled in)
+  // gives its place to the rows written now.
+  let sheetXml = (await zip.file(dataPath).async('string'))
+    .replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (row, r) => (Number(r) >= START ? '' : row));
+  const styles = columnStyles(sheetXml);
+  const report = { offList: new Map(), cut: [], bad: [] };
+  const rows = products.map((p) => menardsRow(p, columns, { gallery: galleries[p.sku] ?? [], imageCell: MENARDS_IMAGE_CELL }, report));
+
+  // Every cell a text in the column's own format, as Menards' files hold them.
+  const rowsXml = rows.map((cells, i) => {
+    const rowNum = START + i;
+    const body = [...cells].sort((a, b) => a[0] - b[0])
+      .map(([ci, value]) => buildCell(`${indexToCol(ci + 1)}${rowNum}`, value, styles.get(ci + 1) ?? null)).join('');
+    return `<row r="${rowNum}" spans="1:${ncols}">${body}</row>`;
+  }).join('');
+  sheetXml = injectRows(sheetXml, rowsXml, START - 1 + products.length);
+  zip.file(dataPath, sheetXml);
+
+  // The pictures the rows name, to hand over beside the workbook.
+  const pictures = [];
+  rows.forEach((cells, i) => {
+    const gallery = galleries[products[i].sku] ?? [];
+    for (const c of columns) {
+      if (c && c.picture !== null && cells.has(c.ci) && gallery[c.picture]) pictures.push({ name: menardsImageName(gallery[c.picture]), url: gallery[c.picture] });
     }
-    rowsXml += `<row r="${rowNum}" spans="1:${ncols}">${cells}</row>`;
   });
 
-  zip.file(dataPath, injectRows(sheetXml, rowsXml, START - 1 + products.length));
   const writing = task?.part(0.5, 1);
   writing?.progress(0, 'Writing the file…');
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }, writing ? (meta) => writing.progress(meta.percent / 100) : undefined);
+  const required = columns.filter((c) => c?.required);
   return {
     file: template.file_name,
     blob,
     dataSheet,
     columns: ncols,
-    unmapped: [...unmapped],
-    fillReport: fill.report(names, products.length),
+    pictures,
+    notes: menardsNotes({ columns, rows, products, report }),
+    fillReport: { rows: products.length, columns: required.map((c) => ({ label: c.name, filled: rows.filter((r) => r.has(c.ci)).length })) },
   };
 }
 
 /**
- * Fill a whole Menards file set (content + containers) for the given products.
- * @param {Object[]} templates  marketplace_templates rows (all Menards files)
+ * Fill the Menards files Templates holds for these products and download them
+ * as one ZIP: the workbook(s) under their own names and, in an "Images"
+ * folder, every picture the rows name, under the very name written in its cell.
+ * @param {Object[]} templates  marketplace_templates rows (the Menards files that apply)
  * @param {Object[]} products   full product rows
- * @param {{ task?: object }} [options]  `task`: a taskProgress reporter (the
- *   images 5%, each file an equal share to 90%, the ZIP the rest)
+ * @param {{ task?: object }} [options]  `task`: a taskProgress reporter
+ * @returns {{ files, count, images, imagesFailed, missingData, results }}
  */
 export async function generateMenardsFromTemplates(templates, products, { task = null } = {}) {
-  if (!templates?.length) throw new Error('No Menards templates uploaded.');
+  if (!templates?.length) throw new Error('No Menards template is uploaded: add the Menards Product Content file in Templates.');
   if (!products?.length) throw new Error('No products to export.');
 
-  // Attach primary-first image URLs (Master Image column).
-  task?.step(`Loading images for ${products.length} products…`);
-  const imgBySku = await fetchImagesBySku(products.map((p) => p.sku));
-  for (const p of products) p._images = (imgBySku[p.sku] || []).map((m) => m.storage_path);
+  task?.step(`Reading the images of ${products.length} product${products.length === 1 ? '' : 's'}…`);
+  const images = await fetchImagesBySku(products.map((p) => p.sku));
+  const galleries = Object.fromEntries(products.map((p) => [p.sku, menardsGallery(images[p.sku])]));
   task?.progress(0.05);
 
-  // True duplicates (re-uploaded files) are detected by their data sheet:
-  // each Containers file carries a distinct dimension sheet, the content file
-  // carries "Attributes". Same sheet twice = same file uploaded twice.
+  // The same workbook uploaded twice is told by its data sheet: each Containers
+  // file has its dimension's own sheet, a content file "Attributes".
+  const withImages = MENARDS_IMAGE_CELL === 'name';
+  const filesShare = withImages ? 0.3 : 0.85;
   const results = [];
   const seenSheets = new Set();
   for (const [i, t] of templates.entries()) {
-    const slice = labelTask(task?.part(0.05 + (0.85 * i) / templates.length, 0.05 + (0.85 * (i + 1)) / templates.length), templates.length > 1 ? `File ${i + 1} of ${templates.length}` : '');
-    const r = await fillOne(t, products, slice);
+    const slice = labelTask(task?.part(0.05 + (filesShare * i) / templates.length, 0.05 + (filesShare * (i + 1)) / templates.length), templates.length > 1 ? `File ${i + 1} of ${templates.length}` : '');
+    const r = await fillOne(t, products, galleries, slice);
     if (seenSheets.has(r.dataSheet)) continue;
     seenSheets.add(r.dataSheet);
     results.push(r);
   }
 
-  // Bundle the whole set into one ZIP, mirroring how Menards delivers it.
   const JSZip = await loadJSZip();
   const bundle = new JSZip();
   for (const r of results) bundle.file(r.file, r.blob);
-  const zipping = task?.part(0.9, 1);
-  zipping?.progress(0, 'Writing the ZIP…');
-  const out = await bundle.generateAsync({ type: 'blob', compression: 'DEFLATE' }, zipping ? (meta) => zipping.progress(meta.percent / 100) : undefined);
-  const category = (products[0]?.category ?? 'export').replace(/[^\w-]+/g, '_');
-  const url = URL.createObjectURL(out);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `Menards_${category}_${new Date().toISOString().slice(0, 10)}.zip`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  const day = new Date().toISOString().slice(0, 10);
+  const categories = new Set(products.map((p) => p.category));
+  const label = (products.length === 1 ? products[0].sku : categories.size === 1 ? [...categories][0] : `${products.length}_products`).replace(/[^\w-]+/g, '_');
+  const baseName = `Menards_${label}`;
 
-  return { files: results.length, count: products.length, results };
+  // The pictures once each: several files of a set name the same ones.
+  const entries = withImages ? [...new Map(results.flatMap((r) => r.pictures).map((e) => [e.name, e])).values()] : [];
+  const downloaded = await downloadMediaZip(entries, baseName, {
+    task: task?.part(0.05 + filesShare, 1),
+    into: bundle,
+    root: 'Images',
+    partName: (part, only) => `${baseName}${only ? '' : `_part${part}`}_${day}.zip`,
+  });
+
+  // A set's files say the same of the columns they share: each note once.
+  const missingData = [...new Set(results.flatMap((r) => r.notes))];
+  if (downloaded.failed.length) missingData.push(`${downloaded.failed.length} image${downloaded.failed.length === 1 ? '' : 's'} could not be downloaded (listed in the ZIP)`);
+  if (missingData.length) console.warn('[Menards export] To look at:', missingData);
+  return {
+    files: results.length,
+    count: products.length,
+    images: downloaded.files,
+    imagesFailed: downloaded.failed.length,
+    missingData,
+    results,
+  };
 }
