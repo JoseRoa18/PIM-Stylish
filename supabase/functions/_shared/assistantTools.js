@@ -35,7 +35,7 @@ import { checkExcelSpec, EXCEL_FORMATS, EXCEL_LIMITS, loadExcelSheet, SpecError,
 import { promoWindow, PROMO_DATE_COLUMNS } from "./promoCalendar.ts";
 import { PRICE_KEYS, priceNotes, priceProblems } from "./priceRules.js";
 import { completenessContext, inCompleteness, scoreCompleteness } from "./completeness.js";
-import { buildListingHealthData, MARKETPLACES } from "./listingHealth.js";
+import { buildListingHealthData, extractWixData, MARKETPLACES } from "./listingHealth.js";
 import { alignTargets, createPriceAlignment } from "./priceAlignmentReport.js";
 import { alignmentSummary } from "./alignmentSummary.js";
 import { WIX_SITES } from "./wixSites.ts";
@@ -145,7 +145,7 @@ export const ASSISTANT_TOOLS = [
   {
     name: "listing_health",
     description:
-      "What one product is missing, by its exact SKU: its PIM completeness (score, and every mandatory field that is empty or wrong, with the tab and section of the product page where it is filled) and its Listing Health on each connected store (Sinks Direct Canada / USA, Stylish Canada / USA, Azuni, Wayfair Canada / USA, Best Buy, Walmart Canada / USA): the score, whether it is listed there, and the checks that fail. These are the app's own rules, computed now. Call this for \"what is this product missing\", \"why is its score low\", \"is it ready for <store>\". Without a SKU it returns the latest snapshot's counters per channel.",
+      "One product's scores, by its exact SKU: its PIM completeness (score, and every mandatory field that is empty or wrong in the PIM, with the tab and section of the product page where it is filled) and its Listing Health on each connected store (Sinks Direct Canada / USA, Stylish Canada / USA, Azuni, Wayfair Canada / USA, Best Buy, Walmart Canada / USA): the score, whether the PIM has it listed there, whether the team switched that store off for it, and each failing check with what it looked at (the PIM's own field, the store as last read, or a difference between the two) and the value it found. These are the app's own rules, computed now. Most checks of Wayfair, Best Buy and Walmart read the PIM's fields, not the store's page: a failing check there does not mean the listing lacks it. Call this for \"what is this product missing\", \"why is its score low\", \"is it ready for <store>\". Without a SKU it returns the latest snapshot's counters per channel.",
     eager_input_streaming: true,
     input_schema: {
       type: "object",
@@ -285,7 +285,7 @@ export function toolLabel(name, input) {
   if (name === "product_details") return `Reading ${String(input?.sku ?? "a product").slice(0, 40)}`;
   if (name === "sales_overview") return "Reading sales";
   if (name === "promotions_overview") return "Reading promotions";
-  if (name === "listing_health") return input?.sku ? `Checking what ${String(input.sku).slice(0, 40)} is missing` : "Reading Listing Health";
+  if (name === "listing_health") return input?.sku ? `Reading Listing Health: ${String(input.sku).slice(0, 40)}` : "Reading Listing Health";
   if (name === "price_alignment") return `Reading Price Alignment${input?.store ? `: ${String(input.store).slice(0, 40)}` : ""}`;
   if (name === "propose_action") return "Preparing a change to confirm";
   if (name === "query_table") return `Reading ${String(input?.table ?? "data").replace(/_/g, " ")}`;
@@ -850,24 +850,143 @@ async function restJson(ctx, path) {
   return text ? JSON.parse(text) : null;
 }
 
+// What a failing check READ. People assign work from these answers, and the
+// team was told that data was "missing" on a marketplace whose listing had it
+// (2026-11-26): most checks of Wayfair, Best Buy and Walmart look at the
+// PIM's own fields, never at the store's page, and Wayfair's spec audit
+// counts a value written Wayfair's way as a difference. So every failing
+// check goes back with what it looked at and the value it found there.
+const HEALTH_HOW_TO_READ =
+  "Each failing check says what it looked at. looks_at \"pim\": the PIM's own field is empty or short — it says nothing about the store's page, which may already show it. \"store\": what the store showed when the PIM last read it (store_read_at). \"store_vs_pim\": the store shows one value and the PIM holds another — a difference, often only the marketplace's own wording or format, not something missing. \"link\": the PIM has no link or offer for the product on that store; with switched_off the team turned that store off for this product, so it is expected. `found` is what the check read. Report each one as that, with its value — never as \"missing on the store\" unless looks_at is \"store\". Wayfair's \"Spec Attributes in Sync\" keeps only the names of the attributes that differ, not the two values: Wayfair may hold the same fact in its own wording, or a value the team set there on purpose, so the list is not a list of errors. The two values are side by side on the product page › Marketplaces › the Wayfair card › \"Review push…\" (editors), which shows Wayfair's current value next to the PIM's and sends nothing until the person confirms. Sinks Direct Canada is scored on the copy of its page the PIM last pulled (store_read_at), which can be weeks old.";
+
+// The product's "Excluded marketplaces" switch of each scored store (the Wix
+// stores have none: they carry every product of their brand).
+const HEALTH_EXCLUSION_KEY = { wayfair: "wayfair_ca", wayfair_usa: "wayfair_us", bestbuy: "bestbuy", walmart_us: "walmart_us", walmart_ca: "walmart_ca" };
+const HEALTH_LINK_CHECKS = new Set(["linked_to_wix", "linked_to_wayfair", "linked_to_wayfair_usa", "listed_on_bestbuy", "listed_on_walmart", "ws_listed"]);
+const HEALTH_COMPARE_CHECKS = new Set(["wayfair_specs_synced", "wayfair_usa_specs_synced", "bb_price_matches", "ws_price_aligned"]);
+
+/** What a Listing Health check looks at. `storeCopy` = the checks ran on the copy of the store's own page (Sinks Direct Canada). */
+function healthLooksAt(key, storeCopy) {
+  if (HEALTH_LINK_CHECKS.has(key)) return "link";
+  if (HEALTH_COMPARE_CHECKS.has(key)) return "store_vs_pim";
+  if (storeCopy || /^(bb_|wm_|ws_)/.test(key)) return "store";
+  return "pim";
+}
+
+const shortText = (v, max = 90) => {
+  const s = String(v ?? "").replace(/\s+/g, " ").trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+};
+const countOf = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`;
+const tabsOf = (titles) => (Array.isArray(titles) && titles.length ? `the page's tabs are: ${titles.map((t) => shortText(t, 40)).join(", ")}` : "the page has no info tabs");
+
+/** The value a failing check read, in a few words. */
+function healthFound(key, { looksAt, subject, media, snapshot, switchedOff }) {
+  const where = looksAt === "store" ? "on the store's page" : "in the PIM";
+  const s = snapshot ?? {};
+  const images = (media ?? []).filter((m) => m.media_type === "image").length;
+  switch (key) {
+    // no link / offer
+    case "linked_to_wix":
+    case "linked_to_wayfair":
+    case "linked_to_wayfair_usa":
+    case "listed_on_bestbuy":
+    case "listed_on_walmart":
+    case "ws_listed":
+      return switchedOff
+        ? "switched off by the team for this product (Excluded marketplaces): no listing is expected"
+        : "no link or offer in the PIM — the product may still be listed there under an id the PIM does not know";
+    // the PIM's own fields — or, on Sinks Direct Canada, the copy of its page
+    case "product_name": {
+      const t = shortText(subject.model_name);
+      return t ? `the name ${where} is "${t}" (${String(subject.model_name).trim().length} characters; the check wants 10 or more)` : `no name ${where}`;
+    }
+    case "marketing_title": {
+      const raw = String(subject.attributes?.general_title_en ?? "").trim();
+      return raw ? `General Title (EN) in the PIM is "${shortText(raw)}" (${raw.length} characters; the check wants 10 or more)` : "General Title (EN) is empty in the PIM";
+    }
+    case "description":
+      return `the description ${where} has ${String(subject.description ?? "").length} characters (the check wants more than 100)`;
+    case "bullet_points": {
+      const n = Array.isArray(subject.attributes?.bullet_points) ? subject.attributes.bullet_points.length : 0;
+      return `${countOf(n, "bullet point")} in the PIM (the check wants 4 or more)`;
+    }
+    case "primary_image":
+      return `no main image ${where}`;
+    case "multiple_images":
+      return `${countOf(images, "image")} ${where} (the check wants 5 or more)`;
+    case "price":
+      return looksAt === "store" ? "no price on the store's page" : "MSRP CAD is empty in the PIM";
+    case "section_dimensions":
+    case "section_documents":
+    case "section_features":
+    case "section_accessories":
+      if (looksAt !== "store") return "the PIM has no copy of the store's page for this product, so its tabs could not be read";
+      return `${tabsOf((subject.additional_info_sections ?? []).map((x) => x?.title))} — none is titled like the one this check looks for; the information may be there under another title`;
+    // the store, as last read
+    case "bb_offer_active":
+      return `Best Buy's offer is not active (state ${s.state ?? "unknown"})`;
+    case "bb_in_stock":
+      return `Best Buy's offer has ${s.quantity ?? 0} units`;
+    case "bb_price_matches":
+      return `Best Buy's offer is at ${s.origin_price ?? s.price} CAD and the PIM's MAP CAD is ${s.map}`;
+    case "wm_published":
+      return `Walmart's status for the item is ${s.published ?? "unknown"}`;
+    case "wm_lifecycle_active":
+      return `Walmart's lifecycle for the item is ${s.lifecycle ?? "unknown"}`;
+    case "ws_live":
+      return `the product is ${s.state ?? "not visible"} on the store`;
+    case "ws_name":
+      return s.name ? `the name on the store is "${shortText(s.name)}" (the check wants 10 characters or more)` : "no name on the store";
+    case "ws_price":
+      return `the price on the store is ${s.price ?? "empty"}`;
+    case "ws_price_aligned":
+      return `the store shows ${s.price} and the PIM expects ${s.expected}${s.expected_source ? ` (${s.expected_source})` : ""}`;
+    case "ws_description":
+      return `the description on the store has ${s.description_length} characters (the check wants more than 100)`;
+    case "ws_main_image":
+      return "the store's page has no main image";
+    case "ws_images":
+      return `${countOf(s.image_count ?? 0, "image")} on the store's page (the check wants 5 or more)`;
+    case "ws_section_dimensions":
+    case "ws_section_documents":
+    case "ws_section_features":
+    case "ws_section_where_to_buy":
+      return `${tabsOf(s.section_titles)} — none is titled like the one this check looks for; the information may be there under another title`;
+    case "wayfair_specs_synced":
+    case "wayfair_usa_specs_synced":
+      if (!snapshot) return "the last Wayfair audit did not cover this product";
+      return `${countOf(s.changed ?? 0, "attribute")} whose value at Wayfair is not the one the PIM would send (names only, see how_to_read): ${(s.fields ?? []).join(", ") || "not named"}`;
+    default:
+      return looksAt === "store" ? "not found on the store's page" : "empty in the PIM";
+  }
+}
+
 async function listingHealth(ctx, input) {
   const asked = String(input.sku ?? "").trim();
   if (!asked) {
     const { rows } = await rest(ctx, "channel_health?select=channel,target,run_at,total,in_sync,with_diffs,errors&order=run_at.desc&limit=200");
     const latest = new Map();
     for (const r of rows) if (!latest.has(r.channel)) latest.set(r.channel, r);
-    return { note: "The latest snapshot per channel. total = products looked at; in_sync = with nothing to fix; with_diffs = with differences. For one product's details, call this with its SKU.", channels: [...latest.values()] };
+    return {
+      note: "The latest snapshot per channel. total = products looked at; in_sync = nothing differs; with_diffs = at least one thing differs between the store and the PIM; errors = could not be read. A difference is not an issue to fix by itself: on Wayfair it is an attribute whose value at Wayfair is not the one the PIM would send, often only Wayfair's own wording, and nearly every listing has one. Do not report with_diffs as issues or as things missing on the store. For one product's details, call this with its SKU.",
+      channels: [...latest.values()],
+    };
   }
   const { rows } = await rest(ctx, `products?select=*&sku=eq.${q(asked)}`);
   if (rows.length !== 1) return { found: false, note: `No product with the SKU "${asked}". Use find_products for the exact one.` };
   const product = rows[0];
   const sku = product.sku;
-  const [media, upcs, ...items] = await Promise.all([
+  const [media, upcs, runs, ...items] = await Promise.all([
     rest(ctx, `product_media?select=*&sku=eq.${q(sku)}&order=display_order`),
     restAll(ctx, "products?select=sku,upc:attributes->>upc&workflow_status=neq.archived"),
+    rest(ctx, "channel_health?select=channel,run_at&order=run_at.desc&limit=200").catch(() => ({ rows: [] })),
     ...HEALTH_ITEM_CHANNELS.map((channel) => restJson(ctx, `rpc/channel_health_item?p_channel=${channel}&p_sku=${q(sku)}`).catch(() => null)),
   ]);
   const item = Object.fromEntries(HEALTH_ITEM_CHANNELS.map((channel, i) => [channel, items[i]]));
+  // when each store's snapshot was taken (the newest per channel)
+  const readAtOf = new Map();
+  for (const r of runs.rows) if (!readAtOf.has(r.channel)) readAtOf.set(r.channel, r.run_at);
   const only = (value) => new Map(value ? [[sku, value]] : []);
 
   const pim = scoreCompleteness(product, media.rows, completenessContext(upcs.map((p) => ({ sku: p.sku, attributes: { upc: p.upc } }))));
@@ -886,18 +1005,39 @@ async function listingHealth(ctx, input) {
       notSold.push(MARKETPLACES[key].label); // the store does not carry this brand
       continue;
     }
+    const def = MARKETPLACES[key];
+    // What the checks of this store ran on: the copy of the store's own page
+    // (Sinks Direct Canada, once pulled) or the PIM's fields, plus the
+    // store's item of the latest snapshot.
+    const wix = def.dataSource === "wix_cache" ? extractWixData(product.wix_raw) : null;
+    const subject = wix ? { ...product, ...wix } : product;
+    const subjectMedia = wix ? wix._wix_media : media.rows;
+    const snapshot = key === "wix" ? null : item[key] ?? null;
+    const exclusion = HEALTH_EXCLUSION_KEY[key];
+    const switchedOff = Boolean(exclusion) && Array.isArray(product.channel_exclusions) && product.channel_exclusions.includes(exclusion);
+    const readAt = wix ? wix._wix_fetched_at : snapshot ? readAtOf.get(key) ?? null : null;
     stores.push({
-      store: MARKETPLACES[key].label,
+      store: def.label,
       score: scored.result.score,
       listed: scored.source !== "not_linked",
-      failing: scored.result.issues.map((i) => `${i.label} (${i.severity})`),
-      ...(scored.wayfair_audit?.fields?.length ? { wayfair_specs_that_differ: scored.wayfair_audit.fields } : {}),
+      ...(switchedOff ? { switched_off: true } : {}),
+      ...(readAt ? { store_read_at: readAt } : {}),
+      failing: scored.result.issues.map((i) => {
+        const looksAt = healthLooksAt(i.key, Boolean(wix));
+        return {
+          check: i.label,
+          severity: i.severity,
+          looks_at: looksAt,
+          found: healthFound(i.key, { looksAt, subject, media: subjectMedia, snapshot, switchedOff }),
+        };
+      }),
     });
   }
   return {
     found: true,
     sku,
     model: product.model_name,
+    how_to_read: HEALTH_HOW_TO_READ,
     pim_completeness: {
       ...(inCompleteness(product) ? {} : { note: "Obsolete and archived products are left out of the PIM completeness score; this is what it would be." }),
       score: pim.score,

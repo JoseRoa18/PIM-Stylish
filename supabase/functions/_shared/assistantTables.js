@@ -29,20 +29,20 @@ export const ASSISTANT_TABLES = {
   wix_links: { key: "site,sku", note: "The product's id on each Wix store (site)." },
   product_inventory: {
     key: "market,sku",
-    note: "Stock cache from Odoo, refreshed every hour: one row per market (ca = Cambridge CBG, us = Atlanta ATL) and sku. `available` = units that can be sold; `eta` = next expected arrival of open purchase orders; warehouses JSON has on_order / expected / late. A product with NO row is 'not tracked' (not in Odoo), never 0.",
+    note: "Stock cache from Odoo, refreshed every 5 minutes: one row per market (ca = Cambridge CBG, us = Atlanta ATL) and sku. `available` = units that can be sold; `eta` = next expected arrival of open purchase orders; warehouses JSON has on_order / expected / late. A product with NO row is 'not tracked' (not in Odoo), never 0.",
   },
   product_sales: {
     key: "market,sku",
-    note: "Units sold cache from Odoo, refreshed every 3 hours: one row per market and sku that sold in the last 90 days (units_30, units_90, channels JSON = { marketplace: { u30, u90 } }). No row = sold nothing. For totals use the sales_overview tool.",
+    note: "Units sold cache from Odoo, refreshed every hour: one row per market and sku that sold in the last 90 days (units_30, units_90, channels JSON = { marketplace: { u30, u90 } }). No row = sold nothing. For totals use the sales_overview tool.",
   },
   product_history: { key: "id", note: "Field-by-field change history of products (field, old_value, new_value, actor_email, changed_at)." },
   product_where_to_buy: { key: "sku,retailer", note: "The PIM's own WHERE TO BUY links: one per product and retailer." },
   where_to_buy_links: {
     key: "id",
-    note: "Every link of the Stylish / Azuni pages and the dealers' price watch with its last check: verdict (ok / broken / manual / missing…), sku_check (match / listing / variant / other / unknown), price, currency, in_stock, read_at, checked_at. site = stylish_ca / stylish_us / azuni_ca / dealers.",
+    note: "Every link of the Stylish / Azuni pages and the dealers' price watch with its last check: verdict (ok / broken / manual / missing…), sku_check (match / listing / variant / other / unknown), price, currency, in_stock, read_at, checked_at. site = stylish_ca / stylish_us / azuni_ca / dealers. A row says what the page behind the SAVED link showed at read_at — not what the store shows now, and not always our listing: the link may open an older listing, another seller's page (Walmart.com for a product we do not list there) or another option; only sku_check = match is a page confirmed as the product. Before listing products as sold out or off price on a store, leave out the ones switched off for it (products.channel_exclusions) and the pages not confirmed.",
     hide: ["page_options"],
   },
-  where_to_buy_readings: { key: "retailer,sku", note: "View: the newest reading per store (retailer) and product — what Price Alignment compares." },
+  where_to_buy_readings: { key: "retailer,sku", note: "View: the newest reading per store (retailer) and product — what Price Alignment compares. The same limits as where_to_buy_links: the page behind the saved link, as of read_at." },
   where_to_buy_suggestions: { key: "id", note: "Suggested replacement links (status ready / applied / dismissed / failed…)." },
   promotions: {
     key: "id",
@@ -68,11 +68,11 @@ export const ASSISTANT_TABLES = {
   },
   kpi_snapshots: {
     key: "snapshot_date,scope,key",
-    note: "Daily KPI snapshots behind Analytics (snapshot_date, scope, key, metrics JSON). scope 'pim' / key 'all' = the PIM's completeness (total, complete = products at 100%, avg, missing = how many products miss each field; also every product's score — a large row, take one day); 'pim_category' / <category> = the same totals per category; 'channel' / <marketplace> = its Listing Health (total, linked, avg, distribution by band; since 2026-11-25 complete = listings at 100%, issues = failed checks in all, by_check); 'channel_detail' / <marketplace> = each listing's score and the listings failing each check — large rows: always filter by key and one snapshot_date; 'price' and 'sync' = price alignment per Wix site and Wayfair's spec sync.",
+    note: "Daily KPI snapshots behind Analytics (snapshot_date, scope, key, metrics JSON). scope 'pim' / key 'all' = the PIM's completeness (total, complete = products at 100%, avg, missing = how many products miss each field; also every product's score — a large row, take one day); 'pim_category' / <category> = the same totals per category; 'channel' / <marketplace> = its Listing Health (total, linked, avg, distribution by band; since 2026-11-25 complete = listings at 100%, issues = failed checks in all, by_check); 'channel_detail' / <marketplace> = each listing's score and the listings failing each check — large rows: always filter by key and one snapshot_date; 'price' and 'sync' = price alignment per Wix site and Wayfair's spec sync. A marketplace's issues are failed checks, not things missing on its listings: most checks of Wayfair, Best Buy and Walmart read the PIM's own fields, the 'listed' / 'linked' checks also count the products the team switched off for that store, and Wayfair's specs check fails on any attribute Wayfair writes its own way.",
   },
   channel_health: {
     key: "id",
-    note: "Listing Health snapshots per channel (channel, target, run_at, total, in_sync, with_diffs, errors). Take the latest run_at per channel.",
+    note: "Listing Health snapshots per channel (channel, target, run_at, total, in_sync, with_diffs, errors). Take the latest run_at per channel. with_diffs = listings where something differs between the store and the PIM — a difference, often only the marketplace's own wording (nearly every Wayfair listing has one), not an issue to fix by itself.",
     hide: ["results"],
   },
   marketplace_templates: { key: "id", note: "The marketplace template files kept in Templates (marketplace, purpose, categories, file_name)." },
