@@ -96,6 +96,7 @@ const REASONS = [
   { key: 'other_currency', label: () => 'Shown in another currency', meaning: () => 'The page showed its price in another currency than this channel\'s.' },
   { key: 'read_before_change', label: () => 'Read before the expected price changed', meaning: () => 'A promotion started or ended for the product after its page was last read, so that reading says nothing about today\'s expected price. Left out until the page is read again.' },
   { key: 'sold_out', label: () => 'Sold out, no price on the page', meaning: () => 'The store shows the product sold out, without a price.' },
+  { key: 'sold_out_no_stock', label: () => 'Sold out on the store, none in our warehouse', meaning: (cfg) => `The store shows the product sold out and our own warehouse in ${countryOf(cfg)} has no units either: there is nothing to sell, so its price is not compared. A product sold out on the store while we have units still counts.` },
   { key: 'no_price', label: () => 'Read without a price', meaning: () => 'The page showed no price when it was read, or it has not been read yet.' },
 ];
 

@@ -917,6 +917,7 @@ function PriceAlignmentCard({ canEdit, confirm, initialSite = null }) {
                   result.otherCurrency ? `${result.otherCurrency} shown in another currency left out` : null,
                   result.readBeforeChange ? `${result.readBeforeChange} read before the expected price changed (a promotion started or ended), left out until read again` : null,
                   result.soldOut ? `${result.soldOut} sold out without a price` : null,
+                  result.soldOutNoStock ? `${result.soldOutNoStock} sold out on the store with none in our warehouse, left out` : null,
                   result.noPrice ? `${result.noPrice} read without a price` : null,
                   // Never when or how the pages are read (user, 2026-11-24: "son reglas internas del sistema").
                 ].filter(Boolean).join(' · ')

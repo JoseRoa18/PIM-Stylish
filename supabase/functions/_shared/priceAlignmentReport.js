@@ -446,6 +446,18 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     });
   }
 
+  // Our own units of each product in a country's warehouse (product_inventory:
+  // Canada CBG, USA ATL), shared. A product Odoo does not track has no row —
+  // not tracked is never 0. A read that fails leaves the list empty, so the
+  // report still comes out, with nothing left out on its account.
+  function warehouseStock(market) {
+    return sharedLoad(`inventory:${market}`, async () => {
+      const { data, error } = await db.from('product_inventory').select('sku, available').eq('market', market).range(0, 4999);
+      if (error) return new Map();
+      return new Map((data ?? []).map((r) => [r.sku, Number(r.available) || 0]));
+    });
+  }
+
   // The Eastern-time day a page was read ('YYYY-MM-DD').
   const etDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Toronto' });
 
@@ -457,7 +469,13 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
    * option — or naming a model that is not this SKU —, a page read before the
    * product's expected price last changed (a promotion started or ended since:
    * it is read again within 3 days), a page that showed no price, and a price
-   * in the other market's currency. A page that names no model at all is
+   * in the other market's currency — and a page that shows the product SOLD
+   * OUT while our own warehouse of that country has none either (user,
+   * 2026-11-26: "verifique si efectivamente está agotado en la warehouse,
+   * entonces no cuenta para misalignment … para todos los demás casos sí
+   * cuenta"): there is nothing to sell at any price. Sold out on the store
+   * while WE have units, or a product Odoo does not track, still counts.
+   * A page that names no model at all is
    * compared but marked unconfirmed. Home Depot Canada keeps a kitchen sink at
    * MAP when its promo is under the 5% NLP minimum (the PIM's NLP workbook
    * leaves it out). On a store with `unsureUncounted` (BB&B, Overstock — user,
@@ -468,11 +486,12 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
     const rows = (await pageReadings(task?.part(0, 0.6), cfg.retailer)).filter((r) => r.retailer === cfg.retailer);
     if (!rows.some((r) => r.read_at)) return null;
     task?.progress(0.6, 'Reading the expected prices…');
-    const [{ baseBySku, promoBySku }, changedOn, categories, off] = await Promise.all([
+    const [{ baseBySku, promoBySku }, changedOn, categories, off, stock] = await Promise.all([
       loadExpectedPrices(cfg),
       loadPriceChangeDays(cfg),
       cfg.nlpMinimum ? productCategories() : null,
       switchedOff(cfg),
+      warehouseStock(cfg.market),
     ]);
     task?.progress(0.9, 'Comparing the prices…');
     const currency = cfg.market === 'us' ? 'USD' : 'CAD';
@@ -482,7 +501,7 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
       if (!prev || (r.read_at ?? '') > (prev.read_at ?? '')) bySku.set(r.sku, r);
     }
     const results = [];
-    const left = { noPrice: 0, soldOut: 0, otherProduct: 0, otherCurrency: 0, readBeforeChange: 0 };
+    const left = { noPrice: 0, soldOut: 0, soldOutNoStock: 0, otherProduct: 0, otherCurrency: 0, readBeforeChange: 0 };
     // The same pages one by one, with what each one showed (the Excel's "Left out").
     const leftOut = [];
     const leave = (counter, reason, sku, r) => {
@@ -497,6 +516,8 @@ export function createPriceAlignment({ db, sharedLoad, readingsOfOneStore = fals
       // 'listing' (the right listing on its default option): the price read is the default finish's.
       if (r.sku_check === 'other' || r.sku_check === 'variant' || r.sku_check === 'listing' || (r.sku_check === 'unknown' && r.page_model)) { leave('otherProduct', 'other_product', sku, r); continue; }
       if (r.price == null || !r.read_at) { leave(r.in_stock === false ? 'soldOut' : 'noPrice', r.in_stock === false ? 'sold_out' : 'no_price', sku, r); continue; }
+      // Sold out there and none with us: nothing to sell, so its price is not judged.
+      if (r.in_stock === false && stock.has(sku) && stock.get(sku) <= 0) { leave('soldOutNoStock', 'sold_out_no_stock', sku, r); continue; }
       if (r.currency && r.currency !== currency) { leave('otherCurrency', 'other_currency', sku, r); continue; }
       if (changedOn.has(sku) && etDay(r.read_at) < changedOn.get(sku)) { leave('readBeforeChange', 'read_before_change', sku, r); continue; }
       if (!readFrom || r.read_at < readFrom) readFrom = r.read_at;
