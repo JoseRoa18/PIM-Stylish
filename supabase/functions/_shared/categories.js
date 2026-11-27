@@ -68,3 +68,26 @@ export function channelCategory(product) {
   if (category === 'accessory' && isColanderOrRack(product)) return 'colander_drying_rack';
   return baseCategory(category);
 }
+
+/**
+ * A wall-mounted faucet (the K-145 Asti pot fillers on 2026-11-27). It is told
+ * by its mounting ("Wall-Mounted"); the product type or the title speak only
+ * where no mounting is stored.
+ */
+export function isWallMounted(product) {
+  if (!isFaucetCategory(product?.category)) return false;
+  const a = product?.attributes ?? {};
+  const mount = String(a.mounting_type ?? '').trim();
+  if (mount) return /wall/i.test(mount);
+  return /wall[\s-]?mount/i.test(`${product?.product_type ?? ''} ${a.general_title_en ?? ''}`);
+}
+
+/**
+ * The three measures a faucet takes from the deck it stands on: Faucet Height
+ * and Spout Height (both from the deck up) and Max Deck Thickness. A
+ * wall-mounted faucet has none of them (user, 2026-11-27: "these
+ * specifications pertain to deck-mounted faucets" — Faucet Height and Max Deck
+ * Thickness first, Spout Height at his word the same day): the PIM neither
+ * shows nor asks for them there. Spout Reach is asked of every faucet.
+ */
+export const hasDeckMeasures = (product) => !isWallMounted(product);

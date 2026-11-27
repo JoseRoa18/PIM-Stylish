@@ -11,6 +11,7 @@
 // Shared with the health-refresh edge function (daily KPI snapshots), so it
 // stays pure JS importing only from _shared. Category labels mirror
 // src/features/products/lib/categories.js; keep both in step.
+import { hasDeckMeasures } from './categories.js';
 import { COUNTRY_NAMES } from './countries.js';
 import { FAUCET_CATEGORIES, KITCHEN_FAUCET_CATEGORIES, SINK_CATEGORIES, hasCutOut } from './categories.js';
 
@@ -205,9 +206,12 @@ export const CHECKS = [
   { key: 'cartridge_size', label: 'Cartridge Size', group: 'Specifications', section: 'Handles, Spray & Cartridge', cats: FAUCETS, check: has('cartridge_size') },
 
   // ---- Specifications: Faucet Dimensions ----
-  { key: 'faucet_height', label: 'Faucet Height', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, check: hasNum('faucet_height_in') },
+  // Faucet Height, Spout Height and Max Deck Thickness are measured from the
+  // deck a faucet stands on: never asked of a wall-mounted one (user,
+  // 2026-11-27, about the K-145 pot fillers) — hasDeckMeasures in categories.js.
+  { key: 'faucet_height', label: 'Faucet Height', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, applies: hasDeckMeasures, check: hasNum('faucet_height_in') },
   { key: 'spout_reach', label: 'Spout Reach', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, check: hasNum('spout_reach_in') },
-  { key: 'spout_height', label: 'Spout Height', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, check: hasNum('spout_height_in') },
+  { key: 'spout_height', label: 'Spout Height', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, applies: hasDeckMeasures, check: hasNum('spout_height_in') },
   {
     key: 'install_hole_mm', label: 'Install Hole Ø (mm)', group: 'Specifications', section: 'Faucet Dimensions', cats: KITCHEN_FAUCETS,
     check: (p) => {
@@ -219,7 +223,7 @@ export const CHECKS = [
     },
   },
   { key: 'install_hole_in', label: 'Install Hole Ø', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, check: hasNum('install_hole_diameter_in') },
-  { key: 'deck', label: 'Max Deck Thickness', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, check: hasNum('max_deck_thickness_in') },
+  { key: 'deck', label: 'Max Deck Thickness', group: 'Specifications', section: 'Faucet Dimensions', cats: FAUCETS, applies: hasDeckMeasures, check: hasNum('max_deck_thickness_in') },
 
   // ---- Specifications: Dimensions & Weight ----
   // Faucets describe size by spout height/reach, not by an overall L×W×H.

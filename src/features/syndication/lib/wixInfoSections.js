@@ -19,7 +19,7 @@
 //     passes through untouched.
 
 import { toFractionLength } from '@/features/products/lib/units';
-import { isFaucetCategory } from '@/features/products/lib/categories';
+import { isFaucetCategory, hasDeckMeasures } from '@/features/products/lib/categories';
 // The pages' section order (Dimensions, Features, documents, … WHERE TO BUY
 // last), shared with the WHERE TO BUY publish of the where-to-buy-audit.
 import { orderWixSections } from '../../../../supabase/functions/_shared/wixSectionOrder.js';
@@ -58,11 +58,18 @@ export function buildDimensionsHtml(product) {
 
   if (isFaucetCategory(category)) {
     const push = (label, key) => {
+      // A 0 is no measure: the K-145 hold one where a measure was not known
+      // or does not apply, and the page would read `Faucet Height: 0"`.
+      if (!(Number(attrs[key]) > 0)) return;
       const v = inches(attrs[key]);
       if (v) rows.push([label, v]);
     };
-    push('Faucet Height', 'faucet_height_in');
-    push('Spout Height', 'spout_height_in');
+    // A wall-mounted faucet stands on no deck and has no heights from it
+    // (user, 2026-11-27): only its reach.
+    if (hasDeckMeasures(product)) {
+      push('Faucet Height', 'faucet_height_in');
+      push('Spout Height', 'spout_height_in');
+    }
     push('Spout Reach', 'spout_reach_in');
   } else if (/sink/i.test(category)) {
     const ext = dims3(attrs.external_dimensions_in);

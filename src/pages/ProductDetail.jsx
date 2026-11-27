@@ -160,6 +160,7 @@ const WORKFLOW_OPTIONS = [
 
 import { CATEGORY_OPTIONS, isFaucetCategory, hasCraftsmanship, hasCutOut } from '@/features/products/lib/categories';
 import { BRAND_OPTIONS } from '@/features/products/lib/brands';
+import { hasDeckMeasures } from '@/features/products/lib/categories';
 import { COUNTRY_NAMES } from '@/features/products/lib/countries';
 import {
   YES_NO_OPTIONS, YES_NO_DNA_OPTIONS, COMPLIANCE_OPTIONS, MANUFACTURER_OPTIONS, COLOR_OPTIONS, FINISH_TYPE_OPTIONS,
@@ -1264,6 +1265,17 @@ function SpecsTab({ product, edit }) {
     || attr(product, 'valve_included') != null
     || attr(product, 'compatible_drain_assembly') != null;
   const isKitchenFaucet = isFaucet && !isBathFaucet;
+  // A wall-mounted faucet (the K-145 pot fillers) stands on no deck: it is not
+  // shown Faucet Height, Spout Height nor Max Deck Thickness (user,
+  // 2026-11-27). Read from the mounting as it is being edited, so the three
+  // fields come back the moment the mounting stops saying "wall".
+  const deckMeasures = hasDeckMeasures({
+    ...product,
+    category: cat,
+    attributes: edit.isEditing
+      ? { ...product.attributes, mounting_type: edit.form._mounting_type ?? attr(product, 'mounting_type') }
+      : product.attributes,
+  });
   const isAccessory = cat === 'accessory';
   const brand = edit.isEditing ? edit.form.brand : product.brand;
   const [unit, setUnit] = useLengthUnit();
@@ -1484,6 +1496,7 @@ function SpecsTab({ product, edit }) {
           </Section>
 
           <Section title="Faucet Dimensions" defaultOpen={false} action={unitToggle}>
+            {deckMeasures ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
               <AttrField label="Faucet Height" attrKey="faucet_height_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Spout Reach" attrKey="spout_reach_in" type="number" unit={unit} product={product} edit={edit} />
@@ -1496,6 +1509,16 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Install Hole Ø" attrKey="install_hole_diameter_in" type="number" unit={unit} product={product} edit={edit} />
               <AttrField label="Max Deck Thickness" attrKey="max_deck_thickness_in" type="number" unit={unit} product={product} edit={edit} />
             </div>
+            ) : (
+            /* Wall-mounted: its reach and the hole it is fixed through. The two
+               holes fill the first row, so the fraction sits under its decimal. */
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+              <AttrField label="Spout Reach" attrKey="spout_reach_in" type="number" unit={unit} product={product} edit={edit} />
+              <AttrField label="Install Hole Ø (mm)" attrKey="install_hole_diameter_mm" type="number" product={product} edit={edit} />
+              <AttrField label="Install Hole Ø" attrKey="install_hole_diameter_in" type="number" unit={unit} product={product} edit={edit} />
+              {isKitchenFaucet && <FractionField label="Spout Reach" attrKey="spout_reach_in" product={product} edit={edit} />}
+            </div>
+            )}
           </Section>
 
           <Section title="Certifications & Compliance" defaultOpen={false}>
