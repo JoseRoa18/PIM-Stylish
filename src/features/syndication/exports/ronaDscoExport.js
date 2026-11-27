@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
 import { isKitchenFaucetCategory } from '@/features/products/lib/categories';
+import { faucetFinish, faucetIncluded } from '@/features/products/lib/includedFaucet';
 import { countryFromList } from '@/features/products/lib/countries';
 import { WAREHOUSE, boxCount, boxSize, competitorPrices } from './ronaExport';
 import {
@@ -67,7 +68,8 @@ const kitchenSink = (p) => p.category === 'kitchen_sink';
 // the PIM keeps no such list for a faucet, and nothing is said for it.
 const included = (p) => list(attr(p).accessories_included).map(String);
 const includedSkus = (p, re) => included(p).filter((a) => re.test(a)).map((a) => a.match(/\(([A-Za-z0-9-]+)\)/)?.[1]).filter(Boolean);
-const withFaucet = (p) => !isSink(p) || /faucet/i.test(`${included(p).join(' ')} ${titleOf(p).replace(/faucet holes?/gi, '')}`);
+// A sink sold with its faucet: the product page's Faucet Included (includedFaucet.js), or a title that says so.
+const withFaucet = (p) => !isSink(p) || faucetIncluded(p) || /faucet/i.test(`${included(p).join(' ')} ${titleOf(p).replace(/faucet holes?/gi, '')}`);
 // A sink's faucet holes: its own count, else the count the faucet fields carry (0 on a sink without a deck).
 const faucetHoles = (p) => { const own = num(attr(p).number_of_faucet_holes); return own === '' ? num(attr(p).number_of_installation_holes) : own; };
 const outside = (p) => attr(p).external_dimensions_in ?? {};
@@ -261,7 +263,8 @@ const RULES = {
     return drain ? [drain.finish, drain.color, drain.color && drain.color === p.color ? 'Matches sink' : ''] : '';
   },
   faucetincluded: (p) => (isSink(p) ? yesNo(withFaucet(p)) : ''),
-  manufacturerfaucetfinish: (p) => (isSink(p) && !withFaucet(p) ? 'N/A' : ''),
+  // The finish of the faucet a sink comes with, as the PIM has it (it goes only when it is on Rona's list).
+  manufacturerfaucetfinish: (p) => (!isSink(p) ? '' : withFaucet(p) ? faucetFinish(p) : 'N/A'),
   numberoffaucetholes: (p) => { const n = faucetHoles(p); return n === '' ? '' : String(n); },
   faucetholespacing: (p) => {
     const n = faucetHoles(p);

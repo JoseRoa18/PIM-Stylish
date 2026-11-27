@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { SUGGEST_COLUMNS, SUGGEST_ATTRS, SUGGEST_FROM } from '@/features/products/lib/suggestFields';
+import { SUGGEST_COLUMNS, SUGGEST_ATTRS, SUGGEST_FROM, SUGGEST_BORROWED } from '@/features/products/lib/suggestFields';
 import { STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE } from '@/features/products/lib/fieldOptions';
 import { FIELD_DEFS } from '@/features/import/lib/importSchema';
 
@@ -59,6 +59,11 @@ export async function loadSuggestionLists({ task = null } = {}) {
   // …the product page's open fields (some from some categories only)…
   for (const k of [...SUGGEST_COLUMNS, ...SUGGEST_ATTRS]) out[k] = collect(k);
   for (const [k, keep] of Object.entries(SUGGEST_FROM)) out[k] = collect(k, keep);
+  // …a field that lists another field's values too (a sink's Faucet Finish:
+  // the finishes the catalog's faucets have)…
+  for (const [k, { from, keep }] of Object.entries(SUGGEST_BORROWED)) {
+    out[k] = [...new Set([...collect(from, keep), ...collect(k)])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }
   // …and the part-number pickers
   for (const [field, type] of Object.entries(SKU_PICKERS)) {
     out[field] = rows.filter((r) => r.product_type === type).map((r) => r.sku).sort();

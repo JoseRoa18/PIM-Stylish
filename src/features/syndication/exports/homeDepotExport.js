@@ -14,6 +14,7 @@ import {
   isYes,
 } from './templateFiller';
 import { isFaucetCategory } from '@/features/products/lib/categories';
+import { faucetFinish, faucetIncluded } from '@/features/products/lib/includedFaucet';
 
 // Fills a Home Depot USA (Mirakl) template in place.
 //
@@ -467,7 +468,9 @@ export const HOME_DEPOT_RULES = {
     if (/wall/i.test(t)) return 'Wall Mount';
     return 'Undermount';
   },
-  'Faucet Included': () => 'Without Faucet',
+  // A sink sold with its faucet (user, 2026-11-27: S-520C1, S-520C2) is "With
+  // Faucet", the list's other word; every other sink "Without Faucet".
+  'Faucet Included': (p) => (faucetIncluded(p) ? 'With Faucet' : 'Without Faucet'),
   // Undermount/vessel sinks carry no faucet holes unless the PIM says so.
   // One occurrence's list spells zero as "0", the other as "None".
   // Kitchen sinks included (user rule 2026-10-01: 0 when the PIM shows no
@@ -477,8 +480,14 @@ export const HOME_DEPOT_RULES = {
     const n = [attr(p).number_of_faucet_holes, attr(p).number_of_installation_holes].map(num).find((x) => x && x !== '0');
     return n ? [n] : ['0', 'None'];
   },
-  // Stylish sinks never ship with a faucet (user, 2026-10-01).
-  'Faucet Finish': (p) => (/sink/.test(p.category ?? '') ? 'No Faucet Included' : ''),
+  // A sink ships without a faucet (user, 2026-10-01) unless its page says it
+  // comes with one (2026-11-27): then the faucet's finish as the PIM has it,
+  // which goes only when it is on Home Depot's list ("Matte Black", "Brushed
+  // Stainless Steel"…) — else the cell stays empty.
+  'Faucet Finish': (p) => {
+    if (!/sink/.test(p.category ?? '')) return '';
+    return faucetIncluded(p) ? faucetFinish(p) : 'No Faucet Included';
+  },
   // HD's list is textual ("50/50 Double Bowl", not "2").
   'Number of Bowls': (p) => {
     const n = Number(num(attr(p).number_of_bowls));

@@ -100,7 +100,7 @@ const SKU_TYPES = [STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE];
 let suggestionsCache = null; // { at, promise }
 function loadSuggestions() {
   if (!suggestionsCache || Date.now() - suggestionsCache.at > SUGGESTIONS_TTL_MS) {
-    const attrs = [...SUGGEST_ATTRS, ...Object.keys(SUGGEST_FROM)];
+    const attrs = [...SUGGEST_ATTRS, ...Object.keys(SUGGEST_FROM), ...Object.keys(SUGGEST_BORROWED)];
     const promise = supabase
       .from('products')
       .select(['sku', 'brand', 'category', 'workflow_status', ...SUGGEST_COLUMNS,
@@ -112,6 +112,9 @@ function loadSuggestions() {
         const out = {};
         for (const k of [...SUGGEST_COLUMNS, ...SUGGEST_ATTRS]) out[k] = collect(k);
         for (const [k, keep] of Object.entries(SUGGEST_FROM)) out[k] = collect(k, keep);
+        // A field that lists another field's values too (a sink's Faucet
+        // Finish: the finishes the catalog's faucets have).
+        for (const [k, { from, keep }] of Object.entries(SUGGEST_BORROWED)) out[k] = [...new Set([...collect(from, keep), ...collect(k)])].sort();
         // The SKUs other products point at (strainers, deck plates, drains).
         out.skusByType = Object.fromEntries(SKU_TYPES.map((t) => [t,
           data.filter((r) => r.product_type === t && r.workflow_status !== 'archived')
@@ -171,7 +174,8 @@ import {
   BOWL_COUNT_OPTIONS, HANDLE_COUNT_OPTIONS, HOLE_COUNT_OPTIONS, PIECE_COUNT_OPTIONS, SPOUT_ROTATION_OPTIONS, SINK_RADIUS_OPTIONS,
   STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE, skusOfType,
 } from '@/features/products/lib/fieldOptions';
-import { SUGGEST_COLUMNS, SUGGEST_ATTRS, SUGGEST_FROM } from '@/features/products/lib/suggestFields';
+import { SUGGEST_COLUMNS, SUGGEST_ATTRS, SUGGEST_FROM, SUGGEST_BORROWED } from '@/features/products/lib/suggestFields';
+import { faucetIncluded } from '@/features/products/lib/includedFaucet';
 
 const MAX_BULLETS = 12;
 
@@ -211,6 +215,9 @@ function joinList(v) {
 const isEmptyish = (v) =>
   v === null || v === undefined || v === '' || v === false || (Array.isArray(v) && v.length === 0);
 const bothEmpty = (a, b) => isEmptyish(a) && isEmptyish(b);
+// Faucet Finish is the finish of the faucet a sink comes with: with Faucet
+// Included off the field is not shown, and a save keeps none.
+const settleIncludedFaucet = (form) => (form._faucet_included || !form._faucet_finish ? form : { ...form, _faucet_finish: '' });
 
 // ===================== Form helpers =====================
 
@@ -294,6 +301,11 @@ function buildEditForm(product) {
     _drain_hole_location: a.drain_hole_location ?? '',
     _has_grooves: a.has_grooves ?? false,
     _includes_grids: a.includes_grids ?? false,
+    // A sink sold with its faucet (user, 2026-11-27). The switch opens on what
+    // the PIM tells the marketplaces today: on too for a sink where it was
+    // never touched and whose Included Accessories name a faucet.
+    _faucet_included: faucetIncluded(product),
+    _faucet_finish: a.faucet_finish ?? '',
     _craftsmanship: a.craftsmanship ?? '',
     _product_weight_lb: a.product_weight_lb ?? '',
     _external_dimensions_in: a.external_dimensions_in ?? { length: '', width: '', depth: '' },
@@ -367,7 +379,7 @@ function buildPatch(form, product) {
   const newAttrs = { ...(product.attributes ?? {}) };
   let attrsChanged = false;
 
-  for (const [key, value] of Object.entries(form)) {
+  for (const [key, value] of Object.entries(settleIncludedFaucet(form))) {
     if (key.startsWith('_')) {
       // Attribute field — write into attributes JSONB
       const attrKey = key.slice(1); // remove leading _
@@ -430,7 +442,7 @@ function buildPatch(form, product) {
 // buildPatch's normalization but keeps each field separate with a label.
 function computeChanges(form, product) {
   const changes = [];
-  for (const [key, value] of Object.entries(form)) {
+  for (const [key, value] of Object.entries(settleIncludedFaucet(form))) {
     if (key.startsWith('_')) {
       const attrKey = key.slice(1);
       const original = (product.attributes ?? {})[attrKey] ?? null;
@@ -1245,6 +1257,24 @@ function ObsoleteField({ product, edit }) {
   return <Field label={<>Obsolete<HelpTip text={FIELD_HELP.is_obsolete} /></>} value={product.is_obsolete ? 'Yes' : 'No'} />;
 }
 
+// A sink sold with its faucet (user, 2026-11-27: "un campo que diga Faucet
+// included y si se le coloca sí, sale otro campo que diga faucet finish"): two
+// cells of the section's grid — the switch and, only while it is on, the finish
+// of THAT faucet (one of the finishes the catalog's faucets have), which is not
+// the sink's own Finish. The switch reads what the PIM tells the marketplaces
+// (faucetIncluded): on too for a sink where it was never touched and whose
+// Included Accessories name a faucet.
+function IncludedFaucetFields({ product, edit, category }) {
+  const included = edit.isEditing ? Boolean(edit.form._faucet_included) : faucetIncluded({ ...product, category });
+  const shown = edit.isEditing ? product : { ...product, attributes: { ...product.attributes, faucet_included: included } };
+  return (
+    <>
+      <AttrField label="Faucet Included" attrKey="faucet_included" type="boolean" product={shown} edit={edit} />
+      {included && <AttrField label="Faucet Finish" attrKey="faucet_finish" suggest product={product} edit={edit} />}
+    </>
+  );
+}
+
 // ===================== Specifications Tab =====================
 
 function SpecsTab({ product, edit }) {
@@ -1260,6 +1290,9 @@ function SpecsTab({ product, edit }) {
     || attr(product, 'pedestal_included') != null
     || attr(product, 'overflow') != null;
   const isKitchenSink = isSink && !isBathSink;
+  // Faucet Included / Faucet Finish (a sink sold with its faucet) sit once:
+  // beside Includes Grids where Bowl Configuration shows, else in Bathroom Sink.
+  const faucetInBowls = isSink && Boolean(isKitchenSink || attr(product, 'number_of_bowls'));
   const isBathFaucet = cat === 'bathroom_faucet'
     || attr(product, 'laminar_flow') != null
     || attr(product, 'valve_included') != null
@@ -1324,6 +1357,7 @@ function SpecsTab({ product, edit }) {
             <AttrField label="Drain Location" attrKey="drain_hole_location" type="select" options={DRAIN_LOCATION_OPTIONS} product={product} edit={edit} />
             <AttrField label="Has Grooves" attrKey="has_grooves" type="boolean" product={product} edit={edit} />
             <AttrField label="Includes Grids" attrKey="includes_grids" type="boolean" product={product} edit={edit} />
+            {faucetInBowls && <IncludedFaucetFields product={product} edit={edit} category={cat} />}
           </div>
         </Section>
       )}
@@ -1376,6 +1410,7 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Pedestal Included" attrKey="pedestal_included" type="boolean" product={product} edit={edit} />
               <AttrField label="Compatible Pedestal #" attrKey="compatible_pedestal" suggest product={product} edit={edit} />
               <AttrField label="Console Included" attrKey="console_included" type="boolean" product={product} edit={edit} />
+              {isSink && !faucetInBowls && <IncludedFaucetFields product={product} edit={edit} category={cat} />}
             </div>
           </Section>
 

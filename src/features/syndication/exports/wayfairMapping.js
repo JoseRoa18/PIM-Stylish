@@ -7,6 +7,7 @@
 // wayfairExport (case-insensitive), so rules return the *intended* value here.
 
 import { hasCraftsmanship } from '@/features/products/lib/categories';
+import { faucetFinish, faucetIncluded } from '@/features/products/lib/includedFaucet';
 
 const attr = (p) => p.attributes || {};
 
@@ -372,6 +373,8 @@ const PIECES_KEYWORDS = [
 ];
 const sinkPieces = (p) => {
   const out = new Set();
+  // A sink sold with its faucet (the product page's Faucet Included).
+  if (faucetIncluded(p)) out.add('Faucet');
   for (const a of attr(p).accessories_included ?? []) {
     for (const [re, label] of PIECES_KEYWORDS) {
       if (re.test(a)) { if (label !== 'Does Not Apply') out.add(label); break; }
@@ -477,7 +480,9 @@ export const WAYFAIR_CATEGORY_RULES = {
     'Number of Basins': (p) => (attr(p).number_of_bowls != null ? String(attr(p).number_of_bowls) : ''),
     'Short Height Divider': (p) => (attr(p).low_divider === true ? 'Yes' : attr(p).low_divider === false ? 'No' : ''),
     'Number of Faucet Holes': (p) => String(attr(p).number_of_faucet_holes ?? attr(p).number_of_installation_holes ?? 0),
-    'Faucet Finish': () => 'Does Not Apply',
+    // The finish of the faucet a sink comes with (free text at Wayfair), as the
+    // PIM has it; a sink sold without one answers Does Not Apply.
+    'Faucet Finish': (p) => (faucetIncluded(p) ? faucetFinish(p) : 'Does Not Apply'),
     'Stainless Steel Gauge': (p) => {
       if (!/stainless/i.test(p.material ?? '')) return 'Does Not Apply';
       const m = String(attr(p).gauge ?? '').match(/\d+/);
@@ -520,7 +525,8 @@ export const WAYFAIR_CATEGORY_RULES = {
       return /stainless|chrome|nickel|brass|bronze|gold|copper|gun ?metal|silver/i.test(f) ? f : 'Does Not Apply';
     },
     // "D" SKUs include a pop-up drain; the rest ship bare.
-    'Pieces Included': (p) => (/D$/i.test(p.sku) ? 'Drain Assembly' : 'Does Not Apply'),
+    'Pieces Included': (p) =>
+      [/D$/i.test(p.sku) ? 'Drain Assembly' : '', faucetIncluded(p) ? 'Faucet' : ''].filter(Boolean).join('; ') || 'Does Not Apply',
     'Drain Finish': () => 'Does Not Apply',
     'Construction Features': (p) => {
       const parts = [];

@@ -79,6 +79,8 @@ export const FIELD_HELP = {
   faucet_hole_center_spacing: 'Spacing between pre-drilled faucet holes, in inches.',
   number_of_faucet_holes: 'Pre-drilled faucet holes on the sink deck.',
   includes_grids: 'Whether bottom grids ship in the box.',
+  faucet_included: 'Whether this sink is sold with its faucet in the box. Marketplaces are told so, and asked for the faucet’s finish.',
+  faucet_finish: 'The finish of the faucet that comes with this sink — not the sink’s own finish.',
   grids_model_code: 'SKU of the compatible/included bottom grid.',
   strainer_model: 'SKU of the compatible/included strainer.',
   compatible_drain_assembly: 'Drain assembly SKU(s) that fit this product.',

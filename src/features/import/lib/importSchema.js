@@ -201,6 +201,10 @@ export const FIELD_DEFS = [
   { key: 'has_grooves', label: 'Does it have Grooves?', aliases: ['doesithavegrooves'], type: 'bool', target: { attr: 'has_grooves' } },
   { key: 'includes_grids', label: 'Include grids?', aliases: ['includegrids', 'includesgrids'], type: 'bool', target: { attr: 'includes_grids' } },
   { key: 'accessories_included', label: 'Accessories included', aliases: ['accessoriesincluded'], type: 'list', target: { attr: 'accessories_included' } },
+  // A sink sold with its faucet (user, 2026-11-27): Yes / No, and the finish
+  // of that faucet. Empty on most sinks, which come without one.
+  { key: 'faucet_included', label: 'Faucet Included', aliases: ['faucetincluded'], type: 'bool', target: { attr: 'faucet_included' }, optional: true },
+  { key: 'faucet_finish', label: 'Faucet Finish', aliases: ['faucetfinish'], type: 'text', target: { attr: 'faucet_finish' }, optional: true },
   { key: 'number_of_pieces', label: 'Number of pieces Included', aliases: ['numberofpiecesincluded', 'totalnumberofpiecesincluded'], type: 'int', target: { attr: 'number_of_pieces' } },
   { key: 'drain_hole_location', label: 'Drain Hole location', aliases: ['drainholelocation', 'drainholelocationplacement', 'drainplacement'], type: 'text', target: { attr: 'drain_hole_location' } },
   { key: 'drain_diameter_in', label: 'Drain Diameter', aliases: ['draindiameter', 'drainholediameter'], type: 'number', target: { attr: 'drain_diameter_in' } },
@@ -878,7 +882,7 @@ const SECTION_FIELDS = {
   physical: ['material', 'finish', 'color', 'finish_type', 'craftsmanship', 'durability', 'lead_free', 'installation_type', 'mounting_type', 'sink_shape', 'overall_shape',
     'pattern', 'wood_species', 'antimicrobial', 'application'],
   sink: ['number_of_bowls', 'bowl_configuration', 'basin_split', 'low_divider', 'gauge', 'sink_radius_mm', 'strainer_model', 'drain_hole_location', 'drain_diameter_in',
-    'has_grooves', 'includes_grids', 'grids_model_code', 'left_bowl_depth_in', 'right_bowl_depth_in', 'number_of_faucet_holes', 'compatible_faucet_type',
+    'has_grooves', 'includes_grids', 'grids_model_code', 'faucet_included', 'faucet_finish', 'left_bowl_depth_in', 'right_bowl_depth_in', 'number_of_faucet_holes', 'compatible_faucet_type',
     'faucet_hole_center_spacing', 'overflow', 'pedestal_included', 'compatible_pedestal', 'console_included'],
   faucet: ['num_install_holes', 'spout_type', 'swivel_spout', 'spout_rotation_degrees', 'max_flow_rate', 'hot_cold_dispenser', 'spray_included', 'spray_type',
     'spray_function_activation', 'spray_head_functions', 'pull_down_hose_model', 'sensor_activation', 'cartridge_size', 'cartridge_type', 'cold_start_handle',
@@ -940,9 +944,9 @@ const ALWAYS = [
 // …and what one kind of product carries beyond its vendor sheet (the fields
 // the catalog holds for it, 2026-10-15).
 const BY_KIND = {
-  kitchen_sink: ['Number of Installation Holes', 'Left Bowl Depth (in)', 'Right Bowl Depth (in)', 'Grids Model Code'],
+  kitchen_sink: ['Number of Installation Holes', 'Left Bowl Depth (in)', 'Right Bowl Depth (in)', 'Grids Model Code', 'Faucet Included', 'Faucet Finish'],
   bathroom_sink: ['Application', 'Product Care', 'Number of Bowls', 'Installation Options', 'Internal Minimum Cabinet Size',
-    'External Minimum Cabinet Size', 'Number of pieces Included', 'Accessories included'],
+    'External Minimum Cabinet Size', 'Number of pieces Included', 'Accessories included', 'Faucet Included', 'Faucet Finish'],
   kitchen_faucet: ['Spout Rotation (degrees)', 'Sensor Activation', 'Overall Shape', 'UPC Certified', 'SCC Compliant'],
   bathroom_faucet: ['Spout Rotation (degrees)', 'Overall Shape', 'UPC Certified', 'Cartridge size', 'Cartridge Type',
     'Installation Hole Diameter (mm)', 'Lead Free', 'Spout Type', 'Swivel Spout', 'Spray Type', 'Spray Head Functions',

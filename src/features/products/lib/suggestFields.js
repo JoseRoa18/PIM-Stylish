@@ -1,3 +1,5 @@
+import { isFaucetCategory } from '@/features/products/lib/categories';
+
 // Open-vocabulary fields: no fixed list (those live in fieldOptions.js), so
 // their dropdown lists the values the catalog already uses, plus "Other…" on
 // the product page. The page (loadSuggestions) and the PIM's Excel
@@ -18,4 +20,10 @@ export const SUGGEST_ATTRS = [
 export const SUGGEST_FROM = {
   installation_type: (r) => !String(r.category ?? '').includes('sink'),
   overall_shape: (r) => r.category === 'accessory',
+};
+// Fields that list ANOTHER field's values besides their own: the finish of the
+// faucet a sink comes with (user, 2026-11-27) is one of the finishes the
+// catalog's faucets have ("Matte Black", "Brushed Stainless Steel"…).
+export const SUGGEST_BORROWED = {
+  faucet_finish: { from: 'finish', keep: (r) => isFaucetCategory(r.category) },
 };

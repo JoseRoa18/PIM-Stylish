@@ -289,6 +289,15 @@ Deno.serve(async (req) => {
           continue;
         }
       }
+      // The faucet a sink comes with (user, 2026-11-27). Wayfair's Faucet Finish
+      // is free text, and its listings write a finish the way its Finish list
+      // does ("Stainless Steel" for the PIM's "Brushed Stainless Steel"): the
+      // word the listing holds stands when it is the PIM's finish in Wayfair's
+      // wording — nothing to change —, else the PIM's own word goes.
+      if (title === "Faucet Finish" && wf.current.length === 1) {
+        const wayfairWord = FINISH_ALIAS[value.toLowerCase().trim()];
+        if (wayfairWord && eq(wf.current[0], wayfairWord)) value = wf.current[0];
+      }
       // Never downgrade a more specific Wayfair value with our generic one
       // (e.g. Material "Stainless Steel (18/0)" vs PIM "Stainless Steel").
       if (

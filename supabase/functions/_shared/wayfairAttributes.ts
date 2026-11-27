@@ -8,6 +8,7 @@
 // value; skip".
 
 import { channelCategory, isFaucetCategory, isKitchenFaucetCategory } from "./categories.js";
+import { faucetFinish, faucetIncluded } from "./includedFaucet.js";
 
 export type Product = Record<string, unknown> & { attributes?: Record<string, unknown> };
 export const attr = (p: Product) => (p.attributes ?? {}) as Record<string, unknown>;
@@ -194,14 +195,14 @@ export const piecesIncluded = (p: Product): string[] => {
   // Bathroom Sinks class lists only: Drain Assembly, Faucet, P-Trap, Pedestal, Supply Line.
   if (isBathSink(p)) {
     if (/drain/.test(acc)) out.add("Drain Assembly");
-    if (/faucet/.test(acc)) out.add("Faucet");
+    if (faucetIncluded(p)) out.add("Faucet");
     return [...out];
   }
   if (/cutting board|bamboo board/.test(acc)) out.add("Cutting Board");
   if (/colander/.test(acc) && !isUtilitySink(p)) out.add("Colander");
   if (/strainer/.test(acc) || attr(p).strainer_model) { out.add("Basket Strainer"); out.add("Drain Assembly"); }
   if ((/grid/.test(acc) || attr(p).includes_grids === true) && !isUtilitySink(p)) out.add("Sink Grid");
-  if (/faucet/.test(acc)) out.add("Faucet");
+  if (faucetIncluded(p)) out.add("Faucet");
   if (/soap/.test(acc) && !isUtilitySink(p)) out.add("Soap / Lotion Dispenser");
   if (/template/.test(acc) && !isUtilitySink(p)) out.add("Cut Out Template");
   if (!isUtilitySink(p) && (/hardware|clip/.test(acc) || /under|dual|drop|top ?mount/.test(installText(p)))) out.add("Mounting Hardware");
@@ -301,6 +302,13 @@ const includedCount = (p: Product, re: RegExp, extra = 0) => {
 const includedCodes = (p: Product, re: RegExp, extra = "") =>
   isSinkCat(p) ? (extra || codesIn(accessories(p), re).join(", ") || "Does Not Apply") : "";
 const sinkDNA = (p: Product, faucetValue: () => string = () => "") => (isSinkCat(p) ? "Does Not Apply" : faucetValue());
+// What Wayfair asks about the faucet a sink comes with (its material, its type,
+// its features, a side spray): "Does Not Apply" on a sink sold without one. On a
+// sink sold WITH its faucet (includedFaucet.js: S-520C1, S-520C2) the PIM keeps
+// only that faucet's finish, so it says nothing here and Wayfair's own answer
+// stays — until 2026-11-27 the push offered to turn S-520C1's "Stainless Steel"
+// and "Single Handle Kitchen Faucet" into "Does Not Apply".
+const noFaucetDNA = (p: Product) => (isSinkCat(p) && !faucetIncluded(p) ? "Does Not Apply" : "");
 
 // Our stainless sinks are 18/10 steel: the PIM says "Stainless Steel", Wayfair
 // carries "Stainless Steel (18/10)" — the same thing (user rule 2026-09-16).
@@ -389,14 +397,24 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
     const n = (isSinkCat(p) && num(attr(p).number_of_faucet_holes)) || num(attr(p).number_of_installation_holes);
     return isSinkCat(p) && n !== "" && Number(n) === 0 ? "Does Not Apply" : n;
   },
-  "Faucet Included": (p) => (isSinkCat(p) ? (/faucet/i.test(accessories(p).join(" ")) ? "Yes" : "No") : ""),
-  "Number of Faucets Included": (p) => sinkDNA(p),
-  "Faucet Finish": (p) => sinkDNA(p),
+  // A sink sold with its faucet (user, 2026-11-27): the product page's Faucet
+  // Included switch, and Faucet Finish = the finish of that faucet as the PIM
+  // has it (free text on Wayfair). A sink without one answers "Does Not Apply";
+  // one with a faucet whose finish the PIM lacks says nothing, and Wayfair's
+  // stays. The count is said only where the Included Accessories name the faucet.
+  "Faucet Included": (p) => (isSinkCat(p) ? (faucetIncluded(p) ? "Yes" : "No") : ""),
+  "Number of Faucets Included": (p) => {
+    if (!isSinkCat(p)) return "";
+    if (!faucetIncluded(p)) return "Does Not Apply";
+    const n = countIn(accessories(p).filter((a) => !/faucet holes?/i.test(a)), /faucet/i);
+    return n > 0 ? String(n) : "";
+  },
+  "Faucet Finish": (p) => (isSinkCat(p) ? (faucetIncluded(p) ? faucetFinish(p) : "Does Not Apply") : ""),
   "Faucet Hole Diameter": (p) => sinkDNA(p),
-  "Faucet Material": (p) => sinkDNA(p),
-  "Faucet Type": (p) => sinkDNA(p),
-  "Faucet Features": (p) => sinkDNA(p),
-  "Side Spray Included": (p) => sinkDNA(p),
+  "Faucet Material": (p) => noFaucetDNA(p),
+  "Faucet Type": (p) => noFaucetDNA(p),
+  "Faucet Features": (p) => noFaucetDNA(p),
+  "Side Spray Included": (p) => noFaucetDNA(p),
   // Faucet Centers is a number on faucets (0 = one-hole), Does Not Apply on sinks.
   "Faucet Centers": (p) => sinkDNA(p, () => num(attr(p).faucet_centers) || (holes(p) === 1 ? "0" : "")),
   // A sink has a deck thickness of its own — the thickest countertop it mounts

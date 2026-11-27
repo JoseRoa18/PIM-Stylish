@@ -38,6 +38,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { isExcluded, excludedMessage } from "../_shared/exclusions.ts";
 import { attr, FINISH_ALIAS, num, type Product, ruleContext, ruleForTitle, shapeForms } from "../_shared/wayfairAttributes.ts";
 import { channelCategory, isFaucetCategory } from "../_shared/categories.js";
+import { faucetFinish, faucetIncluded } from "../_shared/includedFaucet.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -192,7 +193,8 @@ function piecesIncluded(p: Product): string[] {
   if (/strainer|drain/.test(acc)) out.add("Basket Strainer");
   if (/bottom grid/.test(acc)) out.add("Bottom Grid");
   else if (/grid/.test(acc)) out.add("Sink Grid");
-  if (/faucet/.test(acc)) out.add("Faucet");
+  // A sink sold with its faucet: the product page's Faucet Included (includedFaucet.js).
+  if (faucetIncluded(p)) out.add("Faucet");
   if (/soap/.test(acc)) out.add("Soap / Lotion Dispenser");
   if (/template/.test(acc)) out.add("Cut Out Template");
   if (/hardware|clip/.test(acc)) out.add("Mounting Hardware");
@@ -324,7 +326,10 @@ const SPECIAL: Array<{ re: RegExp; value: (p: Product, q: Question) => Val }> = 
       return /full/i.test(w) ? "Full Warranty" : /limited|lifetime|year/i.test(w) ? "Limited Warranty" : "";
     },
   },
-  { re: /^faucet finish$/i, value: (p) => piecesIncluded(p).includes("Faucet") ? finishValue(p) : "Does Not Apply" },
+  // The finish of the faucet a sink comes with — the PIM's Faucet Finish, never
+  // the sink's own Finish (S-520C2: a Dura-Tek sink with a Matte Black faucet;
+  // until 2026-11-27 the sink's finish went). Without a faucet: "Does Not Apply".
+  { re: /^faucet finish$/i, value: (p) => (faucetIncluded(p) ? faucetFinish(p) : "Does Not Apply") },
   { re: /^stainless steel gauge$/i, value: (p) => /stainless/i.test(material(p)) ? num(p.gauge ?? attr(p).gauge) : "Does Not Apply" },
   { re: /number of (faucet |installation |mounting )?holes/i, value: (p) => num(attr(p).number_of_installation_holes) || (isSink(p) ? "0" : "") },
   { re: /^pieces included$/i, value: (p) => piecesIncluded(p) },

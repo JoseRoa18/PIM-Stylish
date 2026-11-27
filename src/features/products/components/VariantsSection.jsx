@@ -664,6 +664,7 @@ function computeDiffs(variant, current) {
   const boolFields = [
     { key: 'includes_grids', label: 'Grids' },
     { key: 'low_divider', label: 'Low Divider' },
+    { key: 'faucet_included', label: 'Faucet' },
   ];
   for (const f of boolFields) {
     if (typeof va[f.key] === 'boolean' && va[f.key] !== ca[f.key]) {

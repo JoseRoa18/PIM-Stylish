@@ -15,6 +15,9 @@ export const VARIANT_DISTINGUISHING = new Set([
   // Each variant is marked obsolete on its own (user, 2026-10-16); still
   // offered, so a whole family can be marked at once.
   'is_obsolete',
+  // A family can hold the sink alone and the sink with a faucet, one finish
+  // each (S-520C, S-520C1 with the K-151S, S-520C2 with the K-151N).
+  'faucet_included', 'faucet_finish',
 ]);
 
 // Fields whose value is UNIQUE to each product (identity/barcodes and
