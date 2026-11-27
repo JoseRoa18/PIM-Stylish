@@ -399,7 +399,14 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   "Side Spray Included": (p) => sinkDNA(p),
   // Faucet Centers is a number on faucets (0 = one-hole), Does Not Apply on sinks.
   "Faucet Centers": (p) => sinkDNA(p, () => num(attr(p).faucet_centers) || (holes(p) === 1 ? "0" : "")),
-  "Maximum Thickness - Deck": (p) => sinkDNA(p, () => num(attr(p).max_deck_thickness_in)),
+  // A sink has a deck thickness of its own — the thickest countertop it mounts
+  // on, the product page's Max Deck Thickness, asked of every kitchen-type
+  // sink — so the PIM's number goes, on a sink as on a faucet. Until 2026-11-27
+  // a sink answered "Does Not Apply" whatever the PIM held, and the push
+  // offered to wipe a number that was right (S-131W: 1.5 in the PIM and on
+  // Wayfair). A product the PIM has no number for says nothing here, so
+  // Wayfair's own answer stays.
+  "Maximum Thickness - Deck": (p) => num(attr(p).max_deck_thickness_in),
   "Maximum Flow Rate": (p) => (isFaucetCat(p) ? num(attr(p).max_flow_rate) : ""),
   "Apron Included": (p) => (isSinkCat(p) ? (isFarmhouse(p) ? "Yes" : "No") : ""),
   "Mounting Hardware Included": (p) => (isSinkCat(p) ? (piecesIncluded(p).includes("Mounting Hardware") ? "Yes" : "No") : ""),
