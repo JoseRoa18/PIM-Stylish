@@ -14,7 +14,10 @@
 //
 // Faucet Finish (attributes.faucet_finish) is the finish of THAT faucet — the
 // sink's own Finish is another thing (S-520C2: a Dura-Tek sink with a Matte
-// Black faucet) — and counts only while a faucet is included.
+// Black faucet) — and counts only while a faucet is included. So do Faucet
+// Material (attributes.faucet_material: "Stainless Steel") and Faucet Type
+// (attributes.faucet_type: "Single Handle Kitchen Faucet"), added the same day
+// (user: "agrega también Faucet Material y Faucet Type").
 
 const text = (v) => String(v ?? '').trim();
 const listOf = (v) => (Array.isArray(v) ? v : text(v) ? text(v).split(/[;,]/) : []).map(text).filter(Boolean);
@@ -38,3 +41,19 @@ export function faucetIncluded(product) {
 export function faucetFinish(product) {
   return faucetIncluded(product) ? text(product?.attributes?.faucet_finish) : '';
 }
+
+/** What that faucet is made of ("Stainless Steel"); '' without one, or while the PIM has none. */
+export function faucetMaterial(product) {
+  return faucetIncluded(product) ? text(product?.attributes?.faucet_material) : '';
+}
+
+/** The kind of faucet it is ("Single Handle Kitchen Faucet"); '' without one, or while the PIM has none. */
+export function faucetType(product) {
+  return faucetIncluded(product) ? text(product?.attributes?.faucet_type) : '';
+}
+
+// The kinds the product page offers for Faucet Type, in Wayfair's own words for
+// a kitchen faucet (its listings of S-520C1 / S-520C2 hold the first one). The
+// field takes another word too ("Other…"): a marketplace is sent it only when
+// its own list has it.
+export const INCLUDED_FAUCET_TYPES = ['Single Handle Kitchen Faucet', 'Pull-Down Faucet', 'Bar Faucet', 'Pot Filler'];

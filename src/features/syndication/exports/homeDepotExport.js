@@ -14,7 +14,7 @@ import {
   isYes,
 } from './templateFiller';
 import { isFaucetCategory, hasCutOut } from '@/features/products/lib/categories';
-import { faucetFinish, faucetIncluded } from '@/features/products/lib/includedFaucet';
+import { faucetFinish, faucetIncluded, faucetType } from '@/features/products/lib/includedFaucet';
 
 // Fills a Home Depot USA (Mirakl) template in place.
 //
@@ -111,6 +111,21 @@ const faucetCollection = (p) => {
   if (/pull.?out/i.test(t)) return 'Pull Out';
   if (/beverage|bar |drinking|filtration|water filter/i.test(t) || isColdWaterTap(p)) return 'Beverage Faucets';
   return 'Pull Down';
+};
+
+// The PIM's Faucet Type of a sink sold with its faucet ("Single Handle Kitchen
+// Faucet", Wayfair's wording) → the candidates of Home Depot's own list; the
+// column takes the first one its list has, and stays empty when none is on it.
+const includedFaucetTypes = (p) => {
+  const t = faucetType(p);
+  if (!t) return '';
+  if (/pot ?filler/i.test(t)) return ['Pot Filler', t];
+  if (/pull.?out/i.test(t)) return ['Pull Out', t];
+  if (/pull.?down/i.test(t)) return ['Pull Down', t];
+  if (/\bbar\b/i.test(t)) return ['Bar', t];
+  if (/double|two/i.test(t)) return ['Double Handle', t];
+  if (/single/i.test(t)) return ['Single Handle', 'Kitchen Faucet', 'Standard', t];
+  return [t];
 };
 
 // Resolve the template's Product Category (full collection path) for any
@@ -359,6 +374,10 @@ export const HOME_DEPOT_RULES = {
 
   // Faucet attributes
   'Faucet Type': (p) => {
+    // A sink (the "With Faucet" sinks file asks it): the kind of faucet it
+    // comes with, in the word of Home Depot's list that says it; none → the
+    // list's "No Faucet Included" (it read "Pull Down" for every sink).
+    if (isSink(p)) return faucetIncluded(p) ? includedFaucetTypes(p) : 'No Faucet Included';
     const c = faucetCollection(p);
     return c === 'Beverage Faucets' ? 'Beverage Faucet' : c; // list option is singular
   },

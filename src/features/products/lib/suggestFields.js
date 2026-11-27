@@ -14,6 +14,8 @@ export const SUGGEST_ATTRS = [
   'warranty_url_us', 'warranty_url_ca', 'reason_for_restriction', 'commercial_warranty',
   'greenguard_certifications', 'cradle_to_cradle_certifications', 'sfi_certifications', 'fsc_certifications',
   'connection_size', 'safety_listing_registration_number',
+  // the kind of faucet a sink comes with: its fixed kinds (includedFaucet.js) plus any other word stored
+  'faucet_type',
 ];
 // Fields whose suggestions come from some categories only (the others have a
 // fixed list): accessories' Installation Type and Overall Shape.
@@ -23,7 +25,9 @@ export const SUGGEST_FROM = {
 };
 // Fields that list ANOTHER field's values besides their own: the finish of the
 // faucet a sink comes with (user, 2026-11-27) is one of the finishes the
-// catalog's faucets have ("Matte Black", "Brushed Stainless Steel"…).
+// catalog's faucets have ("Matte Black", "Brushed Stainless Steel"…), and its
+// material one of their materials ("Stainless Steel", "Solid Brass").
 export const SUGGEST_BORROWED = {
   faucet_finish: { from: 'finish', keep: (r) => isFaucetCategory(r.category) },
+  faucet_material: { from: 'material', keep: (r) => isFaucetCategory(r.category) },
 };

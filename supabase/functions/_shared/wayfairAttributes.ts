@@ -8,7 +8,7 @@
 // value; skip".
 
 import { channelCategory, isFaucetCategory, isKitchenFaucetCategory } from "./categories.js";
-import { faucetFinish, faucetIncluded } from "./includedFaucet.js";
+import { faucetFinish, faucetIncluded, faucetMaterial, faucetType } from "./includedFaucet.js";
 
 export type Product = Record<string, unknown> & { attributes?: Record<string, unknown> };
 export const attr = (p: Product) => (p.attributes ?? {}) as Record<string, unknown>;
@@ -302,12 +302,11 @@ const includedCount = (p: Product, re: RegExp, extra = 0) => {
 const includedCodes = (p: Product, re: RegExp, extra = "") =>
   isSinkCat(p) ? (extra || codesIn(accessories(p), re).join(", ") || "Does Not Apply") : "";
 const sinkDNA = (p: Product, faucetValue: () => string = () => "") => (isSinkCat(p) ? "Does Not Apply" : faucetValue());
-// What Wayfair asks about the faucet a sink comes with (its material, its type,
-// its features, a side spray): "Does Not Apply" on a sink sold without one. On a
-// sink sold WITH its faucet (includedFaucet.js: S-520C1, S-520C2) the PIM keeps
-// only that faucet's finish, so it says nothing here and Wayfair's own answer
-// stays — until 2026-11-27 the push offered to turn S-520C1's "Stainless Steel"
-// and "Single Handle Kitchen Faucet" into "Does Not Apply".
+// What Wayfair asks about the faucet a sink comes with and the PIM does not
+// keep (its features, a side spray): "Does Not Apply" on a sink sold without
+// one. On a sink sold WITH its faucet (includedFaucet.js: S-520C1, S-520C2) the
+// PIM says nothing here and Wayfair's own answer stays — until 2026-11-27 the
+// push offered to turn S-520C1's faucet answers into "Does Not Apply".
 const noFaucetDNA = (p: Product) => (isSinkCat(p) && !faucetIncluded(p) ? "Does Not Apply" : "");
 
 // Our stainless sinks are 18/10 steel: the PIM says "Stainless Steel", Wayfair
@@ -411,8 +410,12 @@ export const EXACT_RULES: Record<string, (p: Product) => RuleValue> = {
   },
   "Faucet Finish": (p) => (isSinkCat(p) ? (faucetIncluded(p) ? faucetFinish(p) : "Does Not Apply") : ""),
   "Faucet Hole Diameter": (p) => sinkDNA(p),
-  "Faucet Material": (p) => noFaucetDNA(p),
-  "Faucet Type": (p) => noFaucetDNA(p),
+  // Its material and its kind are the PIM's too (user, the same day: "agrega
+  // también Faucet Material y Faucet Type"), as the product page has them; the
+  // push sends them only in a word Wayfair's own list has. Empty in the PIM =
+  // nothing said, so Wayfair's stays.
+  "Faucet Material": (p) => (isSinkCat(p) ? (faucetIncluded(p) ? faucetMaterial(p) : "Does Not Apply") : ""),
+  "Faucet Type": (p) => (isSinkCat(p) ? (faucetIncluded(p) ? faucetType(p) : "Does Not Apply") : ""),
   "Faucet Features": (p) => noFaucetDNA(p),
   "Side Spray Included": (p) => noFaucetDNA(p),
   // Faucet Centers is a number on faucets (0 = one-hole), Does Not Apply on sinks.

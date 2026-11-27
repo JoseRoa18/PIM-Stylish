@@ -18,6 +18,7 @@
 //   sku: string,
 //   validateOnly?: boolean=true,  // passed to the Wayfair mutation
 //   dryRun?: boolean=false,       // true = only compute the diff, no mutation
+//   lists?: string[],             // also return Wayfair's own answers for these attribute titles
 // }
 //
 // Required secrets: WAYFAIR_CLIENT_ID, WAYFAIR_CLIENT_SECRET,
@@ -84,6 +85,10 @@ async function getToken(clientId: string, clientSecret: string): Promise<string>
 
 // The PIM -> attribute-title rules live in _shared/wayfairAttributes.ts (shared
 // with wayfair-add-products so new listings and spec pushes never disagree).
+
+// Attributes whose PIM value is a word a person picks or types on the product
+// page (the faucet a sink comes with): sent only when Wayfair's list has it.
+const OWN_LIST = new Set(["Faucet Material", "Faucet Type"]);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -255,8 +260,13 @@ Deno.serve(async (req) => {
           if (pick) values = [pick];
         }
       }
-      // Blank-on-Wayfair attributes: only values from Wayfair's own list.
-      const list = allowed.get(title);
+      // Blank-on-Wayfair attributes: only values from Wayfair's own list. So
+      // does what the PIM says about the faucet a sink comes with (its
+      // material, its kind), blank on Wayfair or not: the product page takes
+      // any word there, and one Wayfair's list lacks is said, never sent.
+      const ownWord = OWN_LIST.has(title) && values.length === 1 && canon(values[0]) !== canon("Does Not Apply") &&
+        !(wf.current.length === 1 && canon(wf.current[0]) === canon(values[0]));
+      const list = allowed.get(title) ?? (ownWord && answers.get(title)?.length ? answers.get(title) : undefined);
       if (list) {
         const snapped = values.map((v) => list.find((o) => canon(o) === canon(v)) ?? null);
         const bad = values.filter((_, i) => snapped[i] == null);
@@ -318,6 +328,11 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
+    // `lists: [titles]` (reads only): Wayfair's own answers for those
+    // attributes of the item's class, to check a rule or a dropdown against.
+    const lists = Array.isArray(body.lists)
+      ? Object.fromEntries(body.lists.map((t: unknown) => [String(t), answers.get(String(t)) ?? null]))
+      : undefined;
     const result: Record<string, unknown> = {
       ok: true,
       env: ENV,
@@ -331,6 +346,7 @@ Deno.serve(async (req) => {
       skipped,
       unmapped,
       notes: classNotes,
+      ...(lists ? { lists } : {}),
     };
 
     // 4. Mutation (unless dryRun)

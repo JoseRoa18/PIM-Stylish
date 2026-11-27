@@ -17,7 +17,7 @@ export const VARIANT_DISTINGUISHING = new Set([
   'is_obsolete',
   // A family can hold the sink alone and the sink with a faucet, one finish
   // each (S-520C, S-520C1 with the K-151S, S-520C2 with the K-151N).
-  'faucet_included', 'faucet_finish',
+  'faucet_included', 'faucet_finish', 'faucet_material', 'faucet_type',
 ]);
 
 // Fields whose value is UNIQUE to each product (identity/barcodes and

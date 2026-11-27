@@ -175,7 +175,7 @@ import {
   STRAINER_TYPE, DECK_PLATE_TYPE, DRAIN_TYPE, skusOfType,
 } from '@/features/products/lib/fieldOptions';
 import { SUGGEST_COLUMNS, SUGGEST_ATTRS, SUGGEST_FROM, SUGGEST_BORROWED } from '@/features/products/lib/suggestFields';
-import { faucetIncluded } from '@/features/products/lib/includedFaucet';
+import { faucetIncluded, INCLUDED_FAUCET_TYPES } from '@/features/products/lib/includedFaucet';
 
 const MAX_BULLETS = 12;
 
@@ -215,9 +215,12 @@ function joinList(v) {
 const isEmptyish = (v) =>
   v === null || v === undefined || v === '' || v === false || (Array.isArray(v) && v.length === 0);
 const bothEmpty = (a, b) => isEmptyish(a) && isEmptyish(b);
-// Faucet Finish is the finish of the faucet a sink comes with: with Faucet
-// Included off the field is not shown, and a save keeps none.
-const settleIncludedFaucet = (form) => (form._faucet_included || !form._faucet_finish ? form : { ...form, _faucet_finish: '' });
+// Faucet Finish, Faucet Material and Faucet Type describe the faucet a sink
+// comes with: with Faucet Included off they are not shown, and a save keeps none.
+const INCLUDED_FAUCET_DETAILS = ['_faucet_finish', '_faucet_material', '_faucet_type'];
+const settleIncludedFaucet = (form) => (form._faucet_included || !INCLUDED_FAUCET_DETAILS.some((k) => form[k])
+  ? form
+  : { ...form, ...Object.fromEntries(INCLUDED_FAUCET_DETAILS.map((k) => [k, ''])) });
 
 // ===================== Form helpers =====================
 
@@ -306,6 +309,8 @@ function buildEditForm(product) {
     // never touched and whose Included Accessories name a faucet.
     _faucet_included: faucetIncluded(product),
     _faucet_finish: a.faucet_finish ?? '',
+    _faucet_material: a.faucet_material ?? '',
+    _faucet_type: a.faucet_type ?? '',
     _craftsmanship: a.craftsmanship ?? '',
     _product_weight_lb: a.product_weight_lb ?? '',
     _external_dimensions_in: a.external_dimensions_in ?? { length: '', width: '', depth: '' },
@@ -1258,10 +1263,11 @@ function ObsoleteField({ product, edit }) {
 }
 
 // A sink sold with its faucet (user, 2026-11-27: "un campo que diga Faucet
-// included y si se le coloca sí, sale otro campo que diga faucet finish"): two
-// cells of the section's grid — the switch and, only while it is on, the finish
-// of THAT faucet (one of the finishes the catalog's faucets have), which is not
-// the sink's own Finish. The switch reads what the PIM tells the marketplaces
+// included y si se le coloca sí, sale otro campo que diga faucet finish", then
+// "agrega también Faucet Material y Faucet Type"): cells of the section's grid
+// — the switch and, only while it is on, what THAT faucet is: its finish and
+// its material (the ones the catalog's faucets have), which are not the sink's
+// own, and its kind. The switch reads what the PIM tells the marketplaces
 // (faucetIncluded): on too for a sink where it was never touched and whose
 // Included Accessories name a faucet.
 function IncludedFaucetFields({ product, edit, category }) {
@@ -1271,6 +1277,8 @@ function IncludedFaucetFields({ product, edit, category }) {
     <>
       <AttrField label="Faucet Included" attrKey="faucet_included" type="boolean" product={shown} edit={edit} />
       {included && <AttrField label="Faucet Finish" attrKey="faucet_finish" suggest product={product} edit={edit} />}
+      {included && <AttrField label="Faucet Material" attrKey="faucet_material" suggest product={product} edit={edit} />}
+      {included && <AttrField label="Faucet Type" attrKey="faucet_type" suggest={INCLUDED_FAUCET_TYPES} product={product} edit={edit} />}
     </>
   );
 }
