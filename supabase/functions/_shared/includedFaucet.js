@@ -52,8 +52,14 @@ export function faucetType(product) {
   return faucetIncluded(product) ? text(product?.attributes?.faucet_type) : '';
 }
 
-// The kinds the product page offers for Faucet Type, in Wayfair's own words for
-// a kitchen faucet (its listings of S-520C1 / S-520C2 hold the first one). The
-// field takes another word too ("Other…"): a marketplace is sent it only when
-// its own list has it.
-export const INCLUDED_FAUCET_TYPES = ['Single Handle Kitchen Faucet', 'Pull-Down Faucet', 'Bar Faucet', 'Pot Filler'];
+// The kinds the product page offers for Faucet Type: Wayfair's own list for a
+// sink's faucet, read from Wayfair on 2026-11-27 (its Utility Sinks class
+// publishes it; Kitchen Sinks and Bathroom Sinks publish none, and the Kitchen
+// Sinks listings of S-520C1 / S-520C2 hold the first one). Wayfair's "Unavailable"
+// and "Does Not Apply" are no kind of faucet and are left out. The field takes
+// another word too ("Other…"): a marketplace is sent it only when its own list
+// has it.
+export const INCLUDED_FAUCET_TYPES = [
+  'Single Handle Kitchen Faucet', 'Double Handle Kitchen Faucet', 'Single Handle', 'Dual Handle', 'Gooseneck / High Arc',
+  'Bar', 'Bridge', 'Monobloc', 'Pillar', 'Pot Fillers', 'Pre-Rinse', 'Wall Mounted',
+];

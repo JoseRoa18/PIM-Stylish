@@ -123,8 +123,9 @@ const includedFaucetTypes = (p) => {
   if (/pull.?out/i.test(t)) return ['Pull Out', t];
   if (/pull.?down/i.test(t)) return ['Pull Down', t];
   if (/\bbar\b/i.test(t)) return ['Bar', t];
-  if (/double|two/i.test(t)) return ['Double Handle', t];
+  if (/double|dual|two/i.test(t)) return ['Double Handle', t];
   if (/single/i.test(t)) return ['Single Handle', 'Kitchen Faucet', 'Standard', t];
+  if (/high.?arc|gooseneck/i.test(t)) return ['High-Arc', t];
   return [t];
 };
 
