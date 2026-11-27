@@ -23,7 +23,7 @@ import { listMediaFor, getMediaUrl } from '@/features/media/api/media';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { loadSuggestionLists } from '@/features/import/api/suggestionLists';
 import { accessoryKind } from '@/features/templates/api/templates';
-import { channelCategory } from '@/features/products/lib/categories';
+import { channelCategory, hasCutOut } from '@/features/products/lib/categories';
 
 // Exports products back into the PIM's OWN category templates (the same
 // sectioned layout the bulk upload downloads and accepts), filled from the
@@ -111,6 +111,8 @@ function cellValue(product, header) {
   if (def.type === 'category') return CATEGORY_LABELS[product.category] ?? product.category ?? '';
 
   const t = def.target;
+  // A vessel sink has no cut-out (user, 2026-11-27): its cells stay empty.
+  if (t.dim?.[0] === 'cut_out_dimensions_in' && !hasCutOut(product)) return '';
   const raw = t.col
     ? product[t.col]
     : t.attr

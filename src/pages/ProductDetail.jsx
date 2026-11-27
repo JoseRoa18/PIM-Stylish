@@ -158,7 +158,7 @@ const WORKFLOW_OPTIONS = [
   { value: 'archived', label: 'Archived' },
 ];
 
-import { CATEGORY_OPTIONS, isFaucetCategory, hasCraftsmanship } from '@/features/products/lib/categories';
+import { CATEGORY_OPTIONS, isFaucetCategory, hasCraftsmanship, hasCutOut } from '@/features/products/lib/categories';
 import { BRAND_OPTIONS } from '@/features/products/lib/brands';
 import { COUNTRY_NAMES } from '@/features/products/lib/countries';
 import {
@@ -788,6 +788,7 @@ export default function ProductDetail() {
             familyNumber={product.family_number}
             installationType={product.attributes?.installation_type}
             brand={product.brand}
+            cutOut={hasCutOut(product)}
           />
         )}
         {activeTab === 'marketplaces' && <MarketplacesTab product={product} media={media} onUpdate={mergeProduct} />}
@@ -1549,7 +1550,9 @@ function SpecsTab({ product, edit }) {
               <AttrField label="Max Deck Thickness" attrKey="max_deck_thickness_in" type="number" unit={unit} product={product} edit={edit} />
             </div>
           )}
-          {!isFaucet && (
+          {/* A vessel sink stands on the counter and has no cut-out (user,
+              2026-11-27): it is not shown the field, nor asked for it. */}
+          {!isFaucet && hasCutOut({ ...product, category: cat }) && (
             <AttrDimensionsField label="Cut-out Dimensions" unit={unit} attrKey="cut_out_dimensions_in"
               keys={['length', 'width', 'depth']} labels={['Length', 'Width', 'Depth']} product={product} edit={edit} />
           )}
@@ -1790,11 +1793,11 @@ function PricingTab({ product, edit, onAddPricing }) {
 
 // ===================== Media & Marketplaces =====================
 
-function MediaTab({ sku, category, familyNumber, installationType, brand }) {
+function MediaTab({ sku, category, familyNumber, installationType, brand, cutOut = true }) {
   return (
     <div className="space-y-6">
       <MediaSection sku={sku} familyNumber={familyNumber} category={category} />
-      <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} installationType={installationType} brand={brand} />
+      <DocumentsSection sku={sku} category={category} familyNumber={familyNumber} installationType={installationType} brand={brand} cutOut={cutOut} />
     </div>
   );
 }

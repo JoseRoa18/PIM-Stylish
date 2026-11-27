@@ -12,7 +12,7 @@
 // stays pure JS importing only from _shared. Category labels mirror
 // src/features/products/lib/categories.js; keep both in step.
 import { COUNTRY_NAMES } from './countries.js';
-import { FAUCET_CATEGORIES, KITCHEN_FAUCET_CATEGORIES, SINK_CATEGORIES } from './categories.js';
+import { FAUCET_CATEGORIES, KITCHEN_FAUCET_CATEGORIES, SINK_CATEGORIES, hasCutOut } from './categories.js';
 
 export const CATEGORY_LABEL = {
   kitchen_sink: 'Kitchen Sink',
@@ -231,7 +231,9 @@ export const CHECKS = [
   { key: 'cabinet', label: 'Min External Cabinet', group: 'Specifications', section: 'Dimensions & Weight', cats: KITCHEN_SINKS, check: hasNum('min_external_cabinet_size_in') },
   { key: 'min_internal_cabinet', label: 'Min Internal Cabinet', group: 'Specifications', section: 'Dimensions & Weight', cats: KITCHEN_SINKS, check: hasNum('min_internal_cabinet_size_in') },
   { key: 'sink_deck', label: 'Max Deck Thickness (sink)', group: 'Specifications', section: 'Dimensions & Weight', cats: KITCHEN_SINKS, check: hasNum('max_deck_thickness_in') },
-  { key: 'cut_out', label: 'Cut-out Dimensions', group: 'Specifications', section: 'Dimensions & Weight', cats: SINKS, check: (p) => dims(attr(p, 'cut_out_dimensions_in')) },
+  // Never asked of a vessel sink (user, 2026-11-27): it stands on the counter
+  // and has no cut-out — hasCutOut in categories.js.
+  { key: 'cut_out', label: 'Cut-out Dimensions', group: 'Specifications', section: 'Dimensions & Weight', cats: SINKS, applies: hasCutOut, check: (p) => dims(attr(p, 'cut_out_dimensions_in')) },
 
   // ---- Specifications: Shipping ----
   {

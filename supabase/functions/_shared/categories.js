@@ -28,6 +28,28 @@ export const SINK_CATEGORIES = ['kitchen_sink', 'bar_prep_sink', 'laundry_sink',
  */
 export const hasCraftsmanship = (category) => SINK_CATEGORIES.includes(String(category ?? ''));
 
+/**
+ * A vessel sink: a bathroom sink that stands on the countertop. It is told by
+ * its mounting ("Vessel" on the 14 of 2026-11-27, whose Installation Type reads
+ * "Top Mount"); the product type or the title speak only where no mounting is
+ * stored — P-210H is a drop-in filed as a "Vessel Porcelain Sink".
+ */
+export function isVesselSink(product) {
+  if (product?.category !== 'bathroom_sink') return false;
+  const a = product?.attributes ?? {};
+  const mount = String(a.mounting_type ?? '').trim();
+  if (mount) return /vessel/i.test(mount);
+  return /vessel/i.test(`${product?.product_type ?? ''} ${a.general_title_en ?? ''}`);
+}
+
+/**
+ * A vessel sink has no countertop cut-out (user, 2026-11-27): it sits on the
+ * counter and needs only the opening for its drain, unlike an undermount or a
+ * drop-in sink. The PIM neither shows, asks for nor imports Cut-out Dimensions
+ * there, and its own Excel leaves those cells empty.
+ */
+export const hasCutOut = (product) => !isVesselSink(product);
+
 // Colanders, drying racks and mats, dish racks and organizers and the
 // workstation kits are Accessories since 2026-10-08 (user's file), but every
 // channel still knows them as "Colanders & Drying Racks", so their templates,

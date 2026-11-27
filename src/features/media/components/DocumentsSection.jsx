@@ -116,8 +116,12 @@ const FAUCET_HIDDEN_TYPES = new Set(['dxf_file', 'cut_out_template']);
 // The Spare Parts Diagram is a faucet document (user, 2026-10-05); other
 // products only show it while one is already stored.
 const FAUCET_ONLY_TYPES = new Set(['spare_parts_diagram']);
+// A vessel sink stands on the counter and has no cut-out (user, 2026-11-27),
+// so no template for one either: with `cutOut` false the row shows only while
+// a file is already stored there (hasCutOut in categories.js decides).
+const CUT_OUT_TYPES = new Set(['cut_out_template']);
 
-export default function DocumentsSection({ sku, category, familyNumber = null, installationType = null, brand = null }) {
+export default function DocumentsSection({ sku, category, familyNumber = null, installationType = null, brand = null, cutOut = true }) {
   const confirm = useConfirm();
   // The warranty is general per brand (Settings → Warranty documents): once
   // the brand has one, the product's Warranty row shows it read-only.
@@ -145,7 +149,8 @@ export default function DocumentsSection({ sku, category, familyNumber = null, i
   const hasLegacy = (typeId) => documents.some((d) => d.document_type === typeId);
   const visibleTypes = DOCUMENT_TYPES.filter(
     (t) => !(isFaucet && FAUCET_HIDDEN_TYPES.has(t.id))
-      && (isFaucet || !FAUCET_ONLY_TYPES.has(t.id) || hasLegacy(t.id)),
+      && (isFaucet || !FAUCET_ONLY_TYPES.has(t.id) || hasLegacy(t.id))
+      && (cutOut || !CUT_OUT_TYPES.has(t.id) || hasLegacy(t.id)),
   ).flatMap((t) => {
     if (manualKinds.length === 0) return [t];
     if (t.id === 'installation_manual') {

@@ -20,6 +20,7 @@ import { fetchProductsForImport, fetchUpcOwners, importProducts } from '@/featur
 import { rowChanges } from '@/features/import/lib/importChanges';
 import { flagInvalidUpcs, flagRepeatedUpcs } from '@/features/import/lib/upcCheck';
 import { flagPriceProblems } from '@/features/import/lib/priceCheck';
+import { dropCutOutOnVesselSinks } from '@/features/import/lib/cutOut';
 import { isOdooPushOn } from '@/features/odoo/api/odooPush';
 import { autoLinkChannels } from '@/features/syndication/api/autoLink';
 import { startTask } from '@/lib/taskProgress';
@@ -233,6 +234,8 @@ export default function ImportProducts() {
       // never above Blue, a cost under the MAP of its level): an error here,
       // like the database's own refusal.
       flagPriceProblems(built.rows, existing);
+      // A vessel sink has no cut-out: its row neither writes nor misses it.
+      dropCutOutOnVesselSinks(built.rows, existing);
       // What each row would change on the product the PIM has.
       for (const r of built.rows) {
         if (!r.errors.length && existing.has(r.sku)) r.changes = rowChanges(r, existing.get(r.sku));

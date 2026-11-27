@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { FIELD_DEFS, SECTIONS, sectionOfHeader, CATEGORY_LABELS, ALIAS_LOOKUP, BULLET_RE, IMAGE_LINK_RE, imageLinkHeader, normalizeHeader } from '@/features/import/lib/importSchema';
 import { buildSectionedWorkbook } from '@/features/import/lib/sectionedXlsx';
 import { scoreCompleteness, completenessContext, inCompleteness } from '@/features/products/lib/completeness';
-import { CATEGORY_OPTIONS } from '@/features/products/lib/categories';
+import { CATEGORY_OPTIONS, hasCutOut } from '@/features/products/lib/categories';
 import { fetchAllProducts } from './pimExport';
 import { reportKind } from './pimReportKinds';
 
@@ -160,8 +160,10 @@ export function pimReportSheets({ products, media, aliases, amazon, stock, wix }
       field: def.key, // one of the import's own fields: what an upload can change
       money: section.startsWith('pricing'),
       format: /\bURL\b/.test(def.label) ? 'link' : undefined, // Product URL, Warranty URLs
+      // (a vessel sink has no cut-out — user, 2026-11-27: its cells stay empty)
       get: (p) => (def.type === 'category'
         ? categoryName(p.category)
+        : t.dim?.[0] === 'cut_out_dimensions_in' && !hasCutOut(p) ? ''
         : show(t.col ? p[t.col] : t.attr ? p.attributes?.[t.attr] : p.attributes?.[t.dim[0]]?.[t.dim[1]], def.type)),
     });
     if (def.key === 'description_en') columns.push(...bulletCols('bullet_points', 'EN', 'content_en'));
