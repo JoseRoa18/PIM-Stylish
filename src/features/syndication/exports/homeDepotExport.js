@@ -13,7 +13,7 @@ import {
   createFillTracker,
   isYes,
 } from './templateFiller';
-import { isFaucetCategory } from '@/features/products/lib/categories';
+import { isFaucetCategory, hasCutOut } from '@/features/products/lib/categories';
 import { faucetFinish, faucetIncluded } from '@/features/products/lib/includedFaucet';
 
 // Fills a Home Depot USA (Mirakl) template in place.
@@ -530,8 +530,10 @@ export const HOME_DEPOT_RULES = {
   'Bathroom Sink Front to Back Width (In.)': (p) => (isKitchenSink(p) ? '' : num(attr(p).external_dimensions_in?.width)),
   'Bathroom Sink Top to Bottom Depth (in.)': (p) =>
     (isKitchenSink(p) ? '' : num(attr(p).external_dimensions_in?.depth ?? attr(p).external_dimensions_in?.height)),
-  'Cut-Out Width (in.) (in)': (p) => num(attr(p).cut_out_dimensions_in?.length),
-  'Cut-Out Depth (in.) (in)': (p) => (isKitchenSink(p) ? '' : num(attr(p).cut_out_dimensions_in?.width)),
+  // A vessel sink has no cut-out (user, 2026-11-27): empty there, whatever is
+  // stored (the 14 hold 0 × 0).
+  'Cut-Out Width (in.) (in)': (p) => (hasCutOut(p) ? num(attr(p).cut_out_dimensions_in?.length) : ''),
+  'Cut-Out Depth (in.) (in)': (p) => (isKitchenSink(p) || !hasCutOut(p) ? '' : num(attr(p).cut_out_dimensions_in?.width)),
   // The PIM's Min Internal Cabinet (user, 2026-10-09; it read the external
   // one). The list only has whole inches — a 29.25" minimum means the next
   // size up.

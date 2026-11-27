@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { getMediaUrl } from '@/features/media/api/media';
-import { isKitchenFaucetCategory } from '@/features/products/lib/categories';
+import { isKitchenFaucetCategory, hasCutOut } from '@/features/products/lib/categories';
 import { faucetFinish, faucetIncluded } from '@/features/products/lib/includedFaucet';
 import { countryFromList } from '@/features/products/lib/countries';
 import { WAREHOUSE, boxCount, boxSize, competitorPrices } from './ronaExport';
@@ -242,8 +242,10 @@ const RULES = {
   // What a sink is, from its own type and name.
   corner: (p) => yesNo(/\bcorner\b/i.test(describes(p))),
   trough: (p) => yesNo(/\btrough\b/i.test(describes(p))),
-  cutoutlengthin: (p) => num(attr(p).cut_out_dimensions_in?.length),
-  cutoutwidthin: (p) => num(attr(p).cut_out_dimensions_in?.width),
+  // A vessel sink stands on the counter and has no cut-out (user, 2026-11-27):
+  // empty there, whatever is stored (the 14 hold 0 × 0, which went out as 0).
+  cutoutlengthin: (p) => (hasCutOut(p) ? num(attr(p).cut_out_dimensions_in?.length) : ''),
+  cutoutwidthin: (p) => (hasCutOut(p) ? num(attr(p).cut_out_dimensions_in?.width) : ''),
   depthofbowlin: (p) => num(attr(p).internal_dimensions_in?.depth),
   // Rona's length, width and height are the PIM's length, width and depth.
   overalllengthin: (p) => num(outside(p).length),

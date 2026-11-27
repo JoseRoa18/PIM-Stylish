@@ -1,5 +1,5 @@
 import { findCountry } from '@/features/products/lib/countries';
-import { isFaucetCategory, SINK_CATEGORIES } from '@/features/products/lib/categories';
+import { isFaucetCategory, SINK_CATEGORIES, hasCutOut } from '@/features/products/lib/categories';
 
 // What goes in each column of Menards' Syndigo files, and how a value is made
 // to fit the column: no file is read or written here (menardsExport.js does).
@@ -234,7 +234,8 @@ const interiorPerBowl = (p) => {
   const d = attr(p).internal_dimensions_in ?? {};
   return d.length && d.width && d.depth ? `${d.length} in x ${d.width} in x ${d.depth} in` : '';
 };
-const cutOut = (p, side) => amount(attr(p).cut_out_dimensions_in?.[side]);
+// A vessel sink has no cut-out (user, 2026-11-27): empty there, whatever is stored.
+const cutOut = (p, side) => (hasCutOut(p) ? amount(attr(p).cut_out_dimensions_in?.[side]) : '');
 const cabinet = (p) => amount(attr(p).min_external_cabinet_size_in);
 
 // Rules by the column's name (row 5). A rule answers with a text, a number, a
